@@ -1318,3 +1318,93 @@ refuses **before** `continueToConnectedJoin()` is called at all, so the existing
 **54**, `account_privacy` still 1 row still `band_18_plus`, directory 1,
 `dir_ins` 2795, tokens 2 / 248. **A refusal that moves any counter would itself
 be a finding.**
+
+---
+
+# 20. STEP 2 AND 3 RESULTS, AND THE DELETION CENSUS. 2026-09-08 12:54:20 UTC
+
+## 20.1 Step 2 — the fixture is LIVE, and nothing was written
+
+Alert: **"Études Connected is for ages 13 and over."** With `Under 13` selected,
+the selection is **provably being honoured right now** — which is the only thing
+this pre-flight existed to establish.
+
+| | predicted | observed | |
+|---|---|---|---|
+| **writer** | 3 | **3** | **PASS — no band write** |
+| `band_updated_at` | 12:30:51.055739 | unchanged | PASS |
+| `account_privacy` | 1 row, `band_18_plus` | unchanged | PASS |
+| directory / `dir_ins` | 1 / 2795 | 1 / 2795 | PASS |
+| tokens | 2 / 248 | 2 / 248 | PASS |
+| `account_privacy_self_v1` | **54** | **55 (+1)** | **MISPREDICTED** |
+
+### The misprediction is mine, and it is the third of the same kind
+
+**The refusal moved nothing, exactly as predicted.** What moved the counter is
+that *reaching* the refusal required a **Settings round-trip**, and returning to
+Études is a **foreground** — which fires the recovery trigger. With a band
+present, `fetchSelf` succeeds and it **short-circuits before Apple**: one read,
+no write.
+
+**I have now mispredicted a read counter three times by forgetting that leaving
+the app is itself a lifecycle event.** Recorded as a standing correction: **never
+predict a flat `account_privacy_self_v1` across any step that involves visiting
+Settings.**
+
+### It is incidentally the first on-device proof of the short-circuit under the fix
+
+Band present → read → return, **writer untouched at 3**. The wiring suite could
+only assert that structurally; this is the behaviour, on hardware, under the new
+View-scoped trigger.
+
+## 20.2 Step 3 — `13 - 15, significant change approved` reads back
+
+Confirmed by the account holder after leaving and re-entering the screen. **Step
+4 holds: no build or install from here on.**
+
+## 20.3 DELETION CENSUS — `c584db5b-5648-4755-9063-5c24763f8819`
+
+**What it owns:**
+
+| object | count |
+|---|---|
+| **`account_privacy`** | **1** (`band_18_plus`) |
+| `account_directory` | **0** — never published |
+| `membership` / `membership_binding` | **0 / 0** — never purchased |
+| **`shadow_enforcement_stat`** | **0** — never triggered an observation |
+| `follows` / `posts` / `post_comments` | **0 / 0 / 0** |
+| `auth.identities` / `auth.sessions` / `auth.refresh_tokens` | **1 / 1 / 2** |
+
+**Even smaller than the last one:** it never published, purchased, posted or
+generated a shadow row. **`shadow_enforcement_stat` is 0 here, where `9c5385f6`
+held 4** — so unlike last time, that total must **not** move.
+
+**Totals now:** users **2** · `account_privacy` **1** · directory **1** ·
+shadow **34** · posts **6** · comments **1** · `connected_attachments` **25** ·
+`post_comment_views` **3** · `storage.objects` **8** · notifications **104** ·
+Samuel **248 tokens / 19 sessions** · writer **3** · privacy_read **55**.
+
+## 20.4 PREDICTED POST-DELETION STATE
+
+| measure | before | **predicted after** |
+|---|---|---|
+| `auth.users` | 2 | **1** |
+| **`account_privacy`** | 1 | **0** — FK cascade |
+| `account_directory` | 1 | **1** (Samuel) |
+| `membership` / `membership_binding` | 0 / 0 | **0 / 0** |
+| **`shadow_enforcement_stat`** | 34 | **34 — UNCHANGED**, unlike last time |
+| posts / comments / follows | 6 / 1 / 0 | **unchanged** |
+| `connected_attachments` / `post_comment_views` / `storage.objects` | 25 / 3 / 8 | **unchanged** |
+| `membership_notification` | 104 | **104** |
+| Samuel tokens / sessions | 248 / 19 | **unchanged** |
+| `c584db5b` identities / sessions / tokens | 1 / 1 / 2 | **0 / 0 / 0** |
+
+**Writer counters are not assertions** — the deletion path and any foreground can
+move reads.
+
+**Client:** Connected identity and account-management state gone. **Whatever
+screen Études lands on is recorded, not scored.** **Apple's SIWA revocation
+outcome is recorded separately from deletion success**, which is judged on server
+state alone.
+
+**AWAITING AUTHORISATION. Nothing executed.**
