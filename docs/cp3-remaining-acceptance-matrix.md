@@ -395,10 +395,17 @@ So **changing the Sandbox Age Assurance fixture does change what
 response. §1's trap — a teen test silently scored against a stale adult answer —
 **does not apply on this device with this Sandbox account.**
 
-**This is the precondition for every remaining teen discriminator**, and it is
-now empirical rather than assumed. Apple's documentation still does not promise
-it; what we have is a measurement on this device, this app and this Sandbox
-account, which is the level at which it will be relied upon.
+**RECORD THIS NARROWLY AND DO NOT GENERALISE IT.** The claim is exactly:
+
+> *On **Device A**, with **this Sandbox account** (`sdsongsltd+devicec@gmail.com`)
+> and **this app**, changing the Age Assurance fixture changed the value returned
+> by `requestAgeRange` despite a previously cached adult response.*
+
+It is **not** a claim about production devices, other Apple Accounts, other apps,
+non-Sandbox accounts, or Apple's behaviour in general. Apple's documentation does
+not promise it. It is one measurement in one test environment, and that is the
+level at which it may be relied upon — enough to unblock teen fixtures **on this
+rig**, and nothing wider.
 
 **One thing is NOT established:** whether Apple re-presented its system sheet or
 served the new fixture value without prompting. It was not observed and it
