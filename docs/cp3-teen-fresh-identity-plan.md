@@ -1484,3 +1484,80 @@ has now paid for itself once, measurably.**
 
 The deletion is clean, the identity is gone, and **no sign-in has happened yet**.
 Setting the fixture now puts the run exactly where it should be.
+
+---
+
+# 22. TEEN RUN 2 — RE-SCORED. THE BLOCKER IS FIXTURE PERSISTENCE. 2026-09-08 13:04
+
+**Age Assurance was found unset again, with nothing changed by the account
+holder.** It was set to `13 - 15` at ~13:00 and verified reading back; it was
+unset by ~13:05.
+
+## 22.1 RE-SCORED
+
+| | scoring |
+|---|---|
+| **The write mechanism** | **CORRECT.** `account_privacy_upsert_v1` **3 → 4, exactly +1** — one establishment, no retry storm. Row written 13:03:26 for `44d633fc`, `privacy_read` +1, tokens and sessions unmoved at 249/20 |
+| **`band_18_plus`** | **CONSISTENT with the fixture state as subsequently inspected.** Not an anomaly |
+| **Apple** | **NO evidence Apple ignored an active 13-15 fixture.** The fixture was not active |
+| **Études' teen derivation / default logic** | **NO evidence against it from this run.** The adult defaults written — both flags true, both `set_under_band` `band_18_plus`, both `changed_at` NULL — are **exactly correct for the band supplied**, and match the two previous adult rows |
+| **Teen defaults** | **STILL UNTESTED** |
+
+**THE BLOCKER IS NOW SPECIFICALLY: Developer Age Assurance fixture persistence
+across the deletion / SIWA lifecycle.** It is not our code, not Apple's
+honouring, and not the derivation.
+
+## 22.2 A PREDICTION I MISSED — `membership_binding` 0 → 1
+
+I predicted binding **0/0**. It is **1**, created 13:03:26.904, never updated.
+
+**That is correct product behaviour and I should have predicted it.** Membership
+Selection calls `ensure_membership_binding()` to fetch the `appAccountToken`, so
+**arriving at that screen creates a binding row** — U5f's design, where the token
+must exist before `product.purchase()` can carry it. **No purchase occurred**
+(`membership` still 0) and the row is clean.
+
+## 22.3 WHAT IS NOW KNOWN ABOUT THE FIXTURE
+
+| event | fixture survives? | evidence |
+|---|---|---|
+| **A Settings visit + app foreground** | **YES** | set and read back repeatedly today (12:52, 12:53, 13:00); the Under-13 selection was honoured through a full Continue at 12:52 |
+| **A SIWA sign-in** | **previously yes** (occurrence 1) | confirmed 13-15 at 10:30 across the 10:19 sign-in |
+| **The account-deletion lifecycle** | **NO** | 12:53 set and verified → 12:57 deletion → unset |
+| **Deletion → onboard → SIWA, as one lifecycle** | **NO** | 13:00 set and verified → deletion already done, then onboarding + SIWA → unset by 13:05 |
+
+**Two clearings observed, both spanning a destructive/sign-in lifecycle.** No
+mechanism is claimed.
+
+## 22.4 THE ORDERING FOR NEXT TIME — and the coordinator forces it
+
+**The now-working coordinator makes "set the fixture, then use Continue"
+impossible**: setting the fixture requires a Settings visit, and **returning to
+Études is a foreground that fires recovery**. On a band-less identity it will
+call Apple and establish **before** Continue can be reached.
+
+**So the return-from-Settings IS the establishment. That is not avoidable, and it
+is fine** — same writer, same defaults, and it exercises the path already
+hardware-verified.
+
+### Proposed sequence — fixture set LAST, and proven live without writing
+
+| | action | why |
+|---|---|---|
+| 1 | Delete → onboard → **SIWA** | fixture state **irrelevant here**; let the lifecycle clear it |
+| 2 | Settings → set **`Under 13`** → verify it reads back → **return to Études** | the foreground fires recovery → Apple returns under-13 → `.ineligible` → `bandToEstablish` **nil** → **NO WRITE** |
+| 3 | **Measure** | **`privacy_read` +1 with `writer` unchanged and `account_privacy` still 0** proves **the coordinator ran, reached Apple, and got a non-band** — i.e. **the fixture is live**, proven **by the very code path that will establish the band**, seconds earlier, writing nothing |
+| 4 | **Wait ≥ 60 s**, then Settings → set **`13 - 15`** → verify → **return to Études** | the coordinator's cooldown is 60 s and `lastAttemptAt` **is** set on the `.noBandEstablished` path, so an immediate retry would be silently skipped. The step-3 measurement round-trip naturally provides the gap |
+| 5 | **Measure the teen row** | recovery writes `band_13_17` |
+
+**Step 3 is the improvement over every previous attempt.** The Continue alert
+proved `ProfileView`'s path was honoured; **this proves the coordinator's path is
+honoured**, which is the one that will actually establish the band, and it does
+so **with no intervening lifecycle action and no write**.
+
+**If `privacy_read` does NOT move at step 3**, the coordinator did not run —
+most likely its cooldown. **Wait 60 s and foreground again rather than
+concluding anything.**
+
+**No device action is proposed now.** This is the sequence for when the account
+holder chooses to resume.
