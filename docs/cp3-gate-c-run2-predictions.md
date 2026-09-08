@@ -154,3 +154,108 @@ evidence exists. The strong ordering test still needs a fresh identity and is
 
 **Teen / under-13 / decline / recovery are not in scope** until this adult run is
 scored.
+
+---
+
+# 5. M1 RESULTS — 06:44:56 UTC, after install + repurchase + Connected
+
+Deltas from T0 (06:29:41):
+
+| counter | T0 | M1 | Δ |
+|---|---|---|---|
+| `posts` SELECT | 19858 | **19859** | **+1** |
+| `account_directory` SELECT | 3348 | **3350** | **+2** |
+| `account_privacy_self_v1` | 18 | **25** | **+7** |
+| `account_directory` INSERT | 2795 | **2795** | **+0** |
+| `9c5385f6` refresh tokens | 41 | **41** | **+0** |
+
+**Anti-over-determination gate: PASS.** `posts` SELECT rose, so the client was
+genuinely Connected and authenticated and every zero below is attributable.
+
+## 5.1 CRITERION 1 — PASS, and it is the fix's own signature
+
+**`dir_select` +2 while `tokens` +0.** Directory hydration **began twice**, with
+an already-valid access token, and **nothing rotated**.
+
+**This is not producible by the pre-fix binary** and was measured absent in the
+identical configuration yesterday: `posts` +3, dir SELECT **+0**, tokens +0. The
+resubscription/hydration regression is **fixed and hardware-verified**.
+
+## 5.2 CRITERION 2 — GATE (C) PASSES ON HARDWARE
+
+| | |
+|---|---|
+| token rotations across install, purchase and activation | **ZERO** (41 → 41) |
+| sub-second gaps | **none — there are no new tokens at all** |
+| privacy preflights (`privacy_rpc`) | **+7**, so the loop's edge was exercised repeatedly |
+| hydrations that actually ran (`dir_select`) | **+2** |
+
+**Each privacy preflight goes `fetchSelf` → `preflight` →
+`ensureValidBackendSession` → `refreshSupabaseSession`, and under the fix each
+of those schedules hydration. Seven schedules produced two hydrations, so at
+least five re-entrant schedules were suppressed by the guard** — direct evidence
+that the re-entrancy cut is doing the work, not merely present.
+
+**This is the exact configuration that produced 34 rotations in 20.5 s at
+0.12–0.13 s spacing on 2026-09-07.** It produced **zero**.
+
+## 5.3 CRITERION 3 — NOT ACHIEVABLE ON THIS FIXTURE. NOT A FAILURE, AND NOT A DEFECT
+
+`account_directory` INSERT is gated:
+
+```
+account_directory_insert_owner  WITH CHECK
+  ((SELECT enforcement_gate('account_directory.insert')) AND (user_id = auth.uid()))
+```
+
+Measured, not inferred:
+
+| | |
+|---|---|
+| `enforcement_enabled` | **true** (U6b, bound 2026-09-02 15:30:20) |
+| `connected_member('9c5385f6')` | **false** |
+| `membership_state('9c5385f6')` | **`sandbox_only`** |
+| `enforcement_gate('account_directory.insert')` | **false** |
+
+**So the INSERT is refused by RLS, by design.** D4 is explicit that production
+`connected_member()` means **Production entitlement only**, and this identity's
+membership is **Sandbox**. A Sandbox-only member cannot publish a directory row
+while enforcement is on — **that is U6b and D4 working exactly as specified.**
+
+**SELECT is NOT gated** (`user_id = auth.uid()`), which is precisely why
+hydration could read (dir SELECT +2) and not write.
+
+**One thing is NOT established and must not be claimed: whether the client
+attempted the INSERT and was denied, or never attempted it.** A denied write
+leaves no telemetry — that is **B-34**, a known open obligation — so the
+`dir_ins` zero cannot separate them.
+
+**I SHOULD HAVE FOUND THIS YESTERDAY.** Yesterday's §8.2 listed five candidate
+causes, all client-side, and a single read-only policy query would have shown the
+write was forbidden. **The regression in §7.2/§9 was real and independently
+confirmed** — that measurement stands — **but it was never a sufficient
+explanation for the missing row, and a second, independent, sufficient cause was
+sitting in `pg_policies` the whole time.**
+
+## 5.4 CRITERIA 4, 5, 6 — ALL PASS
+
+| | prediction | observed | |
+|---|---|---|---|
+| C4 | tokens ≤ 45, no sub-second gap | **41 → 41**, no new tokens | **PASS** |
+| C5 | band unchanged | `band_18_plus`, `band_updated_at` **2026-09-07 13:40:16.675419**, 1 row, both `*_changed_at` NULL, `lookup_enabled` true | **PASS** |
+| C6 | Samuel untouched | **248** tokens, last **2026-09-05 16:44:36**; directory row unchanged; `auth.users` **2** | **PASS** |
+
+`membership_binding` still never updated; `binding_method` still `purchase`;
+entitlement live to **07:14:29**.
+
+## 5.5 CONSEQUENCE FOR THE FIXTURE
+
+**`9c5385f6` keeps its no-directory-row state — and now we know it cannot lose
+it while its membership is Sandbox and enforcement is on.** The fixture is not
+fragile after all; it is structurally stable.
+
+**Criterion 3 needs a different fixture**, and the options are a Production
+entitlement, or an explicit tester carve-out **outside** the entitlement
+predicate — which is the U6b decision D4 already anticipated and deliberately
+deferred. **Weakening enforcement or manufacturing membership state for a test
+is not on the table.**
