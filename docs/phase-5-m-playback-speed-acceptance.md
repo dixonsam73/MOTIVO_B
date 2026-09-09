@@ -1,6 +1,7 @@
 # P5-M — PLAYBACK SPEED: ACCEPTANCE
 
-**COMPLETE 2026-09-09.** Scored against
+**IMPLEMENTATION COMPLETE 2026-09-09; PHYSICAL-DEVICE BEHAVIOURAL AND
+ACCESSIBILITY VERIFICATION OUTSTANDING.** Scored against
 `docs/phase-5-m-playback-speed-prediction.md`, committed at `6d7ea64` **before**
 any product mutation.
 
