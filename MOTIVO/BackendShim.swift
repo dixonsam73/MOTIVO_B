@@ -285,6 +285,24 @@ public protocol BackendPublishService {
 
 public protocol BackendProfileService {}
 
+/// C-43. Outcomes a relationship delete must be able to report distinctly.
+public enum FollowRelationshipError: LocalizedError {
+    /// The intended directional row did not exist. NOT a transport failure, and
+    /// deliberately not reported as success: the previous implementation could
+    /// not tell these apart, which is what made it destructive.
+    case notFound
+    /// A 2xx whose body could not be read as a row set. Refused rather than
+    /// assumed to be a deletion.
+    case undeterminedResult
+
+    public var errorDescription: String? {
+        switch self {
+        case .notFound: return "That relationship no longer exists."
+        case .undeterminedResult: return "The server did not confirm what was removed."
+        }
+    }
+}
+
 public protocol BackendFollowService {
     func fetchFollowingApproved() async -> Result<[String], Error>
     func fetchFollowersApproved() async -> Result<[String], Error>
@@ -295,6 +313,11 @@ public protocol BackendFollowService {
     func approveFollow(from requesterUserID: String) async -> Result<Void, Error>
     func declineFollow(from requesterUserID: String) async -> Result<Void, Error>
     func unfollow(_ targetUserID: String) async -> Result<Void, Error>
+    /// C-43. DISTINCT FROM `unfollow`, and that distinction is the fix.
+    /// `unfollow` deletes me→them; this deletes them→me. One function serving
+    /// both directions is exactly how one action came to destroy two
+    /// relationships.
+    func removeFollower(_ followerUserID: String) async -> Result<Void, Error>
 }
 
 public final class SimulatedPublishService: BackendPublishService {
@@ -584,6 +607,12 @@ public final class SimulatedFollowService: BackendFollowService {
         await BackendDiagnostics.shared.simulatedCall("FollowService.unfollow", meta: ["target": targetUserID])
         return .success(())
     }
+
+    @MainActor
+    public func removeFollower(_ followerUserID: String) async -> Result<Void, Error> {
+        await BackendDiagnostics.shared.simulatedCall("FollowService.removeFollower", meta: ["follower": followerUserID])
+        return .success(())
+    }
 }
 
 
@@ -787,48 +816,77 @@ public func fetchIncomingRequests() async -> Result<[String], Error> {
         }
     }
 
+    /// C-43. Declining an incoming request deletes THEIR row only. My own
+    /// outgoing follow of that person is separate state and survives.
     public func declineFollow(from requesterUserID: String) async -> Result<Void, Error> {
-        // Decline == delete request row.
-        return await deleteRelationship(with: requesterUserID.lowercased())
+        guard let me = currentBackendUserID(), !me.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing backend user id"]))
+        }
+        return await deleteFollowRow(follower: requesterUserID.lowercased(), followed: me)
     }
 
+    /// C-43. Unfollowing deletes MY row only. Their follow of me survives.
     public func unfollow(_ targetUserID: String) async -> Result<Void, Error> {
-        // Unfollow == delete row.
-        return await deleteRelationship(with: targetUserID.lowercased())
+        guard let me = currentBackendUserID(), !me.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing backend user id"]))
+        }
+        return await deleteFollowRow(follower: me, followed: targetUserID.lowercased())
     }
 
-    private func deleteRelationship(with otherUserID: String) async -> Result<Void, Error> {
-    guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
-        return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+    /// C-43. Removing a follower deletes THEIR row only. My own follow of them
+    /// survives.
+    public func removeFollower(_ followerUserID: String) async -> Result<Void, Error> {
+        guard let me = currentBackendUserID(), !me.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing backend user id"]))
+        }
+        return await deleteFollowRow(follower: followerUserID.lowercased(), followed: me)
     }
-    guard let me = currentBackendUserID(), !me.isEmpty else {
-        return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing backend user id"]))
+
+    /// C-43. ONE correctly-directed DELETE, with reliable evidence that the
+    /// intended row was actually matched.
+    ///
+    /// ── WHY THE OLD CODE DELETED BOTH DIRECTIONS ──────────────────────────
+    ///
+    /// `headers(apiKey:)` sets `Prefer: return=minimal` globally, and PostgREST
+    /// answers a zero-match DELETE with **204 and an empty body** under it. With
+    /// no way to tell "deleted" from "matched nothing", the previous code fired
+    /// BOTH directional deletes and reported success if either returned 2xx.
+    /// **That made a directional action destroy the opposite relationship**, and
+    /// it did so even when the intended row did not exist.
+    ///
+    /// ── THE REPLACEMENT, VERIFIED AGAINST THE INSTALLED STACK ─────────────
+    ///
+    /// `Prefer: return=representation` makes PostgREST return the deleted rows
+    /// in the BODY, which `NetworkManager.request` already surfaces. Measured:
+    /// a match returns `[{…}]`, a zero-match returns `[]`.
+    ///
+    /// `Prefer: count=exact` is deliberately NOT used: it reports through the
+    /// `Content-Range` HEADER, which this client's signature does not expose.
+    ///
+    /// **Directional correctness must not be bought with silent success**, so a
+    /// zero-match is a `notFound` failure rather than a cheerful no-op.
+    private func deleteFollowRow(follower: String, followed: String) async -> Result<Void, Error> {
+        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+        }
+
+        var h = headers(apiKey: apiKey)
+        h["Prefer"] = "return=representation"
+
+        let path = "rest/v1/follows?follower_user_id=eq.\(follower)&followed_user_id=eq.\(followed)"
+        let result = await NetworkManager.shared.request(path: path, method: "DELETE", headers: h)
+
+        switch result {
+        case .failure(let e):
+            return .failure(e)
+        case .success(let data):
+            // A 2xx alone is NOT evidence. The body is.
+            guard let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+                return .failure(FollowRelationshipError.undeterminedResult)
+            }
+            return rows.isEmpty ? .failure(FollowRelationshipError.notFound) : .success(())
+        }
     }
-
-    // IMPORTANT:
-    // PostgREST DELETE commonly returns 204 even when 0 rows matched (especially with Prefer: return=minimal).
-    // So we MUST attempt both directional deletes; otherwise an incoming request (other -> me) can look like
-    // a "success" while deleting nothing.
-    let path1 = "rest/v1/follows?follower_user_id=eq.\(me)&followed_user_id=eq.\(otherUserID)"
-    let r1 = await NetworkManager.shared.request(path: path1, method: "DELETE", headers: headers(apiKey: apiKey))
-
-    let path2 = "rest/v1/follows?follower_user_id=eq.\(otherUserID)&followed_user_id=eq.\(me)"
-    let r2 = await NetworkManager.shared.request(path: path2, method: "DELETE", headers: headers(apiKey: apiKey))
-
-    // Treat overall success if either call succeeded.
-    if case .success = r1 { return .success(()) }
-    if case .success = r2 { return .success(()) }
-
-    // Prefer the second error if present (it corresponds to the inverse direction, common for decline/remove-follower).
-    switch (r1, r2) {
-    case (.failure, .failure(let e2)):
-        return .failure(e2)
-    case (.failure(let e1), _):
-        return .failure(e1)
-    default:
-        return .failure(NSError(domain: "Backend", code: 3, userInfo: [NSLocalizedDescriptionKey: "Unknown follow delete failure"]))
-    }
-}
 
 }
 

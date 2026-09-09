@@ -284,7 +284,10 @@ public final class FollowStore: ObservableObject {
             }
 
             Task { @MainActor in
-                let result = await BackendEnvironment.shared.follow.unfollow(id)
+                // C-43: removeFollower deletes THEIR row (them→me). It used to
+                // call `unfollow`, which meant one shim function served two
+                // opposite directions and destroyed both.
+                let result = await BackendEnvironment.shared.follow.removeFollower(id)
                 switch result {
                 case .success:
                     await self.refreshFromBackendIfPossible()
