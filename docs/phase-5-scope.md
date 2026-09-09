@@ -61,7 +61,7 @@ product work. **Nothing below is implemented.**
 | **P5-J** | **Correctness / safety** | **C-6** `fatalError` on store load · **C-16** `try!` on directory creation · **C-20** main-actor isolation · **C-21** discarded status reads | none |
 | **P5-K** | **Behavioural defects** | **C-43** one unfollow destroys both directions · **C-10** `.file` uploads as octet-stream and is rejected · **C-27** location does not carry to Solo · **C-56** Core Data fetches inside `body` · **C-50** idle lock mid-recording · **C-5** duplicate Score adoption | none |
 | **P5-L** | **Investigations** | **C-37**, **C-39**, **C-40**, **C-42**, **C-47**, **C-62** — all *Unverified*; each needs measurement **before** any fix. **C-62** was filed by P5-A: `PublishService:294` logs a session **title** in Release. It is **user content, not identity**, so it was deliberately NOT folded into C-14, and its **severity is unassigned** because the evidence establishes only that the value is written, never that any read path surfaces it | none |
-| **P5-M** | **Product** | **playback-speed control** (AttachmentViewerView only, local and remote audio/video, discrete 50/75/100%, pitch preserved, no looping, no `PracticeTimerView` changes, no `MediaTrimView` carry-over, TestFlight soak) · **C-3** staged-video work **only if measurement justifies it** | none |
+| **P5-M** | **Product** | **playback-speed control** (AttachmentViewerView only, local and remote audio/video, discrete 50/75/100%, pitch preserved, no looping, no `PracticeTimerView` changes, no `MediaTrimView` carry-over, TestFlight soak). **C-3 IS NO LONGER LISTED HERE — corrected 2026-09-09.** Pairing it with playback speed implied a dependency that does not exist: **C-3 is `PracticeTimerView` foreground hydration, playback speed is `AttachmentViewerView`, they touch disjoint files, and this row already FORBIDS `PracticeTimerView` changes during the playback-speed work.** So the two could never have been done together under this row's own terms. **Playback speed proceeds independently of C-3** | none |
 | **P5-N** | **Accessibility & polish** | **C-11** VoiceOver mislabel, and remaining polish | none |
 
 ### CP-1's AGE MECHANISM IS NOW APPLE'S, NOT ÉTUDES' — 2026-09-06
@@ -185,6 +185,7 @@ of thing a later reader assumes was always there**.
 
 - **the playback-speed product work**, which appears only in CLAUDE.md's phase
   list and has no register row (**P5-M**);
+- **C-3 is re-homed with the `PracticeTimerView` performance work (C-56), not with playback speed** — corrected 2026-09-09. Its P1 memory hypothesis **did not reproduce** (same PID at 279 MB, no jetsam) and it is now **P3**; its surviving concern is repeated **main-thread media hydration, memory residency and a full flash rewrite on every foreground**. **C-56 is the natural sibling** — also `PracticeTimerView`, also main-thread cost measured at 47 of 50 samples in one function. **Neither is a playback-speed dependency.**
 - **C-41**, the vestigial `lookup_enabled` client plumbing, which is **revived by
   CP-3 rather than deleted** — the column turns out to be the discovery opt-out
   the children's work needs.
