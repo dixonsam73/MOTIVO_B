@@ -210,3 +210,53 @@ succeeding outside it.
 **This is deliberately C-38's pattern** — a single unreproduced observation, held
 open as *Unverified* rather than either forced to a conclusion or quietly
 forgotten.
+
+---
+
+# 9. D4 — GREEN. C-50 CLOSED UNDER THE STOPPING RULE. 2026-09-09
+
+**D4 replicated the original conditions exactly** — force-quit, fresh launch,
+**full 90-second video take**, saved, dismissed, timer **running**, idle.
+
+**RESULT: GREEN. The device locked.**
+
+So the original observation **did not reproduce under its own conditions**, and
+the uncontrolled variable I had named — 90 s versus 10 s — **is eliminated as the
+explanation.**
+
+## 9.1 The stopping rule is applied, not revisited
+
+It was agreed **before** the attempt: no further hypotheses are manufactured and
+no speculative fix is written. **C-50.2 is closed as unreproduced.**
+
+**The two candidate mechanisms stay recorded** — a stranded guard holder, and the
+review-`AVPlayer` teardown gap (**C-68**) — **as documented hypotheses, not as
+conclusions**, and neither is being fixed on the strength of an observation that
+will not reproduce.
+
+**REOPENING CONDITION, NAMED:** any future observation of Auto-Lock failing inside
+Études while succeeding outside it. That fingerprint is specific enough to
+recognise, which is what makes the stopping rule safe rather than a shrug.
+
+## 9.2 C-50 final status
+
+**RESOLVED — implementation complete and device-verified**, on four checks plus
+three re-tests of the restoration half.
+
+**The unexplained early observation is carried, not erased.** It was real, it was
+internally consistent, and it is written down. **Recording it honestly is the
+difference between a closed finding and a forgotten one.**
+
+## 9.3 A free observation worth keeping
+
+D4 also showed that **after lock and unlock the timer screen returned with the
+correct elapsed time and the timer still running.** Not a scored check and not
+part of C-50 — but it is positive evidence about practice-timer continuity across
+a lock cycle, obtained at no cost, and this project's habit is to write those down
+rather than let them evaporate.
+
+## 9.4 What is now unblocked
+
+**P5-M's playback-speed device QA** — §4 and §5 of
+`docs/phase-5-device-verification-plan.md` — was held pending this disposition and
+is now clear to run.
