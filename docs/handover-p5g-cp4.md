@@ -72,7 +72,7 @@ Current invariants only.
 - **Age comes from Apple's `DeclaredAgeRange`, never from Études.** Études never
   asks anyone their age. `requestAgeRange(ageGates: 13, 18)`. **Nothing in the
   product or the record may imply Études asked.**
-- **iOS 26.2+ for the whole app, including Solo** (P5-A2). Chosen while
+- **iOS 26.4+ for the whole app, including Solo** (P5-A3, 2026-09-09; 26.2 at P5-A2). Chosen while
   pre-release with no installed base, so `DeclaredAgeRange` exists on every
   supported install. The earlier "Solo 18.5 / Connected 26" split is withdrawn.
 - **Derivation is BOUNDS ARITHMETIC, never gate-shape matching.** `lower >= 18`

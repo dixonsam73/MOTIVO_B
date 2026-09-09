@@ -2969,11 +2969,24 @@ Verification gate after each phase. RC QA confirms an already-tested system.
 
 ## Environment
 
-- iPhone-only (`TARGETED_DEVICE_FAMILY = 1`), **deployment target iOS 26.2**
-  (P5-A2, 2026-09-07; was 18.5). **The whole app requires 26.2, INCLUDING Solo** —
+- iPhone-only (`TARGETED_DEVICE_FAMILY = 1`), **deployment target iOS 26.4**
+  (P5-A3, 2026-09-09; was 26.2 at P5-A2, 2026-09-07; was 18.5 before that).
+  **The whole app requires 26.4, INCLUDING Solo** —
   the earlier "Solo on 18.5+, Connected on 26+" split is withdrawn. Chosen while
   Études is pre-release with no installed base, so nobody loses access; it
-  guarantees `DeclaredAgeRange` on every supported installation.
+  guarantees `DeclaredAgeRange` on every supported installation. **P5-A3 raised
+  it to 26.4 for PROSPECTIVE SIMPLIFICATION ONLY:** pre-launch is the
+  lowest-cost opportunity, since there is no public installed base to strand —
+  raising it later stays possible but could exclude existing users or devices
+  from future versions — and if a concrete future obligation ever requires the
+  26.4 regulatory APIs (`requiredRegulatoryFeatures`, `RegulatoryFeature`,
+  `showSignificantUpdateAcknowledgment`), every supported installation can use
+  them **without OS-availability branching inside child-safety code**.
+  **It enabled no new behaviour and changed no legal conclusion.** 26.4 rather
+  than 26.5 because 26.5 adds only `AgeRangeDeclaration.confirmed` — assurance
+  provenance Études deliberately never reads. **Études still consumes NEITHER
+  `isEligibleForAgeFeatures` NOR `requiredRegulatoryFeatures`; age establishment
+  and the 13-17 protections remain UNCONDITIONAL and globally uniform.**
 - Flat source layout via `fileSystemSynchronizedGroups` — everything in
   `MOTIVO/` is auto-included in the app target.
 - Debug and Release use different bundle IDs, and **only Release can transact.**

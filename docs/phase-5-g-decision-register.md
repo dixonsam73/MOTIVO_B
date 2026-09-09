@@ -1879,14 +1879,22 @@ guidance for this.**
 ### O4 — The one measured technical constraint
 
 `requiredRegulatoryFeatures` is **iOS 26.4+**; `isEligibleForAgeFeatures` is
-**26.2**. Études' floor is **26.2**. **A floor assessment is at §P; the floor is
-NOT changed.**
+**26.2**. Études' floor was **26.2** and is now **26.4** — raised by **P5-A3** on
+2026-09-09 as a **discrete pre-launch baseline unit**, scored clean against a
+prediction committed beforehand (`docs/phase-5-a3-ios264-acceptance.md`).
+
+**THAT CHANGED NOTHING HERE.** It enabled no new behaviour, altered no legal
+conclusion, and **§O2 continues to govern**: Études still consumes neither signal,
+and the age protections remain unconditional and globally uniform. **Availability
+is not authorisation.**
 
 ---
 
 ## P. DEPLOYMENT-FLOOR ASSESSMENT — iOS 26.2 → 26.4. MEASURED, NOT AUTHORISED
 
-**Measured 2026-09-09. NO CHANGE MADE. Requires the account holder's approval.**
+**Measured 2026-09-09. AUTHORISED AND EXECUTED the same day as P5-A3 — see
+`docs/phase-5-a3-ios264-acceptance.md`. The assessment below is retained as the
+reasoning that supported the decision.**
 
 ### P1 — Blast radius, measured
 
