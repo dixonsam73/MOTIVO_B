@@ -1988,6 +1988,9 @@ private struct VideoPage: View {
                 }
             )
             .tint(Theme.Colors.accent)
+            // C-67: unlabelled, this announced only "Slider".
+            .accessibilityLabel(PlaybackAccessibility.scrubLabel)
+            .accessibilityValue(PlaybackAccessibility.scrubValue(elapsed: currentTime, duration: duration))
             .onTapGesture {
                 if revealsImmersiveChrome { revealPlaybackChrome(shouldAutoHide: true) }
             }
@@ -2002,6 +2005,7 @@ private struct VideoPage: View {
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
+                    .accessibilityLabel(isMuted ? "Unmute" : "Mute")
 
                     Spacer(minLength: 0)
 
@@ -2020,6 +2024,7 @@ private struct VideoPage: View {
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
+                    .accessibilityLabel("Skip back 10 seconds")
 
                     if isPlayingState {
                         mediaControlButton(compact: controlCompact, action: {
@@ -2030,6 +2035,10 @@ private struct VideoPage: View {
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        // Pause-only by construction: when not playing this slot
+                        // is Color.clear and play is the centre overlay button,
+                        // which already carries its own label.
+                        .accessibilityLabel("Pause")
                     } else {
                         Color.clear
                             .frame(width: controlCompact ? 36 : 40, height: controlCompact ? 36 : 40)
@@ -2043,6 +2052,7 @@ private struct VideoPage: View {
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
+                    .accessibilityLabel("Skip forward 10 seconds")
 
                     PlaybackSpeedMenu(rate: $playbackRate, compact: controlCompact)
                 }
@@ -2794,6 +2804,9 @@ private struct AudioPage: View {
                         }
                     )
                     .tint(Theme.Colors.accent)
+                    // C-67: unlabelled, this announced only "Slider".
+                    .accessibilityLabel(PlaybackAccessibility.scrubLabel)
+                    .accessibilityValue(PlaybackAccessibility.scrubValue(elapsed: audioCurrentTime, duration: audioDuration))
                 }
 
                 ZStack {
@@ -2803,6 +2816,7 @@ private struct AudioPage: View {
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        .accessibilityLabel(isMuted ? "Unmute" : "Mute")
 
                         Spacer(minLength: 0)
 
@@ -2815,6 +2829,7 @@ private struct AudioPage: View {
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        .accessibilityLabel("Skip back 10 seconds")
 
                         mediaControlButton(action: {
                             if isPlaybackPlaying {
@@ -2855,12 +2870,14 @@ private struct AudioPage: View {
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        .accessibilityLabel(isPlaybackPlaying ? "Pause" : "Play")
 
                         mediaControlButton(action: { jump(by: 10) }) {
                             Image(systemName: "goforward.10")
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        .accessibilityLabel("Skip forward 10 seconds")
 
                         PlaybackSpeedMenu(rate: $playbackRate)
                     }

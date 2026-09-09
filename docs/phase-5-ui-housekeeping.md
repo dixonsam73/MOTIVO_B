@@ -61,3 +61,25 @@ Account
 
 **A pure move should leave `u8-acceptance` at its current score.** If it does
 not, the change was not a pure move.
+
+
+---
+
+## H-2 — the directory-sync failure message sits under the Account ID field
+
+**Logged 2026-09-09 from C-70(a). LOGGED ONLY — NOT A REOPENING OF C-70(a),
+which is resolved.**
+
+`ProfileView` has exactly one presentation site for a directory-write failure,
+and it renders **beneath the Account ID `TextField`** (`:668`). C-70(a) fixed the
+*text* — a generic failure no longer names a field — but a `name`, `location` or
+instrument-list failure still appears in that position, so the **placement**
+continues to hint at a field the member did not touch.
+
+**Deliberately not fixed there.** Moving it needs a second presentation surface
+in `ProfileView`, which is a broad error-handling redesign; C-70(a) was scoped
+to forbid exactly that.
+
+**Size:** small. **Risk if left:** cosmetic mis-suggestion only — the words are
+truthful. **Owner:** unassigned; a candidate for any future `ProfileView` pass,
+alongside H-1.

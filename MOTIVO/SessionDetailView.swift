@@ -1664,7 +1664,12 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open comments")
+            // C-11: this is the FAVOURITE control and it announced "Open
+            // comments" — the genuine comments button's label, 23 lines below.
+            // The label describes the action and follows the state; it is
+            // object-neutral because this view renders Thoughts as well as
+            // sessions (`session.isThought`).
+            .accessibilityLabel(isSavedLocal ? "Remove from favourites" : "Add to favourites")
 
 
             if appModeManager.canComment {
@@ -1707,6 +1712,7 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(session.isThought ? "Share thought" : "Share session")
                     }
                 }
             }
