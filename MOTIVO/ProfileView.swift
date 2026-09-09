@@ -282,8 +282,8 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     @State private var accountIDText: String = ""
 
     // Phase 13A — Account ID collision UX (shipping)
-    @State private var accountIDSyncMessage: String? = nil
-    @State private var accountIDSyncIsError: Bool = false
+    @State private var directorySyncMessage: String? = nil
+    @State private var directorySyncIsError: Bool = false
 
     @State private var directorySyncDebounceTask: Task<Void, Never>? = nil
     @State private var lastDirectorySyncFingerprint: String? = nil
@@ -635,8 +635,8 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                                      let normalized = normalizeAccountID(newValue)
                                      if normalized != newValue { accountIDText = normalized }
                                      // Clear any prior sync feedback as the user edits.
-                                     accountIDSyncMessage = nil
-                                     accountIDSyncIsError = false
+                                     directorySyncMessage = nil
+                                     directorySyncIsError = false
                                      ProfileStore.setAccountID(accountIDText, for: auth.backendUserID)
                                  }
                                  .focused($isAccountIDFocused)
@@ -665,10 +665,10 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  }
                  .cardSurface(padding: profileInnerCardPadding)
 
-                 if appModeManager.canShowConnectedAccountManagement, let msg = accountIDSyncMessage {
+                 if appModeManager.canShowConnectedAccountManagement, let msg = directorySyncMessage {
                      Text(msg)
                          .font(Theme.Text.meta)
-                         .foregroundStyle(accountIDSyncIsError ? Color.red : Theme.Colors.secondaryText)
+                         .foregroundStyle(directorySyncIsError ? Color.red : Theme.Colors.secondaryText)
                          .padding(.top, 2)
                  }
              }
@@ -1509,8 +1509,8 @@ private var sessionSetupSection: some View {
          switch result {
 case .success:
     lastDirectorySyncFingerprint = fingerprint
-    accountIDSyncMessage = nil
-    accountIDSyncIsError = false
+    directorySyncMessage = nil
+    directorySyncIsError = false
     await attemptAccountIDAutoGenerationIfNeeded(
         backendID: backendID,
         displayName: display,
@@ -1518,12 +1518,11 @@ case .success:
         instruments: instrumentsSorted
     )
 case .failure(let error):
-    if isAccountIDCollision(error) {
-        accountIDSyncMessage = "That account ID is already taken."
-    } else {
-        accountIDSyncMessage = "Couldn’t update your Account ID. Please try again."
-    }
-    accountIDSyncIsError = true
+    // C-70(a): the message names a field only when the SERVER attributed the
+    // failure to that field. This row also carries display name, location and
+    // instruments, and three of the five triggers never touch the Account ID.
+    directorySyncMessage = DirectorySyncFailure.message(for: error)
+    directorySyncIsError = true
 }
      }
 
@@ -1630,25 +1629,7 @@ case .failure(let error):
          #endif
      }
 
-// Phase 13A — Detect account_id collision (unique constraint) from NetworkManager error.
-     private func isAccountIDCollision(_ error: Error) -> Bool {
-        // NetworkError is nested in NetworkManager.
-        if let net = error as? NetworkManager.NetworkError {
-            switch net {
-            case .httpError(let status, let body):
-                guard status == 409, let body, !body.isEmpty else { return false }
-                // Supabase/Postgres unique violation on account_directory.account_id.
-                if body.contains("\"code\":\"23505\"") { return true }
-                if body.contains("account_directory_account_id_key") { return true }
-                return false
-            default:
-                return false
-            }
-        }
-        return false
-    }
-
-
+// Phase 13A — account_id collision detection RELOCATED to DirectorySyncFailure (C-70(a)).
 
 
      // New helper method to compute initials from a string
