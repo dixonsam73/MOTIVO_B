@@ -1,4 +1,12 @@
-# P5-N TIER 1 — ACCEPTANCE. IMPLEMENTATION COMPLETE; DEVICE VOICEOVER VERIFICATION OUTSTANDING.
+# P5-N TIER 1 — ACCEPTANCE. COMPLETE AND DEVICE/VOICEOVER-VERIFIED.
+
+**DEVICE PASS GREEN 2026-09-09.** All five checks confirmed on hardware with
+VoiceOver: the favourites action, Share session/thought and Open comments are
+distinguished; video and audio transport controls and both scrub sliders
+announce sensible labels and values; the playback-speed accessibility is
+unchanged; no adjacent control tested announces the wrong action. **§4's
+limitation is now DISCHARGED rather than standing** — it is preserved below as
+the record of what source evidence could and could not establish.
 
 **Prediction:** `docs/phase-5-n-tier1-prediction.md`, committed at `cd3f0a3`
 **before** any product change. **Scope held to C-11 + C-67.**
