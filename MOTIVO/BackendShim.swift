@@ -897,6 +897,26 @@ public final class HTTPBackendPublishService: BackendPublishService {
 // MARK: - Storage upload preflight (Media Hygiene)
 private static let maxUploadBytes: Int64 = 50 * 1024 * 1024
 
+/// C-65. Raised when an attachment the member explicitly selected cannot be
+/// prepared for remote publication. Returned BEFORE the post row is created, so
+/// a publish that cannot carry its media publishes nothing at all rather than
+/// reporting success on a partial post.
+///
+/// **Every case is treated as RETRYABLE by the durable queue**, which is correct
+/// for a file that is temporarily unresolvable after a container rotation and
+/// wrong for a permanently unrenderable one. That gap has its own finding; it is
+/// deliberately NOT papered over here by dequeuing a failure.
+private enum AttachmentPreparationError: LocalizedError {
+    case cannotPrepareAttachment(id: UUID, kind: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .cannotPrepareAttachment(let id, let kind):
+            return "Could not prepare \(kind) attachment \(id.uuidString) for upload"
+        }
+    }
+}
+
 private enum StorageUploadPreflightError: LocalizedError {
     case cannotDetermineFileSize
     case fileTooLarge(actualBytes: Int64, limitBytes: Int64)
@@ -937,6 +957,34 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
 
         if owner.isEmpty {
             return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing owner user id"]))
+        }
+
+        // C-65 — PREPARATION HAPPENS BEFORE THE POST ROW IS CREATED.
+        //
+        // It used to run AFTER the INSERT, so an attachment that could not be
+        // prepared was skipped and the publish still returned `.success`: the
+        // post went live without the media the member had explicitly selected,
+        // and nothing told them. Failing at that old site would not have helped
+        // — the row already existed, so the member would have had a partial
+        // public post AND an unbounded retry.
+        //
+        // Preparing first makes failure atomic with respect to publication:
+        // no row, no object, and the queue keeps the item because `.failure`
+        // already means "stays queued, retry on the next foreground".
+        var preparedUploads: [(item: LocalAttachmentUpload, prepared: PreparedAttachmentUpload)] = []
+        if let sessionID = payload.sessionID {
+            for item in loadIncludedAttachments(for: sessionID) {
+                guard let prepared = prepareAttachmentForRemoteUpload(item) else {
+                    // Discard anything this attempt already wrote to tmp.
+                    for done in preparedUploads {
+                        if let tmp = done.prepared.temporaryFileURL {
+                            try? FileManager.default.removeItem(at: tmp)
+                        }
+                    }
+                    return .failure(AttachmentPreparationError.cannotPrepareAttachment(id: item.id, kind: item.kind))
+                }
+                preparedUploads.append((item, prepared))
+            }
         }
 
         let createdAt = ISO8601DateFormatter().string(from: Date())
@@ -1030,12 +1078,17 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         }
 
 // Step 8G Phase 3: upload included attachments (owner-only by default) and PATCH posts.attachments.
-        guard let sessionID = payload.sessionID else {
+        // The BINDING is unused since C-65 moved loading and preparation above the
+        // insert, but the GUARD still carries behaviour and must not be dropped
+        // with it: a payload with no session reference returns here WITHOUT
+        // patching, whereas a session with no included attachments falls through
+        // and explicitly PATCHes `refs: []`. Those are different outcomes.
+        guard payload.sessionID != nil else {
             // No local session reference → nothing to upload.
             return .success(())
         }
 
-        let included = loadIncludedAttachments(for: sessionID)
+        let included = preparedUploads
         if included.isEmpty {
             // Keep backend row consistent: explicitly clear attachments.
             let patch = await patchPostAttachments(postID: payload.id, refs: [])
@@ -1052,17 +1105,12 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
 
         var skippedOversizedCount = 0
 
-        uploadLoop: for item in included {
-            guard let prepared = prepareAttachmentForRemoteUpload(item) else {
-                // PDF files remain local-only. If a PDF thumbnail cannot be generated,
-                // skip the remote attachment rather than uploading the PDF as a fallback.
-                if isPDFAttachmentKind(item.kind) {
-                    print("[BackendShim] Skipping PDF attachment \(item.id.uuidString) — thumbnail generation failed; PDF kept local-only.")
-                    continue uploadLoop
-                }
-                continue uploadLoop
-            }
-
+        // C-65: preparation already succeeded for EVERY item here, above, before
+        // the post row existed. The old post-insert `guard let prepared … else
+        // { continue }` is gone rather than left as dead code — its non-PDF arm
+        // was already unreachable, since `prepareAttachmentForRemoteUpload`
+        // returns nil only on the PDF branch.
+        uploadLoop: for (item, prepared) in included {
             let objectPath = storageObjectPath(owner: owner, postID: payload.id, attachmentID: item.id, ext: prepared.ext)
             let upload = await uploadStorageObject(from: prepared.fileURL, bucket: "attachments", objectPath: objectPath, contentType: prepared.contentType)
 
