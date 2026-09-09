@@ -125,3 +125,42 @@ That is weaker than a behavioural test and is labelled as such.
 **The fix for A is a hypothesis-driven repair, not a verified one.** If the three
 targeted device checks still fail, the cause is something the source does not
 reveal, and the next step is instrumentation — **not another speculative edit.**
+
+---
+
+# F. RESULT — 2026-09-09. BOTH FIXED, TESTS STRENGTHENED.
+
+| # | prediction | actual |
+|---|---|---|
+| P1 | `requestPlay()` uses `playImmediately(atRate:)`, `seek` unchanged | ✅ |
+| P2 | zero bare `player.play()` in `VideoPage` / `RemoteAudioPlayerController` | ✅ |
+| P3 | `AudioPlayerController` keeps `AVAudioPlayer.play()` | ✅ asserted explicitly |
+| P4 | control is a standalone view reading only the rate binding | ✅ |
+| P5 | menu items are `Button`s with a checkmark | ✅ |
+| P6 | rates, face, accessibility strings unchanged | ✅ |
+| P7 | Debug / Release | **both BUILD SUCCEEDED** |
+| P8 | full suite | **118 passed, 0 failed** |
+| P9 | new warning kinds | **25 → 25, zero** |
+| P10 | production / ASC | **untouched** |
+
+**Diff: 71 insertions / 73 deletions in one file** — the two inline menu helpers
+were replaced by one shared view, so the file got slightly shorter.
+
+## F.1 THE NEW TEST IS NON-VACUOUS, AND THAT WAS PROVEN
+
+`testNoAVPlayerPathUsesBarePlay` was run against a **deliberately reintroduced
+defect** — `requestPlay()` restored to bare `play()` — and **FAILED**, then passed
+again once the fix was restored.
+
+**That is the difference between the old test and the new one.** The old one
+asserted `playImmediately` appeared twice; it passed while the bug shipped. This
+one fails on the actual defect.
+
+## F.2 What is still unproven
+
+**Failure A's fix is hypothesis-driven.** The high-frequency-rebuild explanation
+is strongly indicated and the repair is sound on its own terms — but **no test
+here can demonstrate that a `Menu` now commits a tap during playback.** Only the
+three targeted device checks can.
+
+**If they still fail, the next step is instrumentation, not another edit.**

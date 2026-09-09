@@ -1589,6 +1589,69 @@ private struct URLImageView: View {
 }
 
 // MARK: - Media Router & Pages
+
+/// P5-M. The playback-speed control, as its OWN view.
+///
+/// ── WHY IT IS A SEPARATE VIEW ─────────────────────────────────────────────
+///
+/// **DEVICE-OBSERVED DEFECT:** the rate could not be changed *while a clip was
+/// playing*, in both audio and video — the menu opened, a tap did nothing, and
+/// the displayed value never moved.
+///
+/// Both media write high-frequency `@State` **only during playback**: a 0.1 s
+/// periodic time observer (video), a 0.1 s `Timer.publish` (audio) and a 30 fps
+/// waveform timer. So the transport row was being rebuilt up to 30 times a
+/// second with an open `Menu` inside it.
+///
+/// This view reads **only the rate binding**, so none of that time state can
+/// invalidate it.
+///
+/// ── AND WHY BUTTONS, NOT A PICKER ─────────────────────────────────────────
+///
+/// A `Button`'s action fires on tap. A `Picker`'s selection has to survive the
+/// view being replaced, which is precisely what was going wrong. The checkmark
+/// is drawn explicitly, so the **approved UX is unchanged**: same five rates,
+/// same face showing the current rate, same selected-item treatment, no
+/// "Normal" terminology.
+private struct PlaybackSpeedMenu: View {
+    @Binding var rate: PlaybackRate
+    var compact: Bool = false
+
+    var body: some View {
+        Menu {
+            ForEach(PlaybackRate.allCases) { option in
+                Button {
+                    rate = option
+                } label: {
+                    if option == rate {
+                        Label(option.displayLabel, systemImage: "checkmark")
+                    } else {
+                        Text(option.displayLabel)
+                    }
+                }
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(.thinMaterial)
+                    .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                Text(rate.displayLabel)
+                    .font(.system(size: compact ? 12 : 13, weight: .semibold))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                    .padding(.horizontal, 2)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            .frame(width: compact ? 36 : 40, height: compact ? 36 : 40)
+            .contentShape(Circle())
+        }
+        .accessibilityLabel(PlaybackRate.accessibilityLabel)
+        .accessibilityValue(rate.accessibilityValue)
+        .accessibilityHint(PlaybackRate.accessibilityHint)
+    }
+}
+
 private struct MediaPage: View {
     let attachment: AttachmentViewerView.MediaAttachment
     @Binding var isAnyPlayerActive: Bool
@@ -1981,7 +2044,7 @@ private struct VideoPage: View {
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
 
-                    playbackSpeedMenu(compact: controlCompact)
+                    PlaybackSpeedMenu(rate: $playbackRate, compact: controlCompact)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -2081,7 +2144,12 @@ private struct VideoPage: View {
         // Ensure we start/resume playback from the current position consistently
         let current = player.currentTime()
         player.seek(to: current, toleranceBefore: .zero, toleranceAfter: .zero)
-        player.play()
+        // P5-M FIX. THE PATH THAT WAS MISSED. `requestPlay()` is reached from the
+        // BIG CENTRE PLAY BUTTON, which is how a video is normally started — and
+        // `play()` sets rate to 1.0, so the chosen speed was honoured only from
+        // the small transport button. Device-observed: "video ignores the
+        // selected rate regardless".
+        player.playImmediately(atRate: playbackRate.playerRate)
         isAnyPlayerActive = true
         revealPlaybackChrome(shouldAutoHide: true)
     }
@@ -2132,41 +2200,6 @@ private struct VideoPage: View {
     }
 
 
-    /// P5-M. The speed control. A compact `Menu` in the existing transport row —
-    /// its face always shows the current rate, and every rate is directly
-    /// selectable, so nothing depends on counting taps or on gesture precision.
-    ///
-    /// The selected rate uses `Picker`'s ordinary checkmark treatment. No
-    /// "Normal" terminology is introduced.
-    @ViewBuilder
-    private func playbackSpeedMenu(compact: Bool = false) -> some View {
-        Menu {
-            Picker(PlaybackRate.accessibilityLabel, selection: $playbackRate) {
-                ForEach(PlaybackRate.allCases) { rate in
-                    Text(rate.displayLabel).tag(rate)
-                }
-            }
-            .pickerStyle(.inline)
-        } label: {
-            ZStack {
-                Circle()
-                    .fill(.thinMaterial)
-                    .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
-                Text(playbackRate.displayLabel)
-                    .font(.system(size: compact ? 12 : 13, weight: .semibold))
-                    .monospacedDigit()
-                    .minimumScaleFactor(0.7)
-                    .lineLimit(1)
-                    .padding(.horizontal, 2)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-            }
-            .frame(width: compact ? 36 : 40, height: compact ? 36 : 40)
-            .contentShape(Circle())
-        }
-        .accessibilityLabel(PlaybackRate.accessibilityLabel)
-        .accessibilityValue(playbackRate.accessibilityValue)
-        .accessibilityHint(PlaybackRate.accessibilityHint)
-    }
 
     /// P5-M. Builds the player with the pitch-preserving algorithm set on its
     /// item. `.spectral` is explicit rather than relying on the iOS 15+ default
@@ -2829,7 +2862,7 @@ private struct AudioPage: View {
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
 
-                        playbackSpeedMenu()
+                        PlaybackSpeedMenu(rate: $playbackRate)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -2877,41 +2910,6 @@ private struct AudioPage: View {
         }
     }
 
-    /// P5-M. The speed control. A compact `Menu` in the existing transport row —
-    /// its face always shows the current rate, and every rate is directly
-    /// selectable, so nothing depends on counting taps or on gesture precision.
-    ///
-    /// The selected rate uses `Picker`'s ordinary checkmark treatment. No
-    /// "Normal" terminology is introduced.
-    @ViewBuilder
-    private func playbackSpeedMenu(compact: Bool = false) -> some View {
-        Menu {
-            Picker(PlaybackRate.accessibilityLabel, selection: $playbackRate) {
-                ForEach(PlaybackRate.allCases) { rate in
-                    Text(rate.displayLabel).tag(rate)
-                }
-            }
-            .pickerStyle(.inline)
-        } label: {
-            ZStack {
-                Circle()
-                    .fill(.thinMaterial)
-                    .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
-                Text(playbackRate.displayLabel)
-                    .font(.system(size: compact ? 12 : 13, weight: .semibold))
-                    .monospacedDigit()
-                    .minimumScaleFactor(0.7)
-                    .lineLimit(1)
-                    .padding(.horizontal, 2)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-            }
-            .frame(width: compact ? 36 : 40, height: compact ? 36 : 40)
-            .contentShape(Circle())
-        }
-        .accessibilityLabel(PlaybackRate.accessibilityLabel)
-        .accessibilityValue(playbackRate.accessibilityValue)
-        .accessibilityHint(PlaybackRate.accessibilityHint)
-    }
 
     @ViewBuilder
     private func mediaControlButton<Label: View>(action: @escaping () -> Void, @ViewBuilder label: () -> Label) -> some View {

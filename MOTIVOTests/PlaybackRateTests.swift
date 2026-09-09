@@ -106,10 +106,62 @@ final class PlaybackRateTests: XCTestCase {
 
     /// THE HAZARD: `AVPlayer.play()` sets rate to 1.0, so a resume path using it
     /// would silently discard the chosen speed.
-    func testAVPlayerResumePathsUseRateAwarePlayback() {
+    ///
+    /// **THIS TEST USED TO ASSERT ONLY THAT `playImmediately` APPEARED TWICE, AND
+    /// IT PASSED WHILE THE BUG SHIPPED.** A third video play path —
+    /// `requestPlay()`, reached from the big centre play button — still called
+    /// `play()`, so video always ran at 1×. **Asserting the PRESENCE OF THE FIX
+    /// cannot catch a second unfixed path; the absence of the DEFECT can.**
+    func testNoAVPlayerPathUsesBarePlay() {
         let s = viewerCode()
-        XCTAssertEqual(s.components(separatedBy: "playImmediately(atRate:").count - 1, 2,
-                       "both AVPlayer stacks must resume with playImmediately(atRate:)")
+        // Scoped by region: `AVAudioPlayer.play()` in `AudioPlayerController` is
+        // legitimate — its rate survives pause/resume — and is excluded by where
+        // it lives rather than by guessing at the call text.
+        guard let videoStart = s.range(of: "private struct VideoPage: View"),
+              let audioControllerStart = s.range(of: "private final class AudioPlayerController"),
+              let remoteStart = s.range(of: "final class RemoteAudioPlayerController"),
+              let audioPageStart = s.range(of: "private struct AudioPage: View") else {
+            return XCTFail("viewer regions not found")
+        }
+        let videoRegion = String(s[videoStart.lowerBound..<audioControllerStart.lowerBound])
+        let remoteRegion = String(s[remoteStart.lowerBound..<audioPageStart.lowerBound])
+
+        for (name, region) in [("VideoPage", videoRegion), ("RemoteAudioPlayerController", remoteRegion)] {
+            XCTAssertFalse(region.contains("player.play()"),
+                           "\(name) must not use bare play(): it resets rate to 1.0")
+            XCTAssertFalse(region.contains("player?.play()"),
+                           "\(name) must not use bare play(): it resets rate to 1.0")
+        }
+    }
+
+    /// `AVAudioPlayer.play()` is legitimate and must NOT be swept up by the above.
+    func testLocalAudioKeepsItsOwnPlayCalls() {
+        let s = viewerCode()
+        guard let start = s.range(of: "private final class AudioPlayerController"),
+              let end = s.range(of: "final class RemoteAudioPlayerController") else {
+            return XCTFail("region not found")
+        }
+        let region = String(s[start.lowerBound..<end.lowerBound])
+        XCTAssertTrue(region.contains("player?.play()"),
+                      "AVAudioPlayer.play() is correct here — its rate survives pause/resume")
+    }
+
+    /// P5-M fix: the control is its own view, so the high-frequency playback time
+    /// state cannot invalidate it while its menu is open.
+    func testSpeedControlIsAStandaloneViewIsolatedFromTimeState() {
+        let s = viewerCode()
+        guard let start = s.range(of: "private struct PlaybackSpeedMenu: View"),
+              let end = s.range(of: "private struct MediaPage: View") else {
+            return XCTFail("PlaybackSpeedMenu not found")
+        }
+        let region = String(s[start.lowerBound..<end.lowerBound])
+        for forbidden in ["currentTime", "audioCurrentTime", "isPlaying", "duration"] {
+            XCTAssertFalse(region.contains(forbidden),
+                           "the speed control must not depend on \(forbidden) — that is what rebuilt it 10-30×/s during playback")
+        }
+        XCTAssertTrue(region.contains("Button {"),
+                      "menu items must be Buttons: a Button's action fires on tap, a Picker selection must survive a rebuild")
+        XCTAssertTrue(region.contains("checkmark"), "the selected rate keeps the checkmark treatment")
     }
 
     /// Apple: `enableRate` must be set BEFORE `prepareToPlay()`, or it silently
@@ -134,10 +186,10 @@ final class PlaybackRateTests: XCTestCase {
     /// The control is in both transport rows and is fully labelled.
     func testSpeedControlIsPresentAndAccessible() {
         let s = viewerCode()
-        XCTAssertEqual(s.components(separatedBy: "playbackSpeedMenu(").count - 1, 4,
-                       "two definitions and two placements expected")
+        XCTAssertEqual(s.components(separatedBy: "PlaybackSpeedMenu(rate:").count - 1, 2,
+                       "the control must be placed in BOTH transport rows")
         XCTAssertTrue(s.contains(".accessibilityLabel(PlaybackRate.accessibilityLabel)"))
-        XCTAssertTrue(s.contains(".accessibilityValue(playbackRate.accessibilityValue)"))
+        XCTAssertTrue(s.contains(".accessibilityValue(rate.accessibilityValue)"))
         XCTAssertTrue(s.contains(".accessibilityHint(PlaybackRate.accessibilityHint)"))
     }
 
