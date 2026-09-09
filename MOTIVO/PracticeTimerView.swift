@@ -234,6 +234,28 @@ struct PracticeTimerView: View {
 
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.scenePhase) private var scenePhase
+
+    // C-56 — THE APP-SET-UP GATE IS DERIVED, NOT FETCHED AT BODY TIME.
+    //
+    // These two results are maintained by SwiftUI and refreshed by Core Data
+    // change notifications, so reading them costs no I/O. Three declarations
+    // evaluated during `body` used to issue a fetch each time it ran —
+    // `requiresAppSetUpNow()`, `appSetUpCompletenessKey` (via the
+    // `.task(id:)` key expression, which has no presentation guard) and
+    // `homeTopBar`'s initials fallback: three `Profile` fetches and two
+    // unbounded `Instrument` fetches per evaluation.
+    //
+    // **The gate stays DERIVED.** It is deliberately not mirrored into
+    // `@State`, because state that something has to remember to invalidate is
+    // the class of defect C-55 turned out to be.
+    //
+    // `sortDescriptors: []` on `profiles` preserves the previous unsorted
+    // `fetchLimit 1` semantics rather than silently imposing an order.
+    @FetchRequest(sortDescriptors: [])
+    private var profiles: FetchedResults<Profile>
+
+    @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
+    private var allInstruments: FetchedResults<Instrument>
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject var appRoute: AppRouteStore
@@ -1216,15 +1238,12 @@ private func loadPracticeDefaultsIfNeeded() {
             return "existingConnectedAccount"
         }
 
-        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
-        req.fetchLimit = 1
-
-        guard let profile = try? viewContext.fetch(req).first else {
+        guard let profile = profiles.first else {
             return "missingProfile"
         }
 
         let hasName = !(profile.name?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ?? true)
-        let hasInstrument = fetchInstruments().contains(where: { $0.profile == profile })
+        let hasInstrument = allInstruments.contains(where: { $0.profile == profile })
 
         if !hasName { return "missingName" }
         if !hasInstrument { return "missingInstrument" }
@@ -1238,17 +1257,14 @@ private func loadPracticeDefaultsIfNeeded() {
             return false
         }
 
-        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
-        req.fetchLimit = 1
-
-        guard let profile = try? viewContext.fetch(req).first else {
+        guard let profile = profiles.first else {
             return true
         }
 
         let hasName = !(profile.name?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ?? true)
         if !hasName { return true }
 
-        let hasInstrument = fetchInstruments().contains(where: { $0.profile == profile })
+        let hasInstrument = allInstruments.contains(where: { $0.profile == profile })
         return !hasInstrument
     }
 
@@ -1355,9 +1371,7 @@ private func loadPracticeDefaultsIfNeeded() {
                             .padding(8)
                     } else {
                         let initials: String = {
-                            let req: NSFetchRequest<Profile> = Profile.fetchRequest()
-                            req.fetchLimit = 1
-                            if let profile = try? viewContext.fetch(req).first,
+                            if let profile = profiles.first,
                                let name = profile.name?.trimmingCharacters(in: .whitespacesAndNewlines),
                                !name.isEmpty {
                                 let words = name
