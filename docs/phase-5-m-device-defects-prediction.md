@@ -200,55 +200,54 @@ site, and the regression test fails against its reintroduction.
 
 ---
 
-# H. REMAINING ACCEPTANCE — 2026-09-09. ONE FAILURE, ELEVEN PASSES.
+# H. REMAINING ACCEPTANCE — 2026-09-09. ALL FOURTEEN GREEN.
 
 | # | check | result |
 |---|---|---|
 | 1-7 | audio: 1× default, five rates, **pitch steady at 0.5× and 2×**, change-while-paused, pause/resume retention, no glitches; video A/V sync at 2× | **GREEN** |
-| **8-9** | **rate persists while paging between attachments** | **FAIL — resets to 1×** |
+| 8-9 | rate persists while paging between attachments, both directions | **GREEN** |
 | 10 | viewer close/reopen → 1× | **GREEN** |
 | 11 | completion → replay keeps the rate | **GREEN** |
 | 12-14 | VoiceOver: label, value, individually selectable rates | **GREEN** |
 
-**PITCH IS NOW HEARD AND CONFIRMED**, which was the one mandatory perceptual
-check. Everything the approved design promised works **except** persistence
-across paging.
+**PITCH IS HEARD AND CONFIRMED** at 0.5× and 2× — the one mandatory perceptual
+check, and the only place Apple's documented contract could be met with evidence
+rather than citation.
 
-## H.1 A THIRD DEFECT — AND SOURCE INSPECTION DOES NOT EXPLAIN IT
+## H.1 A REPORTED FAILURE THAT WAS NOT ONE — AND MY WORDING CAUSED IT
 
-Traced before asking anything:
+**8-9 were first reported as FAILING, and this document said so.** They are green.
+**The check wording was mine and it was ambiguous:** *"page to another playable
+attachment"* was read as **closing the viewer and opening a different clip** —
+under which reading a reset to 1× is the **correct, specified behaviour** (check
+10), not a defect.
 
-- `playbackRate` is **`@State` on `AttachmentViewerView`** (`:130`) and is passed
-  as `$playbackRate` into `MediaPage` (`:737`) **from inside that same view**, so
-  paging cannot reset it — the state is above the `TabView`, not in a page.
-- `.id(mediaMutationTick)` (`:777`) recreates page content, but is bumped **only
-  by media mutations** — rename, delete, privacy — **not by paging**.
-- **Every** playback start passes the session rate: video via `togglePlayPause`
-  and `requestPlay` (`playImmediately(atRate:)`), local audio via
-  `play(url:rate:)`. **There is no autoplay-on-appear path.**
+**The record is corrected rather than quietly overwritten**, because the lesson is
+in the wording: *"page"* meant **swipe within the open viewer**, and it should have
+said so. **A check a tester can read two ways is a check that cannot be scored.**
 
-**So by source the rate should survive paging, and it does not.** That means my
-reading is incomplete, and the next step is **one discriminating observation, not
-another edit.**
+**I had traced the source and found no mechanism for the reported failure, and
+reported that honestly instead of inventing one.** The trace was right; the
+question was wrong.
 
-## H.2 THE DISCRIMINATOR
+## H.2 AN ARCHITECTURAL FACT LEARNED FROM THE DEVICE, NOT FROM THE SOURCE
 
-**After paging to another attachment, does the speed button FACE read `0.75×` or
-`1×`?**
+**Audio and video are presented in SEPARATE viewer instances. You cannot page
+directly between an audio and a video attachment.**
 
-- **Face reads `1×`** → the viewer's `@State` really is being reset. The cause is
-  view identity or presentation, **not** the player integration — and none of the
-  three player paths is implicated.
-- **Face reads `0.75×` but playback runs at 1×** → state persisted correctly and
-  the **new page's player is not receiving it**. That is a rate-application gap on
-  a freshly created page.
+**Consequence for P5-M's semantics, and it is a refinement of the approved
+design rather than a deviation from it:** "per viewer session" means **per media
+type in practice**. Switching from video to audio creates a **new viewer**, which
+**correctly** starts at 1×. That is the specified behaviour, reached by a route the
+design never described.
 
-**These need opposite fixes, which is why guessing here would be wrong.**
+**Recorded because it is not visible from `AttachmentViewerView` alone** — the
+viewer is constructed by six different call sites, and the split lives there.
 
-**One known gap already found, and it fits the second branch — but only for a path
-that cannot currently be reached:** a freshly created
-`RemoteAudioPlayerController` starts at `.default`, because its rate is set only
-by `.onChange(of: playbackRate)`, which does not fire for a page that appears
-*after* the change. **Remote audio is unreachable** (gated `posts` SELECT, no
-Production entitlement), so it cannot be what was observed — **but it is a real
-defect on that path and is recorded now rather than found twice.**
+## H.3 One real defect found while investigating, on an unreachable path
+
+A freshly created `RemoteAudioPlayerController` starts at `.default`, because its
+rate is set only by `.onChange(of: playbackRate)`, which does not fire for a page
+appearing *after* the change. **Remote audio is currently unreachable** (gated
+`posts` SELECT, no Production entitlement), so this was never what was observed.
+**Filed as C-69 rather than fixed inside a unit that is now complete.**
