@@ -197,3 +197,58 @@ remains a well-supported hypothesis, not a measurement.**
 
 Failure B carries no such caveat: it was a single, plainly-traced missing call
 site, and the regression test fails against its reintroduction.
+
+---
+
+# H. REMAINING ACCEPTANCE — 2026-09-09. ONE FAILURE, ELEVEN PASSES.
+
+| # | check | result |
+|---|---|---|
+| 1-7 | audio: 1× default, five rates, **pitch steady at 0.5× and 2×**, change-while-paused, pause/resume retention, no glitches; video A/V sync at 2× | **GREEN** |
+| **8-9** | **rate persists while paging between attachments** | **FAIL — resets to 1×** |
+| 10 | viewer close/reopen → 1× | **GREEN** |
+| 11 | completion → replay keeps the rate | **GREEN** |
+| 12-14 | VoiceOver: label, value, individually selectable rates | **GREEN** |
+
+**PITCH IS NOW HEARD AND CONFIRMED**, which was the one mandatory perceptual
+check. Everything the approved design promised works **except** persistence
+across paging.
+
+## H.1 A THIRD DEFECT — AND SOURCE INSPECTION DOES NOT EXPLAIN IT
+
+Traced before asking anything:
+
+- `playbackRate` is **`@State` on `AttachmentViewerView`** (`:130`) and is passed
+  as `$playbackRate` into `MediaPage` (`:737`) **from inside that same view**, so
+  paging cannot reset it — the state is above the `TabView`, not in a page.
+- `.id(mediaMutationTick)` (`:777`) recreates page content, but is bumped **only
+  by media mutations** — rename, delete, privacy — **not by paging**.
+- **Every** playback start passes the session rate: video via `togglePlayPause`
+  and `requestPlay` (`playImmediately(atRate:)`), local audio via
+  `play(url:rate:)`. **There is no autoplay-on-appear path.**
+
+**So by source the rate should survive paging, and it does not.** That means my
+reading is incomplete, and the next step is **one discriminating observation, not
+another edit.**
+
+## H.2 THE DISCRIMINATOR
+
+**After paging to another attachment, does the speed button FACE read `0.75×` or
+`1×`?**
+
+- **Face reads `1×`** → the viewer's `@State` really is being reset. The cause is
+  view identity or presentation, **not** the player integration — and none of the
+  three player paths is implicated.
+- **Face reads `0.75×` but playback runs at 1×** → state persisted correctly and
+  the **new page's player is not receiving it**. That is a rate-application gap on
+  a freshly created page.
+
+**These need opposite fixes, which is why guessing here would be wrong.**
+
+**One known gap already found, and it fits the second branch — but only for a path
+that cannot currently be reached:** a freshly created
+`RemoteAudioPlayerController` starts at `.default`, because its rate is set only
+by `.onChange(of: playbackRate)`, which does not fire for a page that appears
+*after* the change. **Remote audio is unreachable** (gated `posts` SELECT, no
+Production entitlement), so it cannot be what was observed — **but it is a real
+defect on that path and is recorded now rather than found twice.**
