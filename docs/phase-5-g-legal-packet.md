@@ -4,8 +4,11 @@
 2026-09-09. This is a checklist and a fact base, not a memo and not legal
 analysis.**
 
-**Four questions, C1–C4.** Each gives the **current behaviour** (measured, not
-described from intent), the **question**, and **exactly what we need confirmed**.
+**Five questions, Q1–Q5, plus one subsidiary yes/no (Q3a).** They are split by
+**mediation, not geography**: **A** — duties falling on Études directly, whatever
+Apple does; **B** — additional duties mediated through Apple's App Store
+framework. Each gives the **current behaviour** (measured, not described from
+intent), the **question**, and **exactly what we need confirmed**.
 
 **Two framing rules, both load-bearing:**
 
@@ -51,8 +54,8 @@ nothing about published content or existing relationships.**
 
 **Under-18 defaults (`band_13_17`):** discovery **OFF**, inbound follow requests
 **OFF**, sharing a session **defaults OFF**. A 13-17 member **may** turn discovery
-on; **inbound follow requests cannot be enabled at all** (see C4/Q2 note). They
-may still follow others themselves.
+on; **inbound follow requests cannot be enabled at all** — the reason is recorded
+at **Q2.3**. They may still follow others themselves.
 
 **A protection that withholds effect rather than destroying data:** a preference
 set as an adult stops taking effect if the band later reads `band_13_17`, and
@@ -182,6 +185,22 @@ satisfies them all.
 
 ---
 
+### Q3a — Subsidiary, narrow, yes/no: consent revocation
+
+**Current behaviour.** Études has **no parental-consent-gated capability** and no
+significant-change flow. Apple states that when a parent or guardian revokes
+consent, **Apple itself prevents the app from launching**. Apple's
+`RESCIND_CONSENT` notification is not handled by Études' notification endpoint.
+
+**Question.** **If Apple withdraws parental/guardian consent and itself prevents
+the app from launching, does Études have any independent obligation to process
+`RESCIND_CONSENT` server-side or to alter Connected or account state?**
+
+**Yes/no, with the required action if yes.** **We do not infer an implementation
+requirement from the notification's existence**, and none is proposed.
+
+---
+
 ### Q4 — Establishment-only sufficiency
 
 **Current behaviour.** The band is established once and **retained**. **No
@@ -212,22 +231,6 @@ deliberately invented no behaviour.** Candidate dispositions: ignore it; withdra
 Connected access while preserving all data; something else.
 
 **This is the one place we ask counsel to help choose rather than confirm.**
-
----
-
-### Q3a — Subsidiary, narrow, yes/no: consent revocation
-
-**Current behaviour.** Études has **no parental-consent-gated capability** and no
-significant-change flow. Apple states that when a parent or guardian revokes
-consent, **Apple itself prevents the app from launching**. Apple's
-`RESCIND_CONSENT` notification is not handled by Études' notification endpoint.
-
-**Question.** **If Apple withdraws parental/guardian consent and itself prevents
-the app from launching, does Études have any independent obligation to process
-`RESCIND_CONSENT` server-side or to alter Connected or account state?**
-
-**Yes/no, with the required action if yes.** **We do not infer an implementation
-requirement from the notification's existence**, and none is proposed.
 
 ---
 
