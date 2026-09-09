@@ -4,6 +4,18 @@
 surface for the DPIA and the legal confirmations, not a design and not an
 implementation plan.
 
+> **FINAL Q1 OUTCOME — 2026-09-09. READ THIS BEFORE ANY SECTION BELOW.**
+> **Q1 IS MINIMAL. CONTINUOUS (periodic re-derivation) WAS EXPLICITLY REJECTED
+> AND ITS IMPLEMENTATION REVERTED** (`cbaeeed`; the work is preserved at
+> `c5440d8`). There is **no automatic refresh, no cadence, no throttle state and
+> no withholding state**. An established band is **retained**, and may be
+> re-derived **only through deliberate member action** (§J).
+>
+> **§D, §E1-E7, §F, §G and §H are HISTORICAL RECORDS of superseded reasoning and
+> are NOT rewritten** — the project's rule. Where they state operative policy they
+> carry their own supersession banner. **§A, §C, §I, §J, §L and §M are the
+> operative sections.**
+
 **READING ORDER: §A** the decisions · **§0-§2** the evidence each rests on ·
 **§B** the Q6 reachability analysis · **§C** what LEGAL still owes · **§D** the
 minimum work before P5-G closes.
@@ -14,8 +26,11 @@ corrected here rather than left to mislead.** Two things changed under explicit
 account-holder authorisation on 2026-09-08: the two `insert-if-absent` comment
 corrections identified in Q1 (**comments-only — no non-comment line moved — Debug
 and Release both build clean**), and the §8 P5-B label reconciliation in
-`docs/phase-5-scope.md`. **§D1 additionally PROPOSES a behavioural change** —
-Q1's periodic re-derivation — **which is not written.**
+`docs/phase-5-scope.md`. **§D1 once proposed a behavioural change — Q1's periodic
+re-derivation. That proposal was implemented, rejected on the §I necessity review,
+and REVERTED (`cbaeeed`), so no behavioural change is proposed by this document
+today.** §J scopes the member-initiated recheck, which is carried work and not
+part of P5-G closure.
 
 **NO PRODUCTION MUTATION HAS BEEN MADE.** Q6/A is authorised and **not executed**.
 
@@ -37,48 +52,38 @@ below is implemented; no production mutation has been made.
 
 | Q | AH decision | still needs LEGAL | still undecided |
 |---|---|---|---|
-| **Q1** reclassification | **A, refined — bidirectional periodic re-derivation, prospective only** | no | refresh cadence/opportunity — **deliberately deferred to implementation** |
+| **Q1** reclassification | **MINIMAL (revised 2026-09-09). Retain the established band; re-derive ONLY on deliberate member action. CONTINUOUS rejected and reverted** | no | — |
 | **Q2** teen inbound requests | **A — teens cannot enable inbound follow requests. Deliberate policy.** | no | — |
 | **Q3** `communicationLimits` | **A — do not consult, consequent on Q2** | no | — |
 | **Q4** declined / unavailable | **A — fail-closed, persist nothing, retryable** | **yes — final wording + jurisdictional adequacy** | — |
-| **Q5** device-bound age source | **A, amended by Q1 — minimisation kept** | **yes — DPIA adequacy** | — |
-| **Q6** legacy directory row | **A authorised (not yet executed). B NOT authorised** | no | whether B is ever justified — **analysis delivered in §B** |
+| **Q5** device-bound age source | **A — minimisation kept. Amendment withdrawn with Q1's revision** | **yes — DPIA adequacy** | — |
+| **Q6** legacy directory row | **A authorised, unexecuted. B REJECTED (§B). RELEASE-GATING** | no | — |
 
-### A1 — Q1 AS DECIDED, with the refinement
+### A1 — Q1 AS DECIDED. **REVISED 2026-09-09: MINIMAL**
 
-Études **periodically re-derives** Apple's declared age range for Connected
-identities and applies a changed band **prospectively**, to the surfaces the band
-actually governs (§1: discovery, inbound follow requests).
+**THE ORIGINAL DECISION AND ITS 30-DAY CADENCE ARE WITHDRAWN.** They were taken
+before the necessity review (§I) and before the age asymmetry was made explicit.
+**Nothing periodic is shipped.**
 
-**Explicitly BIDIRECTIONAL:**
+**What is decided now:**
 
-- **adult → 13-17** activates the effective child-safety overrides;
-- **13-17 → adult** removes those overrides, and the **persisted underlying
-  preferences become effective again**.
+- Apple's declared age range is requested when Connected eligibility is
+  **established**. Under-13 and unavailable can never establish Connected.
+- **An established band is RETAINED.** Études runs **no automatic refresh on any
+  schedule**, stores **no refresh timestamps**, and holds **no withholding
+  state**.
+- It may be re-derived **only when the member deliberately asks** — scoped in
+  **§J**, offered only to a `band_13_17` identity.
+- **13-17 → 18+** updates the band, and the preserved adult-set preferences
+  become effective again automatically as the child override stops matching.
+- **No preference is ever destructively rewritten.**
+- **No DOB, no declaration anniversary, no `ageRangeDeclaration` provenance**, and
+  now **no operational timestamp either** — MINIMAL stores strictly less than the
+  withdrawn design.
 
-**The persisted preferences are NEVER destructively rewritten merely because an
-override applies.** The deployed read-time override already has exactly this
-shape — it withholds effect and destroys no history — so the server semantics
-needed for both directions are in place. `*_set_under_band` is what makes the
-upward direction computable without having stored a second copy of the
-preference.
-
-**CADENCE DECIDED 2026-09-08: 30 DAYS.**
-
-**Its purpose is NOT to approximate Apple's declaration anniversary — which we
-cannot know (§E5) and must not try to model.** It is to **bound the lag between
-Apple beginning to return a changed range and Études observing it**, without
-needless API activity. Thirty days gives a reasonable bound at negligible cost,
-given that Apple anticipates frequent calls (§E1) and a change can surface at most
-once a year anyway (§E2).
-
-**Store only the minimum operational timestamp needed to enforce the throttle,
-scoped to the Études identity. No DOB, no declaration anniversary, no
-`ageRangeDeclaration` provenance.** The timestamp records *when Études last
-asked*, which is neither an age nor provenance.
-
-**The DPIA describes the protection and the 30-day bound — never Apple's internal
-cache policy as if it were ours.**
+**WHY, in one line:** age moves one way, so the only ordinary reclassification is
+13-17 → 18+, whose late observation leaves a member **more** protected, not less
+(§I0). No Apple or legal source requires periodic re-derivation (§I1, §I2).
 
 ### A2 — Q2 AS DECIDED
 
@@ -119,11 +124,12 @@ The DPIA must state plainly that the range comes from **the Apple Account active
 on the device at request time** and is **not independently bound or verified
 against the Études/SIWA identity**.
 
-**AMENDED BY Q1 — this supersedes the wording the register opened with.** Because
-Q1 now requires periodic re-derivation, the band must **NOT** be described as
-permanently "point-in-time" or "not revisited". Describe the **residual assurance
-after periodic refresh** accurately instead: a repeated, still-unverified
-assertion from whichever Apple Account is active at each refresh.
+**THE EARLIER AMENDMENT IS WITHDRAWN — 2026-09-09.** It required the DPIA not to
+call the band "point-in-time", *because Q1 then required periodic re-derivation*.
+**Q1 no longer does.** Under MINIMAL the band is **established once from the Apple
+Account active at that moment, retained thereafter, and re-derived only if the
+member deliberately asks**. **Describing an automatic periodic refresh would
+misdescribe the product to counsel.**
 
 **CARRIED TO LEGAL:** DPIA adequacy of that characterisation.
 
@@ -255,15 +261,15 @@ follows, when an identity reclassifies downward.
 | B — re-derive, and additionally retract discoverability and suspend existing follows on downgrade | Strongest, but suspends relationships a member may have held legitimately for years, on an Apple signal Études cannot audit |
 | C — leave as-is: never re-derive | The status quo. **Must not be adopted by silence.** Defensible only if stated as a decision with a reason |
 
-**DECIDED: A, with the refinement in §A1** — re-derivation is **bidirectional**
-(downgrade activates the overrides; upgrade releases them and lets the persisted
-preferences become effective again), applies **prospectively only**, and
-**never destructively rewrites a preference**. **The cadence is deliberately left
-open to implementation and is NOT "declaration anniversary" by default.**
+**DECIDED — REVISED 2026-09-09 TO MINIMAL. See §A1 and §I.** Option A's periodic
+re-derivation was adopted on 2026-09-08 and **withdrawn on 2026-09-09** after the
+necessity review. **The outcome is closest to option C — the band is retained —
+but it is NOT C, and it is not adoption by silence:** it is a recorded decision,
+with the trapped-teen failure of pure C fixed by **deliberate member action**
+(§J), which costs no server change.
 
-The DPIA cannot describe protections that depend on a re-derivation the client
-never performs — which is precisely why the current short-circuit had to be
-decided against rather than inherited.
+The DPIA must therefore describe **retention plus member-initiated recheck**, and
+**never an automatic periodic refresh**.
 
 **EVIDENCE:** the two call sites above; the deployed `on conflict` clause; §1's
 three-object sweep.
@@ -371,11 +377,12 @@ how much assurance the band carries.
 provenance. **The DPIA must not overstate this** and must not imply the band is
 verified identity.
 
-**THE OPENING WORDING OF THIS QUESTION IS SUPERSEDED.** Because Q1 now requires
-periodic re-derivation, the band must **NOT** be described as permanently
-"point-in-time" or "not revisited". State the **residual assurance after periodic
-refresh**: a repeated, still-unverified assertion from whichever Apple Account is
-active on the device at each refresh. **DPIA adequacy carried to LEGAL.**
+**REVISED 2026-09-09.** The 2026-09-08 amendment — which forbade calling the band
+"point-in-time" because Q1 then required periodic refresh — **is withdrawn with
+Q1's revision**. State the residual assurance as it actually is: a
+**single unverified assertion**, taken from whichever Apple Account was active on
+the device at establishment, **retained** thereafter, and **re-derived only on
+deliberate member action**. **DPIA adequacy carried to LEGAL (C2).**
 
 ---
 
@@ -528,8 +535,10 @@ that the DPIA may state, and that it suffices to state, that:
 - the range comes from the **Apple Account active on the device at request time**;
 - it is **not independently bound or verified** against the Études/SIWA identity;
 - **no DOB and no provenance** (`ageRangeDeclaration`) is stored, deliberately;
-- the band is **periodically re-derived** (Q1), so the assurance is a **repeated
-  unverified assertion**, not a one-time one and not a verified identity.
+- the band is **established once and retained**, and is re-derived **only on
+  deliberate member action** (§J) — **there is no automatic periodic refresh**, so
+  the assurance is a **single unverified assertion**, refreshed only if the member
+  chooses to refresh it, and never a verified identity.
 
 **C3 — the DPIA as a whole**, including lawful basis, must carry §4's teen
 limitation **verbatim**. **A DPIA implying teen protections are device-verified
@@ -540,7 +549,11 @@ the app-store age-assurance laws (Texas SB2420 and successors)? If so, does any
 impose an **ongoing** age-assurance duty beyond establishment? And does
 `RESCIND_CONSENT` handling bind Études? **Apple explicitly refers this to counsel**
 — *"For questions about your compliance obligations, consult your legal counsel."*
-**Q1's periodic re-derivation is provisional pending this.**
+**FRAMED NARROWLY, AND DELIBERATELY SO.** This asks about **applicability and
+obligation**, not implementation. **The existence of a `RESCIND_CONSENT`
+notification type is NOT itself an Études requirement** (§K2), and no Études
+behaviour is proposed on it unless counsel establishes an obligation. **Q1 does
+not depend on this answer** — MINIMAL is adopted regardless.
 
 **NOT required from LEGAL:** Q2, Q3 and Q6 are settled product/privacy policy
 and need no external confirmation.
@@ -551,8 +564,12 @@ and need no external confirmation.
 
 **Ordered. None of it is P5-H, and none of it is started.**
 
-**D1 — Q1 re-derivation (the only real implementation). NOT STARTED, AND NOT TO
-BE STARTED YET.** The supported-mechanism investigation is complete — **§E** — and
+**D1 — WITHDRAWN 2026-09-09. Q1 IS MINIMAL, so there is no periodic
+re-derivation to implement.** What replaces it is §J's member-initiated recheck,
+which has **zero server delta** and is carried, not blocking. The rest of this
+item is historical.
+
+**(historical)** The supported-mechanism investigation is complete — **§E** — and
 the recommended architecture is **§F**. **§F is a recommendation awaiting approval,
 not a plan in flight.** The single behavioural
 change these decisions require. Today `ensureAgeBandEstablished` returns on fetch
@@ -589,9 +606,10 @@ before. **Q6/B is rejected outright (§A6) and is not part of D3.**
 **D4 — the DPIA**, carrying §4 verbatim and §C2's characterisation, then C1 and
 C2 back from LEGAL.
 
-**D5 — record the cadence chosen in D1** back into this register and into
-`docs/phase-5-scope.md`, so the DPIA's description and the shipped behaviour
-cannot drift apart.
+**D5 — WITHDRAWN with D1: there is no cadence to record.** The equivalent
+obligation survives in a different form and is discharged in §M2: the register and
+`docs/phase-5-scope.md` must both say MINIMAL, so the DPIA's description and the
+shipped behaviour cannot drift apart.
 
 **ALREADY DONE, 2026-09-08:** the two `insert-if-absent` comment corrections
 (comments-only; no non-comment line moved; Debug and Release both clean) and the
@@ -751,6 +769,13 @@ anniversary request **can** prompt. **Not a defect; a precision to carry into
 
 ## F. D1 RECOMMENDATION — THE LEAST INTRUSIVE SUPPORTED RE-DERIVATION
 
+> **SUPERSEDED 2026-09-09 — HISTORICAL RECORD ONLY. Q1 IS MINIMAL; this design
+> was rejected and its implementation reverted (`cbaeeed`). Nothing below is
+> operative policy. It is retained because the reasoning — especially the
+> refusal asymmetry and the C-35 traps — is what a future reader must not
+> re-derive from scratch if this question ever reopens.**
+
+
 **A sound mechanism EXISTS. Q1 does NOT need to come back for reconsideration.**
 It is pull-based rather than event-driven, which is a constraint on the design,
 not an obstacle to it.
@@ -859,6 +884,13 @@ refreshing — is what Q1 decided against.**
 ---
 
 ## G. THE MINIMAL D1 STATE MACHINE — PROPOSED 2026-09-08, NOT IMPLEMENTED
+
+> **SUPERSEDED 2026-09-09 — HISTORICAL RECORD ONLY. Q1 IS MINIMAL; this design
+> was rejected and its implementation reverted (`cbaeeed`). Nothing below is
+> operative policy. It is retained because the reasoning — especially the
+> refusal asymmetry and the C-35 traps — is what a future reader must not
+> re-derive from scratch if this question ever reopens.**
+
 
 **Accepted in principle: View-scoped repeated `requestAgeRange`, coarse
 per-identity local throttle, no server schema change, band updates only from
@@ -1018,6 +1050,13 @@ gated on identity.
 ---
 
 ## H. D1 DELTA AND TEST MATRIX — PROPOSED 2026-09-08, NOT IMPLEMENTED
+
+> **SUPERSEDED 2026-09-09 — HISTORICAL RECORD ONLY. Q1 IS MINIMAL; this design
+> was rejected and its implementation reverted (`cbaeeed`). Nothing below is
+> operative policy. It is retained because the reasoning — especially the
+> refusal asymmetry and the C-35 traps — is what a future reader must not
+> re-derive from scratch if this question ever reopens.**
+
 
 **§G6's client-only residual is REJECTED by the account holder and is superseded
 here.** Withholding becomes **server-persisted effective state**. Three required
@@ -1680,17 +1719,20 @@ member-initiated recheck is **scoped** in §J.
 
 ### M2 — Technical housekeeping still required BEFORE closure
 
-1. **Push the seven commits.** They exist only locally.
-2. **Record the MINIMAL outcome in `docs/phase-5-scope.md` §2's P5-G row**, so
-   the phase table does not still imply periodic re-derivation.
-3. **Correct §A5/C2's DPIA wording — a DIRECT CONSEQUENCE OF THE REVERT.** A5
-   currently says the band must **not** be described as "point-in-time / not
-   revisited", *because Q1 required periodic re-derivation*. **Q1 no longer does.**
-   Under MINIMAL the band **is** established once and re-derived **only** if the
-   member deliberately asks. **Sending the superseded wording to LEGAL would
-   misdescribe the product.**
+1. ~~**Record the MINIMAL outcome in `docs/phase-5-scope.md` §2's P5-G row.**~~
+   **DONE 2026-09-09.** The row now states MINIMAL, records that CONTINUOUS was
+   rejected and reverted, and carries the grounds.
+2. ~~**Correct the residual-assurance / DPIA wording wherever it assumed periodic
+   re-derivation.**~~ **DONE 2026-09-09** — §A1, §A5, §C2, Q1 and Q5 in §2, and the
+   header. **This was a direct consequence of the revert:** A5 had *forbidden*
+   calling the band "point-in-time" precisely because Q1 then required periodic
+   refresh, and sending that to counsel would have misdescribed the product.
+   **§D, §F, §G and §H are left as historical records under supersession banners**,
+   per the project's rule that superseded reasoning is marked, not rewritten.
+3. **Push the outstanding commits.** They exist only locally.
 
-**That is the whole list. None of it is implementation.**
+**That is the whole list. None of it is implementation, and items 1 and 2 are
+now done.**
 
 ### M3 — Genuine LEGAL / external confirmations
 
@@ -1701,14 +1743,79 @@ member-initiated recheck is **scoped** in §J.
 | **C3** | The DPIA carries §4's teen limitation **verbatim** |
 | **C4** | Scope and ongoing duty: is Études within the app-store age-assurance laws; does any impose an **ongoing** duty beyond establishment; does `RESCIND_CONSENT` handling bind Études; **and what an Under-13 result on a voluntary recheck should mean** (§J2), which is an identity anomaly rather than ageing |
 
-### M4 — Carried obligations that do NOT block P5-G
+### M4 — Carried obligations that do NOT block P5-G's own closure
 
-- **Q6/A execution** — establish Samuel's band through the ordinary path. Decided, unexecuted, a production mutation.
+**TWO OF THESE ARE RELEASE-GATING, and the distinction is deliberate: they do not
+block P5-G's decisions or its DPIA work, and they DO block release.**
+
+- **Q6/A execution — RELEASE-GATING.** Establish Samuel's band through the
+  ordinary Apple/client path, so the sole legacy directory row without a genuine
+  band is repaired **before release**. Decided, unexecuted, a production mutation.
+  **Non-blocking for the DPIA; blocking for release.**
+- **Production ASSN Server URL + `APPLE_ASSN_ALLOWED_ENVIRONMENTS` —
+  RELEASE-GATING launch configuration (§N).** **This holds even if C4 concludes
+  `RESCIND_CONSENT` requires no additional Études behaviour**, because the risk it
+  addresses is the ordinary subscription stream, not consent.
 - **§J implementation**, folded into **H-1**, with H-1's acceptance re-derived.
-- **Production ASSN Server URL**, gated on §L2's secret decision. Belongs with **C-31**.
 - **P5-H** — must **re-derive** the ASC mapping, not republish it. Not started.
 - **Phase 4 exit**: conditions 2, 6's ASC half, 8, and C-34's avatar verification.
 - **B-34** observability limitation; **G7**, earliest 2026-11-01.
+
+---
+
+## N. RELEASE-GATING LAUNCH CONFIGURATION — App Store Server Notifications
+
+**Classified 2026-09-09. Not P5-G work, and it must not be done opportunistically.**
+
+### N1 — The measured state, authoritative
+
+Measured directly in App Store Connect by the account holder, 2026-09-08:
+
+- **Production Server URL — UNSET.** ASC shows *Set Up URL*.
+- **Sandbox Server URL — configured** to the deployed
+  `appstore_notifications_v1` endpoint.
+
+**Production is deliberately NOT to be configured yet.**
+
+### N2 — The endpoint is safe on shape, and that is not the blocker
+
+`appstore_notifications_v1` handles unknown and non-subscription payloads
+gracefully — the nested-JWS loop guards on shape, `deriveFromNotification`
+returns rather than raises on every missing piece, and unmapped outcomes answer
+200 so Apple does not retry. **Already demonstrated in production** by Apple's
+own `TEST` notification, which carries no transaction and landed as
+`TEST`/`ignored`. Full assessment in **§L**.
+
+### N3 — THE BLOCKER: the environment allowlist
+
+**`APPLE_ASSN_ALLOWED_ENVIRONMENTS` gates the whole production stream, and the
+code default is `"Sandbox"`.** A verified notification outside the allowlist is
+recorded `unsupported` and answered **200** — so enabling the Production URL
+without configuring it would discard **every** production notification while the
+endpoint looked healthy from outside, with **no Apple retry**.
+
+**Corroborated: 112 notifications ingested to date, ALL Sandbox, ZERO
+Production.** The production path has never carried one.
+
+### N4 — The required sequence, and the rule about it
+
+**BEFORE the Production Server URL is enabled:**
+
+1. **Deliberately configure `APPLE_ASSN_ALLOWED_ENVIRONMENTS` to admit
+   Production**, as its own change with a **prediction committed beforehand**.
+2. **Verify that Sandbox behaviour remains correct** — the value is a list, and
+   the whole Phase 3 gate suite plus every future sandbox run depends on Sandbox
+   continuing to be admitted. **Broadening must not silently narrow.**
+3. Only then enable the Production URL, and verify the first production
+   notification is `applied`/`mapped` rather than `unsupported`.
+
+**DO NOT BROADEN THE SECRET OPPORTUNISTICALLY** — not while doing something else,
+not "since we are in there anyway". It is one of the few values that can turn the
+entire production membership pipeline into a silent no-op, and its failure mode
+reports success.
+
+**This is release-gating regardless of C4.** The risk is the ordinary subscription
+stream; `RESCIND_CONSENT` is incidental to it.
 
 ---
 
