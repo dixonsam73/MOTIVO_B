@@ -63,6 +63,17 @@ iPhone-only (`TARGETED_DEVICE_FAMILY = 1`).
 
 ## 4. AN OBSERVATION THAT IS NOT A REGRESSION, RECORDED RATHER THAN GLOSSED
 
+> **CORRECTION 2026-09-09 — THE EXECUTION-COUNT EVIDENCE BELOW IS WITHDRAWN.**
+> Any claim in this document that the full suite ran a *differing number of
+> tests* rests on grepping `Test case '…'` lines from xcodebuild console output.
+> **That method is unsound** — the target mixes XCTest and swift-testing, and
+> parallel runs present results per clone. **Six structured `xcresulttool` runs
+> (3 parallel, 3 serial) each reported 118 of 118 declared tests, all passed,
+> nothing missing.** The observations of tests *not executing* were measurement
+> artefacts. See `docs/phase-5-c64-census.md` and `scripts/test-census.py`.
+> **Statements here about tests that PASSED or FAILED are unaffected.**
+
+
 **`SessionRefreshPolicyTests.testStillValidTokenDoesNotRefresh()` did not execute
 in either controlled full-suite run**, before or after. It executed and passed in
 an earlier full run (87 unique names), and **passes when run in isolation, twice**.

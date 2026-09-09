@@ -52,6 +52,17 @@ written next to the helper so the next person does not rediscover it.
 
 ## 4. FULL-SUITE FLAKINESS — REPORTED, NOT SWEPT
 
+> **CORRECTION 2026-09-09 — THE EXECUTION-COUNT EVIDENCE BELOW IS WITHDRAWN.**
+> Any claim in this document that the full suite ran a *differing number of
+> tests* rests on grepping `Test case '…'` lines from xcodebuild console output.
+> **That method is unsound** — the target mixes XCTest and swift-testing, and
+> parallel runs present results per clone. **Six structured `xcresulttool` runs
+> (3 parallel, 3 serial) each reported 118 of 118 declared tests, all passed,
+> nothing missing.** The observations of tests *not executing* were measurement
+> artefacts. See `docs/phase-5-c64-census.md` and `scripts/test-census.py`.
+> **Statements here about tests that PASSED or FAILED are unaffected.**
+
+
 The **first** full-suite run after this unit showed **115 passed / 1 failed** —
 `SharedOnlyUploadTests.testSharedThenUnsharedRemovesRow()`. **It is not a P5-M
 regression, and that was established rather than assumed:**

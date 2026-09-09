@@ -41,6 +41,17 @@ most likely to be squeezed out**, not a feature.
 
 ## 3. C-64 — MEASURED TODAY, AND THE RESULT CUTS BOTH WAYS
 
+> **CORRECTION 2026-09-09 — THE EXECUTION-COUNT EVIDENCE BELOW IS WITHDRAWN.**
+> Any claim in this document that the full suite ran a *differing number of
+> tests* rests on grepping `Test case '…'` lines from xcodebuild console output.
+> **That method is unsound** — the target mixes XCTest and swift-testing, and
+> parallel runs present results per clone. **Six structured `xcresulttool` runs
+> (3 parallel, 3 serial) each reported 118 of 118 declared tests, all passed,
+> nothing missing.** The observations of tests *not executing* were measurement
+> artefacts. See `docs/phase-5-c64-census.md` and `scripts/test-census.py`.
+> **Statements here about tests that PASSED or FAILED are unaffected.**
+
+
 ### 3.1 The sharpest single fact
 
 **`AgeBandRecoveryGateTests` declares FIVE tests. Two consecutive parallel runs
