@@ -33,8 +33,8 @@ customers**. Production today holds **2 identities, 1 directory row, 6 posts,
 **Minimum age for Connected is 13.** Under-13 is refused, **before any server
 contact and before an account is created**.
 
-**How age is determined.** Apple's **Declared Age Range** framework (iOS 26+),
-called as `requestAgeRange(ageGates: 13, 18)`. Apple returns a **range**, never a
+**How age is determined.** **Études requires iOS 26.4 or later** and uses Apple's
+**Declared Age Range** framework, called as `requestAgeRange(ageGates: 13, 18)`. Apple returns a **range**, never a
 birth date. Études derives exactly **two values**:
 
 | stored | meaning |
@@ -89,11 +89,13 @@ tidied up.** Those signals answer *"do additional regional obligations apply to
 this person?"*, and Études' protections do not depend on the answer because they
 are already applied to everyone.
 
-**The inverse design was considered and rejected as a REGRESSION.** Gating age
-checks on a regulatory signal — *ask whether regulation applies, then apply child
-protections* — would make child protection depend on a signal that other
-developers contemporaneously report returning **false in regulated regions**. It
-would also be strictly less protective than what Études does now.
+**The inverse design was considered and rejected.** Études does **not need** a
+regulatory or jurisdiction signal in order to decide whether to apply its age gate
+or its teen protections, **because those protections are applied unconditionally
+to everyone**. Replacing that with a jurisdiction-gated model — *ask whether
+regulation applies, then apply child protections* — would be **less protective and
+more complex**: it would introduce a decision point where none is needed, and
+every failure of that decision would fail **open**.
 
 **Consequence for this review:** where a regime's requirement is *"apply age
 assurance and child protections"*, Études already does so for everyone. The live
@@ -130,6 +132,19 @@ accessed by children**, and if so what duties apply to SD Songs Ltd — includin
 range meets the required assurance standard, or whether something stronger is
 needed; and whether the absence of moderation/reporting is itself a duty gap.
 
+**A TIMING DISTINCTION WE ARE DELIBERATELY NOT COLLAPSING.** Ofcom's guidance
+appears to distinguish **launch** from the deadlines for statutory assessments,
+including post-launch periods for children's-access and risk assessments. **This
+packet therefore does NOT assert that every OSA assessment is a statutory
+pre-launch condition** — we have not established that, and counsel should say what
+the actual deadlines are.
+
+**Two different things, and the record keeps them apart:** (a) the **statutory
+deadline**, which is counsel's to state; and (b) **our own choice** to disposition
+an issue before launch. **P5-G may elect to treat something as release-gating even
+where the statutory deadline falls after launch** — that is a product decision,
+not a legal conclusion, and it must never be written down as though it were one.
+
 ---
 
 ### Q2 — UK GDPR / Children's Code / DPIA
@@ -146,8 +161,11 @@ needed; and whether the absence of moderation/reporting is itself a duty gap.
 4. **Whether deliberate non-storage of Apple's assurance provenance is
    acceptable.** Note this cuts against data minimisation to reverse: storing it
    would mean holding *more* about minors.
-5. **Whether the refusal wording is adequate**, and whether any jurisdiction
-   requires a variant:
+5. **Whether the refusal wording is adequate for the relevant UK GDPR /
+   Children's Code transparency requirements**, with corrections supplied if not.
+   *(If some Apple-mediated foreign regime independently requires particular
+   wording, that belongs in **Q3** as a concrete additional obligation, not
+   here.)*
    > *"Études Connected is for ages 13 and over."*
    > *"Études needs Apple to share your age range before Connected can be set up.
    > You can change this in Settings, under your Apple Account."*
@@ -180,8 +198,12 @@ App Store age-assurance regimes relevant to a globally distributed Études launc
 additional app-side behaviour **not adequately mediated by Apple's framework**?
 
 **This is deliberately not a request to design or approve a jurisdiction engine.**
-We are asking whether doing more than any single regime requires, uniformly,
-satisfies them all.
+We are asking whether Études' globally uniform age gate and child-protective
+defaults satisfy the **substantive** age-gating and default requirements of the
+Apple-mediated regimes — **subject to any separate PROCEDURAL obligation**, such
+as consent, notification, acknowledgement or record-keeping, which greater
+substantive protection would **not** automatically discharge. **Q3a is one such
+procedural question**; if there are others, name them.
 
 ---
 
@@ -192,12 +214,19 @@ significant-change flow. Apple states that when a parent or guardian revokes
 consent, **Apple itself prevents the app from launching**. Apple's
 `RESCIND_CONSENT` notification is not handled by Études' notification endpoint.
 
-**Question.** **If Apple withdraws parental/guardian consent and itself prevents
-the app from launching, does Études have any independent obligation to process
-`RESCIND_CONSENT` server-side or to alter Connected or account state?**
+**Question.** Apple's guidance is stronger than merely publishing a notification
+type: Apple states that when consent is revoked it **prevents the app from
+launching**, *and* instructs developers to use `RESCIND_CONSENT` **to handle
+consent revocations**.
 
-**Yes/no, with the required action if yes.** **We do not infer an implementation
-requirement from the notification's existence**, and none is proposed.
+**Given that platform enforcement and that instruction, what action — if any —
+must Études take on receipt of the notification, beyond Apple's prevention of
+launch?** And **does that require any change to Connected entitlement, account
+state, or other server-side state?**
+
+**We presume nothing** — not suspension, not deletion, not entitlement removal,
+not any other behaviour. **We are asking counsel to identify the obligation if one
+exists**, and none is proposed or implemented.
 
 ---
 
@@ -273,12 +302,13 @@ so provenance would be partial even if Études did retain it.
 
 **Confirm** the DPIA may proceed carrying this as written.
 
-**Third-party context is deliberately excluded from the DPIA.** Other developers
-are contemporaneously reporting limitations in Apple's new age-assurance Sandbox;
-that material is unverified, some of it has identifiable configuration causes, and
-it lives in the engineering record at `docs/cp3-sandbox-external-evidence.md` as
-context for **why the fixture chase was stopped**. **The DPIA needs the measured
-limitation, not a vendor bug history.**
+**External material is deliberately excluded from this packet and from the
+DPIA.** Unverified third-party observations about Apple's age-assurance Sandbox
+are kept in the engineering record at `docs/cp3-sandbox-external-evidence.md`,
+where their only job is to explain **why the fixture chase was stopped**. **They
+are not offered as evidence here, and nothing in this packet rests on them.**
+**The DPIA needs the measured limitation above — our own evidence — and not a
+vendor bug history.**
 
 ---
 
@@ -288,15 +318,23 @@ limitation, not a vendor bug history.**
 |---|---|---|
 | **Q1** OSA | UK online-safety specialist | **Ask first.** Not Apple-mediated; largest design impact; could change the feature set |
 | **Q2** GDPR / Children's Code / DPIA | UK data-protection specialist | The substantial one. Q1 and Q2 may be the same adviser |
-| **Q3, Q3a, Q4, Q5** | US multi-state app-store age-assurance, plus Brazil if distributing there | **Narrow by construction.** Q3 asks whether uniform protection suffices, not for a survey |
+| **Q3–Q5** (incl. Q3a) | technology / privacy counsel familiar with **Apple's global age-assurance framework** | **Narrow confirmation only.** **No state-by-state or country-by-country survey** unless counsel identifies a concrete **unmediated** requirement |
 
-**Two levers worth knowing before commissioning anything:**
+**THE INTENDED COMMISSIONING MODEL, stated so it is not widened by accident:**
 
-1. **Q3's scope can be reduced by scoping launch distribution territories.** That
-   is a commercial decision, not a legal one.
-2. **Q4 is the only question that can reopen an engineering decision.** The
-   rejected continuous-polling design is preserved at `c5440d8` if it ever needs
-   to return.
+- **A — obligations falling directly on Études:** UK OSA (Q1) plus UK GDPR /
+  Children's Code / DPIA (Q2).
+- **B — Apple-mediated age-assurance obligations:** narrow confirmation of
+  whether the globally uniform Études architecture is **sufficient**, and whether
+  any concrete **additional procedural** behaviour is required (Q3, Q3a, Q4, Q5).
+
+**DO NOT COMMISSION AN INTERNATIONAL AGE-LAW SURVEY** unless counsel identifies a
+specific gap that genuinely requires one. Territory-by-territory analysis is the
+expensive default this packet exists to avoid.
+
+**One thing to know before commissioning:** **Q4 is the only question that can
+reopen an engineering decision.** The rejected continuous-polling design is
+preserved at `c5440d8` if it ever needs to return.
 
 **What we do NOT need counsel for:** whether to build periodic re-derivation
 (decided; reversible only via Q4); the App Store privacy labels (**P5-H**, which
@@ -312,7 +350,9 @@ every "we decided" is a product decision offered for confirmation, not an opinio
 about the law. **No draft privacy policy**: that is P5-H and must follow this
 review.
 
-**And no claim that Apple endorses our flow.** Apple's documentation describes
-what its APIs do; it gives **no compliance guidance**, and we found **no Apple/DTS
-endorsement** of any overall implementation flow. Apple's own materials refer
-compliance questions to counsel — which is why this packet exists.
+**And no claim that Apple endorses our flow.** Apple's published materials
+describe what its APIs do and stop there: Apple's own age-assurance developer
+guidance states that *"developers are responsible for their own age
+restrictions"* and, twice, that developers should *"consult your legal counsel"*
+on compliance obligations. **We therefore make no claim that any Apple guidance
+endorses Études' implementation** — which is precisely why this packet exists.
