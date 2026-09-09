@@ -34,8 +34,9 @@ customers**. Production today holds **2 identities, 1 directory row, 6 posts,
 contact and before an account is created**.
 
 **How age is determined.** **Études requires iOS 26.4 or later** and uses Apple's
-**Declared Age Range** framework, called as `requestAgeRange(ageGates: 13, 18)`. Apple returns a **range**, never a
-birth date. Études derives exactly **two values**:
+**Declared Age Range** framework, called as `requestAgeRange(ageGates: 13, 18)`.
+Apple returns a **range**, never a birth date. Études derives exactly **two
+values**:
 
 | stored | meaning |
 |---|---|
@@ -124,26 +125,41 @@ follows, shared posts and comments between members. Minimum age 13. There is
 **no content moderation, no reporting or flagging surface, and no guardian
 channel**. Solo is account-free and uploads nothing.
 
-**Question.** Is Études Connected an **in-scope user-to-user service likely to be
-accessed by children**, and if so what duties apply to SD Songs Ltd — including
-**what age-assurance standard is required for this feature set**?
+**Our current understanding.** Études Connected is **likely to be an in-scope
+user-to-user service that is intentionally accessible to 13–17-year-olds**.
 
-**Confirm:** in-scope or not; the applicable duties; whether Apple's declared age
-range meets the required assurance standard, or whether something stronger is
-needed; and whether the absence of moderation/reporting is itself a duty gap.
+**Question.** Please **confirm or correct that classification** and identify the
+duties **proportionately applicable to this feature set**, including **whether
+highly effective age assurance is required**.
 
-**A TIMING DISTINCTION WE ARE DELIBERATELY NOT COLLAPSING.** Ofcom's guidance
-appears to distinguish **launch** from the deadlines for statutory assessments,
-including post-launch periods for children's-access and risk assessments. **This
-packet therefore does NOT assert that every OSA assessment is a statutory
-pre-launch condition** — we have not established that, and counsel should say what
-the actual deadlines are.
+**In particular, please confirm:**
 
-**Two different things, and the record keeps them apart:** (a) the **statutory
-deadline**, which is counsel's to state; and (b) **our own choice** to disposition
-an issue before launch. **P5-G may elect to treat something as release-gating even
-where the statutory deadline falls after launch** — that is a product decision,
-not a legal conclusion, and it must never be written down as though it were one.
+- the applicable **protection-of-children** and other material Online Safety Act
+  duties;
+- whether **Apple's Declared Age Range provides an adequate age-assurance
+  mechanism** for Études' particular feature set, or whether something stronger is
+  required;
+- whether the **absence of moderation/reporting is itself a duty gap**;
+- and **any other material duty** arising from the service as described,
+  **including any reporting duty applicable to content the provider detects**.
+
+**TIMING DISTINCTION.** Ofcom's current guidance gives a new in-scope service
+**three months from first becoming available in the UK** to complete its
+**children's access assessment**, and a service to which the protection-of-children
+duties apply **three months after launch** to complete its **children's risk
+assessment**.
+
+**We nevertheless wish to understand and disposition the relevant duties before
+launch.**
+
+**The record therefore distinguishes two different things:**
+
+1. the **statutory deadline**, which counsel should confirm; and
+2. **our own decision** to disposition an issue before launch.
+
+**P5-G may elect to treat something as release-gating even where the statutory
+deadline falls after launch. That is a product decision, not a legal conclusion,
+and must not be recorded as though it were one.**
 
 ---
 
@@ -169,6 +185,7 @@ not a legal conclusion, and it must never be written down as though it were one.
    > *"Études Connected is for ages 13 and over."*
    > *"Études needs Apple to share your age range before Connected can be set up.
    > You can change this in Settings, under your Apple Account."*
+
    **Constraint on any redraft: it must describe Apple SHARING an age range, never
    Études asking for an age.**
 6. **Whether C3 may proceed with the testing limitation stated exactly** — see
@@ -202,27 +219,30 @@ We are asking whether Études' globally uniform age gate and child-protective
 defaults satisfy the **substantive** age-gating and default requirements of the
 Apple-mediated regimes — **subject to any separate PROCEDURAL obligation**, such
 as consent, notification, acknowledgement or record-keeping, which greater
-substantive protection would **not** automatically discharge. **Q3a is one such
-procedural question**; if there are others, name them.
+substantive protection would **not** automatically discharge.
+
+**Q3a is one such procedural question**; if there are others, name them.
 
 ---
 
-### Q3a — Subsidiary, narrow, yes/no: consent revocation
+### Q3a — Subsidiary, narrow: consent revocation
 
 **Current behaviour.** Études has **no parental-consent-gated capability** and no
-significant-change flow. Apple states that when a parent or guardian revokes
-consent, **Apple itself prevents the app from launching**. Apple's
-`RESCIND_CONSENT` notification is not handled by Études' notification endpoint.
+significant-change flow. Apple's `RESCIND_CONSENT` notification is **not handled**
+by Études' notification endpoint.
 
-**Question.** Apple's guidance is stronger than merely publishing a notification
-type: Apple states that when consent is revoked it **prevents the app from
-launching**, *and* instructs developers to use `RESCIND_CONSENT` **to handle
-consent revocations**.
+**Apple's published position presents two relevant pieces together:** Apple states
+that when a parent or guardian revokes consent, **Apple prevents the app from
+launching**, while also **instructing developers to use `RESCIND_CONSENT` to
+handle consent revocations**.
 
-**Given that platform enforcement and that instruction, what action — if any —
-must Études take on receipt of the notification, beyond Apple's prevention of
-launch?** And **does that require any change to Connected entitlement, account
-state, or other server-side state?**
+**Question.** Given Apple's platform enforcement **and** its instruction to
+developers to handle the notification, **what does "handle" legally require Études
+to do, if anything, beyond Apple's prevention of launch?**
+
+**Specifically, does receipt of `RESCIND_CONSENT` require any change to Connected
+entitlement, account state, other server-side state, or any other action by
+Études?**
 
 **We presume nothing** — not suspension, not deletion, not entitlement removal,
 not any other behaviour. **We are asking counsel to identify the obligation if one
