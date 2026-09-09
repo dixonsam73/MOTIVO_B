@@ -150,3 +150,63 @@ unestablished.
 - **The newly recorded video attachment is not treated as causal.** It was present, and that is all that is known.
 - **Mechanism 3 is not asserted.**
 - **No fix is proposed**, and none should be until D3 names the mechanism.
+
+---
+
+# 8. DEVICE RESULTS — 2026-09-09. NOT REPRODUCED.
+
+| check | result |
+|---|---|
+| **D1** baseline, no recording, timer running, idle | **GREEN** — locked after 30 s |
+| **D2** record, save, dismiss, idle — timer not started | **GREEN** — locked after 30 s |
+| **D2** repeated in the same session with the **timer running** | **GREEN** — locked after 30 s |
+| **D3** the discriminator | **NOT REACHED** — no failure to discriminate |
+
+## 8.1 What this does and does not establish
+
+**ESTABLISHED, and it is the half that matters most:** recording holds the screen
+awake (video 90 s, audio 90 s), backgrounding during an active recording restores
+normal Auto-Lock, and **Auto-Lock now returns correctly after recording — three
+times, including in the timer-running state that originally failed.**
+
+**NOT ESTABLISHED:** what caused the original suppression. **A non-reproduction is
+not a refutation.** The first session's observations were specific and internally
+consistent — suppressed inside Études across three screens, normal outside it,
+clearing later with no new build — and that is a real fingerprint, not noise.
+
+## 8.2 THE UNCONTROLLED VARIABLE, NAMED
+
+**The original failure followed a 90-SECOND video take. D2 used roughly ten
+seconds**, because I said duration should not matter for stranding a holder.
+
+**That judgement is unproven.** Both candidate mechanisms could plausibly be
+duration-sensitive: a longer take means a longer writer-finish, more straggler
+sample buffers, and — for the review-player hypothesis — **a clip long enough to
+still be playing across several 30-second observation windows**.
+
+**So the re-test differed from the original in exactly the dimension most likely
+to matter, and that is my error in specifying it, not the tester's.**
+
+## 8.3 RECOMMENDATION — one bounded re-test, then a stopping rule
+
+**ONE further check, and then stop chasing it.**
+
+**D4 — replicate the original conditions exactly.** Fresh launch (force-quit
+first). **Record video for a full 90 seconds**, save, dismiss, then sit on the
+timer screen **with the timer running** and wait 60 s.
+
+- **Locks** → the original observation does not reproduce under its own
+  conditions. **Close C-50.2 as *Unverified — unreproduced*** under the stopping
+  rule below.
+- **Does not lock** → run **D3** immediately: background 5 s, foreground, idle 60 s.
+  That names the mechanism, and only then does any fix get designed.
+
+**THE STOPPING RULE, agreed BEFORE the attempt as this project requires:** if D4
+does not reproduce, **no further hypotheses are manufactured and no speculative
+fix is written.** C-50.2 is recorded as unreproduced, with a **named reopening
+condition**: any future observation of Auto-Lock failing inside Études while
+succeeding outside it.
+
+**This is deliberately C-38's pattern** — a single unreproduced observation, held
+open as *Unverified* rather than either forced to a conclusion or quietly
+forgotten.
