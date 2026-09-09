@@ -535,10 +535,15 @@ that the DPIA may state, and that it suffices to state, that:
 - the range comes from the **Apple Account active on the device at request time**;
 - it is **not independently bound or verified** against the Études/SIWA identity;
 - **no DOB and no provenance** (`ageRangeDeclaration`) is stored, deliberately;
-- the band is **established once and retained**, and is re-derived **only on
-  deliberate member action** (§J) — **there is no automatic periodic refresh**, so
-  the assurance is a **single unverified assertion**, refreshed only if the member
-  chooses to refresh it, and never a verified identity.
+- the band is **established once and retained**, re-derived **only on deliberate
+  member action** (§J) — **there is no automatic periodic refresh**.
+
+**THE PHRASE "a single unverified assertion" IS WITHDRAWN — 2026-09-09.** It was
+inaccurate: it conflated *"Études did not retain the provenance"* with *"there was
+no provenance"*. **Apple's underlying assurance may be self-declared,
+guardian-declared, or confirmed by other means**; Études simply never reads it.
+The agreed wording is in `docs/phase-5-g-legal-packet.md` §C2, and it also records
+that Apple's granular provenance is **itself region-dependent**.
 
 **C3 — the DPIA as a whole**, including lawful basis, must carry §4's teen
 limitation **verbatim**. **A DPIA implying teen protections are device-verified
@@ -1741,7 +1746,7 @@ now done.**
 | **C1** | Final refusal wording and jurisdictional adequacy. Must describe **Apple sharing** an age range, never Études asking |
 | **C2** | DPIA adequacy of the residual-assurance characterisation — **re-worded per M2.3**: Apple Account active at request time, not bound or verified to the Études identity, no DOB or provenance stored, **established once and re-derived only on deliberate member action** |
 | **C3** | The DPIA carries §4's teen limitation **verbatim** |
-| **C4** | Scope and ongoing duty: is Études within the app-store age-assurance laws; does any impose an **ongoing** duty beyond establishment; does `RESCIND_CONSENT` handling bind Études; **and what an Under-13 result on a voluntary recheck should mean** (§J2), which is an identity anomaly rather than ageing |
+| **C4** | **RESTRUCTURED 2026-09-09 into five questions split by MEDIATION, not geography** — see `docs/phase-5-g-legal-packet.md`. **Q1 UK Online Safety Act** (asked first; **not Apple-mediated**, since app stores currently carry no direct OSA duties); **Q2** UK GDPR / Children's Code / DPIA, absorbing C1–C3; **Q3** whether Études' **globally uniform** protection suffices for the Apple-mediated regimes, plus **Q3a**, a narrow yes/no on whether `RESCIND_CONSENT` creates any independent Études obligation given Apple already blocks launch; **Q4** establishment-only sufficiency — **the only question that may reopen CONTINUOUS**; **Q5** the below-13 anomaly, the one place counsel is asked to choose rather than confirm |
 
 ### M4 — Carried obligations that do NOT block P5-G's own closure
 
@@ -1816,6 +1821,142 @@ reports success.
 
 **This is release-gating regardless of C4.** The risk is the ordinary subscription
 stream; `RESCIND_CONSENT` is incidental to it.
+
+---
+
+## O. OPERATIVE ARCHITECTURE — GLOBALLY UNIFORM PROTECTION. 2026-09-09
+
+**This supersedes any reading of §I/§K that suggests Études should consume
+Apple's regulatory signals.**
+
+### O1 — What Études does
+
+> establish Connected → request Apple's age range → **under-13 refused** →
+> **13-17 protections applied — globally, with no regional test anywhere.**
+
+- **Études does not determine jurisdiction.** No geolocation for regulatory
+  purposes, no stored territory, no rules table, no effective dates.
+- **Études consumes NEITHER `isEligibleForAgeFeatures` NOR
+  `requiredRegulatoryFeatures`** — verified absent from the source by sweep.
+- **Age establishment and the 13-17 protections apply unconditionally wherever
+  Études is distributed.**
+- **Therefore jurisdiction detection is unnecessary for the existing protection
+  model.**
+
+### O2 — The rule, stated so it cannot be eroded
+
+**Apple's regulatory signals may become relevant for ADDITIONAL
+jurisdiction-specific obligations. THEY MUST NEVER GATE Études' existing globally
+uniform age assurance or teen protections.**
+
+**DO NOT replace**
+
+> everyone establishing Connected → request age range → under-13 refused → teen
+> protections globally
+
+**WITH**
+
+> ask Apple whether regulation applies → only then apply child protections.
+
+**That is a regression**, on two independent grounds. It is strictly less
+protective. And it would make child safety depend on a signal that other
+developers contemporaneously report returning **false in regulated regions** —
+including a production report after an enforcement date. **Do not add either
+signal merely for completeness.** Any future Apple regulatory mechanism is
+implemented **only** if a concrete applicable obligation requires it.
+
+### O3 — A correction to the record
+
+**No Apple/DTS endorsement of an overall implementation flow was found.** Apple's
+**documentation** does describe `isEligibleForAgeFeatures` as indicating whether
+laws *"may apply … based on the person's location and account settings"* — that
+much is authoritative. But the flows circulating in developer forums are
+**developer interpretation, explicitly not Apple guidance**, in threads whose own
+conclusion is that Apple gives *"no guidance on what the overall flow is meant to
+look like"*, and which report that API broken or hanging. **Do not cite DTS
+guidance for this.**
+
+### O4 — The one measured technical constraint
+
+`requiredRegulatoryFeatures` is **iOS 26.4+**; `isEligibleForAgeFeatures` is
+**26.2**. Études' floor is **26.2**. **A floor assessment is at §P; the floor is
+NOT changed.**
+
+---
+
+## P. DEPLOYMENT-FLOOR ASSESSMENT — iOS 26.2 → 26.4. MEASURED, NOT AUTHORISED
+
+**Measured 2026-09-09. NO CHANGE MADE. Requires the account holder's approval.**
+
+### P1 — Blast radius, measured
+
+| surface | finding |
+|---|---|
+| `IPHONEOS_DEPLOYMENT_TARGET` literals | **4**, all `26.2` — app Debug/Release and `MOTIVOTests` Debug/Release. `MOTIVOUITests` **inherits** |
+| `#available(iOS` in app source | **0** |
+| `@available(iOS` in app source | **0** |
+| Declared Age Range code | `DeclaredAgeRangeService`, `AgeBandRecoveryCoordinator`, `AgeBandRecoveryTrigger` — **no availability branching at all**; the framework import is `#if canImport(DeclaredAgeRange)` |
+| Docs stating 26.2 | `CLAUDE.md` (Environment), `docs/handover-p5g-cp4.md`, `docs/phase-5-a2-baseline-acceptance.md` (**a dated acceptance record — must NOT be rewritten**), `docs/cp3-remaining-acceptance-matrix.md` (states Apple's Sandbox requirement, not our floor) |
+| Test hardware | **Device A iPhone 16e — iOS 26.6.1. Device B iPhone 17 Pro — iOS 26.6.1.** Both already far above 26.4 |
+| Build/test | mechanically identical to P5-A2's 18.5 → 26.2 change |
+
+**THE DECISIVE MEASUREMENT: there is ZERO availability branching in the app
+today.** So raising the floor **removes nothing** and **enables nothing** at
+present. Every benefit is prospective.
+
+### P2 — What 26.4 actually gains, from the installed SDK
+
+| symbol | available |
+|---|---|
+| `AgeRangeService`, `requestAgeRange`, `AgeRange`, `ParentalControls.communicationLimits` | 26.0 |
+| **`isEligibleForAgeFeatures`** | **26.2 — already available** |
+| **`RegulatoryFeature`** | **26.4** |
+| **`requiredRegulatoryFeatures`** | **26.4** |
+| **`showSignificantUpdateAcknowledgment`** (service + SwiftUI action) | **26.4** |
+| `AgeRangeDeclaration.confirmed` | **26.5 — NOT gained at 26.4** |
+
+**Two points that sharpen the choice:**
+
+- **26.4 is the right boundary, and 26.5 is not.** The only thing 26.5 adds here
+  is `.confirmed` — **provenance, which Études has deliberately decided never to
+  read**. So there is no case for going further than 26.4.
+- `ParentalControls.significantAppChangeApprovalRequired` exists at 26.2 but is
+  **deprecated at 26.4**, with Apple directing developers to
+  `requiredRegulatoryFeatures` instead. At a 26.4 floor the non-deprecated path is
+  the only one. **Études uses neither.**
+
+### P3 — Downside
+
+**No user downside: Études is unreleased, so there is no installed base to
+strand.** No test-hardware downside: both devices are on 26.6.1.
+
+**One real cost, and P5-A2 is the precedent:** that floor change **falsified its
+own prediction of "no new warnings"** — 17 warning kinds became 24, all
+deprecations. Raising 26.2 → 26.4 can surface deprecations newly in range, so the
+change **must be scored against a committed prediction with a measured warning
+delta**, not assumed clean.
+
+### P4 — RECOMMENDATION: **YES, 26.4 — but as its own pre-launch baseline unit, not folded into P5-G**
+
+The honest case is **not** "the APIs become available", because we have decided
+not to consume them. It is:
+
+1. **The floor should be set once, deliberately, before release**, and the
+   decision window closes at launch — after that, raising it strands users.
+2. **26.4 is the last meaningful API boundary in this feature area** (P2), so it
+   is the natural resting place.
+3. **If Q4/Q3 ever require a regulatory feature, it would otherwise arrive as
+   `if #available` branching inside child-safety code** — precisely the shape this
+   project avoids, and the reason CP-1's server defaults are one branchless
+   expression.
+4. Mechanically small, and both devices already exceed it.
+
+**Explicitly NOT a reason:** that newer is better, or that the APIs "might be
+useful". **Raising the floor does NOT authorise consuming
+`requiredRegulatoryFeatures`**, and §O2 continues to govern.
+
+**It changes no P5-G legal question.** It removes future technical branching and
+nothing else — which is why it belongs in a launch-baseline unit rather than here.
 
 ---
 
