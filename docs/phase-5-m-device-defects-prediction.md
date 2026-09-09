@@ -164,3 +164,36 @@ here can demonstrate that a `Menu` now commits a tap during playback.** Only the
 three targeted device checks can.
 
 **If they still fail, the next step is instrumentation, not another edit.**
+
+---
+
+# G. TARGETED DEVICE CHECKS — ALL THREE GREEN. 2026-09-09
+
+Device A / Release, build carrying `2983102`.
+
+| # | check | result |
+|---|---|---|
+| 1 | audio playing at 1× → select 0.75× → value changes, audibly slows, does not stop | **GREEN** |
+| 2 | video stopped → select 0.5× → play → clearly half speed, A/V in sync | **GREEN** |
+| 3 | video playing at 1× → select 2× → value changes, clearly accelerates, does not stop | **GREEN** |
+
+**Both defects are fixed on device.** Check 3 exercises both at once: the rate must
+commit *during* playback (A) **and** reach the player (B).
+
+## G.1 WHAT THIS PROVES — AND ONE THING IT DOES NOT
+
+**Proved: the repair works.** Rate selection commits during active playback in
+both media, and video honours the selected rate from the ordinary play control.
+
+**NOT proved: that my causal explanation was correct.** Failure A's fix changed
+**two** things at once — isolating the control into its own view *and* replacing
+the `Picker` with `Button`s. **A green result does not say which of them mattered,
+or whether the high-frequency-rebuild account was right at all.**
+
+**That is an acceptable trade here** — both changes are minimal, both are
+independently defensible, and neither risks the approved UX — but it is recorded
+so that nobody later cites this as confirmation of the mechanism. **The mechanism
+remains a well-supported hypothesis, not a measurement.**
+
+Failure B carries no such caveat: it was a single, plainly-traced missing call
+site, and the regression test fails against its reintroduction.
