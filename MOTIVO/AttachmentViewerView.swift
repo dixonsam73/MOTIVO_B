@@ -124,6 +124,10 @@ struct AttachmentViewerView: View {
     @State private var suppressedFavouriteKeys: Set<String> = []
     @State private var cachedURL: URL? = nil
     @State private var isAnyPlayerActive = false
+    /// P5-M. Playback speed for THIS viewer session only. Deliberately not
+    /// persisted: it dies with the viewer and starts again at 1×, while
+    /// surviving paging between attachments inside the session.
+    @State private var playbackRate: PlaybackRate = .default
     @State private var stopAllPlayersToggle = false
     @State private var isShowingTrimmer: Bool = false
     @State private var trimURL: URL? = nil
@@ -730,6 +734,7 @@ private func currentURL() -> URL? {
                         MediaPage(
                             attachment: media[i],
                             isAnyPlayerActive: $isAnyPlayerActive,
+                            playbackRate: $playbackRate,
                             onRequestStopAll: $stopAllPlayersToggle,
                             immersivePlaybackChromeVisible: $immersivePlaybackChromeVisible,
                             isImmersiveVideoPlaybackActive: $isImmersiveVideoPlaybackActive,
@@ -1587,6 +1592,9 @@ private struct URLImageView: View {
 private struct MediaPage: View {
     let attachment: AttachmentViewerView.MediaAttachment
     @Binding var isAnyPlayerActive: Bool
+    /// P5-M. Viewer-session playback speed, owned by `AttachmentViewerView` so it
+    /// survives paging between attachments and dies with the viewer.
+    @Binding var playbackRate: PlaybackRate
     @Binding var onRequestStopAll: Bool
     @Binding var immersivePlaybackChromeVisible: Bool
     @Binding var isImmersiveVideoPlaybackActive: Bool
@@ -1635,6 +1643,7 @@ private struct MediaPage: View {
                     url: effectiveURL(original),
                     displayTitle: displayTitle,
                     isAnyPlayerActive: $isAnyPlayerActive,
+                    playbackRate: $playbackRate,
                     onRequestStopAll: $onRequestStopAll,
                     immersivePlaybackChromeVisible: $immersivePlaybackChromeVisible,
                     isImmersiveVideoPlaybackActive: $isImmersiveVideoPlaybackActive,
@@ -1649,6 +1658,7 @@ private struct MediaPage: View {
                 AudioPage(
                     url: effectiveURL(original),
                     isAnyPlayerActive: $isAnyPlayerActive,
+                    playbackRate: $playbackRate,
                     onRequestStopAll: $onRequestStopAll,
                     displayTitle: displayTitle,
                     onFailure: { markFailed(original, "Audio failed to load") }
@@ -1712,6 +1722,7 @@ private struct VideoPage: View {
     let url: URL
     let displayTitle: String?
     @Binding var isAnyPlayerActive: Bool
+    @Binding var playbackRate: PlaybackRate
     @Binding var onRequestStopAll: Bool
     @Binding var immersivePlaybackChromeVisible: Bool
     @Binding var isImmersiveVideoPlaybackActive: Bool
@@ -1813,6 +1824,11 @@ private struct VideoPage: View {
                 return
             }
             stop()
+        }
+        .onChange(of: playbackRate) { _, _ in
+            // P5-M. Takes effect at once while playing; while paused it is stored
+            // and applied by the next resume, without starting playback.
+            applyPlaybackRateIfPlaying()
         }
         .onDisappear {
             // Stop playback and reset to start so revisiting begins from the beginning
@@ -1964,6 +1980,8 @@ private struct VideoPage: View {
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
+
+                    playbackSpeedMenu(compact: controlCompact)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -2051,7 +2069,7 @@ private struct VideoPage: View {
     private func requestPlay() {
         onRequestStopAll.toggle()
         ignoreStopBroadcastUntil = Date().addingTimeInterval(0.15)
-        if player == nil { player = AVPlayer(url: url) }
+        if player == nil { player = makeRatePreservingPlayer(url: url) }
         guard let player else { return }
         startObservingPlayerIfNeeded()
         setupTimeObservationIfNeeded()
@@ -2113,12 +2131,69 @@ private struct VideoPage: View {
         }
     }
 
+
+    /// P5-M. The speed control. A compact `Menu` in the existing transport row —
+    /// its face always shows the current rate, and every rate is directly
+    /// selectable, so nothing depends on counting taps or on gesture precision.
+    ///
+    /// The selected rate uses `Picker`'s ordinary checkmark treatment. No
+    /// "Normal" terminology is introduced.
+    @ViewBuilder
+    private func playbackSpeedMenu(compact: Bool = false) -> some View {
+        Menu {
+            Picker(PlaybackRate.accessibilityLabel, selection: $playbackRate) {
+                ForEach(PlaybackRate.allCases) { rate in
+                    Text(rate.displayLabel).tag(rate)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(.thinMaterial)
+                    .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                Text(playbackRate.displayLabel)
+                    .font(.system(size: compact ? 12 : 13, weight: .semibold))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                    .padding(.horizontal, 2)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            .frame(width: compact ? 36 : 40, height: compact ? 36 : 40)
+            .contentShape(Circle())
+        }
+        .accessibilityLabel(PlaybackRate.accessibilityLabel)
+        .accessibilityValue(playbackRate.accessibilityValue)
+        .accessibilityHint(PlaybackRate.accessibilityHint)
+    }
+
+    /// P5-M. Builds the player with the pitch-preserving algorithm set on its
+    /// item. `.spectral` is explicit rather than relying on the iOS 15+ default
+    /// of `.timeDomain`.
+    private func makeRatePreservingPlayer(url: URL) -> AVPlayer {
+        let item = AVPlayerItem(url: url)
+        item.audioTimePitchAlgorithm = .spectral
+        return AVPlayer(playerItem: item)
+    }
+
+    /// P5-M. Applies a rate change made while playing. While paused, nothing is
+    /// done here — `togglePlayPause` resumes at the current rate, so a change
+    /// made while paused takes effect on the next resume without starting
+    /// playback.
+    private func applyPlaybackRateIfPlaying() {
+        guard let player, player.rate != 0 else { return }
+        player.rate = playbackRate.playerRate
+    }
+
     private func togglePlayPause() {
-        if player == nil { player = AVPlayer(url: url) }
+        if player == nil { player = makeRatePreservingPlayer(url: url) }
         startObservingPlayerIfNeeded()
         setupTimeObservationIfNeeded()
         if (player?.rate ?? 0) == 0 {
-            player?.play()
+            // P5-M. NOT `play()`: it sets rate to 1.0 and would silently discard
+            // the chosen speed on every resume.
+            player?.playImmediately(atRate: playbackRate.playerRate)
             isAnyPlayerActive = true
             revealPlaybackChrome(shouldAutoHide: true)
         } else {
@@ -2144,7 +2219,7 @@ private struct VideoPage: View {
     }
 
     private func togglePlayPauseFromBackgroundTap() {
-        if player == nil { player = AVPlayer(url: url) }
+        if player == nil { player = makeRatePreservingPlayer(url: url) }
         startObservingPlayerIfNeeded()
         setupTimeObservationIfNeeded()
         // If currently playing, pause immediately
@@ -2366,14 +2441,28 @@ private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPl
         player.currentTime = clamped
     }
 
-    func play(url: URL) {
+    /// P5-M. The viewer-session rate, applied on start and on every later
+    /// change. `AVAudioPlayer.rate` survives pause/resume, so unlike the
+    /// `AVPlayer` stacks there is nothing to re-apply on resume.
+    var rate: PlaybackRate = .default {
+        didSet { player?.rate = rate.playerRate }
+    }
+
+    func play(url: URL, rate: PlaybackRate) {
+        self.rate = rate
         stop()
         do {
             player = try AVAudioPlayer(contentsOf: url)
             player?.delegate = self
             player?.volume = 1.0
             player?.isMeteringEnabled = true
+            // P5-M. `enableRate` MUST be set before `prepareToPlay()` — Apple's
+            // documentation is explicit about the ordering, and setting it after
+            // silently does nothing. Pitch is unaffected: Apple documents that
+            // "adjusting the audio's playback rate doesn't alter its pitch".
+            player?.enableRate = true
             player?.prepareToPlay()
+            player?.rate = rate.playerRate
             player?.play()
             isPlaying = true
         } catch {
@@ -2486,6 +2575,11 @@ final class RemoteAudioPlayerController: NSObject, ObservableObject {
         }
 
         let item = AVPlayerItem(url: url)
+        // P5-M. Explicit rather than relying on the iOS 15+ default of
+        // `.timeDomain`: Apple documents `.spectral` as "often the best choice …
+        // assuming that it is desirable to maintain a constant pitch", which is
+        // exactly a musician reviewing their own playing.
+        item.audioTimePitchAlgorithm = .spectral
         let p = AVPlayer(playerItem: item)
         player = p
         attachTimeObserver(to: p)
@@ -2505,9 +2599,20 @@ final class RemoteAudioPlayerController: NSObject, ObservableObject {
         currentTime = 0
     }
 
+    /// P5-M. Viewer-session rate. Changing it while playing takes effect at
+    /// once; while paused it is stored and applied on the next resume.
+    var rate: PlaybackRate = .default {
+        didSet {
+            guard let player, isPlaying else { return }
+            player.rate = rate.playerRate
+        }
+    }
+
     func play() {
         guard let player else { return }
-        player.play()
+        // P5-M. NOT `player.play()`: that sets the rate to 1.0 and would silently
+        // discard the chosen speed on every resume.
+        player.playImmediately(atRate: rate.playerRate)
         isPlaying = true
     }
 
@@ -2556,6 +2661,7 @@ final class RemoteAudioPlayerController: NSObject, ObservableObject {
 private struct AudioPage: View {
     let url: URL
     @Binding var isAnyPlayerActive: Bool
+    @Binding var playbackRate: PlaybackRate
     @Binding var onRequestStopAll: Bool
     let displayTitle: String?
     var onFailure: (() -> Void)? = nil
@@ -2703,7 +2809,7 @@ private struct AudioPage: View {
                                     } else {
                                         guard let resolvedURL = resolveAudioURL(url) else { return }
                                         resetWaveformToStart()
-                                        audioController.play(url: resolvedURL)
+                                        audioController.play(url: resolvedURL, rate: playbackRate)
                                     }
 
                                     audioDuration = playbackDuration
@@ -2722,6 +2828,8 @@ private struct AudioPage: View {
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+
+                        playbackSpeedMenu()
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -2746,6 +2854,13 @@ private struct AudioPage: View {
             resetWaveformToStart()
             isAnyPlayerActive = false
         }
+        .onChange(of: playbackRate) { _, newRate in
+            // P5-M. `AVAudioPlayer.rate` survives pause/resume, so the local
+            // controller needs no re-apply; the remote (`AVPlayer`) one applies
+            // immediately only when it is actually playing.
+            audioController.rate = newRate
+            remoteController.rate = newRate
+        }
         .onDisappear {
             stopPlayback()
             audioCurrentTime = 0
@@ -2760,6 +2875,42 @@ private struct AudioPage: View {
                 audioCurrentTime = playbackCurrentTime
             }
         }
+    }
+
+    /// P5-M. The speed control. A compact `Menu` in the existing transport row —
+    /// its face always shows the current rate, and every rate is directly
+    /// selectable, so nothing depends on counting taps or on gesture precision.
+    ///
+    /// The selected rate uses `Picker`'s ordinary checkmark treatment. No
+    /// "Normal" terminology is introduced.
+    @ViewBuilder
+    private func playbackSpeedMenu(compact: Bool = false) -> some View {
+        Menu {
+            Picker(PlaybackRate.accessibilityLabel, selection: $playbackRate) {
+                ForEach(PlaybackRate.allCases) { rate in
+                    Text(rate.displayLabel).tag(rate)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(.thinMaterial)
+                    .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                Text(playbackRate.displayLabel)
+                    .font(.system(size: compact ? 12 : 13, weight: .semibold))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                    .padding(.horizontal, 2)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            .frame(width: compact ? 36 : 40, height: compact ? 36 : 40)
+            .contentShape(Circle())
+        }
+        .accessibilityLabel(PlaybackRate.accessibilityLabel)
+        .accessibilityValue(playbackRate.accessibilityValue)
+        .accessibilityHint(PlaybackRate.accessibilityHint)
     }
 
     @ViewBuilder
