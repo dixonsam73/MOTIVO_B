@@ -187,12 +187,18 @@ struct AudioRecorderView: View {
             cleanupWaveform()
             removeObservers()
             postAudioRecorderRecordingState(false)
+            // C-50. Teardown while recording must not strand the flag.
+            RecordingIdleTimerGuard.release("audio-recorder")
         }
         .onChange(of: scenePhase) { _, newPhase in
             handleScenePhaseChange(newPhase)
         }
         .onChange(of: state) { _, newState in
             postAudioRecorderRecordingState(newState == .recording)
+            // C-50. Alongside the hook that already exists rather than a second
+            // mechanism: this fires on EVERY transition, so success, cancel and
+            // failure all restore the idle timer without needing their own call.
+            RecordingIdleTimerGuard.setHolding(newState == .recording, owner: "audio-recorder")
         }
     }
 

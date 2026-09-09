@@ -224,7 +224,23 @@ public struct VideoRecorderView: View {
                 }
             }
         }
+        .onChange(of: controller.state) { _, newState in
+            // C-50. Hooked in the VIEW, exactly as `AudioRecorderView` already
+            // does — `VideoRecorderController` is not main-actor isolated, so a
+            // `didSet` on `state` could not call a @MainActor guard, and hopping
+            // asynchronously would let two rapid transitions land out of order.
+            //
+            // ONE HOOK FOR 13 ASSIGNMENT SITES: every path that ends a recording
+            // — success, cancel and all three error branches — sets
+            // `state = .idle`, so none needs its own call. `pausedRecording`
+            // deliberately does NOT hold: nothing is being captured, and holding
+            // it would keep the screen awake indefinitely.
+            RecordingIdleTimerGuard.setHolding(newState == .recording, owner: "video-recorder")
+        }
         .onDisappear {
+            // C-50. `controller.onDisappear()` does NOT reset `state`, so
+            // teardown while recording is the one exit `.onChange` cannot see.
+            RecordingIdleTimerGuard.release("video-recorder")
             controller.onDisappear()
             preparingOverlayTask?.cancel()
             preparingOverlayTask = nil
