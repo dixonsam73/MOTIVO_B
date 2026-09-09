@@ -1,164 +1,169 @@
-# PHASE 5 — RE-BASELINE. 2026-09-09
+# PHASE 5 RE-BASELINE FROM HEAD — 2026-09-09
 
-**Premises verified in source or by measurement today. Stale register severity was
-not trusted — C-10 and C-20 already showed why.**
+**Measured at `9cb14d7`.** Premises re-checked in source this pass are marked
+**[RE-VERIFIED]**; rows carried on their filing evidence alone are marked
+**[filed only]** and must not be read as re-confirmed. Nothing here is
+implemented; this is a ranking document.
 
-## 1. AUTHORITATIVE REMAINING PHASE-5 WORK
+**Standing:** P5-G externally pending · P5-H held · Phase 4 explicitly
+exit-incomplete · no production / ASC / enforcement / age-state mutation.
 
-| unit | state |
-|---|---|
-| P5-A, P5-A3, P5-B…P5-F | **complete** |
-| **P5-M — playback speed** | **complete, device-verified 14/14** |
-| P5-G (CP-4) | **externally pending** — counsel |
-| P5-H (CP-5) | **held** behind P5-G |
-| P5-I (C-34 TTL), P5-J, P5-K, P5-L, P5-N | not started |
+---
 
-### 1.1 IS THERE ANY PLANNED PRODUCT WORK LEFT? **NO — AND THAT IS THE HONEST ANSWER**
+## 1. C-71 — THE INVENTORY, AND IT CHANGES THE UNIT
 
-**Playback speed was the only planned product feature in Phase 5, and it is
-done.** Everything remaining is correctness, investigation, performance or
-accessibility. **Nothing feature-shaped is being buried under C-numbers.**
+**The prerequisite is discharged. `SessionIdentityHeader`
+(`SessionDetailView:1985`) carries NOTHING beyond attribution.**
 
-**The inverse risk is real, though: P5-N (accessibility) is planned work**, it now
-carries **two** findings (C-11 and C-67), and it has no advocate. **It is the item
-most likely to be squeezed out**, not a feature.
-
-## 2. VERIFIED EVIDENCE — leading candidates
-
-| finding | verified today | verdict |
+| Element | Site | Interactive? |
 |---|---|---|
-| **C-64** suite integrity | **measured, see §3** | **confirmed, and my instrument is inadequate** |
-| **C-56** Core Data in `body` | `requiresAppSetUpNow()` runs a `Profile` fetch **plus** `fetchInstruments()`; reached from `body` at `:1572` **and** `:1901` — **two call sites per evaluation** | **CONFIRMED at HEAD** |
-| **C-62** title logged in Release | line 294 measured at `#if DEBUG` **depth 0 → SHIPS IN RELEASE**; 12 `NSLog` sites in that file | **CONFIRMED it ships**; exposure still unmeasured |
-| **C-5** duplicate Score adoption | `savedToScoresAt` appears **only** as a model property and coding key — **zero UI reads anywhere** | **CONFIRMED, and sharper than the row** |
-| **C-65** silent partial publish | deliberate skip + `print`, caller cannot distinguish partial from complete | confirmed earlier |
-| **C-66** unfollow no-refresh | asymmetry confirmed; newly reachable since C-43 | confirmed earlier |
-| **C-67** transport a11y | all 12 `accessibilityLabel`s are top-toolbar; both `mediaControlButton` helpers add none | confirmed earlier |
-| **C-68** review-player teardown | `onDisappear` never pauses/releases the player | confirmed earlier |
-| **C-69** remote-audio rate | rate arrives only by change-notification | confirmed earlier |
-| **C-3** foreground hydration | mechanism unchanged; P3; sibling of C-56 | confirmed earlier |
-| **C-20** main-actor isolation | **premise does not reproduce at HEAD** | **already demoted** |
+| avatar image, or initials fallback | `:2043`–`:2064` | **no** |
+| display name | `:2072` | **no** |
+| optional **location** | `:2074`–`:2076` | **no** |
+| `Spacer` | `:2078` | layout |
 
-## 3. C-64 — MEASURED TODAY, AND THE RESULT CUTS BOTH WAYS
+**No `Button`, no `NavigationLink`, no `onTapGesture`, no menu, no follow
+state, no privacy indicator** — the source comment at `:2081` records that the
+privacy icon was deliberately removed. **Location is the only content beyond
+attribution**, and it is the member's own location on the member's own session.
 
-> **CORRECTION 2026-09-09 — THE EXECUTION-COUNT EVIDENCE BELOW IS WITHDRAWN.**
-> Any claim in this document that the full suite ran a *differing number of
-> tests* rests on grepping `Test case '…'` lines from xcodebuild console output.
-> **That method is unsound** — the target mixes XCTest and swift-testing, and
-> parallel runs present results per clone. **Six structured `xcresulttool` runs
-> (3 parallel, 3 serial) each reported 118 of 118 declared tests, all passed,
-> nothing missing.** The observations of tests *not executing* were measurement
-> artefacts. See `docs/phase-5-c64-census.md` and `scripts/test-census.py`.
-> **Statements here about tests that PASSED or FAILED are unaffected.**
+### The decisive routing fact — the Feed does not use this view at all
 
+`SessionIdentityHeader` is instantiated **exactly once**, at
+`SessionDetailView:746`, and `SessionDetailView` is opened only from **local
+Core Data sessions**: `ContentView:1661` and `MeView:466`. **The Connected Feed
+opens `BackendSessionDetailView`** (`ContentView:1681`, `PeopleView:743`,
+`:788`), which has its **own** identity header (`:415`) resolving the directory
+account and avatar key.
 
-### 3.1 The sharpest single fact
+**So the product rule's "Connected Feed → keep the identity row" half is already
+satisfied by a different view, and hiding this row cannot affect Feed
+attribution.** Corroborating: this header's `displayName` returns the literal
+**`"User"`** for a non-current user (`:2023`) — a placeholder that would be
+useless as attribution, and **probably unreachable**, since local `Session`
+rows are the member's own. *Probably*, not certainly: I did not exhaustively
+trace every `Session` creation path, and that trace belongs in the unit.
 
-**`AgeBandRecoveryGateTests` declares FIVE tests. Two consecutive parallel runs
-executed FOUR.** `testRequiresAnIdentityAndAConfiguredBackend` was **absent
-entirely — not passed, not failed, NOT SKIPPED.** It ran in an earlier run of the
-same commit.
+**Consequence: C-71 is smaller and safer than filed** — the two contexts the
+rule says "hide" are the only two contexts this row appears in.
 
-**It is a pure unit suite with no local-stack dependency**, so reachability and
-`XCTSkip` cannot explain it. That is the second test to show this, after
-`SessionRefreshPolicyTests.testStillValidTokenDoesNotRefresh`.
+### One thing the inventory found in passing — FILED, NOT FIXED
 
-### 3.2 A CORRECTION TO MY OWN EARLIER EVIDENCE
+**C-72:** `displayName` (`:2019`) runs a `Profile` fetch reached from `body`
+**twice** per evaluation — directly at `:2072` and again via `initials`
+(`:2034`). **Same class as C-56, different view.** Severity unassigned pending
+measurement, exactly as C-56's was. **If C-71 hides the row, the fetch stops on
+those paths as a side effect** — a reason to sequence C-71 first, never a reason
+to call C-72 fixed.
 
-**I previously cited differing totals (87/86/86, 116/114) as evidence of silent
-variance. Much of that was NOT silent.** Local-stack tests emit explicit
-`Test case '…' skipped` lines when the stack is unreachable, and the arithmetic
-closes: run 1 = 117 names = 115 passed + 2 skipped; run 2 = 117 = 115 + 1 failed +
-1 skipped.
+---
 
-**So C-64's "wildly varying counts" evidence is weaker than I stated, while its
-core — specific pure tests vanishing — is stronger and now reproduced.**
+## 2. Classification
 
-### 3.3 Parallelisation is implicated, and serial behaves differently
+### (1) Confirmed defects
 
-The scheme sets **`parallelizable = "YES"` on both testables**, which is why runs
-report *"Clone 1 of iPhone 17 Pro"*.
-
-| mode | names | failures |
+| Row | Evidence | Note |
 |---|---|---|
-| **parallel** ×3 | 115 / 116 / 117 | 0 / 1 / 1 — both in **local-stack** suites |
-| **serial** ×2 | **103 / 103** | **0 / 0** |
+| **C-6** | **[RE-VERIFIED]** `Persistence.swift:43` — `fatalError` on store load | crash-on-launch shape |
+| **C-16** | **[RE-VERIFIED]** `SessionSyncQueue.swift:396` — `try! fm.url(…)` | one site, not the "directory creation" plural implied |
+| **C-21** | **[RE-VERIFIED] — AND MATERIALLY NARROWED** | see below |
+| **C-62** | **[RE-VERIFIED]** `PublishService:294` `NSLog` with `title=%@`, **no enclosing `#if DEBUG`** — Release-reachable | register said *Unverified*; the write is now confirmed. **What no evidence supports is that any read path surfaces it** |
+| **C-5** | **[filed only]** duplicate Score adoption | not re-checked this pass |
+| **C-27** | **[filed only]** location does not carry to Solo | confirmed by trace at filing |
+| **C-34 (TTL half)** | **[filed only]** | version-signal half shipped in Phase 4 |
 
-**Serial is perfectly stable and has zero failures.** That is consistent with
-concurrent tests contending for one shared local database.
+**C-21 is not what the row says.** It reads *"the shape of a dropped check"*.
+Measured: at `:260`, `:526`, `:577` the binding is unused **because the status is
+re-tested inline as `http.statusCode` on the very next line** — the check is
+present, only the binding is dead. `:859` uses its binding properly. **These
+three are literally compiler warnings today** (*"initialization of immutable
+value 'status' was never used"*, 6 of the 175 Release warnings). **C-21 is dead
+code, not a missing status check**, and its severity should fall accordingly.
 
-### 3.4 BUT MY INSTRUMENT IS NOT TRUSTWORTHY, AND THAT IS THE REAL FINDING
+### (2) Unverified / investigation-only
 
-**Serial reports FEWER tests (103) than parallel (115-117).** I cannot explain
-that from log text, and the likely reason is that **counting `Test case '…'` lines
-does not capture swift-testing cases the same way in both modes** — the suite is a
-mix of XCTest and swift-testing.
+**C-37, C-39, C-40, C-42, C-47** — the standing P5-L set; each needs measurement
+before any fix.
+**C-65** (a publish reports success while silently omitting an attachment),
+**C-66** (`unfollow`'s failure branch does not refresh), **C-68** (video review
+player never released on disappear), **C-69** (a fresh `RemoteAudioPlayerController`
+ignores the session rate), **C-72** (above). All source-identified; **none has an
+observed user consequence**, and C-69's path is currently unreachable.
+**C-65 is the one with real user-facing weight** — silent data loss on a publish
+that reports success.
 
-**So the two numbers are not comparable, and part of the "variance" I have been
-citing all session may be an artefact of my grep rather than a property of the
-suite.**
+### (3) Product / UI decisions, not defects
 
-**THE FIRST TASK OF ANY C-64 UNIT IS THEREFORE MEASUREMENT, NOT A FIX** — a
-structured census via `xcresulttool` on a result bundle, which enumerates every
-test and outcome, instead of grepping console output. **This is the same lesson as
-the U6b telemetry and the comment-defeated assertion: the instrument was wrong
-before the conclusion was.**
+**C-63** — arbitrary `.file` attachments can never upload; choose (a) restrict
+selection or (b) map specific types. **Do not widen the bucket to
+`application/octet-stream`.**
+**C-71** — the presentation rule above; now de-risked by the inventory.
+**H-1** — ProfileView "Connected" section grouping (logged only).
+**H-2** — C-70(a)'s residual: a generic directory-sync failure still renders
+beneath the Account ID field (logged only, not a reopening).
 
-## 4. RECOMMENDATION — **C-64**, and the grounds are today's measurements
+### (4) Release-gating vs ordinary quality work
 
-**Not because it was highlighted.** The grounds are new: a declared test in a pure
-suite silently not executing in two of three runs, reproduced on a second test,
-plus the discovery that my own counting instrument is unsound.
+**Nothing in this backlog gates release.** `docs/phase-5-scope.md` is explicit:
+*"P5-A through P5-H gate release. P5-I through P5-N do not."*
 
-**Criterion 7 is decisive.** Every remaining Phase-5 unit — C-56, C-5, C-62,
-C-67, and P5-I — will be accepted partly on *"full suite green"*. **I can now
-demonstrate that this claim can be silently incomplete.** Fixing the evidence
-system first makes every later acceptance mean what it says; leaving it means each
-subsequent unit inherits the doubt.
+**Release-gating housekeeping, tracked separately and NOT part of this ranking:**
+Q6/A execution; the **Production ASSN Server URL** plus
+`APPLE_ASSN_ALLOWED_ENVIRONMENTS`; P5-G's external legal return; P5-H (held);
+and Phase 4's own exit conditions 2, 6-ASC and 8 plus the C-34 avatar device
+verification. **C-30, C-31, C-32 are RC-owned, not Phase 5.**
 
-**It does not harm users**, and that is exactly why it needs arguing for rather
-than assuming.
+The one soft coupling already recorded: **C-14 should not remain unfixed once a
+privacy policy is published** — relevant to P5-H, not to any unit below.
 
-### 4.1 If you would rather ship user-facing work first
+---
 
-**C-56** is the strongest alternative — confirmed at HEAD, already *measured* (47
-of 50 samples in one function, ~100% CPU on the onboarding screen), release-
-relevant because it is the first screen a new member sees, and bounded.
-**C-5** is next: confirmed, and the duplicate is user-visible.
+## 3. (6) Grouping — YES, four finishing units instead of one C-number at a time
 
-**I would still do C-64 first**, but this is a close call and it is your decision,
-not a technical one.
+The remaining rows fall into four coherent shapes. This regroups what exists; it
+adds no new work.
 
-## 5. PROPOSED SCOPE — C-64, INVESTIGATION-FIRST
+| Unit | Contents | Shape | Why grouped |
+|---|---|---|---|
+| **P5-J′ — correctness & hygiene** | **C-6**, **C-16**, **C-21**, **C-20** (re-verify then most likely close) | small, mechanical, all source-verifiable | one build, one census, one warning delta. C-21 and C-20 may resolve to *no code change* and *close as not-reproducing* |
+| **P5-K′ — reliability defects** | **C-65** first, then **C-66**, **C-69**, **C-68** | behavioural, each needs a pre-fix control | all four are failure-path or teardown defects in code P5-M and C-50 just touched; the fixtures overlap |
+| **P5-P — product & UI decisions** | **C-63**, **C-71** (+ **C-72** as its measured side effect), **H-1**, **H-2** | needs *your* decision before any code | none can start without a product answer; batching the questions costs one round trip instead of four |
+| **P5-L — investigations** | **C-37**, **C-39**, **C-40**, **C-42**, **C-47**, **C-62** | measurement-only, no fix authorised | already a unit in the scope doc; unchanged |
 
-**Phase 1 — measure properly (no fix).**
-Structured census via `xcresulttool get test-results tests` on a result bundle,
-for **N parallel runs and N serial runs**, listing every declared test and its
-outcome. **Establish whether tests genuinely fail to execute, or whether my
-console counting was simply wrong.**
+**C-3** and **C-34 (TTL)** stay on their own — C-3 is a measured performance
+refactor of `PracticeTimerView`'s foreground hydration with a real design
+question, and C-34's TTL half is already P5-I.
 
-**Phase 2 — only if non-execution is confirmed.** Identify the mechanism
-(parallelisation, clone result-merging, shared static/`UserDefaults`/local-DB
-state) and propose the smallest change. **Candidate, not a decision:
-`parallelizable = "NO"` for the suites that share the local stack.**
+---
 
-**Acceptance:** a reproducible census method committed as a script; a stated
-answer to "does the full suite run every declared test, every time"; and, if a fix
-lands, N consecutive runs with an identical complete census.
+## 4. (5) Recommended next unit — **P5-K′, opening with C-65**
 
-**Explicitly NOT in scope:** rewriting tests, changing product code, or
-"fixing" flaky local-stack tests by weakening their assertions.
+**Why C-65 over everything else.** It is the only open row where the product
+**loses member data and reports success**: a `.pdf` whose thumbnail cannot be
+rendered is skipped, no storage object is created, and `uploadPost` still
+returns `.success`, so the post publishes without its media and **the member is
+never told**. Every other open row is dead code, a cosmetic redundancy, an
+unmeasured cost, or a decision waiting on you.
 
-## 6. EXTERNAL REQUIREMENTS
+**Why not the alternatives.** **P5-J′** is cheaper but two of its four rows may
+evaporate on contact (C-20 not reproducing, C-21 being dead bindings), so it is
+tidying, not risk reduction. **P5-P** cannot start without your decisions.
+**C-3** is a genuine refactor with a design question and no user-visible symptom
+beyond a cosmetic thumbnail flash the row itself says should not be fixed
+separately.
 
-**None.** No production, no ASC, no device, no enforcement change. Local stack and
-simulator only.
+**Second choice, and it is close: P5-J′**, precisely *because* it may shrink —
+closing C-20 and C-21 honestly would remove two rows that currently overstate
+the backlog's risk.
 
-## 7. DEMOTIONS AND CLOSURES FROM THIS RE-BASELINE
+**If you would rather unblock the batch, P5-P's four questions are cheap to
+answer and would let product work run alongside.**
 
-- **C-20 — stays demoted.** Premise does not reproduce at HEAD.
-- **C-64 — evidence CORRECTED in both directions** (§3.2): the count-variance
-  claim is weakened; the silent-non-execution claim is strengthened and
-  reproduced.
-- **Nothing else closed.** C-63, C-65, C-66, C-67, C-68, C-69, C-3, C-5, C-56,
-  C-62 all remain open on verified premises.
+---
+
+## 5. What I did NOT do
+
+No implementation. No production, ASC, enforcement, device or age-state
+mutation. **Tier 2's ~49 accessibility candidates are untouched and remain an
+unverified candidate inventory** — not a defect count, not a quality metric, and
+not part of Phase 5 unless you put them there.
