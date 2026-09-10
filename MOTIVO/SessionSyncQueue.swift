@@ -107,7 +107,8 @@ public final class SessionSyncQueue: ObservableObject {
           effort: Int?,
           isPublic: Bool = true,
           notes: String? = nil,
-          areNotesPrivate: Bool = false
+          areNotesPrivate: Bool = false,
+          authorisedOmissions: [UUID]? = nil
       ) {
           self.id = id
           self.sessionID = sessionID
@@ -122,6 +123,7 @@ public final class SessionSyncQueue: ObservableObject {
           self.isPublic = isPublic
           self.notes = notes
           self.areNotesPrivate = areNotesPrivate
+          self.authorisedOmissions = authorisedOmissions
           // DERIVED. See the `op` declaration above.
           self.op = isPublic ? .publish : .unshare
       }
@@ -166,6 +168,12 @@ public final class SessionSyncQueue: ObservableObject {
           // that private content does not belong on Supabase, and is strictly
           // safer than leaving a private row. Decoding it as `.publish` would
           // either upload a private row or stick in the queue for ever.
+          // UNIT 1b. This MUST be decoded explicitly: `authorisedOmissions`
+          // carries a default, so a custom initialiser compiles happily without
+          // touching it — and the member's consent would then be silently lost
+          // on relaunch, re-prompting them or, worse, omitting nothing.
+          authorisedOmissions = try c.decodeIfPresent([UUID].self, forKey: .authorisedOmissions)
+
           let declared = try c.decodeIfPresent(PostOp.self, forKey: .op)
           op = (isPublic == false) ? .unshare : (declared ?? .publish)
       }

@@ -220,7 +220,7 @@ struct AddEditSessionView: View {
 
 
     // CP-3: initialises FALSE so the pre-derivation window is protective.
-    @State private var isPublic: Bool = false
+    @State var isPublic: Bool = false
     @State private var notes: String = ""
     @State private var areNotesPrivate_edit: Bool = false
 
@@ -246,13 +246,20 @@ struct AddEditSessionView: View {
     @State var showCamera = false
     @State var photoPickerItem: PhotosPickerItem?
     @State var showCameraDeniedAlert = false
-    /// One alert presents every import-time attachment notice.
+    /// ONE presenter for every attachment notice AND the Connected share
+    /// consent.
     ///
     /// **UNIT 1 reused it rather than adding a second**: `body` is already at
     /// the type-checker's limit here, and a fourth `.alert` — even extracted
     /// into a `ViewModifier` — produced "unable to type-check this expression in
-    /// reasonable time". Two notices, one presenter.
-    @State var showPublishLimitAlert = false
+    /// reasonable time". Unit 1b generalises it rather than adding another.
+    @State var consentState = ConnectedShareConsentState()
+
+    /// UNIT 1b — the omissions the member authorised for THIS publish. Never
+    /// persisted to the attachment's privacy state; it travels in the payload.
+    @State var authorisedOmissions: [UUID] = []
+
+    static let publishUploadLimitBytesInt = Int(publishUploadLimitBytes)
 
     @State var publishLimitAlertMessage: String = ""
 
@@ -739,13 +746,11 @@ struct AddEditSessionView: View {
                     } else {
                         // Conforms to neither: refuse honestly instead of
                         // creating a `.file` that can never publish.
-                        publishLimitAlertMessage = "That item isn’t a photo or video Études can use."
-                        showPublishLimitAlert = true
+                        consentState.present(notice: "That item isn’t a photo or video Études can use.")
                     }
                 }
             } else {
-                publishLimitAlertMessage = "That item isn’t a photo or video Études can use."
-                showPublishLimitAlert = true
+                consentState.present(notice: "That item isn’t a photo or video Études can use.")
             }
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: MediaFormat.importerContentTypes, allowsMultipleSelection: true, onCompletion: handleFileImport)
@@ -780,10 +785,22 @@ struct AddEditSessionView: View {
                    }
                },
                message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
-        .alert("Publish limit",
-               isPresented: $showPublishLimitAlert,
-               actions: { Button("OK", role: .cancel) {} },
-               message: { Text(publishLimitAlertMessage) })
+        .alert(consentState.title,
+               isPresented: Binding(get: { consentState.isPresented },
+                                    set: { if !$0 { consentState.dismiss() } }),
+               actions: {
+                   if consentState.requiresChoice {
+                       // Cancel returns to the editor: the dialog was raised BY
+                       // pressing Save, so "go back" is the least surprising
+                       // meaning, and it avoids leaving a session saved locally
+                       // with Share ON while nothing was ever queued.
+                       Button("Cancel", role: .cancel) { consentState.dismiss() }
+                       Button("Share Without It") { confirmShareWithoutOmittedAttachments() }
+                   } else {
+                       Button("OK", role: .cancel) { consentState.dismiss() }
+                   }
+               },
+               message: { Text(consentState.message) })
         .fullScreenCover(item: $viewerRequest) { req in
             let imageURLs: [URL] = (req.mode == .visual) ? req.imageURLs : []
             let videoURLs: [URL] = (req.mode == .visual) ? req.videoURLs : []
@@ -1679,7 +1696,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
         HStack {
             Spacer(minLength: 0)
 
-            Button(action: { save() }) {
+            Button(action: { attemptSaveWithConnectedPreflight() }) {
                 Text(isThoughtMode ? "Save Thought" : "Save Session")
                     .font(Theme.Text.body)
                     .foregroundColor(.primary)
@@ -1932,7 +1949,10 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
         !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !stagedAttachments.isEmpty || !scoreAttachmentItems_AESV.isEmpty
     }
 
-    private func save() {
+    /// UNIT 1b: internal rather than private so the Connected share decision,
+    /// which lives in the attachments extension, can call it after the member
+    /// chooses. No other access changed.
+    func save() {
         if isThoughtMode && !canSaveThought { return }
         let shouldGeneratePracticeInsight = (session == nil && isThoughtMode == false)
         let s = session ?? Session(context: viewContext)
@@ -2092,7 +2112,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                     effort: focusValue,
                     isPublic: isPublic,
                     notes: notes,
-                    areNotesPrivate: areNotesPrivate_edit
+                    areNotesPrivate: areNotesPrivate_edit,
+                    // UNIT 1b — durable consent travels with the publish, so a
+                    // retry omits exactly what the member authorised and never
+                    // re-prompts. The private-eye state is untouched.
+                    authorisedOmissions: authorisedOmissions.isEmpty ? nil : authorisedOmissions
                 )
 
                 // P4-U2b. SHARED-ONLY UPLOADS. `shouldPublish` controls EXISTENCE

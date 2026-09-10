@@ -59,4 +59,40 @@ final class QueuePayloadCompatibilityProbe: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(
             SessionSyncQueue.PostPublishPayload.self, from: Data(#"{"isPublic":"yes"}"#.utf8)))
     }
+
+    // MARK: - UNIT 1b — durable consent must SURVIVE the round trip
+
+    /// **THE ASSERTION THAT CATCHES A REAL TRAP.** `authorisedOmissions` carries
+    /// a default, so the hand-written `init(from:)` compiles without touching
+    /// it — and the consent would then be silently lost on relaunch. Removing
+    /// the explicit `decodeIfPresent` makes this fail.
+    func testAuthorisedOmissionsSurvivesEncodeDecode() throws {
+        let omitted = [UUID(), UUID()]
+        let p = SessionSyncQueue.PostPublishPayload(
+            id: UUID(), sessionID: UUID(), sessionTimestamp: Date(), title: "consent",
+            durationSeconds: 60, activityType: nil, activityDetail: nil,
+            instrumentLabel: nil, mood: nil, effort: nil,
+            isPublic: true, notes: nil, areNotesPrivate: false,
+            authorisedOmissions: omitted)
+
+        let round = try JSONDecoder().decode(
+            SessionSyncQueue.PostPublishPayload.self,
+            from: try JSONEncoder().encode(p))
+
+        XCTAssertEqual(round.authorisedOmissions, omitted,
+                       "consent must survive the queue file, or a retry would re-prompt or omit nothing")
+    }
+
+    /// A publish with nothing omitted must not start carrying an empty list.
+    func testNoConsentStaysNil() throws {
+        let p = SessionSyncQueue.PostPublishPayload(
+            id: UUID(), sessionID: UUID(), sessionTimestamp: Date(), title: "plain",
+            durationSeconds: 60, activityType: nil, activityDetail: nil,
+            instrumentLabel: nil, mood: nil, effort: nil,
+            isPublic: true, notes: nil, areNotesPrivate: false)
+        let round = try JSONDecoder().decode(
+            SessionSyncQueue.PostPublishPayload.self,
+            from: try JSONEncoder().encode(p))
+        XCTAssertNil(round.authorisedOmissions)
+    }
 }

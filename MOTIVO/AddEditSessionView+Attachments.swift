@@ -413,16 +413,18 @@ extension AddEditSessionView {
                     // Preflight publish cap warning (do not block local attach).
                     let limit = Self.publishUploadLimitBytes
                     if let size = localFileSizeBytes(url), size > limit {
-                        publishLimitAlertMessage = "This attachment is larger than 50MB and will stay local (it won’t publish)."
-                        showPublishLimitAlert = true
+                        // UNIT 1b: the size decision now happens at SHARE time,
+                        // over the explicitly share-enabled set, where it can
+                        // offer a real choice. Warning at import would fire for
+                        // attachments the member never intends to share.
+                        _ = limit
                     }
 
                     // UNIT 1 — REFUSE HONESTLY. An unsupported file could never
                     // publish, so accepting it silently only defers the failure
                     // to a publish the member believes succeeded (C-63).
                     guard let format = MediaFormat.from(url: url) else {
-                        publishLimitAlertMessage = "That file type isn’t supported in Études."
-                        showPublishLimitAlert = true
+                        consentState.present(notice: "That file type isn’t supported in Études.")
                         continue
                     }
                     let data = try Data(contentsOf: url)
@@ -1529,3 +1531,87 @@ fileprivate struct PDFStagedThumbnailView: View {
 #endif
 
 
+
+
+// MARK: - UNIT 1b — the pre-queue Connected share decision
+
+import AVFoundation
+
+extension AddEditSessionView {
+
+    /// The explicitly share-enabled attachments, as preflight candidates.
+    ///
+    /// **ONLY the share-enabled set.** Attachments are default-private and the
+    /// member turns the private-eye off per attachment, so a private 500 MB
+    /// video is never inspected here — it is not a Connected candidate at all.
+    ///
+    /// Duration comes from `AVAudioPlayer`, which reads it cheaply and
+    /// synchronously, so the Save action does not become asynchronous for a
+    /// decision that is arithmetic.
+    func connectedShareCandidates() -> [ConnectedSharePreflight.Candidate] {
+        var out: [ConnectedSharePreflight.Candidate] = []
+
+        for att in stagedAttachments {
+            let url = surrogateURL(for: att)
+            guard !isPrivate(id: att.id, url: url) else { continue }
+            var seconds: Double?
+            if att.kind == .audio {
+                seconds = (try? AVAudioPlayer(data: att.data))?.duration
+            }
+            out.append(.init(id: att.id,
+                             format: att.sourceFormat,
+                             localBytes: att.data.count,
+                             durationSeconds: seconds))
+        }
+
+        if let existing = session?.attachments as? Set<NSManagedObject> {
+            for a in existing {
+                guard let id = a.value(forKey: "id") as? UUID,
+                      let path = a.value(forKey: "fileURL") as? String,
+                      let url = resolveStoredFileURL(at: path) else { continue }
+                guard !isPrivate(id: id, url: url) else { continue }
+                //  is #if DEBUG only — the Release
+                // build caught that. This helper is already shipping code.
+                let bytes = Int(localFileSizeBytes(url) ?? 0)
+                let format = MediaFormat.from(url: url)
+                var seconds: Double?
+                if format?.kind == .audio {
+                    seconds = (try? AVAudioPlayer(contentsOf: url))?.duration
+                }
+                out.append(.init(id: id, format: format, localBytes: bytes, durationSeconds: seconds))
+            }
+        }
+
+        return out
+    }
+
+    /// Runs the decision, then either saves or asks.
+    ///
+    /// **The dialog must be raised BEFORE `save()`**, because `save()` publishes
+    /// and then dismisses the view — an alert after it could never appear.
+    func attemptSaveWithConnectedPreflight() {
+        // Not sharing? Then there is no Connected decision to make at all.
+        guard isPublic, appModeManager.canShareWithFollowers else {
+            save()
+            return
+        }
+
+        let needing = ConnectedSharePreflight.requiringConsent(
+            connectedShareCandidates(),
+            limitBytes: AddEditSessionView.publishUploadLimitBytesInt)
+
+        guard needing.isEmpty == false else {
+            save()
+            return
+        }
+
+        consentState.present(consentFor: needing.map(\.id))
+    }
+
+    /// "Share Without It": proceed with exactly the authorised set.
+    func confirmShareWithoutOmittedAttachments() {
+        authorisedOmissions = consentState.pendingOmissions
+        consentState.dismiss()
+        save()
+    }
+}
