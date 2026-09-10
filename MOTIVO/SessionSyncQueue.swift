@@ -64,6 +64,21 @@ public final class SessionSyncQueue: ObservableObject {
       public let notes: String?
       public let areNotesPrivate: Bool
 
+      /// UNIT 1 — DURABLE CONSENT. Attachment ids the member explicitly
+      /// authorised omitting from THIS share, after being told before it was
+      /// queued that they could not be included.
+      ///
+      /// **Optional with a `nil` default**, the `op` precedent (P4-U2a-2), so a
+      /// legacy queue file decodes unchanged and an older build ignores the key
+      /// — both directions measured in `QueuePayloadCompatibilityProbe`.
+      ///
+      /// **The attachment's persistent private-eye state is NEVER mutated to
+      /// achieve an exclusion.** That would rewrite the member's stated intent
+      /// and silently un-share it for good. The consent belongs to one publish,
+      /// so it travels with the publish: a retry omits exactly what was
+      /// authorised, and nothing else.
+      public var authorisedOmissions: [UUID]? = nil
+
       /// C-61 / P4-U2c. DERIVED FROM `isPublic`, NEVER SUPPLIED BY A CALLER.
       ///
       /// `op` and `isPublic` are the SAME BIT and always were: `.publish` means

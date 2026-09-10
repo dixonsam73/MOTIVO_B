@@ -341,20 +341,22 @@ extension AddEditSessionView {
         return try? Data(contentsOf: url)
     }
 
-    func stageData(_ data: Data, kind: AttachmentKind, displayName: String? = nil) {
+    func stageData(_ data: Data, kind: AttachmentKind, displayName: String? = nil, sourceFormat: MediaFormat? = nil) {
         let id = UUID()
         // For staged videos (e.g. imported from the photo library), write a temporary
         // surrogate file so that VideoPosterView can resolve a real URL and generate
         // a poster frame while we are still in edit mode. This uses the same
         // extension mapping as the persisted attachments.
         if kind == .video {
-            let ext: String = (kind == .image ? "jpg" : kind == .audio ? "m4a" : kind == .video ? "mov" : "dat")
+            // UNIT 1: prefer the validated source format over the kind default.
+            let ext: String = sourceFormat?.fileExtension
+                ?? (kind == .image ? "jpg" : kind == .audio ? "m4a" : kind == .video ? "mov" : "dat")
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(id.uuidString)
                 .appendingPathExtension(ext)
             try? data.write(to: tempURL, options: .atomic)
         }
-        stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind))
+        stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind, sourceFormat: sourceFormat))
 
         if kind == .file || kind == .pdf {
             let trimmed = (displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -415,22 +417,31 @@ extension AddEditSessionView {
                         showPublishLimitAlert = true
                     }
 
+                    // UNIT 1 — REFUSE HONESTLY. An unsupported file could never
+                    // publish, so accepting it silently only defers the failure
+                    // to a publish the member believes succeeded (C-63).
+                    guard let format = MediaFormat.from(url: url) else {
+                        publishLimitAlertMessage = "That file type isn’t supported in Études."
+                        showPublishLimitAlert = true
+                        continue
+                    }
                     let data = try Data(contentsOf: url)
-                    let kind = kindForURL(url)
                     let displayName = userFacingDisplayName(for: url)
-                    stageData(data, kind: kind, displayName: displayName)
+                    stageData(data, kind: format.kind, displayName: displayName, sourceFormat: format)
                 } catch { print("File import failed for \(url): \(error)") }
             }
         }
     }
 
+    /// UNIT 1: the DELIBERATE set decides. Anything outside it is `.file`, and
+    /// `.file` is now refused at import rather than staged — it could never
+    /// publish, because `application/octet-stream` is not a permitted type.
+    ///
+    /// The old lists recognised GIF/BMP/TIFF/CAF/M4V/AVI, which belonged to no
+    /// Études workflow and no Connected bucket policy. That was accidental
+    /// breadth, not support.
     func kindForURL(_ url: URL) -> AttachmentKind {
-        let ext = url.pathExtension.lowercased()
-        if ["png","jpg","jpeg","heic","heif","gif","bmp","tiff","tif"].contains(ext) { return .image }
-        if ["m4a","aac","mp3","wav","aiff","caf"].contains(ext) { return .audio }
-        if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
-        if ext == "pdf" { return .pdf }
-        return .file
+        MediaFormat.from(url: url)?.kind ?? .file
     }
 
     func userFacingDisplayName(for url: URL) -> String? {
@@ -482,6 +493,11 @@ extension AddEditSessionView {
         for att in stagedAttachments where existingAttachmentIDs.contains(att.id) == false {
             do {
                 let ext: String = {
+                    // UNIT 1 — TRUTHFUL EXTENSION. The validated source format
+                    // wins, so an imported WAV persists as `.wav` and an iPhone
+                    // HEIC as `.heic`. Device-measured before this change: an
+                    // ordinary camera photo was stored `.jpg` with HEIC bytes.
+                    if let f = att.sourceFormat { return f.fileExtension }
                     if let surl = surrogateURL(for: att) {
                         let e = surl.pathExtension.lowercased()
                         if !e.isEmpty { return e }
@@ -696,7 +712,8 @@ extension AddEditSessionView {
         if let existing = existingSurrogateURL_edit(id: att.id, kind: att.kind) {
             return existing
         }
-        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : att.kind == .pdf ? "pdf" : "dat")
+        let ext: String = att.sourceFormat?.fileExtension
+            ?? (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : att.kind == .pdf ? "pdf" : "dat")
         return FileManager.default.temporaryDirectory.appendingPathComponent("\(att.id.uuidString).\(ext)")
     }
 

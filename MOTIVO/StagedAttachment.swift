@@ -17,6 +17,17 @@ struct StagedAttachment: Identifiable {
     let data: Data
     let kind: AttachmentKind
     var selectedPages: [Int]? = nil
+
+    /// UNIT 1 — the VALIDATED source format, when the attachment was imported.
+    ///
+    /// `nil` for Études-generated media, which keep their known formats (the
+    /// recorder writes `.m4a` AAC and `.mov`). Set only for a deliberate
+    /// imported format, so the persisted extension and the declared MIME
+    /// describe the BYTES rather than the kind's default.
+    ///
+    /// **It is a format, never a filename.** No source URL or user-supplied
+    /// name is retained.
+    var sourceFormat: MediaFormat? = nil
 }
 
 enum PDFSelectedPagesStore {

@@ -908,11 +908,16 @@ private static let maxUploadBytes: Int64 = 50 * 1024 * 1024
 /// deliberately NOT papered over here by dequeuing a failure.
 private enum AttachmentPreparationError: LocalizedError {
     case cannotPrepareAttachment(id: UUID, kind: String)
+    /// The arithmetic preflight passed but the REAL derivative did not fit.
+    /// Unexpected by construction; it must never publish a partial post.
+    case derivativeExceedsLimit(id: UUID, bytes: Int, limitBytes: Int)
 
     var errorDescription: String? {
         switch self {
         case .cannotPrepareAttachment(let id, let kind):
             return "Could not prepare \(kind) attachment \(id.uuidString) for upload"
+        case .derivativeExceedsLimit(let id, let bytes, let limit):
+            return "Connected representation of attachment \(id.uuidString) is \(bytes) bytes, over the \(limit) byte limit"
         }
     }
 }
@@ -973,14 +978,36 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         // already means "stays queued, retry on the next foreground".
         var preparedUploads: [(item: LocalAttachmentUpload, prepared: PreparedAttachmentUpload)] = []
         if let sessionID = payload.sessionID {
-            for item in loadIncludedAttachments(for: sessionID) {
-                guard let prepared = prepareAttachmentForRemoteUpload(item) else {
-                    // Discard anything this attempt already wrote to tmp.
-                    for done in preparedUploads {
-                        if let tmp = done.prepared.temporaryFileURL {
-                            try? FileManager.default.removeItem(at: tmp)
-                        }
+            func discardTemporaries() {
+                for done in preparedUploads {
+                    if let tmp = done.prepared.temporaryFileURL {
+                        try? FileManager.default.removeItem(at: tmp)
                     }
+                }
+            }
+
+            for item in loadIncludedAttachments(for: sessionID) {
+                // UNIT 1 — durable consent. The member was told before this was
+                // queued and chose "Share Without It", so omitting it here is
+                // AUTHORISED rather than silent. The exclusion travels in the
+                // payload, so a retry omits exactly this and nothing else.
+                if payload.authorisedOmissions?.contains(item.id) == true { continue }
+
+                // UNIT 1 / Policy A — Connected carries a DERIVED audio
+                // representation. The local original is never touched.
+                if let format = MediaFormat.from(fileExtension: item.ext), format.needsConnectedAudioDerivative {
+                    do {
+                        let derived = try await makeConnectedAudioDerivative(for: item)
+                        preparedUploads.append((item, derived))
+                    } catch {
+                        discardTemporaries()
+                        return .failure(error)
+                    }
+                    continue
+                }
+
+                guard let prepared = prepareAttachmentForRemoteUpload(item) else {
+                    discardTemporaries()
                     return .failure(AttachmentPreparationError.cannotPrepareAttachment(id: item.id, kind: item.kind))
                 }
                 preparedUploads.append((item, prepared))
@@ -1300,6 +1327,42 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         return "users/\(safeOwner)/\(postID.uuidString)/\(attachmentID.uuidString)\(safeExt)"
     }
 
+    /// UNIT 1 — builds the Connected M4A/AAC representation of a deliberate
+    /// audio attachment, and VALIDATES ITS ACTUAL SIZE.
+    ///
+    /// **The arithmetic preflight is an optimisation, never permission to skip
+    /// this.** The pre-queue estimate exists so the member does not wait at
+    /// Save; if the real derivative nevertheless exceeds the ceiling it must not
+    /// upload and must not silently disappear, so this throws and the queue
+    /// keeps the item.
+    private func makeConnectedAudioDerivative(for item: LocalAttachmentUpload) async throws -> PreparedAttachmentUpload {
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EtudesConnectedAudio-\(item.id.uuidString)-\(UUID().uuidString)")
+            .appendingPathExtension(MediaFormat.m4a.fileExtension)
+
+        let result = try await ConnectedAudioDerivative.make(from: item.fileURL, to: destination)
+
+        // Operational measurement only: duration, bytes, elapsed. No filename,
+        // no title, no attachment name, no identity. Permanent by design, in the
+        // family of the C-28/C-48 outcome lines rather than temporary
+        // instrumentation.
+        BackendLogger.notice("Connected audio derivative • \(Int(result.seconds))s • \(result.bytes)B • \(result.elapsedMs)ms")
+
+        guard result.bytes <= Self.maxUploadBytes else {
+            try? FileManager.default.removeItem(at: destination)
+            throw AttachmentPreparationError.derivativeExceedsLimit(
+                id: item.id, bytes: result.bytes, limitBytes: Int(Self.maxUploadBytes))
+        }
+
+        return PreparedAttachmentUpload(
+            fileURL: destination,
+            ext: MediaFormat.m4a.fileExtension,
+            contentType: MediaFormat.m4a.mimeType,
+            remoteKind: "audio",
+            temporaryFileURL: destination
+        )
+    }
+
     private func prepareAttachmentForRemoteUpload(_ item: LocalAttachmentUpload) -> PreparedAttachmentUpload? {
         if isPDFAttachmentKind(item.kind) {
             return preparePDFThumbnailForRemoteUpload(item)
@@ -1511,23 +1574,23 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
         }
     }
 
+    /// UNIT 1 / C-74 — the MIME now describes the BYTES.
+    ///
+    /// It used to fall back WITHIN each kind, so `heif` (which had no branch at
+    /// all), `gif`, `bmp` and `tiff` all declared `image/jpeg`, and every
+    /// non-`m4a` audio declared `audio/m4a`. Those uploads SUCCEEDED while
+    /// lying, because the declared types are bucket-allowed. The extension
+    /// reaching this function is now the validated source format, so the answer
+    /// comes from `MediaFormat` rather than from a per-kind default.
     private func contentType(for kind: String, ext: String) -> String {
-        let e = ext.lowercased()
+        if let format = MediaFormat.from(fileExtension: ext) { return format.mimeType }
+        // Unknown extension: fall back to the kind's conventional type rather
+        // than octet-stream, which the bucket refuses outright.
         switch kind.lowercased() {
-        case "image":
-            if e == "png" { return "image/png" }
-            if e == "heic" { return "image/heic" }
-            return "image/jpeg"
-        case "video":
-            if e == "mov" { return "video/quicktime" }
-            return "video/mp4"
-        case "audio":
-            if e == "mp3" { return "audio/mpeg" }
-            if e == "wav" { return "audio/wav" }
-            if e == "aac" { return "audio/aac" }
-            return "audio/m4a"
-        default:
-            return "application/octet-stream"
+        case "image": return MediaFormat.jpeg.mimeType
+        case "video": return MediaFormat.mov.mimeType
+        case "audio": return MediaFormat.m4a.mimeType
+        default: return "application/octet-stream"
         }
     }
 

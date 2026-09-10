@@ -246,7 +246,14 @@ struct AddEditSessionView: View {
     @State var showCamera = false
     @State var photoPickerItem: PhotosPickerItem?
     @State var showCameraDeniedAlert = false
+    /// One alert presents every import-time attachment notice.
+    ///
+    /// **UNIT 1 reused it rather than adding a second**: `body` is already at
+    /// the type-checker's limit here, and a fourth `.alert` — even extracted
+    /// into a `ViewModifier` — produced "unable to type-check this expression in
+    /// reasonable time". Two notices, one presenter.
     @State var showPublishLimitAlert = false
+
     @State var publishLimitAlertMessage: String = ""
 
 
@@ -719,19 +726,29 @@ struct AddEditSessionView: View {
             guard let item = photoPickerItem else { return }
             if let contentType = item.supportedContentTypes.first {
                 if let data = try? await item.loadTransferable(type: Data.self) {
+                    // UNIT 1 — the validated format comes from the item's own
+                    // UTType, so an iPhone HEIC is stored as `.heic` rather than
+                    // renamed `.jpg`. Device-measured before this change: an
+                    // ordinary camera photo was stored `.jpg`.
+                    let format = contentType.preferredFilenameExtension
+                        .flatMap { MediaFormat.from(fileExtension: $0) }
                     if contentType.conforms(to: .image) {
-                        stageData(data, kind: .image)
+                        stageData(data, kind: .image, sourceFormat: format)
                     } else if contentType.conforms(to: .movie) {
-                        stageData(data, kind: .video)
+                        stageData(data, kind: .video, sourceFormat: format)
                     } else {
-                        stageData(data, kind: .file)
+                        // Conforms to neither: refuse honestly instead of
+                        // creating a `.file` that can never publish.
+                        publishLimitAlertMessage = "That item isn’t a photo or video Études can use."
+                        showPublishLimitAlert = true
                     }
                 }
-            } else if let data = try? await item.loadTransferable(type: Data.self) {
-                stageData(data, kind: .file)
+            } else {
+                publishLimitAlertMessage = "That item isn’t a photo or video Études can use."
+                showPublishLimitAlert = true
             }
         }
-        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: MediaFormat.importerContentTypes, allowsMultipleSelection: true, onCompletion: handleFileImport)
         .sheet(isPresented: $showScoreAttachLibrary) {
             ScoresLibraryView(
                 mode: .attach,
