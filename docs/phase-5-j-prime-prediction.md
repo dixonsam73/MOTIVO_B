@@ -95,6 +95,10 @@ type changed String→Int64 and requires production's configuration to **REFUSE*
 it — so a harness that cannot fail cannot pass. **C-6 is closed only if all
 three hold.** Count now **214** (J4's 213 + the control).
 
+**SECOND ARITHMETIC CORRECTION, after the full run:** the census reported **215**,
+not 214. J4 counted C-20 as two tests; it has **three** (the guard and both
+premises). 208 + 2 + 2 + 3 = 215. The suite was right; the prediction was not.
+
 **J5 — no device acceptance for any row.** C-20 and C-21 are compile-time
 properties with identical runtime behaviour. C-16's failure branch cannot be
 produced on a device, and its success path is proven by the path test. C-6's

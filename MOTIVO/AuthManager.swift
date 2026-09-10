@@ -721,29 +721,32 @@ final class AuthManager: NSObject, ObservableObject {
         var localDisplayName = ""
         var localInstruments: [String] = []
 
-        viewContext.performAndWait {
-            let profileRequest: NSFetchRequest<Profile> = Profile.fetchRequest()
-            profileRequest.fetchLimit = 1
-            if let profile = try? viewContext.fetch(profileRequest).first {
-                localDisplayName = (profile.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            }
+        // C-20 — read directly, NOT inside `viewContext.performAndWait`. This
+        // method runs on the main actor and `viewContext` is the main-queue
+        // context, so `performAndWait` only ran the block inline here; its
+        // `@Sendable` block made every main-actor reference inside it a Swift 6
+        // isolation error. Behaviour is identical.
+        let profileRequest: NSFetchRequest<Profile> = Profile.fetchRequest()
+        profileRequest.fetchLimit = 1
+        if let profile = try? viewContext.fetch(profileRequest).first {
+            localDisplayName = (profile.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
 
-            let userInstruments = (try? PersistenceController.shared.fetchUserInstruments(includeHidden: true, in: viewContext)) ?? []
-            let visibleLocalInstruments = userInstruments
-                .filter { $0.isVisibleOnProfile }
-                .compactMap { $0.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let userInstruments = (try? PersistenceController.shared.fetchUserInstruments(includeHidden: true, in: viewContext)) ?? []
+        let visibleLocalInstruments = userInstruments
+            .filter { $0.isVisibleOnProfile }
+            .compactMap { $0.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if userInstruments.isEmpty {
+            let instrumentRequest: NSFetchRequest<Instrument> = Instrument.fetchRequest()
+            instrumentRequest.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+            let instruments = (try? viewContext.fetch(instrumentRequest)) ?? []
+            localInstruments = instruments
+                .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-
-            if userInstruments.isEmpty {
-                let instrumentRequest: NSFetchRequest<Instrument> = Instrument.fetchRequest()
-                instrumentRequest.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
-                let instruments = (try? viewContext.fetch(instrumentRequest)) ?? []
-                localInstruments = instruments
-                    .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-            } else {
-                localInstruments = visibleLocalInstruments
-            }
+        } else {
+            localInstruments = visibleLocalInstruments
         }
 
         let displayNameToPublish = localDisplayName.isEmpty

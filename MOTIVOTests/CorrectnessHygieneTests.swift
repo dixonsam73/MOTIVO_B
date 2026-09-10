@@ -37,6 +37,17 @@ final class CorrectnessHygieneTests: XCTestCase {
         XCTAssertTrue(offenders.isEmpty, "try! in app source: \(offenders)")
     }
 
+    /// The non-throwing lookup must name EXACTLY the file the `try!` version
+    /// named, or every queued publish would be orphaned in the old location.
+    @MainActor
+    func testQueueFileURLIsUnchanged() throws {
+        let legacy = try FileManager.default
+            .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("MOTIVO", isDirectory: true)
+            .appendingPathComponent("SessionSyncQueue_v1.json")
+        XCTAssertEqual(SessionSyncQueue.makeFileURL().standardizedFileURL, legacy.standardizedFileURL)
+    }
+
     // MARK: - C-20
 
     /// The body of `publishLocalProfileSnapshotToDirectoryIfPossible`, to the

@@ -414,9 +414,14 @@ private func persist() {
         return try decoder.decode([PostPublishPayload].self, from: data)
     }
 
-    private static func makeFileURL() -> URL {
+    /// C-16 — the non-throwing `URL.applicationSupportDirectory` names the same
+    /// directory the old `try! url(for:…, create: true)` did, so queued
+    /// publishes are found where they were written. A directory that cannot be
+    /// created now surfaces as `persist()`'s logged write error instead of a
+    /// crash at launch. Internal only so its path can be tested.
+    static func makeFileURL() -> URL {
         let fm = FileManager.default
-        let dir = try! fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("MOTIVO", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("SessionSyncQueue_v1.json")
