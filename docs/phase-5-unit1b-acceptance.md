@@ -1,4 +1,16 @@
-# UNIT 1b — CONSENT PRESENTATION. IMPLEMENTATION COMPLETE; DEVICE QA OUTSTANDING.
+# UNIT 1b — CONSENT PRESENTATION. COMPLETE AND DEVICE-ACCEPTED.
+
+> **DEVICE PASS GREEN 2026-09-10, BOTH HALVES.**
+> **Consent UX:** dialog exactly as predicted; **Cancel** kept the member in the
+> editor and saved nothing; **Share Without It** saved and published with the
+> attachment omitted; the omitted attachment's **private-eye state was
+> unchanged**; and the **control** — an ordinary photo — produced **no dialog**,
+> so the dialog is not firing indiscriminately.
+> **Audio derivative:** a 204-second Float32 WAV converts to **6,644,508 B in
+> 1,884 ms** — ~113× realtime, essentially matching the Mac, so **no progress UI
+> is needed and that is now measured rather than assumed**.
+> **The pass also found three defects** — C-77, C-79 and, by inspection, C-76 —
+> all recorded.
 
 > **COMPLETED 2026-09-10.** §4's outstanding call site is now done:
 > `PostRecordDetailsView` runs the same preflight through the same boundary.
