@@ -1,9 +1,16 @@
-# C-78 — IMPLEMENTATION COMPLETE. DEVICE CHECK OUTSTANDING — NOT CLOSED.
+# C-78 — COMPLETE AND DEVICE-CONFIRMED. RESOLVED 2026-09-10.
 
-> **C-78 stays open until the Device B check in
-> `docs/phase-5-c78-prediction.md` §4 confirms that a freshly imported named
-> audio file displays and persists under its expected title.** Nothing below is
-> device evidence.
+> **DEVICE CHECK GREEN 2026-09-10, reported by the account holder.** Device B,
+> Études Dev (Debug), all five steps of `docs/phase-5-c78-prediction.md` §4:
+> the imported title shows before Save, in session detail after Save, as the
+> persisted filename, and after reopening, through **both** import paths; and a
+> rename made before Save wins. **Not observed:** the duplicate-name case (P5),
+> which was not one of the five checks.
+>
+> *Previous banner, preserved:* "C-78 stays open until the Device B check …
+> confirms that a freshly imported named audio file displays and persists under
+> its expected title." §1–§4 below were written before the device check and
+> remain accurate as of that point.
 
 Prediction: `docs/phase-5-c78-prediction.md`, committed at `def1f3b` **before
 mutation**, together with the guard test. **C-80** (imported video) was filed
