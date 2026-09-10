@@ -1,5 +1,12 @@
 # C-65 — ACCEPTANCE. PREPARATION IS NOW ATOMIC WITH RESPECT TO PUBLICATION.
 
+
+> **SCOPE CLARIFIED 2026-09-10.** Everywhere this file says "an attachment the member selected", read
+> **an attachment the member explicitly marked share-enabled**. Attachments are default-private with a
+> per-attachment private-eye control, and `loadIncludedAttachments` skips every private one — so a private
+> local attachment of any size never enters the publish path and is not "omitted" by it. C-65's invariant
+> was always about the explicitly-shared set; this states it rather than leaving it implied.
+
 **Prediction:** `docs/phase-5-c65-prediction.md`, committed at `1d291eb` before
 any product change. **Investigation:** `docs/phase-5-c65-investigation.md`.
 **Local Supabase stack only — no production mutation.**
