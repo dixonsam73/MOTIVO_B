@@ -83,3 +83,27 @@ to forbid exactly that.
 **Size:** small. **Risk if left:** cosmetic mis-suggestion only — the words are
 truthful. **Owner:** unassigned; a candidate for any future `ProfileView` pass,
 alongside H-1.
+
+
+---
+
+## H-1 — COMPLETE 2026-09-10, with one check carried
+
+Profile is now **Settings · Connected · Account**. The two Connected preferences
+moved out of the middle of Settings into their own section; the move is
+**provably verbatim** (every removed line reappears byte-identical except the
+wrapper `if` that became the section's gate), bindings and the sole discovery
+writer are unchanged, and Solo renders no empty "Connected" header.
+
+**Device pass:** section organisation accepted; **Default to Private Posts**
+verified in place.
+
+**`Let other members find you` was NOT visible, and that is CORRECT under the
+fixture used.** Its gate is `auth.accountPrivacyState != nil`, which requires a
+genuine Connected identity, a live Supabase session and a server-held age band —
+none of which Force Connected creates. The gate is **byte-identical** across
+H-1, so it was equally invisible before. Full analysis:
+`docs/phase-5-h1-discovery-control-classification.md`.
+
+**Carried:** device verification of the discovery control's placement, to the
+future legitimate Production Connected fixture.
