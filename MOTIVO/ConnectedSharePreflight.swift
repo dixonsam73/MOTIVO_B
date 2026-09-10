@@ -21,6 +21,7 @@
 //
 
 import Foundation
+import AVFoundation
 
 enum ConnectedSharePreflight {
 
@@ -81,5 +82,20 @@ enum ConnectedSharePreflight {
 
     static func consentTitle(count: Int) -> String {
         count == 1 ? "Attachment too large to share" : "Attachments too large to share"
+    }
+
+    /// Builds a candidate from a staged attachment.
+    ///
+    /// **Shared by BOTH publish call sites**, so the two views ask the same
+    /// question of the same data rather than growing two consent models.
+    /// Duration comes from `AVAudioPlayer`, which reads it cheaply and
+    /// synchronously — the decision is arithmetic and must not make Save async.
+    static func candidate(forStaged id: UUID,
+                          data: Data,
+                          kind: AttachmentKind,
+                          sourceFormat: MediaFormat?) -> Candidate {
+        var seconds: Double?
+        if kind == .audio { seconds = (try? AVAudioPlayer(data: data))?.duration }
+        return Candidate(id: id, format: sourceFormat, localBytes: data.count, durationSeconds: seconds)
     }
 }

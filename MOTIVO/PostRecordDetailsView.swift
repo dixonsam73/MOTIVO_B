@@ -234,6 +234,14 @@ struct PostRecordDetailsView: View {
     @State var selectedCustomName: String = ""
     // CP-3: initialises FALSE so the pre-derivation window is protective.
     @State private var isPublic: Bool = false
+
+    /// UNIT 1b — the SAME consent boundary the other publish site uses. No
+    /// second model and no second copy: `ConnectedSharePreflight` decides and
+    /// `ConnectedShareConsentState` asks.
+    @State private var consentState = ConnectedShareConsentState()
+    /// Omissions the member authorised for THIS publish. Never persisted to the
+    /// attachment's privacy state.
+    @State private var authorisedOmissions: [UUID] = []
     @State private var mood: Int = 5
     @State private var effort: Int = 5
     @State private var notes: String = ""
@@ -377,6 +385,50 @@ struct PostRecordDetailsView: View {
         privacyMap[key] = value
         // Persist via shared utility (also posts didChange)
         AttachmentPrivacy.setPrivate(id: id, url: url, value)
+    }
+
+    // MARK: - UNIT 1b — the pre-queue Connected share decision
+
+    /// Only the explicitly share-enabled attachments. This flow stages new
+    /// attachments only, so there is no persisted set to consider.
+    private func connectedShareCandidates() -> [ConnectedSharePreflight.Candidate] {
+        stagedAttachments.compactMap { att in
+            guard !isPrivate(id: att.id, url: nil) else { return nil }
+            return ConnectedSharePreflight.candidate(forStaged: att.id,
+                                                     data: att.data,
+                                                     kind: att.kind,
+                                                     sourceFormat: att.sourceFormat)
+        }
+    }
+
+    /// Raised BEFORE the save, because saving dismisses this view.
+    private func attemptSaveWithConnectedPreflight() {
+        guard isPublic, appModeManager.canShareWithFollowers else {
+            commitSaveAndDismiss()
+            return
+        }
+        let needing = ConnectedSharePreflight.requiringConsent(
+            connectedShareCandidates(),
+            limitBytes: AddEditSessionView.publishUploadLimitBytesInt)
+        guard needing.isEmpty == false else {
+            commitSaveAndDismiss()
+            return
+        }
+        consentState.present(consentFor: needing.map(\.id))
+    }
+
+    /// "Share Without It": proceed with exactly the authorised set.
+    private func confirmShareWithoutOmittedAttachments() {
+        authorisedOmissions = consentState.pendingOmissions
+        consentState.dismiss()
+        commitSaveAndDismiss()
+    }
+
+    /// The original Save behaviour, unchanged and now reached from one place.
+    private func commitSaveAndDismiss() {
+        let visibility = isPublic
+        saveToCoreData(visibility: visibility)
+        DispatchQueue.main.async { withAnimation(.none) { isPresented = false } }
     }
 
     // --- PATCH 8G3A: migrate staged privacy → final attachment keys using AttachmentPrivacy (file-backed) ---
@@ -1316,6 +1368,20 @@ var body: some View {
                        Button("Open Settings") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
+            .alert(consentState.title,
+                   isPresented: Binding(get: { consentState.isPresented },
+                                        set: { if !$0 { consentState.dismiss() } }),
+                   actions: {
+                       if consentState.requiresChoice {
+                           // Cancel returns to the editor and saves nothing —
+                           // the same disposition as the other publish site.
+                           Button("Cancel", role: .cancel) { consentState.dismiss() }
+                           Button("Share Without It") { confirmShareWithoutOmittedAttachments() }
+                       } else {
+                           Button("OK", role: .cancel) { consentState.dismiss() }
+                       }
+                   },
+                   message: { Text(consentState.message) })
             .task {
                 if let pre = prefillAttachments, !pre.isEmpty, stagedAttachments.isEmpty {
                     stagedAttachments.append(contentsOf: pre)
@@ -1454,11 +1520,7 @@ var body: some View {
         HStack {
             Spacer(minLength: 0)
 
-            Button(action: {
-                let visibility = isPublic
-                saveToCoreData(visibility: visibility)
-                DispatchQueue.main.async { withAnimation(.none) { isPresented = false } }
-            }) {
+            Button(action: { attemptSaveWithConnectedPreflight() }) {
                 Text("Save Session")
                     .font(Theme.Text.body)
             }
@@ -1830,7 +1892,11 @@ var body: some View {
                         instrumentLabel: instLabel,
                         mood: nil,
                         effort: focusValue,
-                        isPublic: visibility
+                        isPublic: visibility,
+                        // UNIT 1b — durable consent, same semantics as the other
+                        // publish site: it travels with the publish, so a retry
+                        // omits exactly what was authorised and never re-prompts.
+                        authorisedOmissions: authorisedOmissions.isEmpty ? nil : authorisedOmissions
                     )
 
                     // P4-U2b. SHARED-ONLY UPLOADS -- see AddEditSessionView for

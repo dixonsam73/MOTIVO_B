@@ -1554,14 +1554,10 @@ extension AddEditSessionView {
         for att in stagedAttachments {
             let url = surrogateURL(for: att)
             guard !isPrivate(id: att.id, url: url) else { continue }
-            var seconds: Double?
-            if att.kind == .audio {
-                seconds = (try? AVAudioPlayer(data: att.data))?.duration
-            }
-            out.append(.init(id: att.id,
-                             format: att.sourceFormat,
-                             localBytes: att.data.count,
-                             durationSeconds: seconds))
+            out.append(ConnectedSharePreflight.candidate(forStaged: att.id,
+                                                        data: att.data,
+                                                        kind: att.kind,
+                                                        sourceFormat: att.sourceFormat))
         }
 
         if let existing = session?.attachments as? Set<NSManagedObject> {

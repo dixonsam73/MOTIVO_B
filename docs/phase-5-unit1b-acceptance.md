@@ -1,5 +1,11 @@
 # UNIT 1b — CONSENT PRESENTATION. IMPLEMENTATION COMPLETE; DEVICE QA OUTSTANDING.
 
+> **COMPLETED 2026-09-10.** §4's outstanding call site is now done:
+> `PostRecordDetailsView` runs the same preflight through the same boundary.
+> **P7 is fully met.** Re-verified clean: Debug 187 / Release 175 on clean
+> derived data — **warning delta ZERO** — and **191 of 191** tests pass by
+> structured census.
+
 Prediction: `docs/phase-5-unit1b-prediction.md`, committed before mutation.
 **Unit 1a is untouched.**
 
@@ -13,7 +19,7 @@ Prediction: `docs/phase-5-unit1b-prediction.md`, committed before mutation.
 | **P4** | Cancel queues nothing | **MET** — and saves nothing; see §3 |
 | **P5** | Share Without It carries the authorised set | **MET** |
 | **P6** | retry never re-prompts | **MET** — consent lives in the payload |
-| **P7** | both entry points consistent | **PARTIAL — see §4** |
+| **P7** | both entry points consistent | **MET** — see §4 |
 | **P8** | no new modifier on that body | **MET** — the existing alert was generalised |
 
 **Debug and Release clean on CLEAN derived data — 187 / 175, warning delta
@@ -43,16 +49,27 @@ locally with Share ON while nothing was ever queued — the C-60/C-61 class of
 mismatch. **Every edit is kept.** If you want "save locally but don't share"
 instead, it is a one-line change.
 
-## 4. WHAT IS NOT DONE — `PostRecordDetailsView`
+## 4. `PostRecordDetailsView` — NOW DONE, and it reuses the boundary
 
-**The second publish call site does NOT yet run the preflight.** Its
-`saveToCoreData(visibility:)` (`:1755`) publishes at `:1840` unchanged, so an
-oversized explicitly-shared attachment created through that path still reaches
-the queue without consent.
+Its Save button runs `attemptSaveWithConnectedPreflight()`, asks the **same**
+`ConnectedSharePreflight`, presents through the **same**
+`ConnectedShareConsentState`, and carries the authorised set into its own
+payload. **No second consent model and no second copy of the rule.** The
+original save behaviour is preserved verbatim in `commitSaveAndDismiss()`, now
+reached from one place. Cancel behaves identically: back to the editor, nothing
+saved, nothing queued.
 
-**Stated rather than glossed:** P7 is only half met. That view needs the same
-decision, and it has its own body and its own alert surface. **It is small but it
-is not done**, and Unit 1b should not be recorded as complete until it is.
+**Shared rather than duplicated:** `ConnectedSharePreflight.candidate(forStaged:…)`
+builds the candidate for both sites, so the two views ask the same question of
+the same data.
+
+### A third defect the process caught — MY OWN TEST WAS VACUOUS
+
+`ConsentAtBothPublishSitesTests` first asserted the file merely CONTAINED
+`attemptSaveWithConnectedPreflight()` — which matches the **function's own
+declaration**. Reverting the Save button's gate still passed. **Presence of the
+fix again**, the exact trap P5-M recorded. It now pins the **button's action**,
+and reverting the gate fails it — verified by doing so.
 
 ## 5. Device QA — the smallest that closes both open items
 
