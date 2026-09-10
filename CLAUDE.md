@@ -2440,8 +2440,14 @@ no further handling of the private key. The `.p8` itself lives at
 `~/.etudes-secrets/` (dir `700`, file `600`), outside the repo; `.gitignore`
 already blocks `*.p8` and `*.pem`.
 
-**TEMPORARY INSTRUMENTATION PRESENT — `C42StorefrontProbe`, added 2026-09-10
-for C-42.** One file plus two one-line call sites (`ConnectedMembershipStore`
+**Temporary instrumentation: NONE PRESENT — `C42StorefrontProbe` REMOVED
+2026-09-10, the moment C-42 was measured**, as its standing condition required;
+removal verified as a pure deletion against its pre-probe state. The Release run
+on Device B read `GBR`/`GBP` for the storefront and `£4.99` / `£49.99`,
+`formatCurrency=GBP`, for both products, at load and on the selection screen.
+**The entry below is kept as the record of what it was.**
+
+**HISTORICAL — `C42StorefrontProbe`, added 2026-09-10 for C-42.** One file plus two one-line call sites (`ConnectedMembershipStore`
 after products load; `MembershipSelectionView.onAppear`), each marked
 `// TEMPORARY — C-42`. It logs `Storefront.current` and each product's
 `displayPrice`, `price` and `priceFormatStyle` currency/locale through

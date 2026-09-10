@@ -343,7 +343,6 @@ final class ConnectedMembershipStore: ObservableObject {
                     return lhs.id < rhs.id
                 }
             }
-            await C42StorefrontProbe.record(products: products, context: "loadProducts") // TEMPORARY — C-42
 
         } catch {
             productLoadError = error

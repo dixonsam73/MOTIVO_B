@@ -47,7 +47,6 @@ struct MembershipSelectionView: View {
             }
         }
         .onAppear {
-            Task { await C42StorefrontProbe.record(products: membershipStore.products, context: "selection-screen") } // TEMPORARY — C-42
             selectDefaultProductIfNeeded()
 
             if membershipStore.isEntitled {
