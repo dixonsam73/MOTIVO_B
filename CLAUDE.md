@@ -2440,6 +2440,19 @@ no further handling of the private key. The `.p8` itself lives at
 `~/.etudes-secrets/` (dir `700`, file `600`), outside the repo; `.gitignore`
 already blocks `*.p8` and `*.pem`.
 
+**TEMPORARY INSTRUMENTATION PRESENT — `C42StorefrontProbe`, added 2026-09-10
+for C-42.** One file plus two one-line call sites (`ConnectedMembershipStore`
+after products load; `MembershipSelectionView.onAppear`), each marked
+`// TEMPORARY — C-42`. It logs `Storefront.current` and each product's
+`displayPrice`, `price` and `priceFormatStyle` currency/locale through
+`os.Logger` with `privacy: .public`; it changes no behaviour and touches no
+purchase call. **STANDING REMOVAL CONDITION: delete it the moment C-42 is
+scored, and verify the removal as a PURE DELETION.** The storefront-mismatch
+explanation for C-42 is already ruled out — Device B's App Store country and the
+Sandbox tester's are both United Kingdom.
+
+**HISTORICAL — the entry below was true until 2026-09-10.**
+
 **Temporary instrumentation: NONE PRESENT.** `JWSFreshnessProbe` and its two
 call sites were deleted on 2026-08-20 **the moment F3b was scored**, as its
 standing condition required and as `ActivationTrace` and `MembershipTrace` were

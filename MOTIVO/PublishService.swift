@@ -291,9 +291,11 @@ final class PublishService: ObservableObject {
                     areNotesPrivate: resolvedAreNotesPrivate
                 )
 
-                NSLog("[PublishService][8F] enqueue payload keys • postID=%@ title=%@ dur=%@ act=%@ mood=%@ effort=%@ notes=%@ notesPrivate=%@",
+                // C-62 — the session TITLE is user content and is not logged;
+                // `postID` identifies the publish. Same rule the notes already
+                // follow (present/nil, never the text).
+                NSLog("[PublishService][8F] enqueue payload keys • postID=%@ dur=%@ act=%@ mood=%@ effort=%@ notes=%@ notesPrivate=%@",
                       effectivePayload.id.uuidString,
-                      effectivePayload.title ?? "nil",
                       effectivePayload.durationSeconds != nil ? String(effectivePayload.durationSeconds!) : "nil",
                       effectivePayload.activityType ?? "nil",
                       effectivePayload.mood != nil ? String(effectivePayload.mood!) : "nil",

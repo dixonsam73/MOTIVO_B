@@ -23,7 +23,7 @@ separately and is untouched.
 | **P1** | the guard FAILS on the pre-fix code | **MET** — against `def1f3b`'s tree, the two counting tests **failed** and the regression guard passed. Structured: *3 reported, 2 Failed, 1 Passed* |
 | **P2–P5** | titles, persistence, rename, duplicates | **Not device-observed.** Supported by the behavioural tests (seed, trim, audio-only, blank/nil, never overwrite) and by the traced readers in the prediction §1 |
 | **P6** | nothing else changes | **MET in source** — `Attachment.displayName` still `.file`/`.pdf` only; the rule returns `nil` for every non-audio kind (tested) |
-| **P7** | server effect: publish none; explicit direct send carries the title | **Unchanged from the prediction** — no server code touched |
+| **P7** | server effect: publish none; explicit direct send carries the title | **CORRECTED 2026-09-10 — the "publish: none" half was WRONG.** Publish falls back to the saved audio/video title (`BackendShim:1156-1158`), so a `PostRecordDetailsView` import publishes `display_name = "Again"`; an `AddEditSessionView` import saves no title and sends none. The value is the title the member sees, on a post they chose to share. See the prediction's correction |
 | **P8** | no migration | **MET** — no migration code |
 | **P9** | 208/208; warning delta zero | **MET** — **208 declared, 208 passed**, structured census, nothing missing in any named suite. **Debug 187 / Release 175** on clean derived data — **delta ZERO**, and no warning in any touched file |
 | **P10** | non-vacuous | **MET** — with the call removed from `PostRecordDetailsView.stageData`, **exactly the two counting tests failed** (*8 reported, 6 Passed, 2 Failed*); the call was restored and the full suite had already run green on the restored state |

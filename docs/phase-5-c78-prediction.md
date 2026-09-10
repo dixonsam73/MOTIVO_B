@@ -88,6 +88,19 @@ PDF and `.file`: no seed. `Attachment.displayName` unchanged.
   explicit member send of that specific attachment, and the value sent is the
   title the member sees.
 
+**CORRECTION 2026-09-10, found by P5-L's C-47 history check — P7's "Publish:
+none" IS FALSE.** I read `loadIncludedAttachments` (which sets `displayName` only
+for PDFs) and missed the fallback at publish: `BackendShim:1156-1158` sends
+`item.displayName ?? persistedDisplayNameForAttachment(…)`, and that function
+returns a saved **audio or video** title from the merged title stores. So an
+audio file imported through **`PostRecordDetailsView`** — which saves
+`persistedAudioTitles_v1[finalID] = "Again"` — **publishes `display_name =
+"Again"`**. Through `AddEditSessionView` no title is saved, so nothing is sent.
+Named recordings already published this way. **The value sent is the title the
+member sees, on a post they chose to share** — so no new exposure beyond the
+direct-send case already stated — but the claim was wrong and is kept visible
+rather than rewritten.
+
 **P8 — no migration.** Previously imported attachments keep their UUID stems.
 
 **P9 — verification.** Debug and Release clean on clean derived data, **warning
