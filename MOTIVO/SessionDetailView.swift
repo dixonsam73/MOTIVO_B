@@ -742,24 +742,38 @@ return AttachmentViewerView(
     
     @ViewBuilder
     private func mainContent() -> some View {
-        VStack(alignment: .leading, spacing: session.isThought ? Theme.Spacing.m : Theme.Spacing.l) {
-            SessionIdentityHeader(session: session)
-                .environmentObject(auth)
-                #if DEBUG
-                .onLongPressGesture(minimumDuration: 0.6) {
-                    debugSessionRef = session
-                    debugTitle = "Session Debug"
-                    isDebugPresented = true
-                }
-                #endif
-                .padding(.bottom, session.isThought ? 8 : 4)
+        // C-71: this gesture was attached to the identity row, and `:750` was the
+        // ONLY trigger for the session debug sheet — removing the row without
+        // re-homing it would have deleted the sole developer route to
+        // `DebugViewerView`. It is `#if DEBUG`, so Release is unaffected either
+        // way; it sits on the whole content because both branches below open
+        // with their own `VStack` and there is no common small element.
+        mainContentBody()
+        #if DEBUG
+            .onLongPressGesture(minimumDuration: 0.6) {
+                debugSessionRef = session
+                debugTitle = "Session Debug"
+                isDebugPresented = true
+            }
+        #endif
+    }
 
+    @ViewBuilder
+    private func mainContentBody() -> some View {
+        VStack(alignment: .leading, spacing: session.isThought ? Theme.Spacing.m : Theme.Spacing.l) {
+            // C-71: the identity row is gone. The Journal is the member's OWN
+            // local sessions in both Solo and Connected, so showing them their
+            // own avatar, name and location back was redundant. Attribution
+            // lives on the Feed, which is a different surface entirely —
+            // `BackendSessionDetailView` keeps its identity row for EVERY post
+            // including the member's own, because the distinction is context,
+            // not ownership.
             if session.isThought {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(thoughtDateTimeLine)
                         .font(Theme.Text.meta.weight(.medium))
                         .foregroundStyle(Theme.Colors.secondaryText)
-                        .padding(.top, 4)          // slightly more separation from identity row
+                        .padding(.top, 4)          // C-71: kept as-is pending the device visual pass
                         .padding(.leading, 16)     // match cardSurface horizontal inset
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -1982,106 +1996,12 @@ fileprivate struct VideoThumbCell: View {
 #endif
 
 
-fileprivate struct SessionIdentityHeader: View {
-    let session: Session
-    @Environment(\.managedObjectContext) private var viewContext
-    @EnvironmentObject private var auth: AuthManager
-    @EnvironmentObject private var appModeManager: AppModeManager
-
-    private var usesLocalIdentity: Bool { !appModeManager.canViewFeed }
-    private var ownerUserID: String? { usesLocalIdentity ? auth.currentUserID : (session.ownerUserID ?? auth.currentUserID) }
-    private var isCurrentUser: Bool { usesLocalIdentity || ownerUserID == auth.currentUserID }
-
-    private var avatarImage: UIImage? { ProfileStore.avatarImage(for: ownerUserID) }
-    private var location: String {
-        if usesLocalIdentity {
-            return ProfileStore.location(for: ownerUserID)
-        }
-
-        if isCurrentUser {
-            let canonical = (auth.backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !canonical.isEmpty {
-                let canonicalLocation = ProfileStore.location(for: canonical)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !canonicalLocation.isEmpty {
-                    return canonicalLocation
-                }
-            }
-        }
-
-        return ProfileStore.location(for: ownerUserID)
-    }
-
-    private var displayName: String {
-        if isCurrentUser {
-            // Lookup real name from Profile entity
-            let req: NSFetchRequest<Profile> = Profile.fetchRequest()
-            req.fetchLimit = 1
-            if let profile = try? viewContext.fetch(req).first, let n = profile.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return n
-            }
-            return "You"
-        } else {
-            return "User"
-        }
-    }
-
-    // Updated privacy logic as requested
-    private var isPrivate: Bool { session.isPublic == false }
-
-    // Fallback initials
-    private var initials: String {
-        let name = displayName
-        let words = name.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
-        let first = words.first?.first.map { String($0).uppercased() } ?? "Y"
-        let last = words.last?.first.map { String($0).uppercased() } ?? "U"
-        return first + last
-    }
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            // Avatar
-            Group {
-                #if canImport(UIKit)
-                if let img = avatarImage {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    ZStack {
-                        Circle().fill(Color.gray.opacity(0.2))
-                        Text(initials)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                    }
-                }
-                #else
-                ZStack {
-                    Circle().fill(Color.gray.opacity(0.2))
-                    Text(initials).font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
-                }
-                #endif
-            }
-            .frame(width: 32, height: 32)
-            .clipShape(Circle())
-            .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
-
-            // Name and optional location
-            HStack(spacing: 6) {
-                Text(displayName).font(.subheadline.weight(.semibold))
-                if !location.isEmpty {
-                    Text("•").foregroundStyle(Theme.Colors.secondaryText)
-                    Text(location).font(.footnote).foregroundStyle(Theme.Colors.secondaryText)
-                }
-            }
-
-            Spacer(minLength: 0)
-            // REMOVED privacy icon from lock.fill to eye.slash per instructions (nothing here)
-        }
-        .padding(.bottom, 2)
-    }
-}
+// C-71: `SessionIdentityHeader` was DELETED here, not left unused.
+// It had exactly one call site, in `mainContent()`, and the Journal never shows
+// another member's session — nothing constructs a local `Session` from a
+// `BackendPost`, and every `ownerUserID` writer assigns the signed-in member.
+// Its removal also discharges C-72, whose body-time `Profile` fetch lived in
+// this struct's `displayName`.
 
 // MARK: - Share recipient picker (SessionDetailView)
 
