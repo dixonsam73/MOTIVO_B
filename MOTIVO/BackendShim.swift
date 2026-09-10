@@ -1340,7 +1340,17 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
             .appendingPathComponent("EtudesConnectedAudio-\(item.id.uuidString)-\(UUID().uuidString)")
             .appendingPathExtension(MediaFormat.m4a.fileExtension)
 
-        let result = try await ConnectedAudioDerivative.make(from: item.fileURL, to: destination)
+        let result: (bytes: Int, seconds: Double, elapsedMs: Int)
+        do {
+            result = try await ConnectedAudioDerivative.make(from: item.fileURL, to: destination)
+        } catch {
+            // Operational reporting on a failure path, in the same family as the
+            // C-28/C-48 outcome lines. Numbers and identifiers only — the
+            // extension is a FORMAT, not a filename.
+            BackendLogger.notice("Connected audio derivative FAILED • ext=\(item.ext) • \(error.localizedDescription)")
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
 
         // Operational measurement only: duration, bytes, elapsed. No filename,
         // no title, no attachment name, no identity. Permanent by design, in the

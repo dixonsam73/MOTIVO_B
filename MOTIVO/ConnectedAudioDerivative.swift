@@ -80,16 +80,34 @@ enum ConnectedAudioDerivative {
 
     enum Failure: LocalizedError {
         case noAudioTrack
-        case cannotStart
+        case cannotStart(String)
         case writeFailed(String)
+        case cannotOpenSource(String)
 
         var errorDescription: String? {
             switch self {
             case .noAudioTrack: return "The audio file has no playable audio track"
-            case .cannotStart: return "Could not start the audio conversion"
+            case .cannotStart(let d): return "Could not start the audio conversion: \(d)"
             case .writeFailed(let d): return "Audio conversion failed: \(d)"
+            case .cannotOpenSource(let d): return "Could not open the audio file: \(d)"
             }
         }
+    }
+
+    /// Non-content diagnostic detail for an error: domain, code and the
+    /// underlying error's domain/code where one exists.
+    ///
+    /// **`localizedDescription` alone was not enough to diagnose a real device
+    /// failure** — "Cannot Open" named no domain, no code and no stage, and the
+    /// same file converted on both macOS and the iOS simulator. This carries
+    /// numbers and identifiers only: **no filename, no path, no content.**
+    static func diagnostic(_ error: Error) -> String {
+        let ns = error as NSError
+        var parts = ["\(ns.domain)/\(ns.code)"]
+        if let under = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+            parts.append("under=\(under.domain)/\(under.code)")
+        }
+        return parts.joined(separator: " ")
     }
 
     /// Converts `source` to AAC-in-M4A at `targetBitrate`, preserving the
@@ -98,8 +116,18 @@ enum ConnectedAudioDerivative {
     static func make(from source: URL, to destination: URL) async throws -> (bytes: Int, seconds: Double, elapsedMs: Int) {
         let started = Date()
         let asset = AVURLAsset(url: source)
-        guard let track = try await asset.loadTracks(withMediaType: .audio).first else {
-            throw Failure.noAudioTrack
+        let track: AVAssetTrack
+        do {
+            guard let first = try await asset.loadTracks(withMediaType: .audio).first else {
+                throw Failure.noAudioTrack
+            }
+            track = first
+        } catch let error as Failure {
+            throw error
+        } catch {
+            // Names the STAGE as well as the error, so a device failure can be
+            // told apart from a later one.
+            throw Failure.cannotOpenSource(diagnostic(error))
         }
 
         let asbd = try await track.load(.formatDescriptions).first
@@ -128,7 +156,10 @@ enum ConnectedAudioDerivative {
         input.expectsMediaDataInRealTime = false
         writer.add(input)
 
-        guard reader.startReading(), writer.startWriting() else { throw Failure.cannotStart }
+        guard reader.startReading(), writer.startWriting() else {
+            let detail = [reader.error, writer.error].compactMap { $0 }.map { diagnostic($0) }.joined(separator: " ")
+            throw Failure.cannotStart(detail.isEmpty ? "reader/writer refused" : detail)
+        }
         writer.startSession(atSourceTime: .zero)
 
         let queue = DispatchQueue(label: "etudes.connected.audio.derivative")
@@ -138,7 +169,7 @@ enum ConnectedAudioDerivative {
         }
 
         guard writer.status == .completed else {
-            throw Failure.writeFailed(writer.error?.localizedDescription ?? "unknown")
+            throw Failure.writeFailed(writer.error.map { diagnostic($0) } ?? "unknown")
         }
         let bytes = ((try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?.intValue ?? 0
         let seconds = (try? await asset.load(.duration)).map { CMTimeGetSeconds($0) } ?? 0

@@ -126,3 +126,29 @@ final class ConnectedAudioDerivativeTests: XCTestCase {
         }
     }
 }
+
+// MARK: - C-79 — the Float32 WAV case, found on device
+
+extension ConnectedAudioDerivativeTests {
+
+    /// **DEVICE-OBSERVED FAILURE, REPRODUCED HERE.** A 48 kHz **Float32** WAV —
+    /// an ordinary export from a DAW, and one Études deliberately supports —
+    /// failed conversion on device with AVFoundation's "Cannot Open", while the
+    /// identical file converts on macOS. `AVAudioPlayer` reads it fine, which is
+    /// why the preflight correctly saw a duration and raised no dialog.
+    ///
+    /// If this passes on the simulator but the device still fails, the cause is
+    /// not the sample format and this test must not be read as covering it.
+    func testFloat32WAVConverts() async throws {
+        guard let src = Bundle(for: Self.self).url(forResource: "float32_60.wav", withExtension: nil) else {
+            throw XCTSkip("float32 fixture absent")
+        }
+        let dst = FileManager.default.temporaryDirectory
+            .appendingPathComponent("f32-\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: dst) }
+
+        let r = try await ConnectedAudioDerivative.make(from: src, to: dst)
+        XCTAssertGreaterThan(r.bytes, 0, "a Float32 WAV must produce a derivative")
+        XCTAssertEqual(r.seconds, 60, accuracy: 1.0)
+    }
+}
