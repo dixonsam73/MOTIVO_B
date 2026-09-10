@@ -100,7 +100,8 @@ payload's new optional field. **The private-eye state is never mutated.**
 **`.file` becomes unreachable from the shipping importers.**
 
 **P7 — regenerate, never persist.** The derivative is rebuilt at publish time
-from the untouched original. Deterministic object path + `x-upsert` means a retry
+from the untouched original. **CORRECTED 2026-09-10: a publish that keeps
+failing reconverts on every flush — see C-76.** Deterministic object path + `x-upsert` means a retry
 creates no duplicate; temp files are cleaned on both paths (C-65).
 
 **P8 — no bucket mutation, no schema change**, one optional payload field, and

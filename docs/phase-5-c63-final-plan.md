@@ -187,8 +187,12 @@ your invariants without a media-processing queue:
 - **retry cannot change what was authorised** — consent is in the payload (§13);
 - **no duplicates** — the object path is `users/<owner>/<postID>/<attachmentID>.<ext>`,
   deterministic and independent of the bytes, and upload sends `x-upsert: true`;
-- **no needless transcoding** — regeneration happens only on a *failed* publish's
-  retry, not on every foreground, because success dequeues;
+- **no needless transcoding in the ordinary case** — a successful publish
+  dequeues, so regeneration happens only on a retry. **CORRECTED 2026-09-10:
+  that omitted the case that matters — a publish which keeps failing stays
+  queued and RECONVERTS ON EVERY FLUSH, with no cap and no backoff. Filed as
+  C-76**; not established as a shipping defect, since a real member's publish
+  succeeds, but the original wording read as a guarantee it is not;
 - **no leak** — the existing `temporaryFileURL` cleanup covers both the success
   and (since C-65) the failure path;
 - **relaunch is safe** — everything needed is the payload plus the untouched
