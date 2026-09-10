@@ -27,6 +27,29 @@ Measured on the host (Apple silicon Mac; **a device will be slower**):
 That is NOT instant** — and if the preflight had to transcode before queueing to
 learn the derivative's size, **the member would wait at Save**.
 
+**CORRECTED 2026-09-10, BEFORE IMPLEMENTATION — MY UPPER-BOUND CLAIM WAS WRONG.**
+I wrote that `duration × 256 kbps` is a safe upper bound because every
+measurement undershot the request. **That was measured only on a synthetic tone,
+which is trivially encodable.** Re-measured with **white noise — the maximally
+incompressible signal — the encoder EXCEEDS the request: 263 kbps actual for a
+256 k ask, a ratio of 1.0257.** So the theoretical figure is **not** a ceiling,
+and the account holder was right to refuse it as one.
+
+**Chosen margin: 1.10×**, roughly four times the measured worst-case excess —
+conservative without being excessive, and real music is far more compressible
+than white noise.
+
+| | Budget | Max duration |
+|---|---|---|
+| no margin (**wrong**) | 50 MB | 27.3 min |
+| **1.10× (adopted)** | **45.5 MB** | **≈24.8 min** |
+| 1.05× (considered) | 47.6 MB | 26.0 min |
+
+**The margin costs ~2.5 minutes of allowed duration.** And it is an optimisation,
+never a substitute for validation: **the ACTUAL derivative is still checked
+against the real 50 MB limit before upload** — if it exceeds, it must not upload
+and must not silently disappear.
+
 **It does not have to.** AAC at a requested bitrate is predictable:
 `bytes ≈ duration × bitrate ÷ 8`. Every measurement **undershoots** the request
 (195 kbps actual for a 256 k request), so **duration × 256 kbps is a safe UPPER
