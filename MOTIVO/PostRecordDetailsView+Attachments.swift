@@ -597,7 +597,7 @@ isPrivate: { url in
     }
 
 
-    func stageData(_ data: Data, kind: AttachmentKind, displayName: String? = nil) {
+    func stageData(_ data: Data, kind: AttachmentKind, displayName: String? = nil, sourceFormat: MediaFormat? = nil) {
         let id = UUID()
 
         let finalData: Data
@@ -607,7 +607,20 @@ isPrivate: { url in
             finalData = data
         }
 
-        stagedAttachments.append(StagedAttachment(id: id, data: finalData, kind: kind))
+        // C-77 — THE DECLARED FORMAT MUST FOLLOW THE BYTES.
+        //
+        // This view clamps oversized images, and clamping RE-ENCODES them as
+        // JPEG. Carrying the original format through would declare `image/heic`
+        // over JPEG bytes — planting a fresh instance of exactly the defect
+        // C-74 removed. When the clamp changed the data, the truthful format is
+        // JPEG; when it returned the data untouched, the source format stands.
+        let effectiveFormat: MediaFormat? = {
+            guard kind == .image, sourceFormat != nil else { return sourceFormat }
+            let wasReencoded = (finalData.count != data.count)
+            return wasReencoded ? .jpeg : sourceFormat
+        }()
+
+        stagedAttachments.append(StagedAttachment(id: id, data: finalData, kind: kind, sourceFormat: effectiveFormat))
 
         if kind == .file || kind == .pdf {
             let trimmed = (displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -663,22 +676,26 @@ isPrivate: { url in
                 let accessed = url.startAccessingSecurityScopedResource()
                 defer { if accessed { url.stopAccessingSecurityScopedResource() } }
                 do {
+                    // C-77 — the SAME rules as the other import path, from the
+                    // one place that owns them. Refuse honestly: an unsupported
+                    // file could never publish.
+                    guard let format = AttachmentImportPolicy.classify(fileURL: url) else {
+                        consentState.present(notice: AttachmentImportPolicy.unsupportedFileMessage)
+                        continue
+                    }
                     let data = try Data(contentsOf: url)
-                    let kind = kindForURL(url)
                     let displayName = userFacingDisplayName(for: url)
-                    stageData(data, kind: kind, displayName: displayName)
+                    stageData(data, kind: format.kind, displayName: displayName, sourceFormat: format)
                 } catch { print("File import failed for \(url): \(error)") }
             }
         }
     }
 
+    /// C-77 — defers to the shared policy. The old extension lists here
+    /// recognised GIF/BMP/TIFF/CAF/M4V/AVI, which belong to no Études workflow
+    /// and no Connected bucket policy.
     func kindForURL(_ url: URL) -> AttachmentKind {
-        let ext = url.pathExtension.lowercased()
-        if ["png","jpg","jpeg","heic","heif","gif","bmp","tiff","tif"].contains(ext) { return .image }
-        if ["m4a","aac","mp3","wav","aiff","caf"].contains(ext) { return .audio }
-        if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
-        if ext == "pdf" { return .pdf }
-        return .file
+        AttachmentImportPolicy.kind(forFileURL: url)
     }
 
     func userFacingDisplayName(for url: URL) -> String? {

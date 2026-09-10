@@ -737,23 +737,17 @@ struct AddEditSessionView: View {
                     // UTType, so an iPhone HEIC is stored as `.heic` rather than
                     // renamed `.jpg`. Device-measured before this change: an
                     // ordinary camera photo was stored `.jpg`.
-                    let format = contentType.preferredFilenameExtension
-                        .flatMap { MediaFormat.from(fileExtension: $0) }
-                    if contentType.conforms(to: .image) {
-                        stageData(data, kind: .image, sourceFormat: format)
-                    } else if contentType.conforms(to: .movie) {
-                        stageData(data, kind: .video, sourceFormat: format)
+                    if let format = AttachmentImportPolicy.classify(pickerType: contentType) {
+                        stageData(data, kind: format.kind, sourceFormat: format)
                     } else {
-                        // Conforms to neither: refuse honestly instead of
-                        // creating a `.file` that can never publish.
-                        consentState.present(notice: "That item isn’t a photo or video Études can use.")
+                        consentState.present(notice: AttachmentImportPolicy.unsupportedItemMessage)
                     }
                 }
             } else {
-                consentState.present(notice: "That item isn’t a photo or video Études can use.")
+                consentState.present(notice: AttachmentImportPolicy.unsupportedItemMessage)
             }
         }
-        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: MediaFormat.importerContentTypes, allowsMultipleSelection: true, onCompletion: handleFileImport)
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: AttachmentImportPolicy.importerContentTypes, allowsMultipleSelection: true, onCompletion: handleFileImport)
         .sheet(isPresented: $showScoreAttachLibrary) {
             ScoresLibraryView(
                 mode: .attach,

@@ -423,8 +423,8 @@ extension AddEditSessionView {
                     // UNIT 1 — REFUSE HONESTLY. An unsupported file could never
                     // publish, so accepting it silently only defers the failure
                     // to a publish the member believes succeeded (C-63).
-                    guard let format = MediaFormat.from(url: url) else {
-                        consentState.present(notice: "That file type isn’t supported in Études.")
+                    guard let format = AttachmentImportPolicy.classify(fileURL: url) else {
+                        consentState.present(notice: AttachmentImportPolicy.unsupportedFileMessage)
                         continue
                     }
                     let data = try Data(contentsOf: url)
@@ -435,15 +435,11 @@ extension AddEditSessionView {
         }
     }
 
-    /// UNIT 1: the DELIBERATE set decides. Anything outside it is `.file`, and
-    /// `.file` is now refused at import rather than staged — it could never
-    /// publish, because `application/octet-stream` is not a permitted type.
-    ///
-    /// The old lists recognised GIF/BMP/TIFF/CAF/M4V/AVI, which belonged to no
-    /// Études workflow and no Connected bucket policy. That was accidental
-    /// breadth, not support.
+    /// C-77 — defers to the shared policy, so both import paths answer from
+    /// one place. Unit 1a fixed this view alone and left the other with the old
+    /// extension lists; a second copy of the rules was the defect.
     func kindForURL(_ url: URL) -> AttachmentKind {
-        MediaFormat.from(url: url)?.kind ?? .file
+        AttachmentImportPolicy.kind(forFileURL: url)
     }
 
     func userFacingDisplayName(for url: URL) -> String? {

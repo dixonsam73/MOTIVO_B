@@ -238,7 +238,9 @@ struct PostRecordDetailsView: View {
     /// UNIT 1b — the SAME consent boundary the other publish site uses. No
     /// second model and no second copy: `ConnectedSharePreflight` decides and
     /// `ConnectedShareConsentState` asks.
-    @State private var consentState = ConnectedShareConsentState()
+    /// Internal rather than private: the attachments extension presents import
+    /// notices through this same one presenter (C-77).
+    @State var consentState = ConnectedShareConsentState()
     /// Omissions the member authorised for THIS publish. Never persisted to the
     /// attachment's privacy state.
     @State private var authorisedOmissions: [UUID] = []
@@ -1323,21 +1325,18 @@ var body: some View {
                         matching: .any(of: [.images, .videos]))
             .task(id: photoPickerItem) {
                 guard let item = photoPickerItem else { return }
-                if let contentType = item.supportedContentTypes.first {
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        if contentType.conforms(to: .image) {
-                            stageData(data, kind: .image)
-                        } else if contentType.conforms(to: .movie) {
-                            stageData(data, kind: .video)
-                        } else {
-                            stageData(data, kind: .file)
-                        }
-                    }
-                } else if let data = try? await item.loadTransferable(type: Data.self) {
-                    stageData(data, kind: .file)
+                // C-77 — same rules as the other import path, from the one
+                // place that owns them. An item Études cannot use is refused
+                // rather than staged as a `.file` that could never publish.
+                guard let contentType = item.supportedContentTypes.first,
+                      let format = AttachmentImportPolicy.classify(pickerType: contentType) else {
+                    consentState.present(notice: AttachmentImportPolicy.unsupportedItemMessage)
+                    return
                 }
+                guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+                stageData(data, kind: format.kind, displayName: nil, sourceFormat: format)
             }
-            .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
+            .fileImporter(isPresented: $showFileImporter, allowedContentTypes: AttachmentImportPolicy.importerContentTypes, allowsMultipleSelection: true, onCompletion: handleFileImport)
             .sheet(item: $scorePageSelectionRequest) { request in
                 PDFPageSelectionSheet(
                     pageCount: request.pageCount,

@@ -1,5 +1,18 @@
 # UNIT 1 — PREDICTION, COMMITTED BEFORE MUTATION
 
+> **REOPENED NARROWLY 2026-09-10 — C-77. THIS RECORD IS NOT REWRITTEN.**
+> Unit 1a was recorded implementation-complete on **incomplete call-site
+> coverage**: every change below was applied to `AddEditSessionView` and **not**
+> to `PostRecordDetailsView`, which carries its own `stageData`, `kindForURL`,
+> `handleFileImport`, file importer and photo picker. **Device evidence found
+> it, not review** — an 83 MB, 3 min 24 s WAV imported through the second view
+> was wrongly refused from Connected and persisted as `.m4a`.
+>
+> **The miss stands as part of the record.** It is the same shape as Unit 1b's
+> initially-missed second publish site: one call site of two, twice. The repair
+> moved BOTH paths onto a shared `AttachmentImportPolicy` rather than fixing the
+> duplicate, and added a parity control with an explicit one-of-N guard.
+
 **At `d031c91`, 2026-09-10.** Policy A · 256 kbps AAC · deliberate import set ·
 no production or bucket mutation. Video optimisation is **out** (C-75).
 
