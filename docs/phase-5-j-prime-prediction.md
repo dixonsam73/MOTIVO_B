@@ -76,6 +76,25 @@ appears anywhere.
 **J4 — structured census: 213 declared, 213 passing** (208 + C-6 × 1 + C-16 × 2
 + C-20 × 2).
 
+### CORRECTION AFTER THE PRE-CHANGE RUN — 2026-09-10. J1 IS KEPT AS WRITTEN
+
+**J1's C-6 line was wrong about the inventory, not about migration.** The
+pre-change run failed `testEveryShippedModelVersionMigratesToTheCurrentModel` on
+**one assertion only**: *10 versions found, 11 expected*. **I miscounted:** the
+compiled `MOTIVO.momd` holds **10** `.mom` files (V2, V3 (7.5), V4, V4 HARDENED,
+V5–V9 and the original unversioned `MOTIVO`); `MOTIVO V9.omo` is Xcode's
+optimised copy of V9, and I counted it. **No version failed to load or failed
+the compatibility check**, so the stop condition as defined — a version failing
+to migrate — was **not** met.
+
+**Absence of failure was not accepted as evidence.** Before relying on it the
+test was tightened: the expected count is **10**; the run must **positively
+observe** every version migrate (collected and compared to the inventory); and
+a **positive control** builds a store from the current model with one attribute's
+type changed String→Int64 and requires production's configuration to **REFUSE**
+it — so a harness that cannot fail cannot pass. **C-6 is closed only if all
+three hold.** Count now **214** (J4's 213 + the control).
+
 **J5 — no device acceptance for any row.** C-20 and C-21 are compile-time
 properties with identical runtime behaviour. C-16's failure branch cannot be
 produced on a device, and its success path is proven by the path test. C-6's
