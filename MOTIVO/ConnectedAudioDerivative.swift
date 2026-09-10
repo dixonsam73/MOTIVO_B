@@ -46,6 +46,38 @@ enum ConnectedAudioDerivative {
         (Double(limitBytes) / safetyMargin) * 8.0 / Double(targetBitrate)
     }
 
+    /// Owns the three AVFoundation objects the encode loop touches.
+    ///
+    /// **`@unchecked Sendable` is justified, not waved through:**
+    /// `requestMediaDataWhenReady(on:)` invokes its block SERIALLY on the queue
+    /// it is given, and nothing else touches these objects for the lifetime of
+    /// the export — so there is exactly one accessor at a time. Without this the
+    /// compiler reports three non-Sendable captures, which was measured as the
+    /// only warning delta this type introduced.
+    private final class Pump: @unchecked Sendable {
+        private let reader: AVAssetReaderTrackOutput
+        private let writer: AVAssetWriter
+        private let input: AVAssetWriterInput
+
+        init(reader: AVAssetReaderTrackOutput, writer: AVAssetWriter, input: AVAssetWriterInput) {
+            self.reader = reader; self.writer = writer; self.input = input
+        }
+
+        func run(on queue: DispatchQueue, completion: @escaping @Sendable () -> Void) {
+            input.requestMediaDataWhenReady(on: queue) { [reader, writer, input] in
+                while input.isReadyForMoreMediaData {
+                    if let buffer = reader.copyNextSampleBuffer() {
+                        input.append(buffer)
+                    } else {
+                        input.markAsFinished()
+                        writer.finishWriting { completion() }
+                        return
+                    }
+                }
+            }
+        }
+    }
+
     enum Failure: LocalizedError {
         case noAudioTrack
         case cannotStart
@@ -100,18 +132,9 @@ enum ConnectedAudioDerivative {
         writer.startSession(atSourceTime: .zero)
 
         let queue = DispatchQueue(label: "etudes.connected.audio.derivative")
+        let pump = Pump(reader: output, writer: writer, input: input)
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            input.requestMediaDataWhenReady(on: queue) {
-                while input.isReadyForMoreMediaData {
-                    if let buffer = output.copyNextSampleBuffer() {
-                        input.append(buffer)
-                    } else {
-                        input.markAsFinished()
-                        writer.finishWriting { cont.resume() }
-                        return
-                    }
-                }
-            }
+            pump.run(on: queue) { cont.resume() }
         }
 
         guard writer.status == .completed else {
