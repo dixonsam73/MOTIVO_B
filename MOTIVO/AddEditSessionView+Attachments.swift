@@ -1067,10 +1067,8 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
 
                                             // For existing attachments, also persist under final attachment UUID so publish can round-trip display_name
                                             if existingAttachmentIDs.contains(attID) {
-                                                var persisted = (UserDefaults.standard.dictionary(forKey: "persistedAudioTitles_v1") as? [String: String]) ?? [:]
-                                                if trimmed.isEmpty { persisted.removeValue(forKey: attID.uuidString) }
-                                                else { persisted[attID.uuidString] = trimmed }
-                                                UserDefaults.standard.set(persisted, forKey: "persistedAudioTitles_v1")
+                                                // C-47 — the shared, id-keyed writer.
+                                                AttachmentTitlePersistenceKeys.writeLocalTitle(trimmed, kind: .audio, attachmentID: attID)
                                             }
 
                                             attachmentTitlesRefreshTick &+= 1
@@ -1084,11 +1082,8 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                             if let idx = indexInCombined, idx >= 0, idx < ids.count {
                                                 let attID = ids[idx]
                                                 if existingAttachmentIDs.contains(attID) {
-                                                    // Persisted: write/remove only in persistedVideoTitles_v1
-                                                    var persisted = (UserDefaults.standard.dictionary(forKey: "persistedVideoTitles_v1") as? [String: String]) ?? [:]
-                                                    if trimmed.isEmpty { persisted.removeValue(forKey: attID.uuidString) }
-                                                    else { persisted[attID.uuidString] = trimmed }
-                                                    UserDefaults.standard.set(persisted, forKey: "persistedVideoTitles_v1")
+                                                    // C-47 — the shared, id-keyed writer.
+                                                    AttachmentTitlePersistenceKeys.writeLocalTitle(trimmed, kind: .video, attachmentID: attID)
                                                     attachmentTitlesRefreshTick &+= 1
                                                 } else {
                                                     // Staged (unsaved): write/remove only in stagedVideoTitles_temp

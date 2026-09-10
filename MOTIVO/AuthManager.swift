@@ -1203,15 +1203,10 @@ final class AuthManager: NSObject, ObservableObject {
         accountIDBackfillAttemptedUserIDs.removeAll()
         accountIDBackfillInFlightUserIDs.removeAll()
 
-        let namespaceUserID = AttachmentTitlePersistenceKeys.normalize(
-            BackendEnvironment.shared.isConnected
-                ? Self.canonicalBackendUserID()
-                : (self.currentUserID ?? PersistenceController.shared.currentUserID)
-        )
-        if let userID = namespaceUserID {
-            UserDefaults.standard.removeObject(forKey: AttachmentTitlePersistenceKeys.audioNamespacedKey(for: userID))
-            UserDefaults.standard.removeObject(forKey: AttachmentTitlePersistenceKeys.videoNamespacedKey(for: userID))
-        }
+        // C-47 — attachment titles are NOT removed here. They describe local
+        // Journal attachments, and leaving Connected is not leaving Études.
+        // `LocalFactoryReset` still removes them, because that is the member
+        // asking for everything to go.
 
         Keychain.delete("appleUserID")
         Keychain.delete("displayName")

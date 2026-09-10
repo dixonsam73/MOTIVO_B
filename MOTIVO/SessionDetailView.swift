@@ -516,8 +516,14 @@ return AttachmentViewerView(
                         }
                         return
                     }
-                    guard kind == .video else { return }
-                    // Persist video title keyed by Attachment UUID (match by stem to handle extension changes)
+                    // C-47 — audio AND video persist, with or without a
+                    // Connected identity. Audio used to return here, after the
+                    // viewer had already shown the new title; video wrote only
+                    // to a per-identity store that was absent for a Solo member
+                    // and erased by sign-out.
+                    guard kind == .audio || kind == .video else { return }
+                    // Locate the attachment (match by stem to handle extension
+                    // changes); the title is KEYED by its id, never by the stem.
                     let stem = url.deletingPathExtension().lastPathComponent
                     let set = (session.attachments as? Set<Attachment>) ?? []
                     if let match = set.first(where: { att in
@@ -525,16 +531,9 @@ return AttachmentViewerView(
                         let storedStem = URL(fileURLWithPath: stored).deletingPathExtension().lastPathComponent
                         return storedStem == stem
                     }), let attID = match.value(forKey: "id") as? UUID {
-                        guard let userID = sessionDetailNamespaceUserID(auth: auth) else { return }
-                        let namespacedKey = AttachmentTitlePersistenceKeys.videoNamespacedKey(for: userID)
-                        var map = (UserDefaults.standard.dictionary(forKey: namespacedKey) as? [String: String]) ?? [:]
-                        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if trimmed.isEmpty {
-                            map.removeValue(forKey: attID.uuidString)
-                        } else {
-                            map[attID.uuidString] = trimmed
-                        }
-                        UserDefaults.standard.set(map, forKey: namespacedKey)
+                        AttachmentTitlePersistenceKeys.writeLocalTitle(newTitle,
+                                                                       kind: kind == .audio ? .audio : .video,
+                                                                       attachmentID: attID)
                         _refreshTick &+= 1
                     }
                 },

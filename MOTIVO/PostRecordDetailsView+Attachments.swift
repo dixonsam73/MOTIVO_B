@@ -787,9 +787,8 @@ let stagedURL = surrogateURL(for: att)
                         let trimmed = stagedTitleRaw.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !trimmed.isEmpty {
                             if let finalID = created.value(forKey: "id") as? UUID {
-                                var persisted = (UserDefaults.standard.dictionary(forKey: persistedAudioTitlesKey) as? [String: String]) ?? [:]
-                                persisted[finalID.uuidString] = trimmed
-                                UserDefaults.standard.set(persisted, forKey: persistedAudioTitlesKey)
+                                // C-47 — the shared, id-keyed writer.
+                                AttachmentTitlePersistenceKeys.writeLocalTitle(trimmed, kind: .audio, attachmentID: finalID)
                             } else {
                                 // Fallback (should be rare): key by saved filename stem
                                 let stem = URL(fileURLWithPath: result.path).deletingPathExtension().lastPathComponent
@@ -808,9 +807,8 @@ let stagedURL = surrogateURL(for: att)
                         if !trimmed.isEmpty {
                             // Store under the final attachment UUID (preferred) if available; else fall back to file path stem
                             if let finalID = created.value(forKey: "id") as? UUID {
-                                var persisted = (UserDefaults.standard.dictionary(forKey: persistedVideoTitlesKey) as? [String: String]) ?? [:]
-                                persisted[finalID.uuidString] = trimmed
-                                UserDefaults.standard.set(persisted, forKey: persistedVideoTitlesKey)
+                                // C-47 — the shared, id-keyed writer.
+                                AttachmentTitlePersistenceKeys.writeLocalTitle(trimmed, kind: .video, attachmentID: finalID)
                             } else {
                                 // Fallback: use the created file path stem as a last resort
                                 let stem = URL(fileURLWithPath: result.path).deletingPathExtension().lastPathComponent

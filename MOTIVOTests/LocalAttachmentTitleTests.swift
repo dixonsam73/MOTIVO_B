@@ -101,4 +101,67 @@ final class LocalAttachmentTitleTests: XCTestCase {
         XCTAssertEqual(stemKeyed, 2, "the name-based fallback must not be expanded")
         XCTAssertEqual(direct, 2, "only the two pinned stem fallbacks may write a title store directly")
     }
+
+    // MARK: - Behavioural: the writer
+
+    private var defaults: UserDefaults!
+    private let suite = "LocalAttachmentTitleTests"
+
+    override func setUp() {
+        super.setUp()
+        UserDefaults().removePersistentDomain(forName: suite)
+        defaults = UserDefaults(suiteName: suite)
+    }
+
+    override func tearDown() {
+        UserDefaults().removePersistentDomain(forName: suite)
+        defaults = nil
+        super.tearDown()
+    }
+
+    private func map(_ key: String) -> [String: String] {
+        (defaults.dictionary(forKey: key) as? [String: String]) ?? [:]
+    }
+
+    /// With NO identity anywhere, a title still persists — in the shared store,
+    /// keyed by the attachment id and nothing else.
+    func testWriterPersistsByIDWithNoIdentity() {
+        let id = UUID()
+        AttachmentTitlePersistenceKeys.writeLocalTitle("  Again \n", kind: .audio, attachmentID: id, defaults: defaults)
+        let shared = map(AttachmentTitlePersistenceKeys.legacyAudioTitlesKey)
+        XCTAssertEqual(shared, [id.uuidString: "Again"])
+    }
+
+    /// An older per-identity value would win the readers' merge and hide the
+    /// new title, so the writer clears THAT id — and only that id — from every
+    /// per-identity store.
+    func testWriterClearsOnlyThatIDFromEveryPerIdentityStore() {
+        let id = UUID(), other = UUID()
+        let storeA = AttachmentTitlePersistenceKeys.videoNamespacedKey(for: "user-a")
+        let storeB = AttachmentTitlePersistenceKeys.videoNamespacedKey(for: "user-b")
+        defaults.set([id.uuidString: "Old A", other.uuidString: "Keep"], forKey: storeA)
+        defaults.set([id.uuidString: "Old B"], forKey: storeB)
+
+        AttachmentTitlePersistenceKeys.writeLocalTitle("New", kind: .video, attachmentID: id, defaults: defaults)
+
+        XCTAssertNil(map(storeA)[id.uuidString])
+        XCTAssertNil(map(storeB)[id.uuidString])
+        XCTAssertEqual(map(storeA)[other.uuidString], "Keep", "another attachment's title must be untouched")
+        // The readers' merge — per-identity over shared — now yields the new title.
+        let shared = map(AttachmentTitlePersistenceKeys.legacyVideoTitlesKey)
+        XCTAssertEqual(shared.merging(map(storeA)) { _, scoped in scoped }[id.uuidString], "New")
+    }
+
+    /// Clearing a title removes it from the shared store and every per-identity one.
+    func testEmptyTitleRemovesItEverywhere() {
+        let id = UUID()
+        let scoped = AttachmentTitlePersistenceKeys.audioNamespacedKey(for: "user-a")
+        defaults.set([id.uuidString: "Old"], forKey: AttachmentTitlePersistenceKeys.legacyAudioTitlesKey)
+        defaults.set([id.uuidString: "Older"], forKey: scoped)
+
+        AttachmentTitlePersistenceKeys.writeLocalTitle("   ", kind: .audio, attachmentID: id, defaults: defaults)
+
+        XCTAssertNil(map(AttachmentTitlePersistenceKeys.legacyAudioTitlesKey)[id.uuidString])
+        XCTAssertNil(map(scoped)[id.uuidString])
+    }
 }
