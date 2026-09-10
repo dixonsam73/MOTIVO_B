@@ -4769,7 +4769,7 @@ private func openAudioViewer(_ id: UUID) {
 
     // Helper to get temporary surrogate URL for a staged attachment
     func surrogateURL(for att: StagedAttachment) -> URL? {
-        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+        let ext: String = AttachmentImportPolicy.fileExtension(for: att)
         return FileManager.default.temporaryDirectory.appendingPathComponent(att.id.uuidString).appendingPathExtension(ext)
     }
     

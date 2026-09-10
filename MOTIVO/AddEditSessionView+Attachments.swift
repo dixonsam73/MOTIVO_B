@@ -350,7 +350,7 @@ extension AddEditSessionView {
         if kind == .video {
             // UNIT 1: prefer the validated source format over the kind default.
             let ext: String = sourceFormat?.fileExtension
-                ?? (kind == .image ? "jpg" : kind == .audio ? "m4a" : kind == .video ? "mov" : "dat")
+                ?? AttachmentImportPolicy.defaultExtension(for: kind)
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(id.uuidString)
                 .appendingPathExtension(ext)
@@ -490,18 +490,12 @@ extension AddEditSessionView {
         // 1) Add ONLY newly staged attachments (skip those that were preloaded from Core Data)
         for att in stagedAttachments where existingAttachmentIDs.contains(att.id) == false {
             do {
-                let ext: String = {
-                    // UNIT 1 — TRUTHFUL EXTENSION. The validated source format
-                    // wins, so an imported WAV persists as `.wav` and an iPhone
-                    // HEIC as `.heic`. Device-measured before this change: an
-                    // ordinary camera photo was stored `.jpg` with HEIC bytes.
-                    if let f = att.sourceFormat { return f.fileExtension }
-                    if let surl = surrogateURL(for: att) {
-                        let e = surl.pathExtension.lowercased()
-                        if !e.isEmpty { return e }
-                    }
-                    return (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : att.kind == .pdf ? "pdf" : "dat")
-                }()
+                // C-77 — TRUTHFUL EXTENSION, from the ONE place that decides it.
+                // An imported WAV persists as `.wav` and an iPhone HEIC as
+                // `.heic`. Device-measured before this work: an ordinary camera
+                // photo was stored `.jpg` with HEIC bytes, and an imported WAV
+                // as `.m4a`, which AVFoundation then could not open at all.
+                let ext: String = AttachmentImportPolicy.fileExtension(for: att)
                 let suggestedName: String = {
                     switch att.kind {
                     case .audio:
@@ -711,7 +705,7 @@ extension AddEditSessionView {
             return existing
         }
         let ext: String = att.sourceFormat?.fileExtension
-            ?? (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : att.kind == .pdf ? "pdf" : "dat")
+            ?? AttachmentImportPolicy.defaultExtension(for: att.kind)
         return FileManager.default.temporaryDirectory.appendingPathComponent("\(att.id.uuidString).\(ext)")
     }
 
@@ -1258,7 +1252,7 @@ return isPrivate(id: id, url: url)
                                                 if !extCandidate.isEmpty {
                                                     ext = extCandidate
                                                 } else {
-                                                    ext = (old.kind == .image ? "jpg" : old.kind == .audio ? "m4a" : old.kind == .video ? "mov" : old.kind == .pdf ? "pdf" : "dat")
+                                                    ext = AttachmentImportPolicy.defaultExtension(for: old.kind)
                                                 }
 
                                                 let surrogateTarget = FileManager.default.temporaryDirectory.appendingPathComponent("\(old.id.uuidString).\(ext)")
@@ -1290,7 +1284,7 @@ return isPrivate(id: id, url: url)
                                         if !extCandidate.isEmpty {
                                             ext = extCandidate
                                         } else {
-                                            ext = (kind == .image ? "jpg" : kind == .audio ? "m4a" : kind == .video ? "mov" : "dat")
+                                            ext = AttachmentImportPolicy.defaultExtension(for: kind)
                                         }
 
                                         let surrogateTarget = FileManager.default.temporaryDirectory.appendingPathComponent("\(newID.uuidString).\(ext)")

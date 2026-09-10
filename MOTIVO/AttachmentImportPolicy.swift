@@ -64,4 +64,36 @@ enum AttachmentImportPolicy {
     static func kind(forFileURL url: URL) -> AttachmentKind {
         classify(fileURL: url)?.kind ?? .file
     }
+
+    /// **THE ONLY PLACE AN ATTACHMENT'S FILE EXTENSION IS DECIDED.**
+    ///
+    /// This expression previously existed in **eight** places across three
+    /// files, and C-77's first repair fixed some of them — so a fresh import
+    /// through `PostRecordDetailsView` still persisted a WAV as `.m4a`, and
+    /// AVFoundation then refused to open it (`AVErrorFileFormatNotRecognized`).
+    /// **That was the third one-of-N miss in this work.** Duplication was the
+    /// defect; a parity test over three of the sites could not see the fourth.
+    ///
+    /// The validated source format wins. Études-generated media carry no source
+    /// format and fall back to the kind's own container, which is correct for
+    /// them: the recorder writes `.m4a` AAC and `.mov`.
+    static func fileExtension(for attachment: StagedAttachment) -> String {
+        attachment.sourceFormat?.fileExtension ?? defaultExtension(for: attachment.kind)
+    }
+
+    /// The container Études' OWN capture produces for each kind.
+    static func defaultExtension(for kind: AttachmentKind) -> String {
+        switch kind {
+        case .image: return "jpg"
+        case .audio: return "m4a"
+        case .video: return "mov"
+        case .pdf: return "pdf"
+        case .file: return "dat"
+        }
+    }
+
+    /// For a path-based site, where the URL itself carries the truth.
+    static func fileExtension(forURL url: URL, kind: AttachmentKind) -> String {
+        MediaFormat.from(url: url)?.fileExtension ?? defaultExtension(for: kind)
+    }
 }

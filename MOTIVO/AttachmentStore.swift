@@ -392,7 +392,18 @@ struct AttachmentStore {
     /// - Returns: Final path in Documents.
     static func adoptTempExport(_ tempURL: URL, suggestedName: String, kind: AttachmentKind) throws -> String {
         let docs = try ensureDocumentsDir()
-        let ext = tempURL.pathExtension.isEmpty ? (kind == .audio ? "m4a" : kind == .video ? "mp4" : kind == .pdf ? "pdf" : "dat") : tempURL.pathExtension
+        // C-77 — the temp export's own extension is the truth when it has one;
+        // otherwise the kind's container, from the one place that decides it.
+        //
+        // **ONE DISCLOSED BEHAVIOUR CHANGE:** this fallback previously said
+        // `mp4` for video and now says `mov`, because that is the app's own
+        // video container everywhere else. It is reachable only when a temp
+        // export carries NO extension, which the export paths always set, so it
+        // is effectively dead — but it is a change, and it is recorded rather
+        // than absorbed.
+        let ext = tempURL.pathExtension.isEmpty
+            ? AttachmentImportPolicy.defaultExtension(for: kind)
+            : tempURL.pathExtension
         let filename = uniqueFilename(base: suggestedName, ext: ext, in: docs)
         let finalURL = docs.appendingPathComponent(filename, isDirectory: false)
         try FileManager.default.moveItem(at: tempURL, to: finalURL)

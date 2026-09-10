@@ -749,7 +749,10 @@ let namesKey = "stagedAudioNames_temp"
         // 1) Write files using rollback-safe API and create Attachment objects
         for att in stagedAttachments {
             do {
-                let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : att.kind == .pdf ? "pdf" : "dat")
+                // C-77 — THE PERSISTED EXTENSION MUST DESCRIBE THE BYTES.
+                // This site fabricated it from the kind, so an imported WAV
+                // was written as `.m4a` and AVFoundation could not open it.
+                let ext: String = AttachmentImportPolicy.fileExtension(for: att)
                 let baseName: String
                 if let custom = namesDict[att.id.uuidString], !custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     baseName = custom
@@ -1152,7 +1155,7 @@ fileprivate struct AttachmentThumbCell: View {
 
     private var resolvedURL: URL? {
         // Use a stable, surrogate URL in Caches/Temp using the staged id and an extension by kind.
-        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : att.kind == .pdf ? "pdf" : "dat")
+        let ext: String = AttachmentImportPolicy.fileExtension(for: att)
         return FileManager.default.temporaryDirectory
             .appendingPathComponent(att.id.uuidString)
             .appendingPathExtension(ext)

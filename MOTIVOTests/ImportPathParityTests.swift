@@ -109,4 +109,51 @@ final class ImportPathParityTests: XCTestCase {
         XCTAssertTrue(s.contains("wasReencoded"),
                       "a re-encoded image must be declared JPEG, not its original format")
     }
+
+    // MARK: - C-77's THIRD miss: the extension-writing sites
+
+    /// **THE ASSERTION THAT WOULD HAVE CAUGHT THE THIRD MISS.**
+    ///
+    /// The extension was fabricated from the kind in **eight** places across
+    /// three files. C-77's first repair fixed some, so a fresh import through
+    /// `PostRecordDetailsView` still persisted a WAV as `.m4a` — and
+    /// AVFoundation refused to open it. The earlier parity test could not see
+    /// it, because it asserted `stageData`, `handleFileImport` and `kindForURL`
+    /// and **not the sites that write the extension**.
+    ///
+    /// Duplication was the defect, so this pins that the decision exists in
+    /// exactly ONE place.
+    func testTheExtensionDecisionExistsInExactlyOnePlace() {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let dir = root.appendingPathComponent("MOTIVO")
+        let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+            .filter { $0.hasSuffix(".swift") }
+
+        var offenders: [String] = []
+        for f in files where f != "AttachmentImportPolicy.swift" {
+            let src = code(f)
+            // The shape that kept reappearing: a ternary chain mapping kind to a
+            // container extension.
+            if src.contains(#"kind == .image ? "jpg""#) || src.contains(#"kind == .audio ? "m4a""#) {
+                offenders.append(f)
+            }
+        }
+        XCTAssertTrue(offenders.isEmpty,
+                      "the extension decision must live only in AttachmentImportPolicy; found a copy in: \(offenders)")
+    }
+
+    /// Every persistence site must consult the validated source format, not the
+    /// kind default — that is the difference between `.wav` and an unopenable
+    /// `.m4a`.
+    func testBothCommitPathsUseTheSharedExtensionDecision() {
+        for (_, ext) in paths {
+            let s = code(ext)
+            guard let r = s.range(of: "func commitStagedAttachments(") else {
+                return XCTFail("\(ext): commit path not found")
+            }
+            let body = String(s[r.lowerBound...].prefix(2500))
+            XCTAssertTrue(body.contains("AttachmentImportPolicy.fileExtension(for:"),
+                          "\(ext): the persisted extension must come from the shared decision")
+        }
+    }
 }
