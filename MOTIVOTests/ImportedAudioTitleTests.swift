@@ -93,4 +93,70 @@ final class ImportedAudioTitleTests: XCTestCase {
                            "\(file): stageData must defer to AttachmentImportPolicy, not write the map itself")
         }
     }
+
+    // MARK: - Behavioural: the rule itself
+
+    private var defaults: UserDefaults!
+    private let suite = "ImportedAudioTitleTests"
+
+    override func setUp() {
+        super.setUp()
+        UserDefaults().removePersistentDomain(forName: suite)
+        defaults = UserDefaults(suiteName: suite)
+    }
+
+    override func tearDown() {
+        UserDefaults().removePersistentDomain(forName: suite)
+        defaults = nil
+        super.tearDown()
+    }
+
+    private func names() -> [String: String] {
+        (defaults.dictionary(forKey: AttachmentImportPolicy.stagedAudioNamesKey) as? [String: String]) ?? [:]
+    }
+
+    /// `Again.wav` → `Again`, trimmed, without disturbing other staged names.
+    func testAudioImportSeedsItsStemAsTheTitle() {
+        let other = UUID(), id = UUID()
+        defaults.set([other.uuidString: "Earlier take"], forKey: AttachmentImportPolicy.stagedAudioNamesKey)
+        AttachmentImportPolicy.seedImportedAudioTitle(stagedID: id, kind: .audio, displayName: "  Again \n", defaults: defaults)
+        XCTAssertEqual(names()[id.uuidString], "Again")
+        XCTAssertEqual(names()[other.uuidString], "Earlier take")
+    }
+
+    /// Only audio takes its title from the source name (video is C-80's).
+    func testNonAudioKindsSeedNothing() {
+        for kind in [AttachmentKind.image, .video, .pdf, .file] {
+            let id = UUID()
+            AttachmentImportPolicy.seedImportedAudioTitle(stagedID: id, kind: kind, displayName: "Again", defaults: defaults)
+            XCTAssertNil(names()[id.uuidString], "\(kind) must not be titled from its source name")
+        }
+    }
+
+    /// Recordings and photo-library items pass no name — nothing is seeded.
+    func testMissingOrBlankNameSeedsNothing() {
+        for name in [nil, "", "   \n"] as [String?] {
+            AttachmentImportPolicy.seedImportedAudioTitle(stagedID: UUID(), kind: .audio, displayName: name, defaults: defaults)
+        }
+        XCTAssertTrue(names().isEmpty)
+    }
+
+    /// A rename always wins; the seed never overwrites.
+    func testSeedNeverOverwritesAnExistingTitle() {
+        let id = UUID()
+        defaults.set([id.uuidString: "Renamed"], forKey: AttachmentImportPolicy.stagedAudioNamesKey)
+        AttachmentImportPolicy.seedImportedAudioTitle(stagedID: id, kind: .audio, displayName: "Again", defaults: defaults)
+        XCTAssertEqual(names()[id.uuidString], "Renamed")
+    }
+
+    /// The seeded map is the one the audio readers actually consult — the
+    /// register's first proposal wrote a map none of them read.
+    func testTheSeededKeyIsTheOneAudioReadersUse() {
+        XCTAssertEqual(AttachmentImportPolicy.stagedAudioNamesKey, "stagedAudioNames_temp")
+        XCTAssertNotEqual(AttachmentImportPolicy.stagedAudioNamesKey, "stagedAttachmentDisplayNames_temp")
+        for file in importPaths {
+            XCTAssertTrue(code(file).contains("\"stagedAudioNames_temp\""),
+                          "\(file): its audio-title readers must read the map the rule seeds")
+        }
+    }
 }

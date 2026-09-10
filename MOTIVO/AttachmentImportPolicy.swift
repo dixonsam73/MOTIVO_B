@@ -96,4 +96,37 @@ enum AttachmentImportPolicy {
     static func fileExtension(forURL url: URL, kind: AttachmentKind) -> String {
         MediaFormat.from(url: url)?.fileExtension ?? defaultExtension(for: kind)
     }
+
+    // MARK: - C-78 — an imported audio file keeps its name
+
+    /// The map every audio-title reader consults while an attachment is staged:
+    /// both editors' captions and viewers, and both commits, which turn it into
+    /// the persisted filename stem (and, in `PostRecordDetailsView`, a
+    /// `persistedAudioTitles_v1` entry). **NOT `stagedAttachmentDisplayNames_temp`**
+    /// — that becomes `Attachment.displayName`, which no audio reader uses, and
+    /// widening it was C-78's original, wrong proposal.
+    static let stagedAudioNamesKey = "stagedAudioNames_temp"
+
+    /// `Again.wav` imported as audio is titled `Again`. Only `.audio` gets a
+    /// title from its source name; every other kind is unchanged.
+    static func importedAudioTitle(kind: AttachmentKind, displayName: String?) -> String? {
+        guard kind == .audio else { return nil }
+        let trimmed = (displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Seeds the initial title for a freshly staged imported audio file.
+    /// **Never overwrites** an existing entry, so a rename always wins. Called
+    /// from exactly the two `stageData` bodies — `ImportedAudioTitleTests`
+    /// counts the call sites.
+    static func seedImportedAudioTitle(stagedID: UUID,
+                                       kind: AttachmentKind,
+                                       displayName: String?,
+                                       defaults: UserDefaults = .standard) {
+        guard let title = importedAudioTitle(kind: kind, displayName: displayName) else { return }
+        var names = (defaults.dictionary(forKey: stagedAudioNamesKey) as? [String: String]) ?? [:]
+        guard names[stagedID.uuidString] == nil else { return }
+        names[stagedID.uuidString] = title
+        defaults.set(names, forKey: stagedAudioNamesKey)
+    }
 }

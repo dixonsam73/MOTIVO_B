@@ -620,6 +620,9 @@ isPrivate: { url in
             return wasReencoded ? .jpeg : sourceFormat
         }()
 
+        // C-78 — an imported audio file keeps its name, from the shared rule.
+        // Seeded before the append so the first render already sees it.
+        AttachmentImportPolicy.seedImportedAudioTitle(stagedID: id, kind: kind, displayName: displayName)
         stagedAttachments.append(StagedAttachment(id: id, data: finalData, kind: kind, sourceFormat: effectiveFormat))
 
         if kind == .file || kind == .pdf {
