@@ -80,4 +80,15 @@ final class ReliabilityRemainderTests: XCTestCase {
         XCTAssertGreaterThan(calls, 0, "the remote play call site must exist")
         XCTAssertEqual(rated, calls, "every remote play call must pass the session rate")
     }
+
+    /// Behavioural half: a FRESH controller — the state a newly created page
+    /// starts in — adopts the rate it is started with, instead of `.default`.
+    func testRemoteToggleAdoptsTheGivenRate() {
+        let controller = RemoteAudioPlayerController()
+        XCTAssertEqual(controller.rate, .default, "precondition: a fresh controller starts at the default")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("C69-\(UUID().uuidString).m4a")
+        controller.toggle(url: url, rate: .oneAndAHalf)
+        XCTAssertEqual(controller.rate, .oneAndAHalf)
+        controller.pause()
+    }
 }

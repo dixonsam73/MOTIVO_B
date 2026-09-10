@@ -513,6 +513,12 @@ final class VideoRecorderController: NSObject,
     func onDisappear() {
         stopTimer()
         removeNotifications()
+        // C-68 — release the review player explicitly rather than relying on
+        // this controller being deallocated with the view. Lifecycle hardening
+        // only: no user-visible failure was reproduced, and this is NOT an
+        // explanation of C-50.
+        player?.pause()
+        player = nil
         sessionQueue.async {
             self.stopCaptureSession()
             self.cleanupRecordingFile()

@@ -320,6 +320,12 @@ public final class FollowStore: ObservableObject {
                     await self.refreshFromBackendIfPossible()
                 case .failure(let e):
                     NSLog("[FollowStore] backend unfollow failed: %@", String(describing: e))
+                    // C-66 — fail closed, like `declineFollow` and
+                    // `removeFollower`: refresh to restore the true backend
+                    // state. Without it a `.notFound` (the row was already
+                    // gone) left "Following" on screen. `.notFound` semantics
+                    // are deliberately unchanged.
+                    await self.refreshFromBackendIfPossible()
                 }
             }
             return .none

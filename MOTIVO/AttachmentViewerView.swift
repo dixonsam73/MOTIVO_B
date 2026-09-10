@@ -2595,7 +2595,12 @@ final class RemoteAudioPlayerController: NSObject, ObservableObject {
         }
     }
 
-    func toggle(url: URL) {
+    /// C-69 — the viewer-session rate is a REQUIRED input. It used to arrive
+    /// only through `AudioPage`'s `.onChange(of: playbackRate)`, which does not
+    /// fire for a page created after the rate was chosen, so such a page played
+    /// at 1×. Taking it here means starting playback cannot omit it.
+    func toggle(url: URL, rate: PlaybackRate) {
+        self.rate = rate
         if player == nil || currentURL != url {
             prepare(url: url)
             play()
@@ -2843,7 +2848,7 @@ private struct AudioPage: View {
                                 isAnyPlayerActive = false
                             } else {
                                 if isRemoteURL {
-                                    remoteController.toggle(url: url)
+                                    remoteController.toggle(url: url, rate: playbackRate)
                                     audioDuration = playbackDuration
                                     isAnyPlayerActive = true
                                     startWaveform()
