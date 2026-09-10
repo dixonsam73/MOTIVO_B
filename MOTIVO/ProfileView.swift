@@ -349,6 +349,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                      Group {
                          profileSection
                          sessionSetupSection
+                         connectedPreferencesSection
                      }
                      Group {
                          if appModeManager.canShowConnectedAccountManagement {
@@ -706,55 +707,6 @@ private var sessionSetupSection: some View {
                  }
 
 
-                  if appModeManager.canShowConnectedAccountManagement {
-                 VStack(alignment: .leading, spacing: 4) {
-                     Toggle("Default to Private Posts", isOn: $defaultPrivacy)
-                        .tint(Theme.Colors.accent)
-                        .frame(minHeight: 44, alignment: .center)
-                        .font(Theme.Text.body)
-
-                     // D-1: the default is ON for sharing, and nothing said so.
-                     // Describes what the toggle does, without overstating --
-                     // Thoughts START private but remain shareable by choice.
-                     Text("When on, new sessions start private. Thoughts are always private by default. You can change sharing for each session.")
-                        .font(.footnote)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                 }
-                 .padding(.vertical, Theme.Spacing.s)
-                 .overlay(alignment: .bottom) {
-                     quietDivider()
-                 }
-
-                 // CP-3: the discoverability preference, written through the ONLY
-                 // client writer of it. Shown only once the server holds an age
-                 // band -- without one the member is undiscoverable anyway and the
-                 // writer would refuse, so offering a control here would be
-                 // offering one that cannot work.
-                 if auth.accountPrivacyState != nil {
-                     VStack(alignment: .leading, spacing: 4) {
-                         Toggle("Let other members find you", isOn: $discoverabilityOn)
-                            .tint(Theme.Colors.accent)
-                            .frame(minHeight: 44, alignment: .center)
-                            .font(Theme.Text.body)
-                            .disabled(discoverabilityBusy)
-                            .onChange(of: discoverabilityOn) { oldValue, newValue in
-                                guard oldValue != newValue else { return }
-                                Task { @MainActor in await applyDiscoverability(newValue) }
-                            }
-
-                         // Neutral and factual: what each position does, and what
-                         // does NOT change either way. No recommendation and no
-                         // nudge in either direction.
-                         Text("When this is on, other members can find you by searching your name, account ID or instrument. When it’s off, you won’t appear in search. People you already share with can still see your name on anything you’ve shared.")
-                            .font(.footnote)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                     }
-                     .padding(.vertical, Theme.Spacing.s)
-                     .overlay(alignment: .bottom) {
-                         quietDivider()
-                     }
-                 }
-                  }
                  Button { showTintModeSelection = true } label: {
                      navigationRow(title: "Journal Tint", value: currentTintMode.displayName)
                  }
@@ -846,6 +798,79 @@ private var sessionSetupSection: some View {
              .cardSurface(padding: profileInnerCardPadding)
              .listRowSeparator(.hidden)
                 .padding(.vertical, profileSectionSpacing / 2)
+         }
+     }
+
+     // H-1: these Connected preferences used to sit in the MIDDLE of Settings,
+     // between Activities and Journal Tint. Same controls, same bindings, same
+     // writers, same visibility rules — only the grouping changed.
+     //
+     // The header is "Connected", deliberately NOT "Privacy": these are
+     // membership-scoped preferences, and "Privacy" would imply a scope they do
+     // not have.
+     //
+     // It renders ONLY under `canShowConnectedAccountManagement`, which is the
+     // gate that already wrapped both controls, so Solo shows no empty
+     // "Connected" header. The discovery control keeps its own NESTED
+     // `accountPrivacyState != nil` condition: without a server age band the
+     // writer would refuse and the control could not work.
+     @ViewBuilder
+     private var connectedPreferencesSection: some View {
+         if appModeManager.canShowConnectedAccountManagement {
+             Section(header: Text("Connected").sectionHeader()) {
+                 VStack(spacing: 0) {
+                 VStack(alignment: .leading, spacing: 4) {
+                     Toggle("Default to Private Posts", isOn: $defaultPrivacy)
+                        .tint(Theme.Colors.accent)
+                        .frame(minHeight: 44, alignment: .center)
+                        .font(Theme.Text.body)
+
+                     // D-1: the default is ON for sharing, and nothing said so.
+                     // Describes what the toggle does, without overstating --
+                     // Thoughts START private but remain shareable by choice.
+                     Text("When on, new sessions start private. Thoughts are always private by default. You can change sharing for each session.")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                 }
+                 .padding(.vertical, Theme.Spacing.s)
+                 .overlay(alignment: .bottom) {
+                     quietDivider()
+                 }
+
+                 // CP-3: the discoverability preference, written through the ONLY
+                 // client writer of it. Shown only once the server holds an age
+                 // band -- without one the member is undiscoverable anyway and the
+                 // writer would refuse, so offering a control here would be
+                 // offering one that cannot work.
+                 if auth.accountPrivacyState != nil {
+                     VStack(alignment: .leading, spacing: 4) {
+                         Toggle("Let other members find you", isOn: $discoverabilityOn)
+                            .tint(Theme.Colors.accent)
+                            .frame(minHeight: 44, alignment: .center)
+                            .font(Theme.Text.body)
+                            .disabled(discoverabilityBusy)
+                            .onChange(of: discoverabilityOn) { oldValue, newValue in
+                                guard oldValue != newValue else { return }
+                                Task { @MainActor in await applyDiscoverability(newValue) }
+                            }
+
+                         // Neutral and factual: what each position does, and what
+                         // does NOT change either way. No recommendation and no
+                         // nudge in either direction.
+                         Text("When this is on, other members can find you by searching your name, account ID or instrument. When it’s off, you won’t appear in search. People you already share with can still see your name on anything you’ve shared.")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                     }
+                     .padding(.vertical, Theme.Spacing.s)
+                     .overlay(alignment: .bottom) {
+                         quietDivider()
+                     }
+                 }
+                 }
+                 .cardSurface(padding: profileInnerCardPadding)
+                 .listRowSeparator(.hidden)
+                 .padding(.vertical, profileSectionSpacing / 2)
+             }
          }
      }
 
