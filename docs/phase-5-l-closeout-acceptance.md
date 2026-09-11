@@ -36,6 +36,7 @@ not closed here.
 
 ## 4. Still open
 
-- **C-47** — the Device B audio rename → close → reopen check.
+- ~~**C-47** — the Device B audio rename → close → reopen check.~~ **Done
+  2026-09-11, green on Device B / Release — C-47 RESOLVED.**
 - **C-69** — device check carried to the Production Connected fixture.
 - **C-80, C-81** — open, untouched.

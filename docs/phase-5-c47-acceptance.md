@@ -1,8 +1,18 @@
-# C-47 — OPTION B IMPLEMENTED. DEVICE CHECK OUTSTANDING — NOT CLOSED.
+# C-47 — OPTION B. RESOLVED, DEVICE-CONFIRMED 2026-09-11.
 
-> **C-47 stays open until the Device B audio rename/reopen check (M5) passes.**
-> Nothing below is device evidence. **The sign-out case is deliberately not
-> device-tested** — by decision, the member is not signed out to test it.
+> **M5 GREEN — Device B, Release build.** An audio attachment renamed from a
+> saved session's detail view kept its new title across closing and reopening
+> the viewer and across leaving and returning to the session. **Run on the
+> corrected code** — including the 2026-09-11 fix that made
+> `ContentView.loadFeedPersistedTitles` read-only (see
+> `docs/phase-5-l-closeout-acceptance.md`). **The sign-out case was
+> deliberately not device-tested**; it rests on the source guard and the
+> writer's behavioural tests.
+>
+> *Previous banner, preserved:* "C-47 stays open until the Device B audio
+> rename/reopen check (M5) passes. Nothing below is device evidence." §1–§4 were
+> written before the device check and before the `ContentView` correction; the
+> correction is recorded in the close-out acceptance, not rewritten into them.
 
 Prediction and guards: `docs/phase-5-c47-prediction.md`, committed at `0dbe8cf`
 **before mutation**. C-80 and C-81 not touched. No production, ASC, enforcement
