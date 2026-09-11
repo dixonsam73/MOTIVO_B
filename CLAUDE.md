@@ -3013,7 +3013,11 @@ Verification gate after each phase. RC QA confirms an already-tested system.
   so `Product.products(for:)` returns an empty array and you get C-29's
   signature — "Membership options are unavailable", no error beneath it —
   instead of a purchase. The shared scheme's Run action is Release. Keep it
-  there.
+  there. **It was silently reverted to Debug a SECOND time by `3d49c4c`
+  (2026-09-09) and restored 2026-09-11 — C-52's second recurrence. This bullet
+  is now ENFORCED, not merely stated:** `SchemeConfigurationGuardTests` fails the
+  suite if the Run action stops building Release or pins a StoreKit
+  configuration, and was proven to fail against the reverted scheme.
 - **The shared scheme no longer pins a StoreKit configuration** (changed
   2026-08-11; **silently reverted 2026-08-14 by `0daecd1`, restored 2026-08-20 by
   U5a — C-52**, and the six-day gap is why this bullet is not self-verifying). Running from Xcode now gets **real StoreKit against Apple's

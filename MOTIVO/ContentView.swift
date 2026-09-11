@@ -2351,21 +2351,17 @@ fileprivate struct SessionsRootView: View {
 
     @MainActor
     private func loadFeedPersistedTitles(kind: AttachmentTitlePersistenceKeys.Kind) -> [String: String] {
+        // C-47 — READ-ONLY. This used to copy the shared titles into the
+        // per-identity store and DELETE the shared store on the first Feed
+        // search, which emptied `AddEditSessionView`'s titles and hid every title
+        // written since. It now merges exactly as `SessionDetailView` and
+        // `BackendShim` do: shared, with any per-identity value over it.
         let defaults = UserDefaults.standard
-        if let userID = feedSearchNamespaceUserID() {
-            let namespacedKey = AttachmentTitlePersistenceKeys.namespacedKey(for: kind, userID: userID)
-            if let namespaced = defaults.dictionary(forKey: namespacedKey) as? [String: String] {
-                return namespaced
-            }
-            let legacyKey = AttachmentTitlePersistenceKeys.legacyKey(for: kind)
-            if let legacy = defaults.dictionary(forKey: legacyKey) as? [String: String] {
-                defaults.set(legacy, forKey: namespacedKey)
-                defaults.removeObject(forKey: legacyKey)
-                return legacy
-            }
-            return [:]
-        }
-        return (defaults.dictionary(forKey: AttachmentTitlePersistenceKeys.legacyKey(for: kind)) as? [String: String]) ?? [:]
+        let shared = (defaults.dictionary(forKey: AttachmentTitlePersistenceKeys.legacyKey(for: kind)) as? [String: String]) ?? [:]
+        guard let userID = feedSearchNamespaceUserID() else { return shared }
+        let namespacedKey = AttachmentTitlePersistenceKeys.namespacedKey(for: kind, userID: userID)
+        let scoped = (defaults.dictionary(forKey: namespacedKey) as? [String: String]) ?? [:]
+        return shared.merging(scoped) { _, scopedValue in scopedValue }
     }
 
     private func localAttachmentSearchTerms(for session: Session, audioTitles: [String: String], videoTitles: [String: String]) -> [String] {

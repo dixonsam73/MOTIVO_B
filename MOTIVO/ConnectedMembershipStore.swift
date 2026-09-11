@@ -94,6 +94,7 @@ final class ConnectedMembershipStore: ObservableObject {
 
     private var hasStarted = false
     private var transactionUpdatesTask: Task<Void, Never>?
+    private var storefrontUpdatesTask: Task<Void, Never>?
     private var entitlementRefreshTask: Task<MembershipState, Never>?
 
     func start() {
@@ -101,6 +102,7 @@ final class ConnectedMembershipStore: ObservableObject {
         hasStarted = true
 
         startTransactionObservation()
+        startStorefrontObservation()
 
         Task {
             await loadProducts()
@@ -265,6 +267,25 @@ final class ConnectedMembershipStore: ObservableObject {
 
                 await transaction.finish()
                 await refreshEntitlement(forceAfterCurrent: true)
+            }
+        }
+    }
+
+    /// Hardening, separate from C-42's historical observation (measured on
+    /// Release, not reproduced, cause unexplained). Products load once at
+    /// `start()`; if the member's App Store storefront changes while the app
+    /// runs, reload them so the membership screen shows that storefront's
+    /// prices. StoreKit's own `Storefront.updates` reports the change.
+    ///
+    /// Known edge, left deliberately: `loadProducts()` returns early while a
+    /// load is in flight, so a change landing during one is not reloaded.
+    private func startStorefrontObservation() {
+        guard storefrontUpdatesTask == nil else { return }
+
+        storefrontUpdatesTask = Task { @MainActor in
+            for await _ in Storefront.updates {
+                guard !Task.isCancelled else { return }
+                await loadProducts()
             }
         }
     }
