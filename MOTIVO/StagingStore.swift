@@ -133,21 +133,31 @@ enum StagingStore {
             DispatchQueue.global(qos: .utility).async {
                 do {
                     let fm = FileManager.default
-                    let dir = abs.deletingLastPathComponent()
-                    let tmp = dir.appendingPathComponent(".tmp_\(UUID().uuidString)")
-                    if fm.fileExists(atPath: tmp.path) { try? fm.removeItem(at: tmp) }
-                    try moveOrCopy(sourceURL: sourceURL, to: tmp)
-                    _ = try fm.replaceItemAt(abs, withItemAt: tmp, backupItemName: nil, options: [.usingNewMetadataOnly])
-
+                    let newExt = sourceURL.pathExtension
                     var newRef = ref
-                    let finalURL = abs
-                    if finalURL.lastPathComponent != abs.lastPathComponent {
-                        newRef = StagingStore.refByChangingPath(ref, to: relativePath(for: finalURL))
+                    if !newExt.isEmpty && newExt.lowercased() != abs.pathExtension.lowercased() {
+                        // C-85 — the file must be named for what it now contains (a trim of
+                        // a `.mov` recording is MP4). The new file is placed first, then the
+                        // ref points at it, then the old container goes: no step leaves the
+                        // recording without a referenced file.
+                        let target = abs.deletingPathExtension().appendingPathExtension(newExt)
+                        if fm.fileExists(atPath: target.path) { try? fm.removeItem(at: target) }
+                        try moveOrCopy(sourceURL: sourceURL, to: target)
+                        newRef = StagingStore.refByChangingPath(ref, to: relativePath(for: target))
+                        var list = loadRefs()
+                        if let idx = list.firstIndex(where: { $0.id == ref.id }) { list[idx] = newRef }
+                        saveRefs(list)
+                        try? fm.removeItem(at: abs)
+                    } else {
+                        let dir = abs.deletingLastPathComponent()
+                        let tmp = dir.appendingPathComponent(".tmp_\(UUID().uuidString)")
+                        if fm.fileExists(atPath: tmp.path) { try? fm.removeItem(at: tmp) }
+                        try moveOrCopy(sourceURL: sourceURL, to: tmp)
+                        _ = try fm.replaceItemAt(abs, withItemAt: tmp, backupItemName: nil, options: [.usingNewMetadataOnly])
+                        var list = loadRefs()
+                        if let idx = list.firstIndex(where: { $0.id == ref.id }) { list[idx] = newRef }
+                        saveRefs(list)
                     }
-
-                    var list = loadRefs()
-                    if let idx = list.firstIndex(where: { $0.id == ref.id }) { list[idx] = newRef }
-                    saveRefs(list)
 
                     cont.resume(returning: newRef)
                 } catch {

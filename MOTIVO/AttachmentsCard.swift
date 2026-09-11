@@ -162,6 +162,8 @@ struct AttachmentsCard: View {
                                             .appendingPathComponent(att.id.uuidString)
                                             .appendingPathExtension("mov")
                                         try? FileManager.default.removeItem(at: tmp)
+                                        // C-85 — a trimmed video's surrogate is `.mp4`.
+                                        try? FileManager.default.removeItem(at: tmp.deletingPathExtension().appendingPathExtension("mp4"))
                                         
                                         // Also remove any stray copies created in Documents by older replace paths
                                         if let docs = FileManager.default.urls(for: .documentDirectory,

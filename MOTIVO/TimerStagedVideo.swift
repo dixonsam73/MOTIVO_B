@@ -20,8 +20,12 @@ struct TimerStagedVideo: Identifiable, Equatable {
     /// recorder's output; afterwards it is the staging file.
     var fileURL: URL
 
-    /// C-85 — PRE-CHANGE STAND-IN, NO CALLER. Today every staged video is
-    /// treated as QuickTime; the implementation commit derives the format from
-    /// the file itself.
-    static func format(forFile url: URL) -> MediaFormat { .mov }
+    /// C-85 — a staged video's format comes from ITS OWN FILE: the trim tool
+    /// writes MP4, the recorder writes QuickTime. Nothing is transcoded; every
+    /// name and declared type follows the bytes. An unrecognised extension
+    /// falls back to the recorder's container.
+    static func format(forFile url: URL) -> MediaFormat {
+        if let format = MediaFormat.from(url: url), format.kind == .video { return format }
+        return .mov
+    }
 }

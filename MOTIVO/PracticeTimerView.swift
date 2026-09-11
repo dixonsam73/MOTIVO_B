@@ -4273,13 +4273,12 @@ private func loadPracticeDefaultsIfNeeded() {
                 .appendingPathExtension(ext)
             try? fm.removeItem(at: url)
         }
-        // Purge video surrogates
+        // Purge video surrogates — C-85: under the truthful extension, and any
+        // legacy `.mov` copy.
         for att in stagedVideos {
-            let ext = "mov"
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent(att.id.uuidString)
-                .appendingPathExtension(ext)
-            try? fm.removeItem(at: url)
+            try? fm.removeItem(at: videoSurrogateURL(for: att))
+            try? fm.removeItem(at: FileManager.default.temporaryDirectory
+                .appendingPathComponent(att.id.uuidString).appendingPathExtension("mov"))
         }
         // Clear cached video thumbnails when purging staged items
         videoThumbnails.removeAll()
@@ -4291,7 +4290,7 @@ private func loadPracticeDefaultsIfNeeded() {
         let tmp = FileManager.default.temporaryDirectory
         guard let items = try? fm.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil) else { return }
         // Match files like <UUID>.mov, <UUID>.m4a, <UUID>.jpg, <UUID>_poster.jpg
-        let pattern = "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(_poster)?\\.(mov|m4a|jpg)$"
+        let pattern = "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(_poster)?\\.(mov|mp4|m4a|jpg)$"
         let uuidRegex = try? NSRegularExpression(pattern: pattern)
         var removed = 0
         for url in items {
@@ -4672,14 +4671,14 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
         // C-84 — the viewer keeps its `tmp/<id>.mov` surrogate (URL → id is by
         // file stem), made by COPYING THE FILE, never by reading it into memory.
         // Its cost is logged, so it is measured rather than assumed.
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
+        let url = videoSurrogateURL(for: video)
         let fm = FileManager.default
         let started = Date()
         do {
             if fm.fileExists(atPath: url.path) { try fm.removeItem(at: url) }
             try fm.copyItem(at: stagedVideoFileURL(video), to: url)
             let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            PracticeTimerDiagnostics.notice("Practice Timer video surrogate • ms=\(Int(Date().timeIntervalSince(started) * 1000)) • bytes=\(bytes)")
+            PracticeTimerDiagnostics.notice("Practice Timer video surrogate • ms=\(Int(Date().timeIntervalSince(started) * 1000)) • bytes=\(bytes) • ext=\(url.pathExtension)")
             attachmentViewer = PTVViewerURL(url: url, kind: .video)
         } catch {
             print("Failed to prepare video for viewer: \(error)")
@@ -4693,6 +4692,13 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
         return video.fileURL
     }
 
+    /// C-85 — the viewer's `tmp/<id>.<ext>` surrogate, named for what the file
+    /// really is. URL → id stays by stem.
+    func videoSurrogateURL(for video: TimerStagedVideo) -> URL {
+        let ext = TimerStagedVideo.format(forFile: stagedVideoFileURL(video)).fileExtension
+        return FileManager.default.temporaryDirectory.appendingPathComponent(video.id.uuidString).appendingPathExtension(ext)
+    }
+
     func stagedKind(for id: UUID) -> AttachmentKind? {
         if stagedVideos.contains(where: { $0.id == id }) { return .video }
         if stagedAudio.contains(where: { $0.id == id }) { return .audio }
@@ -4704,11 +4710,15 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
     /// bytes are read (existing behaviour, outside the relaunch loss): once.
     func makeReviewPrefill() -> [StagedAttachment] {
         let videos: [StagedAttachment] = stagedVideos.compactMap { video in
-            guard let data = try? Data(contentsOf: stagedVideoFileURL(video)) else {
+            let url = stagedVideoFileURL(video)
+            guard let data = try? Data(contentsOf: url) else {
                 PracticeTimerDiagnostics.notice("Practice Timer hand-off • a staged video file could not be read")
                 return nil
             }
-            return StagedAttachment(id: video.id, data: data, kind: .video)
+            // C-85 — the video's REAL format travels with it: a trim is MP4, a
+            // recording QuickTime. Post-record details persists and uploads from it.
+            return StagedAttachment(id: video.id, data: data, kind: .video,
+                                    sourceFormat: TimerStagedVideo.format(forFile: url))
         }
         return stagedImages + stagedAudio + videos
     }
@@ -5050,7 +5060,10 @@ private func openAudioViewer(_ id: UUID) {
                         self.stagedVideos[idx].fileURL = replacedURL
                     }
                     // The viewer re-copies its surrogate on the next open.
-                    _ = try? fm.removeItem(at: fm.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov"))
+                    // C-85 — drop the copies under BOTH names (a replace can change the container).
+                    for ext in ["mov", "mp4"] {
+                        _ = try? fm.removeItem(at: fm.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension(ext))
+                    }
                     if let thumb = self.generateVideoThumbnail(from: replacedURL) {
                         self.videoThumbnails[id] = thumb
                         if let jpg = thumb.jpegData(compressionQuality: 0.85) {

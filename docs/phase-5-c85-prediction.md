@@ -122,3 +122,13 @@ the affected steps. The session currently staged on the device carries a recorde
 
 **Closure:** N1–N4 met. C-85 closes with that evidence; **C-84's acceptance then
 continues.**
+
+## 5. RESULT — automated gates
+
+| # | Predicted | Observed | Verdict |
+|---|---|---|---|
+| **N1** | 282 declared; exactly #1, #3, #5 and #6 fail; the controls pass | **282 declared, 278 passed, 4 failed** — exactly those four; each message names the defect, e.g. `"mov" is not equal to "mp4"`. Prediction committed first (`8c12ed1`) | **MET** |
+| **N2** | 282 / 282 | **282 declared, 282 passed**, nothing else | **MET** |
+| **N3** | Debug 177 / Release 165, sets identical | **Both clean builds succeeded, 177 and 165, both sets identical** | **MET** |
+
+**N4 (device) follows.**
