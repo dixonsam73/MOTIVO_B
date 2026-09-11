@@ -248,3 +248,113 @@ exist.**
 **Those, plus the C-84 kill procedure, are then repeated after the change,
 inverted.** A failed Save cannot be induced on device, so it is covered by a unit
 test and a structural guard.
+
+### 6.7 PRE-CHANGE DEVICE OBSERVATIONS — 2026-09-11
+
+**Rig:** Device B, Études Dev, throwaway clips only.
+
+**Predictions:** source predictions committed at `7cb76eb` §6.4. **Both confirmed.**
+
+**Method:** read-only snapshots with `c84-snap.sh`. **All in ONE process, pid
+32736**, so neither result involves the relaunch wipe.
+
+**O1 — swipe-down of the review sheet: CONFIRMED, the recording is lost.**
+- **Before** (O1pre, 12:15:34Z):
+  - `2026sep11_13:15.m4a` (166,581 B), ref `5922AB47`;
+  - `stagedAudioIDs` names it; the timer is running.
+- **The action:** Finish, then swipe the review sheet down.
+- **Screen:** the timer reset, no clip.
+- **After** (O1post, 12:16:18Z):
+  - **the file is deleted; `staged.json` is empty;**
+  - the timer keys and staged-id lists are removed;
+  - `sessionDiscarded = true`, `sessionActive = false`.
+
+**O2 — "Back to Timer", then leave and return: CONFIRMED, the recording is lost.**
+- **Before-snapshot: MISSED.** The step was taken before it could be captured.
+  Recorded as a gap. Recording writes the file and its ref together (O1pre, S1),
+  so **an id with no file and no ref** at O2mid means both were removed after
+  recording.
+- **The action:** Finish, then the back chevron.
+- **Screen:** the timer paused at 8 s; **the clip still shown.**
+- **Mid** (O2mid, 12:17:48Z):
+  - **no file, and no ref** for the clip;
+  - `stagedAudioIDs = ["51F08534-…"]` still names it;
+  - `accumulated = 8`, paused.
+  - **The recording existed only in memory.**
+- **The action:** to the Home Screen and straight back — same pid, so no relaunch.
+- **Screen:** paused at 8 s; **the clip gone.**
+- **After** (O2post, 12:20:18Z): as O2mid. **The in-memory copy was dropped by
+  hydration.**
+
+**Found during O2 — a latent path, source-backed.** `PracticeTimer.sessionDiscarded`
+was **still `true` at O2mid and O2post**, left over from O1's swipe discard, even
+though a new session had been started since. It is consumed only by the timer
+view's `onAppear` (`:1763`), where it runs `clearAllStagingStoreRefs()`. **A
+leftover flag can therefore clear a LATER session's staging the next time the view
+appears.** The implementation must not delete on this flag at a later appearance.
+
+### 6.8 RESET — what it reaches and clears today
+
+**Where it is reachable.** TimerCard offers:
+- **idle:** Start;
+- **running:** Pause, Finish;
+- **paused:** Resume, Finish, **Reset**.
+
+**Reset is not shown while idle.** A member who stages media without starting the
+timer reaches it only through Start → Pause → Reset. **FLAGGED for decision.**
+
+**What `reset()` clears:**
+- pause, which also stops the drone and metronome;
+- `clearPersistedTimer`;
+- `clearPersistedStagedAttachments` — the staged-id lists, `videoTitles` and
+  `selectedThumbnailID`;
+- **`clearPersistedTasks`** — the task pad **on disk only**. The on-screen
+  `taskLines` are untouched, so they disappear at a later relaunch;
+- `resetUIOnly` — elapsed time, score/page tracking, the thread label, activity
+  back to Practice, activity detail;
+- the in-memory `videoTitles` and the session id.
+
+**What it does NOT clear:** staged files, `staged.json` refs, or the in-memory
+staged arrays. The reconciliation can resurrect them.
+
+**The consequence for D7's copy and trigger.** **A Reset with nothing staged
+already destroys member-typed task-pad content, without confirmation.**
+FLAGGED — the account holder's assumption that such a Reset "may remain
+immediate" holds only if the task pad is empty.
+
+### 6.9 FOUND WHILE SIZING P2 — two trim paths and the attachments card (source-established, NOT device-observed)
+
+**"Trim → Save as new" loses the new clip.**
+- `handleTrimSaveAsNew` (`:4883–4966`) makes a new staged item under a new UUID
+  **in memory only**.
+- It seeds a `tmp` surrogate, persists the id list, and deletes its temp file.
+- **It calls no `StagingStore` API, so there is no staging file and no ref.**
+- The next hydration rebuilds from refs, so the new clip **vanishes on the next
+  return to the app, or on relaunch** — O2's shape.
+- **In scope of the invariant.** It is staged media removed without Save or a
+  confirmed discard.
+
+**"Trim → Replace original" can lose the original.**
+- `handleTrimReplaceOriginal` writes over the staging file in place, **but calls
+  `removeItem(at: finalURL)` BEFORE `moveItem`**. Its `catch` then deletes the
+  trimmed temp as well.
+- **A failed move leaves neither copy.**
+- `StagingStore.replace` already does this atomically (`replaceItemAt`), and the
+  timer does not use it.
+
+**P2 reaches `AttachmentsCard`.**
+- It takes `@Binding var stagedVideos: [StagedAttachment]` (`AttachmentsCard:21`)
+  and merges images and videos into its visual tiles (`:55`).
+- It calls `UIImage(data: att.data)` on each tile (`:62`), which for a video is an
+  attempted decode over the whole file, falling back to the thumbnail.
+- **A distinct file-backed video type** means about 5 line changes there. It is
+  preferred over an empty-`Data` sentinel, because **the compiler then finds every
+  video site**. A sentinel's one silent failure is the worst one: a 0-byte video
+  handed to Save.
+
+**The playback and trim constraint.** The viewer maps a URL to an id by file stem
+("LOCKED: URL → UUID mapping is stem-only", `+Sheets:328`). A recorded video's
+staging file is named after the **pre-store** temp UUID, not after its ref id.
+- File-backed playback and trim therefore keep the `tmp/<id>.mov` surrogate.
+- **They create it with `FileManager.copyItem`, which clones on APFS** — no byte
+  load, and effectively no copy cost.
