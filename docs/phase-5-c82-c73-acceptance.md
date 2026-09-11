@@ -1,4 +1,16 @@
-# C-82 + C-73 TYPE 1 — IMPLEMENTATION COMPLETE. DEVICE CHECK OUTSTANDING — NOT CLOSED.
+# C-82 + C-73 TYPE 1 — BOTH RESOLVED 2026-09-11.
+
+> **CLOSURE, 2026-09-11.**
+> - **C-82** was closed by the omission-identity fix, not by the fix recorded
+>   below, which the device falsified. See
+>   `phase-5-c82-omission-identity-acceptance.md`.
+> - **C-73 Type 1** was device-verified in §4's step-4 record.
+> - Both closed at the unit's final census: Run restored to Release,
+>   **256 / 256**, and the scheme guard passing.
+>
+> *Original heading, preserved:* "IMPLEMENTATION COMPLETE. DEVICE CHECK
+> OUTSTANDING — NOT CLOSED." The text below is kept as the record of what was
+> believed at each point.
 
 > **CORRECTION 2026-09-12 — THE C-82 DEVICE CHECK FALSIFIED THE FIX (K5).** On
 > Device B a 32-minute WAV saved from `PostRecordDetailsView` with Share on was

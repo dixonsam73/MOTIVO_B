@@ -1,4 +1,15 @@
-# C-82 (REOPENED) — OMISSION IDENTITY. DEVICE B RETEST PASSED 2026-09-11 (§5). NOT CLOSED — RELEASE RESTORE AND SCHEME GUARD OUTSTANDING.
+# C-82 — OMISSION IDENTITY. RESOLVED 2026-09-11.
+
+> **CLOSED ON ITS STATED CONDITIONS, 2026-09-11:**
+> - the Device B retest passed (§5);
+> - the account holder restored Run → Release, and the scheme is byte-identical
+>   to the committed blob `013cc35`;
+> - the final census reads **256 declared, 256 passed**, with
+>   `testRunActionBuildsRelease` and `testRunActionPinsNoStoreKitConfiguration`
+>   both passing.
+>
+> *Heading at the retest, preserved:* "DEVICE B RETEST PASSED 2026-09-11 (§5).
+> NOT CLOSED — RELEASE RESTORE AND SCHEME GUARD OUTSTANDING."
 
 > *Previous heading, preserved:* "IMPLEMENTED. DEVICE RETEST OUTSTANDING — NOT
 > CLOSED." §4 below is the procedure as written before the run; §5 is the result.
