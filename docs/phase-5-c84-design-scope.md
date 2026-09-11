@@ -137,3 +137,114 @@ only together with P2 and P3.
 **C-3** is re-dispositioned afterwards. Whatever P2 does not cover (the audio and
 image re-reads, and the background purge that clears thumbnails) is re-measured,
 not assumed.
+
+---
+
+## 6. REVISION 2026-09-11 — decisions, three tightenings, and the verified destructive paths
+
+**The sections above are kept as first written. Where this section differs, this
+section governs.**
+
+### 6.1 Decisions recorded (account holder)
+
+| Decision | Choice |
+|---|---|
+| **D1** | Running. Restore a running timer as running, with elapsed time from the persisted start — exactly as when the process survives. **No separate killed-vs-suspended semantics** |
+| **D2** | **Video only** becomes file-backed |
+| **D3** | **No automatic expiry.** A session is preserved until an explicit session-ending action |
+| **D4** | Accept the loss of the in-memory score/page tracking and the provisional thread label on recovery. **The consequence is reduced post-record suggestion context, not lost media** |
+| **D5** | **Force-quit preserves** |
+
+**Boundary, recorded explicitly.** File-backed video **still loads its bytes at the
+hand-off to post-record details** (`prefillAttachments`). That is existing
+behaviour, it is outside the relaunch-loss mechanism, and **it is not changed in
+C-84.**
+
+### 6.2 P4 — NARROWED
+
+**Automatic cleanup removes only two things:**
+- **empty dated folders**;
+- **refs whose backing file is already absent.**
+
+**Unreferenced media is RETAINED.**
+- **Verified in source:** `StagingStore.saveNew` moves the media into
+  `Staging/` (`:87`) **before** writing its ref to `staged.json` (`:113–115`).
+- A process death between the two leaves a real recording that no ref names.
+- **Deleting unreferenced media at launch would make that partial commit
+  permanent.**
+- **Orphan-media cleanup is dispositioned separately, not in C-84.**
+
+### 6.3 P3 — REPLACED by decode-free hydration (no marker)
+
+**Why the marker is not needed.** P2 removes the one known hydration crash cause —
+reading staged video wholesale. **The smaller safe path is to take all decoding
+out of hydration**, rather than detect a crash after the fact. After P2, hydration:
+- builds video items from refs only (file URL and poster path) and **reads no video
+  bytes**;
+- shows the stored **poster JPEG** as the thumbnail — every in-app recording gets
+  one at staging (`stageVideoURL`, `:4616–4627`) — **with no `AVAssetImageGenerator`
+  decode**, and a placeholder tile if a poster is missing;
+- reads audio and image bytes as today (D2). These are bounded and small;
+- **does not probe audio with `AVAudioPlayer`.** The duration comes from the stored
+  ref; if absent, none is shown.
+
+**The account holder's four questions, answered for this design:**
+- **What the Practice Timer shows after a relaunch:** the restored timer and its
+  attachments, as before. A video with no stored poster shows a placeholder tile.
+  **No new UI.**
+- **How and when the marker clears:** there is no marker.
+- **Whether and how the member can retry:** there is nothing to retry. Hydration
+  performs no decode, so there is no failure mode to fall back from.
+- **How preserved recordings reach Save:** unchanged. Finish → review → Save. The
+  hand-off loads the video bytes (§6.1).
+
+**Residual.** A media file that crashes AVFoundation deterministically can still
+crash when the member **plays** it, or when post-record details decodes it for
+display. **That is member-triggered, not a launch loop, and the item can be
+removed on its own** (`+Sheets:366`).
+
+**If defence in depth is wanted anyway,** the earlier marker can be layered on
+later. **It is not proposed for C-84.**
+
+### 6.4 DESTRUCTIVE PATHS — VERIFIED IN SOURCE (not yet device-observed)
+
+| Action | What the member does | Today | Under the rule |
+|---|---|---|---|
+| **Save, success** | Taps Save | `onSaved` clears the session; the `!sessionActive` launch block removes staging at the next appearance | **Keep** — the canonical end |
+| **Save, FAILURE** | Taps Save; Core Data throws | `saveToCoreData`'s `catch` rolls back without `onSaved`; `commitSaveAndDismiss` **still dismisses** (`:433`); the timer's no-flag branch runs → **recordings deleted** | **Change:** preserve. Do not dismiss on failure; nothing is deleted |
+| **Swipe the review sheet down** | A gesture — **no `interactiveDismissDisabled` on this sheet** (the only two in the app are `AppSetUpView`, `:1590`, and `MediaTrimView`) | The timer's "Intentional discard" branch (`:2130–2158`) → **recordings deleted** | **Change: preserve** — not an explicit Discard |
+| **"Back to Timer" chevron** (post-record details, `:1280`) | Taps back | Post-record details takes the timer's attachments **with the same ids** (`:1386`), then calls `StagingStore.removeMany(ids:)`, which **deletes the files and refs** (`:429`). The timer keeps its in-memory copies, so the clips look present **until the next hydration**, when they vanish | **Change: preserve** — remove the deletion |
+| **Reset** (TimerCard, paused state, beside Resume/Finish; **no confirmation**) | Taps Reset | `reset()` (sole caller `:2729`) clears the timer, tasks and persisted id lists — **not** the files, refs or in-memory arrays; the reconciliation can resurrect them | **Decision D7** |
+| **Quit** (toolbar) | — | **Unreachable.** Shown only when `!isHomePresentation`, and the only instance is `.home` | Leave untouched. A Phase 6 cleanup candidate |
+| **New process** | None | **Deleted** (C-84, reproduced) | **Change: restore** |
+| **`willTerminate`** | None — a termination | Deleted when `ephemeralSessionHasMedia_v1` is set | **Change: preserve** |
+
+**The consequence.** **The app has no explicit, confirmed "discard this session"
+action today.** The swipe-down is the de facto discard. Under D3 a session is
+preserved until an explicit ending, so **exactly one explicit discard has to
+exist.**
+
+### 6.5 Decisions still required
+
+| # | Decision | Options | Recommendation |
+|---|---|---|---|
+| **D6** | Swiping the review sheet down | preserve — the same as Back to Timer | **Preserve.** It is a gesture, not an explicit Discard |
+| **D7** | The explicit whole-session discard | **(a)** Reset asks for confirmation when recordings are staged — *"Reset the timer and discard N recordings?"* — and discards on confirm; with nothing staged it behaves as today. **(b)** A "Discard session" button in review. **(c)** None: remove items one by one; Reset clears the timer only | **(a)** — one confirmation, on a control that already exists and already means "start over" |
+| **D8** | A failed Save | keep the member in review, delete nothing | **Keep in review.** Whether an error message is shown is separate, and is not C-84 |
+
+### 6.6 Final implementation shape (pending D6–D8)
+
+| Part | Change |
+|---|---|
+| **P1** | New-pid block restores instead of deleting. `willTerminate` stops deleting. The swipe and "Back to Timer" preserve. A failed Save does not dismiss. **The only deleters: a successful Save** (via the `!sessionActive` block) **and the D7 discard** |
+| **P2** | File-backed staged video, about 9 sites. The hand-off loads bytes (§6.1) |
+| **P3** | Decode-free hydration (§6.3) |
+| **P4** | Cleanup narrowed (§6.2) |
+
+**Before-controls on device, before any change**, with a throwaway clip each:
+- the swipe-down deletes;
+- "Back to Timer", then background and return, loses the clip.
+
+**Those, plus the C-84 kill procedure, are then repeated after the change,
+inverted.** A failed Save cannot be induced on device, so it is covered by a unit
+test and a structural guard.
