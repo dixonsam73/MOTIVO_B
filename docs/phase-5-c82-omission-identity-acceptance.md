@@ -1,4 +1,7 @@
-# C-82 (REOPENED) — OMISSION IDENTITY. IMPLEMENTED. DEVICE RETEST OUTSTANDING — NOT CLOSED.
+# C-82 (REOPENED) — OMISSION IDENTITY. DEVICE B RETEST PASSED 2026-09-11 (§5). NOT CLOSED — RELEASE RESTORE AND SCHEME GUARD OUTSTANDING.
+
+> *Previous heading, preserved:* "IMPLEMENTED. DEVICE RETEST OUTSTANDING — NOT
+> CLOSED." §4 below is the procedure as written before the run; §5 is the result.
 
 **Status: implemented, not closed.**
 - Nothing below is device evidence.
@@ -136,3 +139,63 @@ container. Items X1 and X2 must carry `authorisedOmissions` = [B1] and [B2],
 **Old queued test publishes are left alone.** They will keep flushing and
 failing as before (C-76, C-83). They are distinguishable by postID from X1
 and X2.
+
+## 5. Device B retest — RESULT, 2026-09-11
+
+Device B, Études Dev, Force Connected. The account holder ran the device; the
+queue file was copied read-only with `devicectl copy from`. It held 17 items.
+
+| Path | Evidence | Verdict |
+|---|---|---|
+| **1 · PRDV** (X1 `3CC35AB5`) | `staged=2A08B0A1… → saved=4A201A19…`; `skipped at upload • postID=3CC35AB5… • attachment=4A201A19…` on every flush; its flush fails only with **403 RLS at the INSERT**, so preparation completed and it **never** hit the size limit; queue file `[4A201A19…]` | **PASS** |
+| **2 · AESV, new session** (X2 `C3FEE085`) | `staged=5EFAAF75… → saved=503D288A…`; skip lines naming `503D288A`; fails only with 403; queue file `[503D288A…]` | **PASS** |
+| **3 · AESV, attachment saved before editing** | dialog appeared, as predicted; `saved=503D288A… unchanged`; queue file holds `[503D288A…]` after the re-save | **PASS** — not remapped |
+| **Queue file, whole** | neither staged id (`2A08B0A1`, `5EFAAF75`) appears anywhere | **PASS** |
+
+**The 1904s conversions are `AAC7D156`, established by post id and not by
+duration.**
+- Its flush fails with `Connected representation of attachment 8E19903F… is
+  61081909 bytes, over the 52428800 byte limit`.
+- Its queued consent names `3BA63A87`. That is a staged id queued by the pre-fix
+  build, and it can never match.
+- **This is C-82's original mechanism, preserved on an item the fix cannot
+  reach.**
+
+**§4's own check was badly designed, and that is recorded.** The conversion log
+line carries no post id, and an old 32-minute item was still queued, so "no
+1904s line" could not discriminate between old and new items. The attribution
+comes from the failure lines instead.
+
+**Not exercised:** a flush observed after Path 3's re-save. No flush ran in the
+window that was watched. The queue file holds `[B2]` after the re-save.
+
+**`35F7C0BD` `['7CCD6A3B']`, 10:40 UTC — not attributed and not scored.**
+- It is the tester's **first Path-1 attempt**, interrupted when the app lost its
+  Xcode connection and stopped. The app was restarted and Path 1 repeated,
+  which is X1.
+- Its flush reaches the server INSERT (403) and never converts, so it shows **no
+  violation** of the invariant.
+- **Whether `7CCD6A3B` names a saved attachment was not established:** no skip
+  line was captured for it.
+
+**Residue, deliberately left in place:**
+- **`AAC7D156`** converts for ~15 s and fails on every flush. It is a pre-fix
+  item the fix cannot repair.
+- **`D8A2D2AA`** is a 204 s WAV re-converted on every flush (C-76).
+- **12 older items** fail with 403 (C-83's shape).
+
+Removing any of them is fixture cleanup, for a separate decision.
+
+**Date correction.** The falsification banner in `phase-5-c82-c73-acceptance.md`
+and the C-82 row both date the falsifying run **2026-09-12**. The evidence says
+**2026-09-11**:
+- the queue file dates that run's session (`AAC7D156`) at **2026-09-11 07:50
+  UTC**;
+- `ec62de5` was committed at 2026-09-11 07:57 UTC.
+
+The original text is kept, and corrected here.
+
+**Remaining before C-82 closes:**
+1. The account holder restores Run → Release.
+2. The full census reads **256 / 256**, with `SchemeConfigurationGuardTests`
+   passing.
