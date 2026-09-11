@@ -250,9 +250,14 @@ final class C84SessionPreservationTests: XCTestCase {
         XCTAssertFalse(s.contains("prefillAttachments: (stagedImages + stagedAudio + stagedVideos)"))
     }
 
+    /// PracticeTimerView's 9: the post-Save `!isActive` block, the unreachable
+    /// Quit (5), `discardSessionCompletely` (2) and the `clearAllStagingStoreRefs`
+    /// helper body. **The prediction said 10 — a miss, recorded:** its "16 today"
+    /// counted the helper's declaration line, which this rule excludes. The true
+    /// baseline was 15, and 15 − 8 + 2 = 9. Verified site by site.
     func testWholeSessionDeletionSitesArePinned() {
         let expected: [String: Int] = [
-            "PracticeTimerView.swift": 10, "PracticeTimerView+Sheets.swift": 1,
+            "PracticeTimerView.swift": 9, "PracticeTimerView+Sheets.swift": 1,
             "PracticeTimerView+AudioPlayback.swift": 1, "AttachmentsCard.swift": 2,
             "PostRecordDetailsView.swift": 1,
         ]

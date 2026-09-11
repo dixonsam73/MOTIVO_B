@@ -18,7 +18,7 @@ private enum PracticeTimerDebug {
 struct AttachmentsCard: View {
     @Binding var stagedImages: [StagedAttachment]
     @Binding var stagedAudio: [StagedAttachment]
-    @Binding var stagedVideos: [StagedAttachment]
+    @Binding var stagedVideos: [TimerStagedVideo]
     
     @Binding var selectedThumbnailID: UUID?
     @Binding var trimItem: StagedAttachment?
@@ -52,11 +52,12 @@ struct AttachmentsCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if !stagedImages.isEmpty || !stagedVideos.isEmpty {
-                let visuals = stagedImages + stagedVideos
+                // C-84 — videos are file-backed, so tiles are merged by id.
+                let visualIDs: [UUID] = stagedImages.map(\.id) + stagedVideos.map(\.id)
                 let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(visuals, id: \.id) { att in
-                        if stagedImages.contains(where: { $0.id == att.id }) {
+                    ForEach(visualIDs, id: \.self) { attID in
+                        if let att = stagedImages.first(where: { $0.id == attID }) {
                             // Image tile
                             ZStack(alignment: .topTrailing) {
                                 if let ui = UIImage(data: att.data) {
@@ -107,7 +108,7 @@ struct AttachmentsCard: View {
                                 }
                                 .padding(6)
                             }
-                        } else if stagedVideos.contains(where: { $0.id == att.id }) {
+                        } else if let att = stagedVideos.first(where: { $0.id == attID }) {
                             // Video tile
                             ZStack(alignment: .topTrailing) {
                                 // Ensure video tiles sit behind audio rows in hit testing

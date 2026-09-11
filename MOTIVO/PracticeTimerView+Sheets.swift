@@ -178,7 +178,7 @@ extension PracticeTimerView {
                 usedScoreIDsPrefill: usedScoreIDsThisSession,
                 meaningfulScorePagesPrefill: meaningfulScorePagesThisSession,
                 lastMeaningfulScorePagePrefill: lastMeaningfulScorePageThisSession,
-                prefillAttachments: (stagedImages + stagedAudio + stagedVideos),
+                prefillAttachments: reviewPrefill,
                 prefillAttachmentNames: audioTitles,
                 onSaved: {
                     didSaveFromReview = true
@@ -450,21 +450,13 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
             },
            
             onReplaceAttachment: { oldURL, newURL, _ in
-                if let uuid = resolveStagedID(from: oldURL) {
-                    if let item = stagedVideos.first(where: { $0.id == uuid })
-                        ?? stagedAudio.first(where: { $0.id == uuid })
-                        ?? stagedImages.first(where: { $0.id == uuid }) {
-                        handleTrimReplaceOriginal(from: disposableTrimPersistenceURL(from: newURL), for: item)
-                    }
+                if let uuid = resolveStagedID(from: oldURL), let kind = stagedKind(for: uuid) {
+                    handleTrimReplaceOriginal(from: disposableTrimPersistenceURL(from: newURL), id: uuid, kind: kind)
                 }
             },
             onSaveAsNewAttachmentFromSource: { sourceURL, newURL, _ in
-                if let uuid = resolveStagedID(from: sourceURL) {
-                    if let item = stagedVideos.first(where: { $0.id == uuid })
-                        ?? stagedAudio.first(where: { $0.id == uuid })
-                        ?? stagedImages.first(where: { $0.id == uuid }) {
-                        handleTrimSaveAsNew(from: disposableTrimPersistenceURL(from: newURL), basedOn: item)
-                    }
+                if let uuid = resolveStagedID(from: sourceURL), let kind = stagedKind(for: uuid) {
+                    handleTrimSaveAsNew(from: disposableTrimPersistenceURL(from: newURL), sourceID: uuid, kind: kind)
                 }
             },
             canShare: false
@@ -483,10 +475,10 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                         trimItem = nil
                     },
                     onSaveAsNewAttachment: { newURL, _ in
-                        handleTrimSaveAsNew(from: newURL, basedOn: item)
+                        handleTrimSaveAsNew(from: newURL, sourceID: item.id, kind: item.kind)
                     },
                     onReplaceAttachment: { _, newURL, _ in
-                        handleTrimReplaceOriginal(from: newURL, for: item)
+                        handleTrimReplaceOriginal(from: newURL, id: item.id, kind: item.kind)
                     }
                 )
                 .accessibilityLabel("Trim media")

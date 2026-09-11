@@ -64,8 +64,8 @@ enum StagingStore {
                         poster: URL? = nil,
                         id requestedID: UUID? = nil) async throws -> StagedAttachmentRef {
         try bootstrap()
-        // C-84 PRE-CHANGE STAND-IN: `requestedID` is accepted and ignored.
-        let id = UUID()
+        // C-84 — the caller may name the id, so its in-memory item never re-keys.
+        let id = requestedID ?? UUID()
         let ext = preferredExtension(for: sourceURL, kind: kind)
         let dayFolder = dateFolderName(Date())
         let targetDir = baseURL.appendingPathComponent(dayFolder, isDirectory: true)
@@ -160,15 +160,52 @@ enum StagingStore {
 
     static func list() -> [StagedAttachmentRef] { loadRefs() }
 
-    /// C-84 — PRE-CHANGE STAND-IN, NO CALLER. The implementation commit
-    /// replaces this with the narrowed cleanup (empty folders, dangling refs).
+    /// C-84 / P4 — clean up only what is genuinely abandoned: empty folders, and
+    /// refs whose file is already gone. **Unreferenced media is KEPT** —
+    /// `saveNew` writes the file before its ref, so a death between the two
+    /// leaves a real recording that nothing names, and deleting it would make
+    /// that partial commit permanent.
     @discardableResult
-    static func cleanupAbandoned() -> (removedFolders: Int, removedRefs: Int) { (0, 0) }
+    static func cleanupAbandoned() -> (removedFolders: Int, removedRefs: Int) {
+        let fm = FileManager.default
+        var list = loadRefs()
+        let before = list.count
+        list.removeAll { !fm.fileExists(atPath: absoluteURL(for: $0).path) }
+        let removedRefs = before - list.count
+        if removedRefs > 0 { saveRefs(list) }
 
-    /// C-84 — PRE-CHANGE STAND-IN, NO CALLER. The implementation commit
-    /// replaces this with a poster write for a staged video.
+        var removedFolders = 0
+        if let items = try? fm.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.isDirectoryKey]) {
+            for dir in items where (try? dir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                if let contents = try? fm.contentsOfDirectory(atPath: dir.path), contents.isEmpty,
+                   (try? fm.removeItem(at: dir)) != nil {
+                    removedFolders += 1
+                }
+            }
+        }
+        return (removedFolders, removedRefs)
+    }
+
+    /// C-84 — write (or overwrite) a staged video's poster, so a restore that
+    /// decodes nothing still shows the right frame after a trim.
     @discardableResult
-    static func writePoster(for id: UUID, jpeg: Data) -> Bool { false }
+    static func writePoster(for id: UUID, jpeg: Data) -> Bool {
+        var list = loadRefs()
+        guard let idx = list.firstIndex(where: { $0.id == id }) else { return false }
+        let media = absoluteURL(for: list[idx])
+        let posterURL = list[idx].posterPath.map { absoluteURL(forRelative: $0) }
+            ?? media.deletingLastPathComponent()
+                .appendingPathComponent(media.deletingPathExtension().lastPathComponent + "_poster")
+                .appendingPathExtension("jpg")
+        do {
+            try jpeg.write(to: posterURL, options: .atomic)
+        } catch {
+            return false
+        }
+        list[idx].posterPath = relativePath(for: posterURL)
+        saveRefs(list)
+        return true
+    }
 
     static func update(_ ref: StagedAttachmentRef) {
         var list = loadRefs()

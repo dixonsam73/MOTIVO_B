@@ -429,7 +429,9 @@ struct PostRecordDetailsView: View {
     /// The original Save behaviour, unchanged and now reached from one place.
     private func commitSaveAndDismiss() {
         let visibility = isPublic
-        saveToCoreData(visibility: visibility)
+        // C-84 — a failed Save stays in review and deletes nothing: dismissing
+        // here would land in the timer's no-save path.
+        guard saveToCoreData(visibility: visibility) else { return }
         DispatchQueue.main.async { withAnimation(.none) { isPresented = false } }
     }
 
@@ -1278,11 +1280,7 @@ var body: some View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
-                        // Intentional discard: purge any currently staged items for this review
-                        let discardIDs: [UUID] = stagedAttachments.map { $0.id }
-                        if !discardIDs.isEmpty {
-                            StagingStore.removeMany(ids: discardIDs)
-                        }
+                        // C-84 — Back to Timer PRESERVES the session: nothing staged is deleted here.
                         // Also purge any surrogate temp files created for staged items
                         purgeStagedTempFiles()
                         onCancel()
@@ -1813,7 +1811,7 @@ var body: some View {
     }
 
     @MainActor
-    private func saveToCoreData(visibility: Bool) {
+    private func saveToCoreData(visibility: Bool) -> Bool {
         let s = Session(context: viewContext)
         if (s.value(forKey: "id") as? UUID) == nil {
             let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1937,6 +1935,7 @@ var body: some View {
             // Reset local fields after save so next fresh session starts blank
             notes = ""
             selectedDotIndex = nil
+            return true
         } catch {
             // On failure, best-effort: remove any files written during this attempt by scanning attachments without permanent IDs
           
@@ -1950,6 +1949,7 @@ var body: some View {
             viewContext.rollback()
             purgeStagedTempFiles()
             print("Error saving session (timer review): \(error)")
+            return false
         }
     }
 

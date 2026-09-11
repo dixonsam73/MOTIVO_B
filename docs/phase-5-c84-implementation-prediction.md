@@ -261,6 +261,33 @@ a miss, recorded as such.**
 
 **Closure:** M1–M4 met, recorded, and **C-84 closed only on the device result.**
 
+> **PREDICTION MISS — test 20's `PracticeTimerView` pin: predicted 10, actual 9.**
+>
+> **The cause is the baseline, not the code.** "PTV 16" came from a rough
+> `grep -c` that also matched the helper's declaration line,
+> `private func clearAllStagingStoreRefs() {`. The test's own rule excludes
+> that line, so **the true pre-change count was 15**, and 15 − 8 + 2 = **9**.
+>
+> **Verified site by site against `ce1c38c`:**
+> - **Every removed site is intended:** the new-process block, the stale flag,
+>   the review dismissal (3) and termination (3).
+> - **Every remaining site is intended:**
+>   - the post-Save `!isActive` block;
+>   - the unreachable Quit (5, untouched);
+>   - `discardSessionCompletely` (2);
+>   - the helper body.
+>
+> **Resolution:** the pin is re-pointed to 9, with the reason in its doc
+> comment.
+>
+> **The rest of the first post-change run:** 276 declared, 275 passed — all 19
+> previously failing C-84 tests passed, and no existing test changed.
+>
+> **Also recorded as a deviation:** the restore log reports **`headroomMB`**
+> (`os_proc_available_memory`), not `footprintMB`. Reading `phys_footprint`
+> needs `mach_task_self_`, which Swift's concurrency checking flags. The two
+> measure the same thing: headroom = limit − footprint.
+
 ## 6. What this does NOT claim or change
 
 - **A failed-Save error message** — preservation only (D8).

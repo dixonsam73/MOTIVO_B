@@ -11,6 +11,10 @@ struct TimerCard: View {
     let onPause: () -> Void
     let onReset: () -> Void
     let onFinish: () -> Void
+    /// C-84 — offer Reset while idle when there is session content to discard.
+    let showsIdleReset: Bool
+    /// C-84 — this Reset will destroy member content, so it must be confirmed.
+    let resetRequiresConfirmation: Bool
 
     private enum ControlMode: Equatable {
         case idle
@@ -167,6 +171,18 @@ struct TimerCard: View {
                 )
                 .frame(maxWidth: 180)
 
+                // C-84 — Reset is offered whenever there is session content to
+                // discard, even if the timer never started.
+                if showsIdleReset {
+                    controlSlot(
+                        title: "Reset",
+                        background: Color.orange.opacity(0.12),
+                        isInteractive: isInteractive,
+                        action: { requestReset() }
+                    )
+                    .frame(maxWidth: 180)
+                }
+
                 Spacer(minLength: 0)
             }
             .offset(y: -34)
@@ -218,10 +234,22 @@ struct TimerCard: View {
                     background: Color.orange.opacity(0.12),
                     isInteractive: isInteractive,
                     action: {
-                        performControlTransition(to: .idle, action: onReset)
+                        requestReset()
                     }
                 )
             }
+        }
+    }
+
+    /// C-84 — a Reset that destroys member content is confirmed first, so it
+    /// runs without the control transition: the controls follow the timer's
+    /// state once the discard actually happens, and a Cancel leaves them as
+    /// they were.
+    private func requestReset() {
+        if resetRequiresConfirmation {
+            onReset()
+        } else {
+            performControlTransition(to: .idle, action: onReset)
         }
     }
 

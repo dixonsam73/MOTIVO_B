@@ -346,6 +346,11 @@ struct PracticeTimerView: View {
     
     // Review sheet
     @State var showReviewSheet = false
+    // C-84 — the review's attachments, materialised ONCE at Finish. Staged
+    // video bytes are read here, at the hand-off, and nowhere on restore.
+    @State var reviewPrefill: [StagedAttachment] = []
+    @State private var showResetConfirmation = false
+    @State private var pendingDiscardSummary = SessionDiscardSummary()
     @State private var showManualAddSheet: Bool = false
     @State private var showThoughtEditorSheet: Bool = false
     @State private var showScoresLibrary: Bool = false
@@ -421,7 +426,7 @@ struct PracticeTimerView: View {
 
     // --- Inserted video recording and attachments state ---
     @State var showVideoRecorder: Bool = false
-    @State var stagedVideos: [StagedAttachment] = []
+    @State var stagedVideos: [TimerStagedVideo] = []
     @State var videoThumbnails: [UUID: UIImage] = [:]
     @State var videoTitles: [UUID: String] = [:]
     // Remove old video player state:
@@ -1691,27 +1696,17 @@ private func loadPracticeDefaultsIfNeeded() {
             // Detect cold launch by boot ID
             let lastBootID = UserDefaults.standard.string(forKey: sessionBootIDKey)
             if lastBootID != currentBootID {
-                // Fresh process launch (cold start), force clean state
-                stopAttachmentPlayback()
-                clearPersistedStagedAttachments()
-                clearAllStagingStoreRefs()
-                clearPersistedTasks()
-                purgeStagedTempFiles()
-                stagedAudio.removeAll()
-                audioTitles.removeAll()
-                audioAutoTitles.removeAll()
-                audioDurations.removeAll()
-                stagedImages.removeAll()
-                stagedVideos.removeAll()
-                videoThumbnails.removeAll()
-                videoTitles.removeAll()
-                selectedThumbnailID = nil
-                clearPersistedTimer()
-                resetUIOnly()
-                UserDefaults.standard.set(false, forKey: sessionActiveKey)
-                UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
+                // C-84 — A NEW PROCESS IS NOT A DISCARD. iOS reclaims suspended apps,
+                // and a pid cannot tell that from a force-quit, so the unsaved
+                // session — timer and staged media — is kept; the hydration that
+                // already ran in `onAppear` restored it. Only a successful Save or a
+                // confirmed Reset ends a session.
                 UserDefaults.standard.set(currentBootID, forKey: sessionBootIDKey)
             }
+
+            // C-84 / P4 — clean only what is genuinely abandoned: empty folders and
+            // refs whose file is gone. Unreferenced media is KEPT.
+            StagingStore.cleanupAbandoned()
 
             // New sessionActiveKey logic: clear staging etc if no active session, to ensure clean state on fresh launch.
             let isActive = UserDefaults.standard.bool(forKey: sessionActiveKey)
@@ -1759,12 +1754,11 @@ private func loadPracticeDefaultsIfNeeded() {
                 handleAppTerminationCleanup()
             }
 
-            // If last session was explicitly discarded, ensure staging store is empty before hydrating
+            // C-84 — a discard is completed where it is confirmed, so this flag no
+            // longer deletes anything. A stale one (left by the old swipe-down
+            // path) must not clear a LATER session's staging: it is only consumed.
             if UserDefaults.standard.bool(forKey: sessionDiscardedKey) {
-                clearAllStagingStoreRefs()
                 UserDefaults.standard.set(false, forKey: sessionDiscardedKey)
-                UserDefaults.standard.set(false, forKey: sessionActiveKey)
-                UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
             }
 
             // Safety net: if an editing buffer leaked from a previous instance, commit it now before hydrating
@@ -2127,41 +2121,20 @@ private func loadPracticeDefaultsIfNeeded() {
                     }
             }
         }
+        .alert(SessionDiscardSummary.title, isPresented: $showResetConfirmation) {
+            Button(SessionDiscardSummary.confirmTitle, role: .destructive) { discardSessionCompletely() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(pendingDiscardSummary.message ?? "")
+        }
         .onChange(of: showReviewSheet) { oldValue, newValue in
-            // If the review sheet was closed and no save occurred, reset timer for next opening
-            if oldValue == true && newValue == false && didSaveFromReview == false {
-                if didCancelFromReview == true {
-                    // Explicit chevron cancel: do nothing (preserve state)
-                } else {
-                    // Intentional discard: purge staged items associated with this live session
-                    let __discardIDs: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
-                    if !__discardIDs.isEmpty {
-                        StagingStore.removeMany(ids: __discardIDs)
-                    }
-                    
-                    let refsToDelete = StagingStore.list()
-                    clearPersistedTimer()
-                    clearPersistedStagedAttachments()
-                    clearAllStagingStoreRefs()
-                    UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
-                    UserDefaults.standard.set(false, forKey: sessionActiveKey)
-                    clearPersistedTasks()
-                    resetUIOnly()
-                    stagedAudio.removeAll()
-                    audioTitles.removeAll()
-                    stagedImages.removeAll()
-                    stagedVideos.removeAll()
-                    videoThumbnails.removeAll()
-                    selectedThumbnailID = nil
-                    StagingStore.deleteFiles(for: refsToDelete)
-                    purgeStagedTempFiles()
-                    UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
-                    UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
-                }
-                didCancelFromReview = false
-            }
-
+            // C-84 — DISMISSAL WITHOUT EXPLICIT DESTRUCTIVE CONFIRMATION PRESERVES
+            // THE SESSION. A swipe-down, "Back to Timer" and a failed Save all come
+            // back here with the timer and staged media intact; a successful Save
+            // clears the session through `onSaved`.
             if oldValue == true && newValue == false {
+                didCancelFromReview = false
+                reviewPrefill = []
                 recomputeSessionMetaTint()
             }
         }
@@ -2726,8 +2699,10 @@ private func loadPracticeDefaultsIfNeeded() {
             isRunning: isRunning,
             onStart: { start() },
             onPause: { pause() },
-            onReset: { reset() },
-            onFinish: { finish() }
+            onReset: { requestReset() },
+            onFinish: { finish() },
+            showsIdleReset: hasDiscardableSessionContent,
+            resetRequiresConfirmation: hasDiscardableSessionContent
         )
     }
 
@@ -3844,6 +3819,61 @@ private func loadPracticeDefaultsIfNeeded() {
         UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
     }
 
+    // MARK: - C-84 Reset: the one explicit, confirmed whole-session discard
+
+    func currentDiscardSummary() -> SessionDiscardSummary {
+        SessionDiscardSummary(
+            recordings: stagedAudio.count,
+            videos: stagedVideos.count,
+            photos: stagedImages.count,
+            hasTasks: SessionDiscardSummary.memberTaskContent(taskLines, autoTexts: autoTaskTexts)
+        )
+    }
+
+    var hasDiscardableSessionContent: Bool { currentDiscardSummary().needsConfirmation }
+
+    /// A Reset that would destroy nothing the member created stays immediate;
+    /// otherwise it asks, naming exactly what will be lost.
+    func requestReset() {
+        let summary: SessionDiscardSummary = currentDiscardSummary()
+        guard summary.needsConfirmation else {
+            reset()
+            return
+        }
+        pendingDiscardSummary = summary
+        showResetConfirmation = true
+    }
+
+    /// C-84 — whole-session staged data is removed ONLY after a successful Save
+    /// or HERE, after an explicit confirmed discard. It is complete, so the
+    /// reconciliation cannot resurrect anything — refs no longer in memory
+    /// (a stale id list) go too.
+    func discardSessionCompletely() {
+        stopAttachmentPlayback()
+        let ids: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
+        StagingStore.removeMany(ids: ids)
+        clearAllStagingStoreRefs()
+        purgeStagedTempFiles()
+        removeAllSessionTempSurrogates()
+        reset()
+        stagedAudio.removeAll()
+        audioTitles.removeAll()
+        audioAutoTitles.removeAll()
+        audioDurations.removeAll()
+        stagedImages.removeAll()
+        stagedVideos.removeAll()
+        videoThumbnails.removeAll()
+        videoTitles.removeAll()
+        selectedThumbnailID = nil
+        reviewPrefill = []
+        resetTasksForNewSessionContext()
+        let d = UserDefaults.standard
+        d.set(false, forKey: ephemeralMediaFlagKey)
+        d.set(false, forKey: sessionDiscardedKey)
+        d.set(true, forKey: sessionActiveKey)
+        persistStagedAttachments()
+    }
+
     private func finish() {
         let finishTappedAt = Date()
         let total = trueElapsedSeconds()
@@ -3885,6 +3915,8 @@ private func loadPracticeDefaultsIfNeeded() {
         pause()
         persistTasksSnapshot()
         didSaveFromReview = false
+        // C-84 — the hand-off: staged video bytes are read here, once.
+        reviewPrefill = makeReviewPrefill()
         showReviewSheet = true
     }
 
@@ -4022,9 +4054,10 @@ private func loadPracticeDefaultsIfNeeded() {
         let audioIDs = audioIDStrings.compactMap(UUID.init)
         let videoIDs = videoIDStrings.compactMap(UUID.init)
         let imageIDs = imageIDStrings.compactMap(UUID.init)
+        let restoreStarted = Date()
         let refs = StagingStore.list()
         var rebuiltAudio: [StagedAttachment] = []
-        var rebuiltVideo: [StagedAttachment] = []
+        var rebuiltVideo: [TimerStagedVideo] = []
         var rebuiltImages: [StagedAttachment] = []
         var rebuiltThumbs: [UUID: UIImage] = [:]
 
@@ -4041,9 +4074,15 @@ private func loadPracticeDefaultsIfNeeded() {
             }
         }
         for id in videoIDs {
-            if let (data, kind) = loadData(for: id), kind == .video {
-                rebuiltVideo.append(StagedAttachment(id: id, data: data, kind: .video))
-                if let thumb = generateVideoThumbnail(from: data, id: id) { rebuiltThumbs[id] = thumb }
+            // C-84 / P3 — a staged video is restored BY FILE: no bytes read, no
+            // frame decoded. The thumbnail is the poster saved at staging.
+            guard let ref = refs.first(where: { $0.id == id }), ref.kind == .video else { continue }
+            let url = StagingStore.absoluteURL(for: ref)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            rebuiltVideo.append(TimerStagedVideo(id: id, fileURL: url))
+            if let poster = ref.posterPath,
+               let thumb = UIImage(contentsOfFile: StagingStore.absoluteURL(forRelative: poster).path) {
+                rebuiltThumbs[id] = thumb
             }
         }
         for id in imageIDs {
@@ -4055,6 +4094,7 @@ private func loadPracticeDefaultsIfNeeded() {
         self.stagedVideos = rebuiltVideo
         self.stagedImages = rebuiltImages
         self.videoThumbnails = rebuiltThumbs
+        PracticeTimerDiagnostics.notice("Practice Timer restore • videos=\(rebuiltVideo.count) • audio=\(rebuiltAudio.count) • images=\(rebuiltImages.count) • ms=\(Int(Date().timeIntervalSince(restoreStarted) * 1000)) • headroomMB=\(PracticeTimerDiagnostics.headroomMB())")
         if rebuiltAudio.isEmpty && rebuiltVideo.isEmpty && rebuiltImages.isEmpty {
             self.selectedThumbnailID = nil
         }
@@ -4081,12 +4121,8 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
                 if let d = ref.duration, d.isFinite { self.audioDurations[att.id] = max(0, Int(d.rounded())) }
             }
-            // Backfill duration if missing by probing the data
-            if self.audioDurations[att.id] == nil, let player = try? AVAudioPlayer(data: att.data) {
-                let secs = max(0, Int(player.duration.rounded()))
-                self.audioDurations[att.id] = secs
-                StagingStore.updateAudioMetadata(id: att.id, title: nil, autoTitle: nil, duration: Double(secs))
-            }
+            // C-84 / P3 — no decode on restore: the duration comes from the stored
+            // ref; if it is absent, none is shown.
             #if DEBUG
             let tDebug = self.audioTitles[att.id] ?? ""
             let aDebug = self.audioAutoTitles[att.id] ?? ""
@@ -4276,7 +4312,10 @@ private func loadPracticeDefaultsIfNeeded() {
         return imgs + auds
     }
     private var totalStagedBytesVideo: Int {
-        stagedVideos.reduce(0) { $0 + $1.data.count }
+        // C-84 — a file-backed video is sized by its file, never loaded to count it.
+        stagedVideos.reduce(0) { total, video in
+            total + ((try? video.fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
     }
     private var stagedSizeWarning: String? {
         let nonVideoLimit = 100 * 1024 * 1024 // 100 MB (existing behavior)
@@ -4386,11 +4425,22 @@ private func loadPracticeDefaultsIfNeeded() {
         let refs = StagingStore.list()
         var images: [StagedAttachment] = []
         var audios: [StagedAttachment] = []
-        var videos: [StagedAttachment] = []
+        var videos: [TimerStagedVideo] = []
         var thumbs: [UUID: UIImage] = [:]
 
         for ref in refs {
             let abs = StagingStore.absoluteURL(for: ref)
+            if ref.kind == .video {
+                // C-84 / P3 — BY FILE: no bytes read, no frame decoded; the
+                // thumbnail is the poster saved at staging.
+                guard FileManager.default.fileExists(atPath: abs.path) else { continue }
+                videos.append(TimerStagedVideo(id: ref.id, fileURL: abs))
+                if let posterRel = ref.posterPath,
+                   let ui = UIImage(contentsOfFile: StagingStore.absoluteURL(forRelative: posterRel).path) {
+                    thumbs[ref.id] = ui
+                }
+                continue
+            }
             if let data = try? Data(contentsOf: abs) {
                 switch ref.kind {
                 case .image:
@@ -4398,16 +4448,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 case .audio:
                     audios.append(StagedAttachment(id: ref.id, data: data, kind: .audio))
                 case .video:
-                    videos.append(StagedAttachment(id: ref.id, data: data, kind: .video))
-                    // If a posterPath exists, try to load and cache it as thumbnail; else generate from data as current behavior
-                    if let posterRel = ref.posterPath {
-                        let posterURL = StagingStore.absoluteURL(forRelative: posterRel)
-                        if let imgData = try? Data(contentsOf: posterURL), let ui = UIImage(data: imgData) {
-                            thumbs[ref.id] = ui
-                        }
-                    } else {
-                        if let thumb = generateVideoThumbnail(from: data, id: ref.id) { thumbs[ref.id] = thumb }
-                    }
+                    break
                 }
             }
         }
@@ -4438,12 +4479,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
                 if let d = ref.duration, d.isFinite { newDurs[a.id] = max(0, Int(d.rounded())) }
             }
-            // Backfill duration if still missing
-            if newDurs[a.id] == nil, let player = try? AVAudioPlayer(data: a.data) {
-                let secs = max(0, Int(player.duration.rounded()))
-                newDurs[a.id] = secs
-                StagingStore.updateAudioMetadata(id: a.id, title: nil, autoTitle: nil, duration: Double(secs))
-            }
+            // C-84 / P3 — no decode on restore: the duration comes from the stored ref.
             // Non-destructive coalescing: only fall back to auto if title truly absent
             let currentTitle = (newTitles[a.id] ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
             if currentTitle.isEmpty, let auto = newAutos[a.id], !auto.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
@@ -4591,76 +4627,90 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
     }
 
     func stageVideoURL(_ url: URL) {
-        do {
-            let data = try Data(contentsOf: url)
-            // Clean up original file to avoid duplicates taking space
-            try? FileManager.default.removeItem(at: url)
-            let id = UUID()
+        // C-84 — staged BY FILE: the recording is never read into memory. Its
+        // thumbnail is decoded from the file once, here at staging (a member
+        // action), and saved as the poster that restore shows.
+        let id = UUID()
+        if let thumb = generateVideoThumbnail(from: url) {
+            videoThumbnails[id] = thumb
+        }
 
-            // Generate thumbnail from the video data and cache it
-            if let thumb = generateVideoThumbnail(from: data, id: id) {
-                videoThumbnails[id] = thumb
-            }
+        let shouldRevealAttachmentsAfterStaging = !hasAttachments
+        stagedVideos.append(TimerStagedVideo(id: id, fileURL: url))
+        if shouldRevealAttachmentsAfterStaging {
+            isAttachmentsVisible = true
+        }
+        if UserDefaults.standard.bool(forKey: ephemeralMediaFlagKey) == false {
+            UserDefaults.standard.set(true, forKey: ephemeralMediaFlagKey)
+        }
+        persistStagedAttachments()
 
-            let shouldRevealAttachmentsAfterStaging = !hasAttachments
-            stagedVideos.append(StagedAttachment(id: id, data: data, kind: .video))
-            if shouldRevealAttachmentsAfterStaging {
-                isAttachmentsVisible = true
-            }
-            if UserDefaults.standard.bool(forKey: ephemeralMediaFlagKey) == false {
-                UserDefaults.standard.set(true, forKey: ephemeralMediaFlagKey)
-            }
-            persistStagedAttachments()
-
-            // Double-write to staging store (with poster if generated)
-            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
-            try? data.write(to: tmp, options: .atomic)
-            var posterURL: URL? = nil
-            if let thumb = videoThumbnails[id], let jpg = thumb.jpegData(compressionQuality: 0.85) {
-                let p = FileManager.default.temporaryDirectory.appendingPathComponent("\(id.uuidString)_poster").appendingPathExtension("jpg")
-                try? jpg.write(to: p, options: .atomic)
-                posterURL = p
-            }
-            let duration = AVURLAsset(url: tmp).duration.seconds
-            Task {
-                do {
-                    let ref = try await StagingStore.saveNew(from: tmp, kind: .video, suggestedName: id.uuidString, duration: duration.isFinite ? duration : nil, poster: posterURL)
-                    if ref.id != id {
-                        #if DEBUG
-                        print("[PracticeTimer] Remapping video ID local=\(id) -> store=\(ref.id)")
-                        #endif
-                        // Update stagedVideos array to use store id
-                        if let idx = self.stagedVideos.firstIndex(where: { $0.id == id }) {
-                            let data = self.stagedVideos[idx].data
-                            self.stagedVideos[idx] = StagedAttachment(id: ref.id, data: data, kind: .video)
-                        }
-                        // Remap thumbnail cache
-                        if let thumb = self.videoThumbnails.removeValue(forKey: id) {
-                            self.videoThumbnails[ref.id] = thumb
-                        }
-                        // Update persisted IDs immediately
-                        self.persistStagedAttachments()
-                    }
-                } catch {
-                    print("StagingStore saveNew (video) failed: \(error)")
+        var posterURL: URL? = nil
+        if let thumb = videoThumbnails[id], let jpg = thumb.jpegData(compressionQuality: 0.85) {
+            let p = FileManager.default.temporaryDirectory.appendingPathComponent("\(id.uuidString)_poster").appendingPathExtension("jpg")
+            try? jpg.write(to: p, options: .atomic)
+            posterURL = p
+        }
+        let duration = AVURLAsset(url: url).duration.seconds
+        Task {
+            do {
+                // The store is given THIS id, so the in-memory item never re-keys.
+                let ref = try await StagingStore.saveNew(from: url, kind: .video, suggestedName: id.uuidString,
+                                                         duration: duration.isFinite ? duration : nil, poster: posterURL, id: id)
+                if let idx = self.stagedVideos.firstIndex(where: { $0.id == ref.id }) {
+                    self.stagedVideos[idx].fileURL = StagingStore.absoluteURL(for: ref)
                 }
+            } catch {
+                print("StagingStore saveNew (video) failed: \(error)")
             }
-        } catch {
-            print("Failed to stage video: \(error)")
         }
     }
 
     // Prepare and present a video player for a given staged video ID
     private func playVideo(_ id: UUID) {
-        guard let att = stagedVideos.first(where: { $0.id == id }) else { return }
-        // Ensure a temp surrogate exists for AttachmentViewerView
+        guard let video = stagedVideos.first(where: { $0.id == id }) else { return }
+        // C-84 — the viewer keeps its `tmp/<id>.mov` surrogate (URL → id is by
+        // file stem), made by COPYING THE FILE, never by reading it into memory.
+        // Its cost is logged, so it is measured rather than assumed.
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
+        let fm = FileManager.default
+        let started = Date()
         do {
-            try att.data.write(to: url, options: .atomic)
+            if fm.fileExists(atPath: url.path) { try fm.removeItem(at: url) }
+            try fm.copyItem(at: stagedVideoFileURL(video), to: url)
+            let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            PracticeTimerDiagnostics.notice("Practice Timer video surrogate • ms=\(Int(Date().timeIntervalSince(started) * 1000)) • bytes=\(bytes)")
             attachmentViewer = PTVViewerURL(url: url, kind: .video)
         } catch {
             print("Failed to prepare video for viewer: \(error)")
         }
+    }
+
+    /// The staged video's file: the store's copy once `saveNew` has landed,
+    /// otherwise the recorder's output it is being moved from.
+    func stagedVideoFileURL(_ video: TimerStagedVideo) -> URL {
+        if let ref = StagingStore.ref(withId: video.id) { return StagingStore.absoluteURL(for: ref) }
+        return video.fileURL
+    }
+
+    func stagedKind(for id: UUID) -> AttachmentKind? {
+        if stagedVideos.contains(where: { $0.id == id }) { return .video }
+        if stagedAudio.contains(where: { $0.id == id }) { return .audio }
+        if stagedImages.contains(where: { $0.id == id }) { return .image }
+        return nil
+    }
+
+    /// C-84 — the hand-off to post-record details is the one place staged video
+    /// bytes are read (existing behaviour, outside the relaunch loss): once.
+    func makeReviewPrefill() -> [StagedAttachment] {
+        let videos: [StagedAttachment] = stagedVideos.compactMap { video in
+            guard let data = try? Data(contentsOf: stagedVideoFileURL(video)) else {
+                PracticeTimerDiagnostics.notice("Practice Timer hand-off • a staged video file could not be read")
+                return nil
+            }
+            return StagedAttachment(id: video.id, data: data, kind: .video)
+        }
+        return stagedImages + stagedAudio + videos
     }
 
     
@@ -4711,21 +4761,19 @@ private func openAudioViewer(_ id: UUID) {
         }
     }
     
-    // Generate a thumbnail image for a video from raw Data by writing a temp file and using AVAssetImageGenerator
-    private func generateVideoThumbnail(from data: Data, id: UUID) -> UIImage? {
-        // Write to a temporary surrogate URL so AVAsset can read it
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
+    // Generate a thumbnail for a video FILE using AVAssetImageGenerator.
+    // C-84 — from the file itself: no bytes read into memory, no temp copy.
+    private func generateVideoThumbnail(from url: URL) -> UIImage? {
+        let asset = AVURLAsset(url: url)
+        let imgGen = AVAssetImageGenerator(asset: asset)
+        imgGen.appliesPreferredTrackTransform = true
+        imgGen.maximumSize = CGSize(width: 512, height: 512)
+        // Choose a representative frame around 40% into the clip (fallback to 0.2s)
+        let duration = asset.duration
+        let durationSeconds = duration.isNumeric ? duration.seconds : 0
+        let targetSeconds = durationSeconds > 0 ? min(max(durationSeconds * 0.4, 0.2), max(durationSeconds - 0.1, 0.2)) : 0.2
+        let time = CMTime(seconds: targetSeconds, preferredTimescale: 600)
         do {
-            try data.write(to: tmp, options: .atomic)
-            let asset = AVURLAsset(url: tmp)
-            let imgGen = AVAssetImageGenerator(asset: asset)
-            imgGen.appliesPreferredTrackTransform = true
-            imgGen.maximumSize = CGSize(width: 512, height: 512)
-            // Choose a representative frame around 40% into the clip (fallback to 0.2s)
-            let duration = asset.duration
-            let durationSeconds = duration.isNumeric ? duration.seconds : 0
-            let targetSeconds = durationSeconds > 0 ? min(max(durationSeconds * 0.4, 0.2), max(durationSeconds - 0.1, 0.2)) : 0.2
-            let time = CMTime(seconds: targetSeconds, preferredTimescale: 600)
             let cg = try imgGen.copyCGImage(at: time, actualTime: nil)
             return UIImage(cgImage: cg)
         } catch {
@@ -4880,220 +4928,151 @@ private func openAudioViewer(_ id: UUID) {
     }
 
     // MARK: - Trim helpers (extracted to reduce type-checking complexity)
-    func handleTrimSaveAsNew(from newURL: URL, basedOn item: StagedAttachment) {
-        if let data = try? Data(contentsOf: newURL) {
-            let newID = UUID()
-            let newItem = StagedAttachment(id: newID, data: data, kind: item.kind)
+    // C-84 — keyed by (id, kind): a staged video is no longer a `StagedAttachment`.
 
-            // Ensure a real on-disk file exists at the surrogate URL for playback / thumbnails / viewer routing.
-            if let surrogate = surrogateURL(for: newItem) {
+    func handleTrimSaveAsNew(from newURL: URL, sourceID: UUID, kind: AttachmentKind) {
+        guard kind == .audio || kind == .video else {
+            try? FileManager.default.removeItem(at: newURL)
+            trimItem = nil
+            return
+        }
+        let newID = UUID()
+
+        if kind == .audio {
+            guard let data = try? Data(contentsOf: newURL) else {
+                trimItem = nil
+                return
+            }
+            let newItem = StagedAttachment(id: newID, data: data, kind: .audio)
+            // Ensure a real on-disk file exists at the surrogate URL for playback / viewer routing.
+            if let surrogate = surrogateURL(for: newItem), surrogate != newURL {
                 let fm = FileManager.default
-                if surrogate != newURL {
-                    _ = try? fm.removeItem(at: surrogate)
-                    do {
-                        try fm.copyItem(at: newURL, to: surrogate)
-                        #if DEBUG
-                        print("[Trim] saveAsNew seeded surrogate at \(surrogate.path)")
-                        #endif
-                    } catch {
-                        #if DEBUG
-                        print("[Trim] saveAsNew failed to seed surrogate: \(error)")
-                        #endif
-                    }
-                }
+                _ = try? fm.removeItem(at: surrogate)
+                _ = try? fm.copyItem(at: newURL, to: surrogate)
             }
-
-            if item.kind == .audio {
-                stagedAudio.append(newItem)
-                if let player = try? AVAudioPlayer(data: data) {
-                    audioDurations[newID] = max(0, Int(player.duration.rounded()))
-                }
-                // Seed title metadata so viewer/UI doesn't fall back to generic labels.
-                // Save-as-new should retain the source clip title (user or auto) and append an edit suffix.
-                let trimmedSourceTitle: String? = {
-                    if let t = audioTitles[item.id]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
-                    if let t = audioAutoTitles[item.id]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
-                    return nil
-                }()
-                let baseTitle = trimmedSourceTitle ?? formattedAutoTitle(from: Date())
-
-                // Find the next available suffix for this base title among existing audio titles in this session.
-                let existingTitles: Set<String> = {
-                    var s = Set<String>()
-                    for t in audioTitles.values {
-                        let v = t.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !v.isEmpty { s.insert(v) }
-                    }
-                    for t in audioAutoTitles.values {
-                        let v = t.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !v.isEmpty { s.insert(v) }
-                    }
-                    return s
-                }()
-
-                var suffix = 1
-                var candidate = "\(baseTitle)_\(suffix)"
-                while existingTitles.contains(candidate) {
-                    suffix += 1
-                    candidate = "\(baseTitle)_\(suffix)"
-                }
-
-                audioAutoTitles[newID] = candidate
-                audioTitles[newID] = candidate
-            } else {
-                stagedVideos.append(newItem)
-                if let thumb = generateVideoThumbnail(from: data, id: newID) {
-                    videoThumbnails[newID] = thumb
-                }
+            stagedAudio.append(newItem)
+            if let player = try? AVAudioPlayer(data: data) {
+                audioDurations[newID] = max(0, Int(player.duration.rounded()))
             }
+            // Save-as-new keeps the source clip's title (user or auto) with an edit suffix.
+            let trimmedSourceTitle: String? = {
+                if let t = audioTitles[sourceID]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
+                if let t = audioAutoTitles[sourceID]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
+                return nil
+            }()
+            let baseTitle = trimmedSourceTitle ?? formattedAutoTitle(from: Date())
+            let existingTitles: Set<String> = {
+                var s = Set<String>()
+                for t in audioTitles.values {
+                    let v = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !v.isEmpty { s.insert(v) }
+                }
+                for t in audioAutoTitles.values {
+                    let v = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !v.isEmpty { s.insert(v) }
+                }
+                return s
+            }()
+            var suffix = 1
+            var candidate = "\(baseTitle)_\(suffix)"
+            while existingTitles.contains(candidate) {
+                suffix += 1
+                candidate = "\(baseTitle)_\(suffix)"
+            }
+            audioAutoTitles[newID] = candidate
+            audioTitles[newID] = candidate
+        } else {
+            if let thumb = generateVideoThumbnail(from: newURL) {
+                videoThumbnails[newID] = thumb
+            }
+            stagedVideos.append(TimerStagedVideo(id: newID, fileURL: newURL))
+        }
 
-            persistStagedAttachments()
+        persistStagedAttachments()
 
+        // C-84 — STAGE the new clip, under its own id. It used to exist only in
+        // memory, so the next hydration or a relaunch dropped it.
+        var posterURL: URL? = nil
+        if kind == .video, let thumb = videoThumbnails[newID], let jpg = thumb.jpegData(compressionQuality: 0.85) {
+            let p = FileManager.default.temporaryDirectory.appendingPathComponent("\(newID.uuidString)_poster").appendingPathExtension("jpg")
+            try? jpg.write(to: p, options: .atomic)
+            posterURL = p
+        }
+        let title = audioTitles[newID]
+        let duration = audioDurations[newID].map(Double.init)
+        let refKind: StagedAttachmentRef.Kind = (kind == .audio) ? .audio : .video
+        Task {
             do {
-                try FileManager.default.removeItem(at: newURL)
-                #if DEBUG
-                print("[Trim] onSaveAsNew cleaned temp at \(newURL.path)")
-                #endif
+                let ref = try await StagingStore.saveNew(from: newURL, kind: refKind, suggestedName: newID.uuidString,
+                                                         duration: duration, poster: posterURL, id: newID)
+                if kind == .audio {
+                    StagingStore.updateAudioMetadata(id: newID, title: title, autoTitle: title, duration: duration)
+                } else if let idx = self.stagedVideos.firstIndex(where: { $0.id == newID }) {
+                    self.stagedVideos[idx].fileURL = StagingStore.absoluteURL(for: ref)
+                }
             } catch {
-                #if DEBUG
-                print("[Trim] onSaveAsNew temp cleanup failed: \(error)")
-                #endif
+                print("[Trim] saveAsNew staging failed: \(error)")
             }
         }
         trimItem = nil
     }
 
-    func handleTrimReplaceOriginal(from newURL: URL, for item: StagedAttachment) {
-        let refs = StagingStore.list()
-        guard let ref = refs.first(where: { $0.id == item.id }) else {
+    func handleTrimReplaceOriginal(from newURL: URL, id: UUID, kind: AttachmentKind) {
+        guard kind == .audio || kind == .video,
+              let ref = StagingStore.list().first(where: { $0.id == id }) else {
             try? FileManager.default.removeItem(at: newURL)
-            #if DEBUG
-            print("[Trim] replaceOriginal aborted — missing staging ref; cleaned temp at \(newURL.path)")
-            #endif
+            trimItem = nil
             return
         }
-
-        let existingAbsURL = StagingStore.absoluteURL(for: ref)
-        let existingPath = existingAbsURL.path
-        #if DEBUG
-        let origSize = AttachmentStore.fileSize(atPath: existingPath)
-        let tmpSize = AttachmentStore.fileSize(atURL: newURL)
-        print("[Trim] replaceOriginal begin\n  original=\(existingPath) size=\(origSize)\n  temp=\(newURL.path) size=\(tmpSize)")
-        #endif
-
-        // Replace in-place at the Staging path to avoid extra copies in Documents
-        let fm = FileManager.default
-        let finalURL = existingAbsURL
-
-        // Remove existing file first (best-effort)
-        _ = try? fm.removeItem(at: finalURL)
-
-        // Move the trimmed temp over the original path atomically
-        do {
-            try fm.moveItem(at: newURL, to: finalURL)
-
-            // Ensure the surrogate file for THIS original item is refreshed to the new bytes.
-            if let surrogate = surrogateURL(for: item) {
-                if surrogate != finalURL {
-                    _ = try? fm.removeItem(at: surrogate)
-                    do {
-                        try fm.copyItem(at: finalURL, to: surrogate)
-                        #if DEBUG
-                        print("[Trim] replaceOriginal refreshed surrogate at \(surrogate.path)")
-                        #endif
-                    } catch {
-                        #if DEBUG
-                        print("[Trim] replaceOriginal failed to refresh surrogate: \(error)")
-                        #endif
-                    }
-                }
-            }
-
-            if let newData = try? Data(contentsOf: finalURL) {
-                if item.kind == .audio {
-                    if let idx = stagedAudio.firstIndex(where: { $0.id == item.id }) {
-                        stagedAudio[idx] = StagedAttachment(id: item.id, data: newData, kind: .audio)
-                    }
-                    if let player = try? AVAudioPlayer(data: newData) {
-                        let secs = max(0, Int(player.duration.rounded()))
-                        audioDurations[item.id] = secs
-                        StagingStore.updateAudioMetadata(id: item.id, title: nil, autoTitle: nil, duration: Double(secs))
+        Task {
+            do {
+                // C-84 — ATOMIC. The original is replaced only once the trim is in
+                // place; a failure deletes nothing but the trimmed temp.
+                let updated = try await StagingStore.replace(original: ref, with: newURL)
+                let replacedURL = StagingStore.absoluteURL(for: updated)
+                let fm = FileManager.default
+                if kind == .audio {
+                    if let newData = try? Data(contentsOf: replacedURL),
+                       let idx = self.stagedAudio.firstIndex(where: { $0.id == id }) {
+                        self.stagedAudio[idx] = StagedAttachment(id: id, data: newData, kind: .audio)
+                        if let surrogate = self.surrogateURL(for: self.stagedAudio[idx]) {
+                            _ = try? fm.removeItem(at: surrogate)
+                            _ = try? fm.copyItem(at: replacedURL, to: surrogate)
+                        }
+                        if let player = try? AVAudioPlayer(data: newData) {
+                            let secs = max(0, Int(player.duration.rounded()))
+                            self.audioDurations[id] = secs
+                            StagingStore.updateAudioMetadata(id: id, title: nil, autoTitle: nil, duration: Double(secs))
+                        }
                     }
                 } else {
-                    if let idx = stagedVideos.firstIndex(where: { $0.id == item.id }) {
-                        stagedVideos[idx] = StagedAttachment(id: item.id, data: newData, kind: .video)
+                    if let idx = self.stagedVideos.firstIndex(where: { $0.id == id }) {
+                        self.stagedVideos[idx].fileURL = replacedURL
                     }
-                    if let thumb = generateVideoThumbnail(from: newData, id: item.id) {
-                        videoThumbnails[item.id] = thumb
+                    // The viewer re-copies its surrogate on the next open.
+                    _ = try? fm.removeItem(at: fm.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov"))
+                    if let thumb = self.generateVideoThumbnail(from: replacedURL) {
+                        self.videoThumbnails[id] = thumb
+                        if let jpg = thumb.jpegData(compressionQuality: 0.85) {
+                            StagingStore.writePoster(for: id, jpeg: jpg)
+                        }
                     }
                 }
+                self.persistStagedAttachments()
+            } catch {
+                try? FileManager.default.removeItem(at: newURL)
+                print("[Trim] replaceOriginal failed; the original is intact: \(error)")
             }
-
-            persistStagedAttachments()
-            trimItem = nil
-
-            #if DEBUG
-            let finalSize = AttachmentStore.fileSize(atPath: finalURL.path)
-            print("[Trim] replaceOriginal done (in-place)\n  final=\(finalURL.path) size=\(finalSize)")
-            #endif
-        } catch {
-            try? FileManager.default.removeItem(at: newURL)
-            #if DEBUG
-            print("[Trim] replaceOriginal failed (in-place): \(error). Cleaned temp at \(newURL.path)")
-            #endif
         }
+        trimItem = nil
     }
 
-    // MARK: - App Termination Cleanup
-    // Cleanup path for app swipe-away termination; mirrors explicit Quit when ephemeral media exists
+    // MARK: - App Termination
+    // C-84 — A TERMINATION IS NOT A DISCARD. `willTerminate` reaches only a
+    // running app, and a force-quit cannot be told from iOS reclaiming it, so
+    // the unsaved session is preserved in both cases. This only persists.
     private func handleAppTerminationCleanup() {
-        // Respect existing behavior: only discard if this was an unsaved, ephemeral session with media
-        let hasEphemeral = UserDefaults.standard.bool(forKey: ephemeralMediaFlagKey)
-        guard hasEphemeral else { return }
-
-        #if DEBUG
-        StorageInspector.logSandboxUsage(tag: "Before Terminate Cleanup")
-        #endif
-
-        // Remove staged refs/files for current live session
-        let ids: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
-        if !ids.isEmpty {
-            StagingStore.removeMany(ids: ids)
-            let refsToDelete = StagingStore.list()
-            StagingStore.deleteFiles(for: refsToDelete)
-            #if DEBUG
-            print("[PracticeTimer] terminate — removed \(ids.count) staged items")
-            #endif
-        }
-
-        // Purge temp surrogates before clearing arrays
-        purgeStagedTempFiles()
-        removeAllSessionTempSurrogates()
-
-        // Clear persisted IDs/state similar to Quit
-        stopAttachmentPlayback()
-        clearPersistedStagedAttachments()
-        clearAllStagingStoreRefs()
-        UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
-        UserDefaults.standard.set(false, forKey: sessionActiveKey)
-        UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
-        clearPersistedTasks()
-        clearPersistedTimer()
-        resetUIOnly()
-        stagedAudio.removeAll()
-        audioTitles.removeAll()
-        audioAutoTitles.removeAll()
-        audioDurations.removeAll()
-        stagedImages.removeAll()
-        stagedVideos.removeAll()
-        videoThumbnails.removeAll()
-        videoTitles.removeAll()
-        selectedThumbnailID = nil
-        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
-
-        #if DEBUG
-        StorageInspector.logSandboxUsage(tag: "After Terminate Cleanup")
-        #endif
+        persistTimerSnapshotSafely(context: "willTerminate")
     }
 
     private func toggleTuner() {
