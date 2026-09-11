@@ -75,4 +75,42 @@ final class AvatarFreshnessTests: XCTestCase {
         }
         XCTAssertTrue(trigger.contains("ownAvatarRevision"), "the Profile must redraw when the own avatar is replaced")
     }
+
+    // MARK: - Behavioural
+
+    /// Absent and expired rows are fetched; fresh rows are not; forcing fetches all.
+    func testExpiredDirectoryRowsAreRefetched() {
+        let now = Date()
+        let ttl = AccountDirectoryService.directoryCacheTTL
+        XCTAssertEqual(ttl, 20 * 60, "consistent with CommentPresenceStore's comparable cache")
+        let fetchedAt: [String: Date] = [
+            "fresh": now.addingTimeInterval(-(ttl - 60)),
+            "expired": now.addingTimeInterval(-(ttl + 60))
+        ]
+        let requested = ["fresh", "expired", "absent"]
+        XCTAssertEqual(AccountDirectoryService.idsNeedingFetch(requested: requested, fetchedAt: fetchedAt,
+                                                               now: now, ttl: ttl, forceRefresh: false),
+                       ["expired", "absent"])
+        XCTAssertEqual(AccountDirectoryService.idsNeedingFetch(requested: requested, fetchedAt: fetchedAt,
+                                                               now: now, ttl: ttl, forceRefresh: true),
+                       requested)
+    }
+
+    /// B1's whole rule, row by row.
+    func testOwnAvatarSyncDecisionTable() {
+        typealias S = OwnAvatarSync
+        // An unsynced local change is never overwritten, whatever the backend says.
+        XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v2", backendHasAvatar: true, hasPendingLocalChange: true), .none)
+        XCTAssertEqual(S.decide(lastApplied: nil, backendVersion: nil, backendHasAvatar: false, hasPendingLocalChange: true), .none)
+        // First sight: refresh a present avatar; never delete on an absent one.
+        XCTAssertEqual(S.decide(lastApplied: nil, backendVersion: "v1", backendHasAvatar: true, hasPendingLocalChange: false), .refresh)
+        XCTAssertEqual(S.decide(lastApplied: nil, backendVersion: nil, backendHasAvatar: true, hasPendingLocalChange: false), .refresh)
+        XCTAssertEqual(S.decide(lastApplied: nil, backendVersion: nil, backendHasAvatar: false, hasPendingLocalChange: false), .recordOnly)
+        // Unchanged: nothing.
+        XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v1", backendHasAvatar: true, hasPendingLocalChange: false), .none)
+        XCTAssertEqual(S.decide(lastApplied: "", backendVersion: nil, backendHasAvatar: true, hasPendingLocalChange: false), .none)
+        // Changed: follow the backend — replace, or remove if it was removed.
+        XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v2", backendHasAvatar: true, hasPendingLocalChange: false), .refresh)
+        XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v2", backendHasAvatar: false, hasPendingLocalChange: false), .remove)
+    }
 }

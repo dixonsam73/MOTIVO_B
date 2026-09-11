@@ -127,6 +127,10 @@ final class AuthManager: NSObject, ObservableObject {
     @Published private(set) var displayName: String?
     @Published private(set) var backendUserID: String?
     @Published private(set) var backendAvatarKey: String?
+    /// P5-I / C-34 R2: bumped whenever this device's copy of the owner's avatar
+    /// is replaced or removed to follow the backend, so the Profile redraws —
+    /// `backendAvatarKey` alone never changes, because the key is fixed.
+    @Published private(set) var ownAvatarRevision: Int = 0
     @Published private(set) var isSigningIn: Bool = false
     @Published private(set) var backendBootstrapState: BackendBootstrapState = .unknown
 
@@ -497,6 +501,46 @@ final class AuthManager: NSObject, ObservableObject {
         #endif
     }
 
+    /// P5-I / C-34 R2 (B1). The backend avatar and version are authoritative for
+    /// the Connected profile **when this device has no unsynced local avatar
+    /// change** — the existing pending flag, which a Connected edit always sets
+    /// and only a fully successful sync clears. The decision is
+    /// `OwnAvatarSync.decide`; this only carries it out.
+    func syncOwnAvatarFromBackend(avatarKey: String?, avatarVersion: String?) async {
+        guard let storageID = currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !storageID.isEmpty else { return }
+        let key = avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let incoming = OwnAvatarSync.normalized(avatarVersion)
+
+        switch OwnAvatarSync.decide(lastApplied: ProfileStore.ownAvatarAppliedVersion(for: storageID),
+                                    backendVersion: avatarVersion,
+                                    backendHasAvatar: !key.isEmpty,
+                                    hasPendingLocalChange: ProfileStore.hasPendingLocalAvatarSync()) {
+        case .none:
+            return
+        case .recordOnly:
+            ProfileStore.setOwnAvatarAppliedVersion(incoming, for: storageID)
+        case .remove:
+            ProfileStore.removeAvatarFromConnected(for: storageID)
+            ProfileStore.setOwnAvatarAppliedVersion(incoming, for: storageID)
+            ownAvatarRevision &+= 1
+        case .refresh:
+            #if canImport(UIKit)
+            // The version registry treats a first sight as "no change", so drop
+            // the cached image first or a stale one could be handed back.
+            await RemoteAvatarPipeline.invalidateAvatarCaches(avatarKey: key)
+            // Not recorded on failure, so the next hydration tries again.
+            guard let image = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key, version: avatarVersion) else { return }
+            // The member may have edited during the fetch: never overwrite that.
+            guard !ProfileStore.hasPendingLocalAvatarSync(),
+                  currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines) == storageID else { return }
+            ProfileStore.seedAvatarFromConnected(image, for: storageID, replacingExisting: true)
+            ProfileStore.setOwnAvatarAppliedVersion(incoming, for: storageID)
+            ownAvatarRevision &+= 1
+            #endif
+        }
+    }
+
     private func invalidateAvatarCaches(avatarKey: String) async {
         let trimmed = avatarKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -683,6 +727,8 @@ final class AuthManager: NSObject, ObservableObject {
             ProfileStore.setAccountID(row.accountID ?? "", for: userID)
 
             self.backendAvatarKey = row.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+            // P5-I / C-34 R2: follow a replacement made on another device.
+            Task { await self.syncOwnAvatarFromBackend(avatarKey: row.avatarKey, avatarVersion: row.avatarVersion) }
 
             let viewContext = PersistenceController.shared.container.viewContext
             ProfileStore.hydrateMissingLocalIdentity(

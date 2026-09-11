@@ -92,6 +92,9 @@ public struct SelfDirectoryRow: Decodable, Hashable {
     public let instruments: [String]?
     public let lookupEnabled: Bool
     public let followRequestsEnabled: Bool
+    /// P5-I / C-34 R2: the owner's own `avatar_version`, so a device can tell
+    /// that the backend avatar was replaced from another device.
+    public let avatarVersion: String?
 
     enum CodingKeys: String, CodingKey {
         case accountID = "account_id"
@@ -101,6 +104,7 @@ public struct SelfDirectoryRow: Decodable, Hashable {
         case instruments = "instruments"
         case lookupEnabled = "lookup_enabled"
         case followRequestsEnabled = "follow_requests_enabled"
+        case avatarVersion = "avatar_version"
     }
 }
 
@@ -173,24 +177,55 @@ public final class AccountDirectoryService {
     // Phase 14 Step 2 — batch directory lookup cache (viewer-local, in-memory only).
     // Note: This cache is intentionally ephemeral (clears on cold start).
     private actor DirectoryAccountCache {
-        private var store: [String: DirectoryAccount] = [:]
+        // P5-I / C-34 R1: each row remembers when it was fetched, so an expired
+        // row is refetched and a new `avatar_version` reaches every site.
+        private var store: [String: (account: DirectoryAccount, fetchedAt: Date)] = [:]
 
         func getMany(_ userIDs: [String]) -> [String: DirectoryAccount] {
             var out: [String: DirectoryAccount] = [:]
             for id in userIDs {
-                if let v = store[id] { out[id] = v }
+                if let v = store[id] { out[id] = v.account }
             }
             return out
         }
 
-        func setMany(_ accounts: [DirectoryAccount]) {
+        func fetchedAt(_ userIDs: [String]) -> [String: Date] {
+            var out: [String: Date] = [:]
+            for id in userIDs {
+                if let v = store[id] { out[id] = v.fetchedAt }
+            }
+            return out
+        }
+
+        func setMany(_ accounts: [DirectoryAccount], fetchedAt: Date = Date()) {
             for a in accounts {
-                store[a.userID] = a
+                store[a.userID] = (a, fetchedAt)
             }
         }
     }
 
     private let cache = DirectoryAccountCache()
+
+    /// P5-I / C-34 R1. How long a cached directory row is trusted before it is
+    /// refetched. **20 minutes, for consistency with `CommentPresenceStore`** —
+    /// the comparable viewer-local, in-memory cache of server state, with the
+    /// same trade-off: short enough to avoid stale state, long enough not to
+    /// spam requests. No polling: a row refreshes when it is next asked for.
+    static let directoryCacheTTL: TimeInterval = 20 * 60
+
+    /// PURE. The ids to fetch: every id when forced, otherwise those with no
+    /// cached row and those whose row is older than `ttl`.
+    static func idsNeedingFetch(requested: [String],
+                                fetchedAt: [String: Date],
+                                now: Date,
+                                ttl: TimeInterval,
+                                forceRefresh: Bool) -> [String] {
+        if forceRefresh { return requested }
+        return requested.filter { id in
+            guard let at = fetchedAt[id] else { return true }
+            return now.timeIntervalSince(at) > ttl
+        }
+    }
 
     /// Fetch the caller's own account_directory row via RLS (owner-only).
     /// Used to hydrate ProfileStore/Core Data defaults on fresh installs (e.g. lookup_enabled, display_name, location, instruments).
@@ -199,7 +234,7 @@ public final class AccountDirectoryService {
         guard !trimmed.isEmpty else { return .success(nil) }
 
         let query: [URLQueryItem] = [
-            URLQueryItem(name: "select", value: "account_id,display_name,location,avatar_key,instruments,lookup_enabled,follow_requests_enabled"),
+            URLQueryItem(name: "select", value: "account_id,display_name,location,avatar_key,instruments,lookup_enabled,follow_requests_enabled,avatar_version"),
             URLQueryItem(name: "user_id", value: "eq.\(trimmed)"),
             URLQueryItem(name: "limit", value: "1")
         ]
@@ -249,7 +284,15 @@ public final class AccountDirectoryService {
         }
 
         let cached = await cache.getMany(orderedUnique)
-        let missing = forceRefresh ? orderedUnique : orderedUnique.filter { cached[$0] == nil }
+        let fetchedAt = await cache.fetchedAt(orderedUnique)
+        let missing = Self.idsNeedingFetch(requested: orderedUnique,
+                                           fetchedAt: fetchedAt,
+                                           now: Date(),
+                                           ttl: Self.directoryCacheTTL,
+                                           forceRefresh: forceRefresh)
+        // Expiry must not blank names that are showing today: if a refresh
+        // fails but every requested row is cached, serve the cached rows.
+        let everyRequestedRowIsCached = orderedUnique.allSatisfy { cached[$0] != nil }
 
         var merged = cached
 
@@ -275,10 +318,12 @@ public final class AccountDirectoryService {
                         merged[r.userID] = r
                     }
                 } catch {
+                    if everyRequestedRowIsCached { return .success(cached) }
                     return .failure(error)
                 }
 
             case .failure(let error):
+                if everyRequestedRowIsCached { return .success(cached) }
                 return .failure(error)
             }
         }

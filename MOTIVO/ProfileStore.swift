@@ -22,6 +22,33 @@ import UIKit
 ///   - Location: UserDefaults per user.
 ///   - Avatar (original): JPEG file in Application Support/Profiles/{userID}-original.jpg
 ///   - Avatar (derived/display): PNG file in Application Support/Profiles/{userID}-avatar.png (square, typically 256–512 px)
+/// P5-I / C-34 R2 (B1) — PURE. Whether this device's copy of the owner's own
+/// avatar should follow the backend. **The backend avatar and version are
+/// authoritative for the Connected profile when this device has no unsynced
+/// local avatar change.**
+///
+/// On FIRST SIGHT (nothing applied yet) an absent backend avatar cannot be told
+/// apart from one never uploaded, so it is only recorded — a local copy is
+/// removed only when the version CHANGES after one was already applied.
+enum OwnAvatarSync {
+    enum Action: Equatable { case none, recordOnly, refresh, remove }
+
+    static func normalized(_ version: String?) -> String {
+        (version ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func decide(lastApplied: String?,
+                       backendVersion: String?,
+                       backendHasAvatar: Bool,
+                       hasPendingLocalChange: Bool) -> Action {
+        if hasPendingLocalChange { return .none }
+        let incoming = normalized(backendVersion)
+        guard let last = lastApplied else { return backendHasAvatar ? .refresh : .recordOnly }
+        if last == incoming { return .none }
+        return backendHasAvatar ? .refresh : .remove
+    }
+}
+
 struct ProfileStore {
     // MARK: - Keys
     private static let localProfileStorageID = "__local_etudes_profile__"
@@ -47,6 +74,22 @@ struct ProfileStore {
 
     static func clearPendingLocalAvatarSync() {
         UserDefaults.standard.removeObject(forKey: localAvatarSyncStateKey)
+    }
+
+    // MARK: - P5-I / C-34 R2 — the backend avatar version this device last applied
+
+    private static func ownAvatarAppliedVersionKey(for userID: String) -> String {
+        "profile.\(userID).ownAvatarAppliedVersion_v1"
+    }
+
+    /// The owner's `avatar_version` this device last took from the backend, or
+    /// nil if it has never applied one. A record, not a pending flag.
+    static func ownAvatarAppliedVersion(for userID: String) -> String? {
+        UserDefaults.standard.string(forKey: ownAvatarAppliedVersionKey(for: userID))
+    }
+
+    static func setOwnAvatarAppliedVersion(_ version: String, for userID: String) {
+        UserDefaults.standard.set(version, forKey: ownAvatarAppliedVersionKey(for: userID))
     }
 
     private static func markPendingLocalAvatarUploadIfNeeded(for userID: String?) {
@@ -387,6 +430,11 @@ struct ProfileStore {
     }
 
     static func deleteAvatar(for userID: String?) {
+        deleteAvatarFiles(for: userID)
+        markPendingLocalAvatarDeletionIfNeeded(for: userID)
+    }
+
+    private static func deleteAvatarFiles(for userID: String?) {
         let fm = FileManager.default
         if let url = avatarOriginalURL(for: userID) {
             try? fm.removeItem(at: url)
@@ -396,7 +444,29 @@ struct ProfileStore {
             try? fm.removeItem(at: url)
             cache.removeObject(forKey: url.path as NSString)
         }
-        markPendingLocalAvatarDeletionIfNeeded(for: userID)
+    }
+
+    /// The ONE place a backend avatar becomes the local copy. It writes the
+    /// connected scope (only if absent unless `replacingExisting`) and always the
+    /// local Études scope, and never sets a pending upload — the image is already
+    /// backend-authoritative.
+    static func seedAvatarFromConnected(_ image: UIImage, for userID: String?, replacingExisting: Bool) {
+        if replacingExisting || avatarImage(for: userID) == nil {
+            saveAvatarDerived(image, for: userID, markPendingLocalSync: false)
+        }
+        if replacingExisting || avatarOriginalImage(for: userID) == nil {
+            saveAvatarOriginal(image, for: userID)
+        }
+        saveAvatarDerived(image, for: nil, markPendingLocalSync: false)
+        saveAvatarOriginal(image, for: nil)
+    }
+
+    /// P5-I / C-34 R2: the backend avatar was removed on another device. Clears
+    /// both scopes WITHOUT a pending-deletion marker, which would loop back into
+    /// a sync that re-deletes what is already gone.
+    static func removeAvatarFromConnected(for userID: String?) {
+        deleteAvatarFiles(for: userID)
+        deleteAvatarFiles(for: nil)
     }
 
     private static func downscale(_ img: UIImage, maxSide: CGFloat) -> UIImage {

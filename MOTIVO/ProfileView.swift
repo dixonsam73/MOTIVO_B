@@ -1192,7 +1192,9 @@ private var sessionSetupSection: some View {
      private var avatarRefreshTrigger: String {
          let currentUserID = auth.currentUserID ?? "nil"
          let backendAvatarKey = auth.backendAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-         return "\(currentUserID)|\(backendAvatarKey)"
+         // P5-I / C-34 R2: the key never changes, so a replacement from another
+         // device redraws through the revision instead.
+         return "\(currentUserID)|\(backendAvatarKey)|\(auth.ownAvatarRevision)"
      }
 
      @MainActor
@@ -1281,17 +1283,10 @@ private var sessionSetupSection: some View {
      private func seedLocalAvatarFromFetchedConnectedAvatar(_ fetchedImage: UIImage, currentUserID: String?) {
          guard currentUserID != nil else { return }
 
-         if ProfileStore.avatarImage(for: currentUserID) == nil {
-             ProfileStore.saveAvatarDerivedFromConnectedHydration(fetchedImage, for: currentUserID)
-         }
-         if ProfileStore.avatarOriginalImage(for: currentUserID) == nil {
-             ProfileStore.saveAvatarOriginal(fetchedImage, for: currentUserID)
-         }
-
          // A fetched Connected avatar is already backend-authoritative, so it should also become
-         // the local Études avatar without creating a pending upload marker.
-         ProfileStore.saveAvatarDerivedFromConnectedHydration(fetchedImage, for: nil)
-         ProfileStore.saveAvatarOriginal(fetchedImage, for: nil)
+         // the local Études avatar without creating a pending upload marker. P5-I: routed through
+         // the one ProfileStore seeding function; first seeding keeps an existing connected copy.
+         ProfileStore.seedAvatarFromConnected(fetchedImage, for: currentUserID, replacingExisting: false)
      }
 
      @MainActor
