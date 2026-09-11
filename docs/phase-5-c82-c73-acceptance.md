@@ -104,3 +104,27 @@ mutation.
 > - a plural title;
 > - no dialog at the first Save;
 > - a dialog at the second Save.
+
+> **C-73 TYPE 1 DEVICE RESULT — 2026-09-11. PASS, as predicted at each step.**
+> Device B, Études Dev, Force Connected. The account holder ran the device, using
+> the two fixtures committed above (`e97a816`).
+>
+> - **With both PDFs attached, share-enabled, Save** raised the dialog titled
+>   **"Attachment can’t be shared"**. The title was **singular**, so exactly one
+>   attachment was flagged. Buttons: Cancel / Share Without It.
+> - **After Cancel and removing the zero-page PDF, Save** raised **no dialog**, and
+>   the session saved with the control included.
+>
+> **What this establishes on hardware:**
+> - an unrenderable PDF is caught **at Save**, through the existing consent dialog,
+>   under the neutral title;
+> - a renderable PDF is not.
+>
+> **Not claimed:**
+> - **Audio parity.** An audio file that `AVAudioPlayer` cannot open was not
+>   exercised on device, and the §3 residual still stands.
+> - **C-73 Types 2 and 4** are unchanged.
+> - **Type 3 is C-83.**
+>
+> The session saved at the second step queues a publish that fails at the gated
+> INSERT (403), like the other test items. That is expected residue.
