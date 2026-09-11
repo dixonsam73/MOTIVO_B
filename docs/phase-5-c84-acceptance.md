@@ -94,6 +94,50 @@ superseded by C-85 N4.1:** the trimmed MP4 survived a whole new process.
 
 **C-84 is RESOLVED.**
 
+### Decisions, account holder, 2026-09-11
+
+**C-84 and C-85 are closed and device-accepted on the recorded evidence.**
+**No further implementation today.**
+
+1. **The viewer-trim `Documents/` leak is FILED as C-86 — P3, pre-existing, fix
+   deferred.** It is a real backup leak and a filename-collision nuisance, but
+   **not data loss**, and not worth extending the completed C-84 unit.
+2. **PRODUCT DECISION — the restored-session attachments panel.** When a
+   restored Practice Timer session contains staged media, **the attachments panel
+   opens automatically**, so the member can see at once that their recordings
+   survived.
+   - **NOT IMPLEMENTED.** A small follow-up.
+   - Today the timer's `onAppear` sets `isAttachmentsVisible = false`.
+3. **The sub-second staging window is a NARROW RESIDUAL RISK, deferred.** A kill
+   in the moment between the recorder handing over
+   `Documents/motivo_vid_*.mov` and `saveNew` moving it into `Staging/` would lose
+   that take.
+   - **The pre-C-84 code had the same exposure.**
+   - **C-84 is not reopened for it.**
+   - The fix, if ever wanted: move the file into staging before the thumbnail
+     decode.
+
+### Resume boundary
+
+**The next task is to re-assess C-3 against the post-C-84 architecture —
+investigation only, with a measured disposition reported before any
+implementation.**
+
+**Do not assume the old C-3 refactor is still needed.** Establish:
+- what work still happens on active/resume;
+- whether audio/image rereads or thumbnail behaviour now cause meaningful
+  latency, memory, CPU/energy or visible UX cost;
+- what of the original finding C-84 has subsumed;
+- whether anything remaining warrants code at all — and if so, the smallest
+  option and its before/after measurement.
+
+**Out of scope:**
+- C-34/B1 and C-69 stay on the Production fixture;
+- C-80, C-81, B-38, C-75, C-76, C-83 and C-86;
+- the two small C-84 follow-ups above.
+
+**Unless the C-3 investigation directly depends on one of them.**
+
 **Diagnosis of the step-7 difference — a PRE-EXISTING mislabel, not introduced by
 C-84.**
 
