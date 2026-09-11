@@ -41,6 +41,18 @@ deterministic device trigger.
 
 | **7 · Trim → Save as new (video)** — first half | a second video tile with a thumbnail; a **new `.mov`** in `Staging/` named by its id, plus its poster; a new video ref with `posterPath`; `stagedVideoIDs` 2; everything else byte-identical | Screen: two videos, one audio, 10:02 paused. E1: new ref **`1EF1B2C2`**, file **`1EF1B2C2-….mp4`** (3,240,162 B) + `_poster.jpg` (21,084 B), `posterPath` set; `stagedVideoIDs` 2; the original video, its poster and the audio byte-identical; pid 33264 | **STOPPED — the extension differs from the prediction (`.mp4`, not `.mov`); diagnosed below.** Everything the step tests matched |
 
+**Resumed after C-85** (fixed as its own finding; build `47eb456`, executable
+SHA-256 `7eca472997bf8f33…`, installed as an update). The C-85 device results —
+relaunch, both surrogates, and Trim → Replace original on the recorded video —
+are in `phase-5-c85-prediction.md` §6. **Step 7's never-run leave/return is
+superseded by C-85 N4.1:** the trimmed MP4 survived a whole new process.
+
+| Step | Prediction | Observed | Verdict |
+|---|---|---|---|
+| **10 · Normal Save** (Share with followers OFF, so no publish is queued) | a normal save and landing on the journal; staged files and refs removed; timer and staged-id keys cleared; `sessionActive = false` until the timer next appears | Landed on the journal. J1: **`Staging/` has no media, `staged.json` has no refs**; the timer and staged-id keys are absent; `sessionActive = false`; pid 33456. One empty dated folder remains — removed by the launch cleanup (P4) | **PASS** — the canonical deleter works |
+| **9 · Kill and relaunch after all the trims** (a replaced `.mp4` recording, a saved-as-new `.mp4`, a replaced `.m4a`) | I2 = I1 after SIGKILL; relaunch restores all three with thumbnails; 10:02 paused; `restore • videos=2 • audio=1` | I1: both `.mp4`s, their posters and the 215,904 B `.m4a`, three refs. Guarded SIGKILL of pid 33433 at 16:21:29Z. I2 identical, process gone. Relaunch: **10:02 paused, both videos with thumbnails, the 9 s audio**; Console `restore • videos=2 • audio=1 • images=0 • ms=1 • headroomMB=3350`. I3: new pid 33456 = `bootID`; every file byte-identical | **PASS** — every trim output survives a new process |
+| **8 · Trim → Replace original on the audio** (same container) | the same path, smaller; the ref keeps its path; the stored duration updates; everything else unchanged | Audio heard shorter; videos unchanged. H1: `2026sep11_16:10.m4a` **same path**, 378,911 → **215,904 B**; ref duration **13 → 9 s**, title unchanged; both `.mp4` videos, posters, ids, timer and pid 33433 unchanged | **PASS** |
+
 **Diagnosis of the step-7 difference — a PRE-EXISTING mislabel, not introduced by
 C-84.**
 
@@ -84,6 +96,40 @@ which shows restore did not load the video. **A 14.9 MB clip is too small to pro
 that alone**; the longer-video step is the stronger test.
 
 ## Observations and boundaries (not C-84 defects; recorded for decision)
+
+**FOUND AT STEP 10 — the viewer's trim leaves an unreferenced copy of every
+timer-staged trim in `Documents/`.** Pre-existing, not C-84 or C-85.
+**No loss — a leak.**
+
+**The mechanism, read from source:**
+- The viewer's **Save as new** calls `AttachmentStore.adoptTempExport`, which
+  moves the trim into `Documents/<source stem>.<ext>`.
+- Its **Replace original**, under the default `.immediate` strategy (the timer
+  passes none), calls `AttachmentStore.replaceAttachmentFile`. That writes
+  `Documents/<source stem>.<ext>` — for a timer clip the source is a `tmp`
+  surrogate, so this is a **new** file.
+- The timer's handlers then stage a **disposable copy** (`+Sheets:22`). **Nothing
+  removes the viewer's persisted copy.** It is included in backup and removed
+  only by Erase All.
+- `AttachmentViewerView` and `MediaTrimView` are **unchanged since `5713222`**.
+
+**Observed:**
+- `Documents/19E75D01-….mp4` — 3,240,162 B, written at 15:23Z (step 7's Save as
+  new);
+- `Documents/19E75D01-…-1.mp4` — 2,243,607 B, written at 16:16:10Z (C-85 N4.4's
+  Replace original).
+
+Core Data references neither. **They also shadow later saves:** step 10's real
+recording landed at `-2`.
+
+**Proposed as a separate finding (C-86), for decision.**
+
+**TOOLING LIMITATION — `devicectl device info files` returns NO entries for this
+container's `Documents/`**, even after a successful Save.
+- `Library/` lists normally.
+- **Its empty answers are not evidence.**
+- Saved attachments were attributed from a **read-only copy of Core Data**
+  (`Attachment.fileURL`), plus read-only `copy from` of the named files.
 
 **The restored attachments panel starts collapsed.** The timer view's `onAppear`
 sets `isAttachmentsVisible = false`, so after a relaunch the restored clips are

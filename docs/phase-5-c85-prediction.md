@@ -131,4 +131,49 @@ continues.**
 | **N2** | 282 / 282 | **282 declared, 282 passed**, nothing else | **MET** |
 | **N3** | Debug 177 / Release 165, sets identical | **Both clean builds succeeded, 177 and 165, both sets identical** | **MET** |
 
-**N4 (device) follows.**
+## 6. RESULT — device (N4)
+
+**The build:** Études Dev at **`47eb456`**, executable SHA-256
+`7eca472997bf8f33…`, installed as an in-place update — the folder moved from
+`EE910B82-…` to `20222F1E-…`. **The Release app was untouched** (`EE36AE2D-…`).
+F0, taken before relaunch, showed all five staged files, the three refs and the
+602 s paused timer byte-identical.
+
+| # | Predicted | Observed | Verdict |
+|---|---|---|---|
+| **N4.1 · Relaunch** | 10:02 paused; two videos and one audio with thumbnails; `restore • videos=2 • audio=1` | **Exactly that on screen.** F1: new pid 33433 = `bootID`; all files and refs byte-identical. Console was empty at first — **a CAPTURE gap, not the app:** Console.app had stopped streaming when the reinstall ended the process. With streaming restarted, a return to the app logged `restore • videos=2 • audio=1 • images=0 • ms=6 • headroomMB=3312` | **PASS.** The trimmed MP4 survived a new process — stronger than C-84 step 7's never-run leave/return |
+| **N4.2 · Play the trimmed clip** | plays; `bytes=3240162 • ext=mp4` | played; `video surrogate • ms=2 • bytes=3240162 • ext=mp4` | **PASS** — the surrogate is now truthful |
+| **N4.4 · Trim → Replace original on the RECORDED video** — first half | its staging file becomes `19E75D01-….mp4` (same stem); the old `.mov` gone; the ref names the `.mp4`; the poster refreshed; everything else unchanged | Screen: two videos (both shorter edits), one audio, 10:02. G1: **`19E75D01-….mp4` (2,243,607 B)**, **no `.mov` anywhere in `Staging/`**; the ref names the `.mp4`; **the poster rewritten** (25,780 → 26,935 B, the same mtime as the new file); `1EF1B2C2`, its poster and the audio byte-identical; ids, timer and pid 33433 unchanged | **first half MATCHES** — pre-C-85 this wrote MP4 into the `.mov` |
+| **N4.4 · second half** — play it; leave and return | plays with `bytes=2243607 • ext=mp4`; survives leave/return | `video surrogate • ms=2 • bytes=2243607 • ext=mp4`; after Home and back both videos and the audio remain; `restore • videos=2 • audio=1 • images=0 • ms=5`. G2 byte-identical to G1; same pid | **PASS** |
+
+**N4.5 (the hand-off) is exercised by C-84's normal-Save step.** The persisted
+files must be `.mp4` for both videos and `.m4a` for the audio.
+
+| **N4.5 · The hand-off, via a normal Save** (Share OFF) | the persisted files: `.mp4` for both videos, `.m4a` for the audio; sizes equal the staged sizes (no transcoding) | **Session 676** (read from a read-only copy of Core Data): row 769 video → `Documents/1EF1B2C2-….mp4` (3,240,162 B); row **770 video → `Documents/19E75D01-…-2.mp4` (2,243,607 B, written at Save)**; row 771 audio → `Documents/2026sep11_16:10.m4a` (215,904 B). **Both videos `.mp4`, `ftyp mp42`; no `.mov` exists; every size equals its staged size** | **PASS** — a trimmed MP4 stays MP4 through the hand-off |
+
+**The first probe was misleading, and why.**
+- `devicectl info files` **cannot list this container's `Documents/`**: it returns
+  0 entries even after a successful Save. **That is a tooling gap, not evidence.**
+- A read-only `copy from` of the base name `19E75D01-….mp4` returned a
+  **different, older file** — 3,240,162 B, written at 15:23Z. The real saved
+  recording is **`-2`**, because `uniqueFilename` suffixes on a name clash.
+- **The attribution comes from Core Data's `Attachment.fileURL`, not from the
+  folder.**
+- The clash comes from **stray, unreferenced copies the viewer's trim writes into
+  `Documents/`**, recorded separately.
+
+## 7. CLOSURE — 2026-09-11
+
+**N1, N2, N3 and N4.1–N4.5 all met**, which is this record's stated closure
+condition:
+- **A trimmed video stays identified as MP4** through staging, the playback
+  surrogate and the hand-off, **with no transcoding**;
+- **the recorder's `.mov` is unchanged** (N4.3).
+
+**The one discrepancy on the way (N4.5's first probe) was explained by
+measurement:** a pre-existing stray copy from the viewer's trim, plus
+`uniqueFilename`'s suffixing. **It is not a C-85 defect** — see
+`phase-5-c84-acceptance.md`, the proposed C-86.
+
+**C-85 is RESOLVED.**
+| **N4.3 · Play the recorded clip** | plays; `bytes=14868684 • ext=mov` — **unchanged** | played; `video surrogate • ms=3 • bytes=14868684 • ext=mov` | **PASS** — the recorder is unchanged |
