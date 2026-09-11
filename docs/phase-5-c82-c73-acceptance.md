@@ -70,3 +70,37 @@ mutation.
    appears** — the omitted attachment is never converted or uploaded.
 4. Attach a **zero-page PDF** (or any PDF that will not render), share-enabled,
    Save → the dialog appears with the new title.
+
+> **§4 STEP 4 — FIXTURE AND CONTROL FIXED 2026-09-11, BEFORE THE RUN. The step
+> text above is kept as written.**
+>
+> **Narrowed to the zero-page PDF.** "Or any PDF that will not render" is not a
+> fixture. And the prediction's "zero-page *or locked*" is wrong for this check:
+> K1 measured that PDFKit renders a locked PDF's page, so a locked PDF is
+> preparable and correctly raises **no** dialog.
+>
+> **Fixture: `C73-zero-page.pdf`.**
+> - 125 bytes, SHA-256 `79370862c6cb54e96ed3125464c11e4ce3e8b08fb5048723695b6b9e9728d701`.
+> - **Byte-identical to `PreparabilityPreflightTests.zeroPagePDF()`**, the bytes
+>   `testZeroPagePDFNeedsConsent` scored.
+> - Import classifies by extension, and staging does not open PDFs, so it
+>   attaches even though macOS PDFKit refuses to open it at all. The verdict is
+>   the same either way: no renderable page.
+>
+> **Control: `C73-one-page-control.pdf`.**
+> - 2161 bytes, SHA-256 `1e8be8f96443a7f79ab96a2ee04d8291d05804f8bc397fcc8a6c52d71547dbf7`.
+> - One renderable page (macOS PDFKit: opens, 1 page).
+>
+> **Procedure** (Device B, Études Dev, `AddEditSessionView`, new session):
+> 1. Attach both PDFs, set private-eye off on both, and turn Share on. Save.
+>    - **PREDICTED:** a dialog titled exactly **"Attachment can’t be shared"**.
+>      The title is singular, so exactly one attachment is flagged, not two.
+>      Buttons: **Cancel** / **Share Without It**.
+> 2. Tap **Cancel**, remove the zero-page PDF, and Save again.
+>    - **PREDICTED:** **no dialog**, and the session saves with the control
+>      included.
+>
+> **Any one of these falsifies:**
+> - a plural title;
+> - no dialog at the first Save;
+> - a dialog at the second Save.
