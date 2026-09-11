@@ -79,20 +79,32 @@ final class LocalAttachmentTitleTests: XCTestCase {
         XCTAssertTrue(s.contains("AttachmentTitlePersistenceKeys.videoPrefix"))
     }
 
-    /// **THE ONE-OF-N GUARD, AND THE ID-ONLY RULE.** Every title write goes
-    /// through the shared writer, except `PostRecordDetailsView`'s two existing
-    /// stem-keyed fallbacks — which are pinned so they cannot grow.
+    /// **THE ONE-OF-N GUARD, AND THE ID-ONLY RULE.** Every title write — and
+    /// every removal — goes through the shared writer, except
+    /// `PostRecordDetailsView`'s two existing stem-keyed fallbacks, which are
+    /// pinned so they cannot grow. Factory reset is the one allowed remover.
+    ///
+    /// **WIDENED 2026-09-11 — the first version was too narrow and missed a
+    /// live site.** It matched only `UserDefaults.standard.set(`, so
+    /// `ContentView.loadFeedPersistedTitles` — which wrote through
+    /// `defaults.set(` and deleted the shared store with
+    /// `defaults.removeObject(` — passed unseen. Any receiver and any removal
+    /// now count.
     func testEveryTitleWriteGoesThroughTheSharedWriter() {
         let keyTokens = ["persistedAudioTitlesKey", "persistedVideoTitlesKey",
                          "\"persistedAudioTitles_v1\"", "\"persistedVideoTitles_v1\"",
-                         "forKey: namespacedKey"]
+                         "forKey: namespacedKey", "forKey: legacyKey", "NamespacedKey(for",
+                         "legacyAudioTitlesKey", "legacyVideoTitlesKey"]
         let files = ((try? FileManager.default.contentsOfDirectory(atPath: sourceRoot.path)) ?? [])
-            .filter { $0.hasSuffix(".swift") && $0 != "AttachmentTitlePersistenceKeys.swift" }
+            .filter { $0.hasSuffix(".swift")
+                && $0 != "AttachmentTitlePersistenceKeys.swift"
+                && $0 != "LocalFactoryReset.swift" }
         var direct = 0
         var stemKeyed = 0
         for f in files {
             for line in code(f).components(separatedBy: .newlines) {
-                if line.contains("UserDefaults.standard.set("), keyTokens.contains(where: { line.contains($0) }) {
+                let mutates = line.contains(".set(") || line.contains("removeObject(forKey:")
+                if mutates, keyTokens.contains(where: { line.contains($0) }) {
                     direct += 1
                 }
                 if line.contains("persisted[stem] =") { stemKeyed += 1 }
