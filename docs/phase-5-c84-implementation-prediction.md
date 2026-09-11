@@ -261,6 +261,12 @@ a miss, recorded as such.**
 
 **Closure:** M1–M4 met, recorded, and **C-84 closed only on the device result.**
 
+> **RESULT 2026-09-11 — M4 MET ON DEVICE.** Every item is mapped to its passing
+> step in `phase-5-c84-acceptance.md` (Closure). Item 7 was measured as
+> `headroomMB` — the recorded deviation from `footprintMB`. **A 117 MB video
+> restored with headroom unchanged** (3351 against an empty launch's 3351), and
+> **its playback clone took 2 ms.** **C-84 is RESOLVED.**
+
 > **PREDICTION MISS — test 20's `PracticeTimerView` pin: predicted 10, actual 9.**
 >
 > **The cause is the baseline, not the code.** "PTV 16" came from a rough
