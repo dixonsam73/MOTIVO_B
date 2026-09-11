@@ -164,4 +164,12 @@ enum ConnectedSharePreflight {
         return Candidate(id: id, format: format, localBytes: bytes,
                          durationSeconds: seconds, preparable: preparable)
     }
+
+    /// C-82 — PRE-CHANGE STAND-IN, NO CALLER. Returns the consent list
+    /// unchanged, which is exactly what both editors do today. It exists only
+    /// so `OmissionIdentityTests` compile and fail for the right reason before
+    /// the fix; the implementation commit replaces this body.
+    static func persistedOmissions(_ omissions: [UUID], stagedToFinal: [UUID: UUID]) -> [UUID]? {
+        omissions.isEmpty ? nil : omissions
+    }
 }
