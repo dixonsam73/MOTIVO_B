@@ -61,8 +61,10 @@ enum StagingStore {
                         kind: StagedAttachmentRef.Kind,
                         suggestedName: String? = nil,
                         duration: Double? = nil,
-                        poster: URL? = nil) async throws -> StagedAttachmentRef {
+                        poster: URL? = nil,
+                        id requestedID: UUID? = nil) async throws -> StagedAttachmentRef {
         try bootstrap()
+        // C-84 PRE-CHANGE STAND-IN: `requestedID` is accepted and ignored.
         let id = UUID()
         let ext = preferredExtension(for: sourceURL, kind: kind)
         let dayFolder = dateFolderName(Date())
@@ -157,6 +159,16 @@ enum StagingStore {
     }
 
     static func list() -> [StagedAttachmentRef] { loadRefs() }
+
+    /// C-84 — PRE-CHANGE STAND-IN, NO CALLER. The implementation commit
+    /// replaces this with the narrowed cleanup (empty folders, dangling refs).
+    @discardableResult
+    static func cleanupAbandoned() -> (removedFolders: Int, removedRefs: Int) { (0, 0) }
+
+    /// C-84 — PRE-CHANGE STAND-IN, NO CALLER. The implementation commit
+    /// replaces this with a poster write for a staged video.
+    @discardableResult
+    static func writePoster(for id: UUID, jpeg: Data) -> Bool { false }
 
     static func update(_ ref: StagedAttachmentRef) {
         var list = loadRefs()
