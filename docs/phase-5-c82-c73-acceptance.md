@@ -1,5 +1,17 @@
 # C-82 + C-73 TYPE 1 — IMPLEMENTATION COMPLETE. DEVICE CHECK OUTSTANDING — NOT CLOSED.
 
+> **CORRECTION 2026-09-12 — THE C-82 DEVICE CHECK FALSIFIED THE FIX (K5).** On
+> Device B a 32-minute WAV saved from `PostRecordDetailsView` with Share on was
+> converted at flush (`1904s • 61081909B • 15002ms`) and then failed on the size
+> limit. **The consent list carries STAGED attachment ids, while saving gives
+> each attachment a NEW id** (`AttachmentStore.addAttachment`), and neither editor
+> translates the list — so the flush never matches it for a newly added
+> attachment. The fix below made the list survive, in the wrong id space; its
+> tests used arbitrary ids and checked carriage, not identity. **C-82 is OPEN.**
+> **Also corrected:** §4 step 2 is wrong — the Debug queue view shows item ids
+> only, never `authorisedOmissions`; the queue file is the evidence. The text
+> below is kept as the record of what was believed.
+
 > **Neither row closes until the Device B check in §4 passes.** Nothing below is
 > device evidence. A successful server post is **not** required and **not**
 > claimed — `posts` INSERT is gated; the end-to-end publish stays with the
