@@ -288,7 +288,10 @@ final class PublishService: ObservableObject {
                     effort: payload.effort,
                     isPublic: payload.isPublic,
                     notes: resolvedNotes,
-                    areNotesPrivate: resolvedAreNotesPrivate
+                    areNotesPrivate: resolvedAreNotesPrivate,
+                    // C-82 — this rebuild used to drop the member's "Share
+                    // Without It", so the consent never reached the queue.
+                    authorisedOmissions: payload.authorisedOmissions
                 )
 
                 // C-62 — the session TITLE is user content and is not logged;

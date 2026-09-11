@@ -1,5 +1,20 @@
 # UNIT 1b — CONSENT PRESENTATION. COMPLETE AND DEVICE-ACCEPTED.
 
+> **CORRECTION 2026-09-11 — P5 AND P6 WERE NOT MET END TO END, AND THE DEVICE
+> RESULT BELOW WAS A FALSE POSITIVE FOR CONSENT PROPAGATION (C-82).** The
+> dialog, Cancel and the private-eye observations stand. But
+> `PublishService.publish(…)` rebuilt the queued payload **without
+> `authorisedOmissions`**, and the queue's merge dropped it again — so the
+> member's "Share Without It" **never reached the queue**. The oversized video
+> was omitted on device only because the old upload-time fallback ("Option B")
+> skipped it later, which is indistinguishable on screen. **For a long imported
+> WAV/AIFF the consequence was real:** ~24.8–27 min shared against the
+> member's choice; beyond ~27 min a permanent, silent, retry-forever failure.
+> The tests behind P5/P6 checked the editors' source text and an encode/decode
+> round trip, neither of which sees a rebuild. **Fixed by C-82** — see
+> `docs/phase-5-c82-c73-prediction.md` and its acceptance. The text below is
+> kept as written, and is accurate only as the record of what was believed.
+
 > **DEVICE PASS GREEN 2026-09-10, BOTH HALVES.**
 > **Consent UX:** dialog exactly as predicted; **Cancel** kept the member in the
 > editor and saved nothing; **Share Without It** saved and published with the

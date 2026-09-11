@@ -1907,7 +1907,11 @@ var body: some View {
                         objectID: s.objectID,
                         shouldPublish: visibility
                     )
-                    FeedInteractionStore.markForPublish(sid)
+                    // `FeedInteractionStore.markForPublish(sid)` was removed here:
+                    // it queued a session-less `isPublic: true` stub BEFORE
+                    // `publish`'s asynchronous enqueue ran. The queue merge let the
+                    // real intent replace it, so no public post was ever
+                    // reproduced — removed as a redundant timing-risk stub.
                 } else {
                     print("Publish skipped: missing Session.id")
                 }

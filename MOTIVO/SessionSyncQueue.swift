@@ -248,7 +248,11 @@ public final class SessionSyncQueue: ObservableObject {
                 // recombined into a contradiction here either.
                 isPublic: mergedIsPublic,
                 notes: payload.notes ?? existing.notes,
-                areNotesPrivate: (payload.notes != nil ? payload.areNotesPrivate : existing.areNotesPrivate)
+                areNotesPrivate: (payload.notes != nil ? payload.areNotesPrivate : existing.areNotesPrivate),
+                // C-82 — the member's "Share Without It" must survive the merge.
+                // A newer consent replaces the older one; an update that says
+                // nothing about consent keeps it.
+                authorisedOmissions: payload.authorisedOmissions ?? existing.authorisedOmissions
             )
             items[index] = merged
             persist()

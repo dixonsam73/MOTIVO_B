@@ -1554,15 +1554,9 @@ extension AddEditSessionView {
                       let path = a.value(forKey: "fileURL") as? String,
                       let url = resolveStoredFileURL(at: path) else { continue }
                 guard !isPrivate(id: id, url: url) else { continue }
-                //  is #if DEBUG only — the Release
-                // build caught that. This helper is already shipping code.
-                let bytes = Int(localFileSizeBytes(url) ?? 0)
-                let format = MediaFormat.from(url: url)
-                var seconds: Double?
-                if format?.kind == .audio {
-                    seconds = (try? AVAudioPlayer(contentsOf: url))?.duration
-                }
-                out.append(.init(id: id, format: format, localBytes: bytes, durationSeconds: seconds))
+                // C-73 — the same rules as a staged attachment, from one place.
+                // This was built inline here: a second copy of the rules.
+                out.append(ConnectedSharePreflight.candidate(forPersisted: id, url: url))
             }
         }
 
