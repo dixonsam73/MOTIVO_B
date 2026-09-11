@@ -19,4 +19,9 @@ struct TimerStagedVideo: Identifiable, Equatable {
     /// The staged file. Before `StagingStore.saveNew` completes this is the
     /// recorder's output; afterwards it is the staging file.
     var fileURL: URL
+
+    /// C-85 — PRE-CHANGE STAND-IN, NO CALLER. Today every staged video is
+    /// treated as QuickTime; the implementation commit derives the format from
+    /// the file itself.
+    static func format(forFile url: URL) -> MediaFormat { .mov }
 }
