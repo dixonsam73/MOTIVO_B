@@ -165,11 +165,25 @@ enum ConnectedSharePreflight {
                          durationSeconds: seconds, preparable: preparable)
     }
 
-    /// C-82 — PRE-CHANGE STAND-IN, NO CALLER. Returns the consent list
-    /// unchanged, which is exactly what both editors do today. It exists only
-    /// so `OmissionIdentityTests` compile and fail for the right reason before
-    /// the fix; the implementation commit replaces this body.
+    /// C-82 — THE ONE PLACE A CONSENT LIST CROSSES FROM STAGED IDS TO SAVED IDS.
+    ///
+    /// The member consents against the id the dialog saw. For a newly added
+    /// attachment that is its STAGED id, and saving mints a new one
+    /// (`AttachmentStore.addAttachment`) — while the flush matches saved ids.
+    /// So each editor's commit returns staged → saved for the attachments it
+    /// created, and the consent goes through here before it is queued.
+    ///
+    /// An id not in the map passes unchanged: that is an attachment saved
+    /// before this edit, whose consent already names its saved id.
     static func persistedOmissions(_ omissions: [UUID], stagedToFinal: [UUID: UUID]) -> [UUID]? {
-        omissions.isEmpty ? nil : omissions
+        guard !omissions.isEmpty else { return nil }
+        return omissions.map { id in
+            if let saved = stagedToFinal[id] {
+                BackendLogger.notice("Consent omission • staged=\(id.uuidString) → saved=\(saved.uuidString)")
+                return saved
+            }
+            BackendLogger.notice("Consent omission • saved=\(id.uuidString) unchanged")
+            return id
+        }
     }
 }

@@ -2066,7 +2066,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
         let __tmpCleanupSnapshot: [(UUID, AttachmentKind)] = stagedAttachments.map { ($0.id, $0.kind) }
 
         commitScoreAttachments_AESV(to: s, ctx: viewContext)
-        commitStagedAttachments(to: s, ctx: viewContext)
+        // C-82 — consent names staged ids; the publish must name saved ones.
+        let stagedToFinal = commitStagedAttachments(to: s, ctx: viewContext)
 
         do {
             try viewContext.save()
@@ -2110,7 +2111,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                     // UNIT 1b — durable consent travels with the publish, so a
                     // retry omits exactly what the member authorised and never
                     // re-prompts. The private-eye state is untouched.
-                    authorisedOmissions: authorisedOmissions.isEmpty ? nil : authorisedOmissions
+                    // C-82 — translated to the SAVED ids the flush matches.
+                    authorisedOmissions: ConnectedSharePreflight.persistedOmissions(authorisedOmissions, stagedToFinal: stagedToFinal)
                 )
 
                 // P4-U2b. SHARED-ONLY UPLOADS. `shouldPublish` controls EXISTENCE

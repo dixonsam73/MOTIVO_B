@@ -1862,7 +1862,8 @@ var body: some View {
             s.setValue(uid, forKey: "ownerUserID")
         }
         commitUsedScoreAttachments(to: s, ctx: viewContext)
-        commitStagedAttachments(to: s, ctx: viewContext)
+        // C-82 — consent names staged ids; the publish must name saved ones.
+        let stagedToFinal = commitStagedAttachments(to: s, ctx: viewContext)
         do {
             try viewContext.save()
             viewContext.processPendingChanges()
@@ -1895,7 +1896,8 @@ var body: some View {
                         // UNIT 1b — durable consent, same semantics as the other
                         // publish site: it travels with the publish, so a retry
                         // omits exactly what was authorised and never re-prompts.
-                        authorisedOmissions: authorisedOmissions.isEmpty ? nil : authorisedOmissions
+                        // C-82 — translated to the SAVED ids the flush matches.
+                        authorisedOmissions: ConnectedSharePreflight.persistedOmissions(authorisedOmissions, stagedToFinal: stagedToFinal)
                     )
 
                     // P4-U2b. SHARED-ONLY UPLOADS -- see AddEditSessionView for

@@ -60,10 +60,16 @@ final class ConsentAtBothPublishSitesTests: XCTestCase {
 
     /// The consent must reach the durable payload at BOTH sites, or a retry
     /// would omit nothing.
+    ///
+    /// **RE-POINTED BY C-82, 2026-09-11 — stricter, not weaker.** This pinned
+    /// `authorisedOmissions: authorisedOmissions.isEmpty ? nil : authorisedOmissions`,
+    /// which carried the set in the STAGED id space the flush never matches. It
+    /// now requires the translation to saved ids; the old text fails it.
     func testBothSitesCarryConsentIntoThePayload() {
         for file in sites {
-            XCTAssertTrue(code(file).contains("authorisedOmissions: authorisedOmissions.isEmpty ? nil : authorisedOmissions"),
-                          "\(file): the authorised set must travel in the payload")
+            XCTAssertTrue(code(file).contains(
+                "authorisedOmissions: ConnectedSharePreflight.persistedOmissions(authorisedOmissions, stagedToFinal: stagedToFinal)"),
+                          "\(file): the authorised set must travel in the payload, translated to saved ids")
         }
     }
 

@@ -475,7 +475,10 @@ extension AddEditSessionView {
     // --- end PATCH 8G-AESV ---
 
     /// Adds only newly staged attachments (not those that originated from Core Data) and updates thumbnail flags for all.
-    func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
+    /// Returns staged → saved ids for the attachments this commit CREATED
+    /// (C-82). Attachments saved before this edit never enter it.
+    func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) -> [UUID: UUID] {
+        var stagedToFinalID: [UUID: UUID] = [:]
         // Persist renamed audio stems from the viewer (if any)
         let audioNamesDict: [String: String] = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
         let displayNamesKey = "stagedAttachmentDisplayNames_temp"
@@ -529,6 +532,7 @@ extension AddEditSessionView {
                 let stagedURL = surrogateURL(for: att)
                 let persistedURL = resolveStoredFileURL(at: result.path)
                 if let newID = created.value(forKey: "id") as? UUID {
+                    stagedToFinalID[att.id] = newID
                     migratePrivacy_AESV(
                         fromStagedID: att.id,
                         stagedURL: stagedURL,
@@ -569,6 +573,7 @@ extension AddEditSessionView {
         UserDefaults.standard.removeObject(forKey: displayNamesKey)
         stagedAttachments.removeAll()
         existingAttachmentIDs.removeAll()
+        return stagedToFinalID
     }
 
     // Added helpers for attachment viewer integration:

@@ -721,7 +721,9 @@ isPrivate: { url in
     }
 
 
-    func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
+    /// Returns staged → saved ids for the attachments this commit created —
+    /// the thumbnail uses it, and so does the member's consent (C-82).
+    func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) -> [UUID: UUID] {
         let chosenThumbID = selectedThumbnailID
         // Ensure thumbnail implies included (staged privacy) before migration/commit
         if let tid = chosenThumbID, let thumb = stagedAttachments.first(where: { $0.id == tid }) {
@@ -864,6 +866,7 @@ let stagedURL = surrogateURL(for: att)
         UserDefaults.standard.removeObject(forKey: namesKey)
         UserDefaults.standard.removeObject(forKey: displayNamesKey)
         UserDefaults.standard.removeObject(forKey: stagedVideoTitlesKey)
+        return stagedToFinalID
     }
 
     func stagedIndexForAttachment(_ target: StagedAttachment) -> Int {

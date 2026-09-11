@@ -991,7 +991,10 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
                 // queued and chose "Share Without It", so omitting it here is
                 // AUTHORISED rather than silent. The exclusion travels in the
                 // payload, so a retry omits exactly this and nothing else.
-                if payload.authorisedOmissions?.contains(item.id) == true { continue }
+                if payload.authorisedOmissions?.contains(item.id) == true {
+                    BackendLogger.notice("Consent omission skipped at upload • postID=\(payload.id.uuidString) • attachment=\(item.id.uuidString)")
+                    continue
+                }
 
                 // UNIT 1 / Policy A — Connected carries a DERIVED audio
                 // representation. The local original is never touched.
