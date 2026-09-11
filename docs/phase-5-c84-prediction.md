@@ -79,3 +79,34 @@ sets `PracticeTimer.sessionDiscarded`.
 
 **Throwaway data only.** The kill ends Études Dev's process, and the only data at
 risk is the few-second test clip and the test timer.
+
+## 4. RESULT — 2026-09-11, Device B, Études Dev. **C-84 REPRODUCED. R1–R5 ALL MET.**
+
+Read-only snapshots were taken with `c84-snap.sh`. The kill was guarded: it ran
+only if S1 showed exactly one Études Dev pid, a staged media file, a staged
+audio id and a running timer. SIGKILL went to that pid alone, matched by its
+install path, so the Release app running under Xcode was never a target.
+
+| # | Observed | Verdict |
+|---|---|---|
+| **R1** | The account holder backgrounded and returned **twice**: once with the recorder still open, and once after the clip was saved into the attachments. The clip and the running timer persisted both times | **MET** — stronger than predicted |
+| **R2** | S1 (11:50:55Z): pid **32733**, `bootID` 32733. `Staging/2026-09-11/2026sep11_12:48.m4a` (202,777 B), ref `C4390E8E` (audio). `stagedAudioIDs = ["C4390E8E-…"]`. `isRunning = true`, `startedAtEpoch` set, `accumulated = 0`. `ephemeralSessionHasMedia_v1 = true` | **MET** |
+| **R3** | SIGKILL pid 32733 at 11:50:56Z. S2: **process not running; file, ref and every key byte-for-byte as in S1** | **MET** — the kill deleted nothing |
+| **R4** | Relaunched from the Home Screen straight onto the Practice Timer: **the timer was not running, and no audio clip was visible** | **MET** |
+| **R5** | S3 (11:52:07Z): new pid **32736**, `bootID` rewritten to 32736. **The `.m4a` is deleted; `staged.json` holds no ref.** `stagedAudioIDs = []`. `isRunning`, `startedAtEpoch` and `accumulated` are all **absent**. `ephemeralSessionHasMedia_v1 = false` | **MET** |
+
+**What R3 and R5 establish together:** the member-created recording and the
+timer survived the termination intact, and were **deleted by the relaunch**,
+through the pid boot-ID check (Path 1).
+
+**What was not exercised:**
+- **Path 2** (`willTerminate`) was deliberately excluded by using SIGKILL.
+- **A real iOS memory kill was not induced.** SIGKILL is the signal such a kill
+  delivers, and **the relaunch path cannot tell the two apart**, because it keys
+  only on the pid.
+
+**Incidental, for the cleanup scope.** Études Dev's `Staging/` holds **118–119
+empty dated folders** going back to 2025-11-19: `StagingStore.remove` deletes
+files but never folders. **No orphaned media was found.** The preferences file
+carries **486–487 `PracticeTimer.currentSessionStartTimestamp.<UUID>` keys** that
+are never removed.
