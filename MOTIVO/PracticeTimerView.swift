@@ -311,8 +311,15 @@ struct PracticeTimerView: View {
     @State private var showMetronomeControlsExpanded: Bool = false
     @AppStorage("ptv_hasSeenDroneLongPressHint_v1") private var hasSeenDroneLongPressHint: Bool = false
     @AppStorage("ptv_hasSeenMetronomeLongPressHint_v1") private var hasSeenMetronomeLongPressHint: Bool = false
+    private enum LongPressControlsHintTarget {
+        case drone, metronome
+    }
+
     @State private var showLongPressControlsHint: Bool = false
+    @State private var longPressControlsHintTarget: LongPressControlsHintTarget = .drone
     @State private var longPressControlsHintToken = UUID()
+    @State private var longPressControlsHintHeight: CGFloat = 32
+    @ScaledMetric(relativeTo: .caption) private var longPressControlsHintWidth: CGFloat = 96
     @State private var isTunerOpen: Bool = false
     @State private var isAttachmentsVisible: Bool = false
     @StateObject private var tunerService = TunerService()
@@ -2576,6 +2583,9 @@ private func loadPracticeDefaultsIfNeeded() {
                     )
                     .opacity(isTunerOpen ? 0.45 : 1.0)
                     .allowsHitTesting(!isTunerOpen)
+                    .overlay(alignment: .bottom) {
+                        longPressControlsHint(for: .drone)
+                    }
                 }
 
                 if showMetronomeStrip {
@@ -2601,6 +2611,9 @@ private func loadPracticeDefaultsIfNeeded() {
                     )
                     .opacity(isTunerOpen ? 0.45 : 1.0)
                     .allowsHitTesting(!isTunerOpen)
+                    .overlay(alignment: .bottom) {
+                        longPressControlsHint(for: .metronome)
+                    }
                 }
 
                 if showTuner {
@@ -2626,17 +2639,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)
-            .overlay(alignment: .top) {
-                if showLongPressControlsHint {
-                    Text("Long press for controls")
-                        .font(.caption)
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.82))
-                        .transition(.opacity)
-                        .offset(y: -22)
-                        .accessibilityHidden(true)
-                }
-            }
-            .padding(.bottom, Theme.Spacing.xs)
+            .padding(.bottom, longPressControlsHintBottomPadding)
 
             if showDroneStrip && showDroneControlsExpanded {
                 DroneControlStripCard(
@@ -2672,16 +2675,65 @@ private func loadPracticeDefaultsIfNeeded() {
         }
     }
 
+    private func longPressControlsHint(for target: LongPressControlsHintTarget) -> some View {
+        Text("Touch and hold\nfor controls")
+            .font(.caption)
+            .foregroundStyle(Theme.Colors.secondaryText)
+            .multilineTextAlignment(.center)
+            .frame(width: min(longPressControlsHintWidth, 140))
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { height in
+                longPressControlsHintHeight = height
+            }
+            .opacity(showLongPressControlsHint && longPressControlsHintTarget == target ? 1 : 0)
+            .transaction { transaction in
+                // Switch anchors immediately; only the newly requested caption fades in.
+                if longPressControlsHintTarget != target {
+                    transaction.animation = nil
+                }
+            }
+            .alignmentGuide(.bottom) { dimensions in
+                dimensions[.top] - Theme.Spacing.s
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    private var longPressControlsHintBottomPadding: CGFloat {
+        guard showDroneStrip || showMetronomeStrip else { return Theme.Spacing.xs }
+
+        // Reserve space independently of hint visibility, so discovery/fading never
+        // moves the controls. The idle TimerCard already leaves room above Start.
+        let availableCaptionSpace: CGFloat
+        if (showDroneStrip && showDroneControlsExpanded) ||
+            (showMetronomeStrip && showMetronomeControlsExpanded) {
+            availableCaptionSpace = Theme.Spacing.xs
+        } else if isTunerOpen {
+            availableCaptionSpace = Theme.Spacing.xs + Theme.Spacing.l - Theme.Spacing.s
+        } else if !isRunning && elapsedSeconds == 0 {
+            availableCaptionSpace = 44
+        } else {
+            // Section gap plus TimerCard's 10-point top inset, leaving an 8-point gap.
+            availableCaptionSpace = Theme.Spacing.xs + Theme.Spacing.l + 10 - Theme.Spacing.s
+        }
+
+        return Theme.Spacing.xs + max(
+            0, Theme.Spacing.s + longPressControlsHintHeight - availableCaptionSpace
+        )
+    }
+
     private func requestDroneLongPressHint() {
         guard !hasSeenDroneLongPressHint else { return }
         hasSeenDroneLongPressHint = true
-        presentLongPressControlsHint()
+        presentLongPressControlsHint(for: .drone)
     }
 
     private func requestMetronomeLongPressHint() {
         guard !hasSeenMetronomeLongPressHint else { return }
         hasSeenMetronomeLongPressHint = true
-        presentLongPressControlsHint()
+        presentLongPressControlsHint(for: .metronome)
     }
 
     private func markDroneLongPressHintDiscovered() {
@@ -2694,11 +2746,12 @@ private func loadPracticeDefaultsIfNeeded() {
         hideLongPressControlsHint()
     }
 
-    private func presentLongPressControlsHint() {
+    private func presentLongPressControlsHint(for target: LongPressControlsHintTarget) {
         let token = UUID()
         longPressControlsHintToken = token
 
         withAnimation(.easeInOut(duration: 0.15)) {
+            longPressControlsHintTarget = target
             showLongPressControlsHint = true
         }
 
