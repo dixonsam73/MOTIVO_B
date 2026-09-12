@@ -303,6 +303,10 @@ struct PracticeTimerView: View {
     @State var isAddingNewInstrumentInPicker: Bool = false
     @State var newInstrumentNameInPicker: String = ""
     @State private var showSessionMetaSetup: Bool = false
+    @AppStorage("ptv_hasShownFirstUseGuidance_v1") private var hasShownFirstUseGuidance: Bool = false
+    @AppStorage("ptv_hasOpenedManualSessionEditor_v1") private var hasOpenedManualSessionEditor: Bool = false
+    @AppStorage("ptv_hasOpenedThoughtEditor_v1") private var hasOpenedThoughtEditor: Bool = false
+    @State private var hasPendingFirstUseGuidance: Bool = false
     @State private var showDroneControlsExpanded: Bool = false
     @State private var showMetronomeControlsExpanded: Bool = false
     @AppStorage("ptv_hasSeenDroneLongPressHint_v1") private var hasSeenDroneLongPressHint: Bool = false
@@ -1281,6 +1285,18 @@ private func loadPracticeDefaultsIfNeeded() {
         refreshInstrumentSelectionFromStore()
         showAppSetUp = false
         if appRoute.isProfilePresented { appRoute.isProfilePresented = false }
+        hasPendingFirstUseGuidance = true
+        revealFirstUseGuidanceIfReady()
+    }
+
+    private func revealFirstUseGuidanceIfReady() {
+        // Initial timer setup can reset the + panel; reveal only after that work.
+        guard didPrefetch, hasPendingFirstUseGuidance else { return }
+        hasPendingFirstUseGuidance = false
+        guard !hasShownFirstUseGuidance else { return }
+        hasShownFirstUseGuidance = true
+        showSessionMetaSetup = true
+        showAddEntryActions = true
     }
 
     private func evaluateAppSetUpGate() {
@@ -1740,6 +1756,7 @@ private func loadPracticeDefaultsIfNeeded() {
             syncActivityChoiceFromState()
             recomputeSessionMetaTint()
             do { try StagingStore.bootstrap() } catch { /* ignore */ }
+            revealFirstUseGuidanceIfReady()
             await refreshRelationalUnseenCountSources()
         }
         .onAppear {
@@ -2058,9 +2075,15 @@ private func loadPracticeDefaultsIfNeeded() {
                     isPresented = false
                 }
             })
+            .onAppear {
+                if hasShownFirstUseGuidance { hasOpenedManualSessionEditor = true }
+            }
         }
         .sheet(isPresented: $showThoughtEditorSheet) {
             thoughtEditorSheet
+                .onAppear {
+                    if hasShownFirstUseGuidance { hasOpenedThoughtEditor = true }
+                }
         }
         .sheet(isPresented: $showScoresLibrary) {
             ScoresLibraryView(
@@ -2907,6 +2930,14 @@ private func loadPracticeDefaultsIfNeeded() {
         .accessibilityLabel(showAddEntryActions ? "Hide add actions" : "Show add actions")
     }
 
+    private var showManualSessionHint: Bool {
+        hasShownFirstUseGuidance && !hasOpenedManualSessionEditor
+    }
+
+    private var showThoughtHint: Bool {
+        hasShownFirstUseGuidance && !hasOpenedThoughtEditor
+    }
+
     @ViewBuilder
     private var bottomActionSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -3018,18 +3049,33 @@ private func loadPracticeDefaultsIfNeeded() {
 
             if showAddEntryActions && isIdleAddEntryAvailable {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .center, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
                         Button {
                             showAddEntryActions = false
                             showManualAddSheet = true
                         } label: {
-                            HStack(spacing: 4) {
-                                Text("+")
-                                Text("Add session")
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 4) {
+                                    Text("+")
+                                    Text("Add session")
+                                }
+                                .foregroundStyle(tasksAccent.opacity(0.95))
+
+                                if showManualSessionHint {
+                                    Text("Log a session manually")
+                                        .font(.caption)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .accessibilityHidden(true)
+                                }
                             }
-                            .foregroundStyle(tasksAccent.opacity(0.95))
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Add session")
+                        .accessibilityHint(showManualSessionHint ? "Log a session manually" : "")
 
                         Spacer(minLength: 8)
 
@@ -3037,13 +3083,28 @@ private func loadPracticeDefaultsIfNeeded() {
                             showAddEntryActions = false
                             showThoughtEditorSheet = true
                         } label: {
-                            HStack(spacing: 4) {
-                                Text("+")
-                                Text("Add thought")
+                            VStack(alignment: .trailing, spacing: 4) {
+                                HStack(spacing: 4) {
+                                    Text("+")
+                                    Text("Add thought")
+                                }
+                                .foregroundStyle(tasksAccent.opacity(0.95))
+
+                                if showThoughtHint {
+                                    Text("An idea, note, or attachment")
+                                        .font(.caption)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .accessibilityHidden(true)
+                                }
                             }
-                            .foregroundStyle(tasksAccent.opacity(0.95))
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .topTrailing)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Add thought")
+                        .accessibilityHint(showThoughtHint ? "An idea, note, or attachment" : "")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

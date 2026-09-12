@@ -1,146 +1,195 @@
-// CHANGE-ID: 20260518_132400_AboutEtudes_CopyRefresh
-// SCOPE: AboutEtudesView — refresh helper/about copy to reflect current Études philosophy and feature set (Thoughts, Threads, tint system, private-first model, Insights wording, Timer naming). Preserve existing layout/UI structure and inline heart icon formatting.
-// SEARCH-TOKEN: 20260518_132400_AboutEtudes_CopyRefresh
-
 import SwiftUI
 
 struct AboutEtudesView: View {
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
-                aboutSection("Overview") {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("Études is a journal for musicians. Capture practice sessions, rehearsals, performances, ideas, recordings, reflections, and scores — and build a lasting archive of your musical life.")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText)
+            VStack(alignment: .leading, spacing: 0) {
+                introduction
 
-                        Text("Designed for musicians, composers, teachers, and students, Études adapts to the way you work — whether you’re practising alone, teaching, composing, performing, or collaborating.")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText)
+                PracticeWindowSeparator(animationDelay: 0.3)
+                    .padding(.vertical, Theme.Spacing.xxl)
 
-                        Text("Études is private by default — nothing leaves your device unless you enable Études Connected. In Connected, sessions are shared with your followers by default; you can turn sharing off for any session, or make private the default in Profile → Default to Private Posts. There are no public counts, rankings or popularity systems.")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText)
+                captureSection
+                tasksSection.padding(.top, Theme.Spacing.xxl)
+                scoresSection.padding(.top, Theme.Spacing.xxl)
 
-                    }
-                }
+                PracticeWindowSeparator(animationDelay: 0.5)
+                    .padding(.vertical, Theme.Spacing.xxl)
 
-                aboutSection("Profile") {
-                    Text("Add your instruments and activities, and choose a primary instrument for faster session setup.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                journalSection
+                insightsSection.padding(.top, Theme.Spacing.xxl)
 
-                    Text("Set up reusable task lists in the Tasks Manager — they can appear automatically when you begin a session. Import tasks by pasting text or scanning handwritten notes.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                PracticeWindowSeparator(animationDelay: 0.3)
+                    .padding(.vertical, Theme.Spacing.xxl)
 
-                    Text("Your Journal, Tasks, and personal score library remain available even when used entirely offline.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-
-                aboutSection("Timer") {
-                    Text("The Timer is where most sessions begin.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("Log practice, rehearsal, performance, writing, recording, listening, score study, or rehearsal preparation. Open scores from your personal library, pick up where you left off, and attach the pages you worked on to your Journal. Record or attach photos, audio, and video — and trim recordings before saving.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("Use the + button to add sessions manually, or create Thoughts — lightweight journal entries for ideas, sketches, reflections, fragments, or unfinished work that doesn’t fit a timed session.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("In Études Connected, you control sharing for each session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default and can be included individually when publishing. Thoughts start private, though you can choose to share one.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("Use Threads to preserve continuity across long-term work — for example recital preparation, a recording project, technical studies, a composition, or an ensemble programme. Threads are personal and visible only to you.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-
-                aboutSection("Journal & Feed") {
-                    Text("Your Journal is a private, time-based archive of your work, organised by week, month, or year.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("As patterns emerge in your practice, the Journal can subtly reflect them through colour. Depending on your settings, tint can respond to instruments, activities, or Threads — while remaining calm and neutral when no strong pattern exists.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("Thoughts appear alongside sessions, allowing ideas, sketches, reflections, and recordings to become part of the same long-term archive.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("If you choose to enable Études Connected, your Feed shows shared sessions in chronological order. You’ll only see what other musicians have intentionally chosen to share.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    (
-                        Text("Use Filters to narrow your Journal by instrument, activity, Threads, Favourites (")
-                        + Text(Image(systemName: "heart"))
-                        + Text("), content type, or search. Études Connected adds additional filters for shared content and Ensembles.")
-                    )
-                    .font(Theme.Text.body)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("Favourited Sessions and Thoughts are personal bookmarks, never public reactions.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("In Études Connected, Ensembles help organise the people you follow into meaningful musical contexts — for example students, collaborators, chamber groups, or bands.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("In Études Connected, comments are private conversations between you and the author — never public threads.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-
-                aboutSection("Insights") {
-                    Text("Insights help reveal patterns in your work over time — including your focus, consistency, session rhythm, activities, and Threads — without scores, rankings, or performance pressure.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-
+                connectedSection
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .padding(.top, Theme.Spacing.s)
+            .frame(maxWidth: 600, alignment: .leading)
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, Theme.Spacing.xxl)
+            .frame(maxWidth: .infinity)
         }
         .appBackground()
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Text("")
+                Text("About Études")
                     .font(Theme.Text.pageTitle)
                     .foregroundStyle(.primary)
             }
         }
     }
 
-    private func aboutSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text(title)
-                .sectionHeader()
+    private var introduction: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            Text("A journal for musicians.")
+                .font(.title2.weight(.medium))
+                .foregroundStyle(.primary)
+                .accessibilityAddTraits(.isHeader)
 
-            aboutCard {
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    content()
-                }
-            }
+            Text("Keep a record of your practice, rehearsals, performances and ideas, and build an archive of your musical life.")
+                .aboutBody()
         }
     }
 
-    private func aboutCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+    private var captureSection: some View {
+        aboutSection("Capture sessions and ideas") {
+            Text("Start the Timer when you begin, or add a session manually afterwards. Keep notes, record audio and video, and take photos alongside your work.")
+                .aboutBody()
+
+            Text("For something that doesn’t need a timed session, add a Thought: an idea, reflection, sketch or fragment, with text and any existing files you’d like to attach.")
+                .aboutBody()
+
+            Text("Choose your instruments and activities in Profile to make session setup your own.")
+                .aboutBody()
+        }
+    }
+
+    private var tasksSection: some View {
+        aboutSection("Shape your practice") {
+            Text("Create reusable task lists for the things you want to work on. Bring them into a session, tick off tasks as you go, and return to them next time. You can also import a list by pasting text or scanning handwritten notes.")
+                .aboutBody()
+
+            AboutScreenshot(
+                "AboutTasks",
+                crop: CGRect(x: 32, y: 1310, width: 878, height: 552),
+                description: "Example task list, with warm-up and scale patterns completed and work on Bach’s Cello Suite II still to do."
+            )
+
+            Text("The built-in tuner, metronome and drone are there when you need them.")
+                .aboutBody()
+        }
+    }
+
+    private var scoresSection: some View {
+        aboutSection("Keep scores close") {
+            Text("Build your personal score library, open a score while practising, and pick up where you left off. Keep the scores you use alongside the sessions they belong to.")
+                .aboutBody()
+
+            AboutScreenshot(
+                "AboutScore",
+                crop: CGRect(x: 55, y: 460, width: 832, height: 520),
+                description: "The opening of Bach’s Cello Suite II, Prélude, in the score viewer."
+            )
+        }
+    }
+
+    private var journalSection: some View {
+        aboutSection("Return to what matters") {
+            Text("Your Journal brings Sessions and Thoughts together over time. Use Threads to connect work on a piece, project or longer-term goal.")
+                .aboutBody()
+
+            AboutScreenshot(
+                "AboutSession",
+                crop: CGRect(x: 0, y: 246, width: 942, height: 1750),
+                description: "A saved Afternoon Practice session: Bass Guitar, two hours and five minutes, with notes, focus, a photo and page 8 of the Bach score attached."
+            )
+
+            Text("Filter by instrument, activity or Thread, search your entries and recording titles, and bookmark useful Sessions and Thoughts with Favourites. Threads and Favourites are personal.")
+                .aboutBody()
+        }
+    }
+
+    private var insightsSection: some View {
+        aboutSection("Notice your patterns") {
+            Text("Insights help you notice patterns in your time, activities and focus, without rankings or performance pressure.")
+                .aboutBody()
+
+            AboutScreenshot(
+                "AboutInsights",
+                crop: CGRect(x: 36, y: 1010, width: 870, height: 625),
+                description: "Example Insights showing varied session lengths and a current streak of one day."
+            )
+        }
+    }
+
+    private var connectedSection: some View {
+        aboutSection("Explore Connected") {
+            Text("Your Journal, Tasks and score library work offline without a Connected account.")
+                .aboutBody()
+
+            Text("Études Connected adds sharing with other musicians. In Connected, sessions share with your followers by default; you can change this in Profile.")
+                .aboutBody()
+
+        }
+    }
+
+    private func aboutSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            Text(title)
+                .font(Theme.Text.pageTitle)
+                .foregroundStyle(.primary)
+                .accessibilityAddTraits(.isHeader)
             content()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface(padding: Theme.Spacing.m)
+    }
+}
+
+/// Presents a detail from a screenshot without altering its source pixels.
+/// Crop coordinates use the same 942 × 2048 reference canvas for every asset.
+private struct AboutScreenshot: View {
+    let asset: String
+    let crop: CGRect
+    let description: String
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(_ asset: String, crop: CGRect, description: String) {
+        self.asset = asset
+        self.crop = crop
+        self.description = description
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let scale = proxy.size.width / crop.width
+            Image(asset)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 942 * scale, height: 2048 * scale)
+                .offset(x: -crop.minX * scale, y: -crop.minY * scale)
+        }
+        .aspectRatio(crop.width / crop.height, contentMode: .fit)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                .strokeBorder(Theme.Colors.stroke(colorScheme), lineWidth: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(description)
+        .accessibilityAddTraits(.isImage)
+    }
+}
+
+private extension View {
+    func aboutBody() -> some View {
+        font(Theme.Text.body)
+            .foregroundStyle(Theme.Colors.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

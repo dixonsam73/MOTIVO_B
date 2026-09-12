@@ -929,6 +929,18 @@ private var sessionSetupSection: some View {
                      quietDivider()
                  }
 
+                 Button { showAboutEtudes = true } label: {
+                     navigationRow(title: "About Études")
+                 }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     quietDivider()
+                 }
+
                  Button {
                      auth.signOut()
                  } label: {

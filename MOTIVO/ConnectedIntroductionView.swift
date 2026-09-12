@@ -1,7 +1,3 @@
-// CHANGE-ID: 20260713_ConnectedIntroduction_M8A1_GlyphAnimation
-// SCOPE: Add a one-shot, Reduce Motion-aware reveal to the two existing Practice Window separators in ConnectedIntroductionView only. No copy, layout, navigation, authentication, StoreKit, or unrelated UI changes.
-// SEARCH-TOKEN: 20260713_ConnectedIntroduction_M8A1_GlyphAnimation
-
 import SwiftUI
 
 struct ConnectedIntroductionView: View {
@@ -25,6 +21,12 @@ struct ConnectedIntroductionView: View {
                     .padding(.vertical, Theme.Spacing.xxl)
 
                 sharingSection
+
+                privacySection
+                    .padding(.top, Theme.Spacing.xxl)
+
+                conversationSection
+                    .padding(.top, Theme.Spacing.xxl)
 
                 PracticeWindowSeparator(animationDelay: 0.5)
                     .padding(.vertical, Theme.Spacing.xxl)
@@ -94,7 +96,7 @@ struct ConnectedIntroductionView: View {
 
     private var introductionSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
-            Text("Études Connected opens up your Études journal to the people you already make music with.")
+            Text("Études Connected gives you a place to share musical work with the people already in your life.")
                 .connectedBody()
 
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -107,21 +109,53 @@ struct ConnectedIntroductionView: View {
             .font(Theme.Text.body)
             .foregroundStyle(.primary)
 
-            Text("Connected gives you a place to share ideas, find inspiration, and stay connected with the people you make music with.")
-                .connectedBody()
-
-            Text("You decide what to share, and what remains private. Sessions are shared with your followers by default — you can turn sharing off for any session, or make private the default in your profile.")
-                .connectedBody()
         }
         .editorialMargins()
     }
 
     private var sharingSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
-            Text("Share when you've worked something out on your instrument that might help someone else, you'd like to send charts for tomorrow's rehearsal to your bandmates, or you've found inspiration in something another musician has posted.")
+            Text("Share something useful")
+                .font(Theme.Text.pageTitle)
+                .accessibilityAddTraits(.isHeader)
+
+            Text("Share a recording of something you’ve worked out, an idea you want to discuss, or charts for the next rehearsal.")
                 .connectedBody()
 
-            Text("Find other musicians by name or instrument, organise them into Ensembles, and save useful posts for future reference.")
+            Text("Find musicians by name or instrument, organise the people you follow into Ensembles, and save useful posts for another day.")
+                .connectedBody()
+        }
+        .editorialMargins()
+    }
+
+    private var privacySection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            Text("Understand what’s shared")
+                .font(Theme.Text.pageTitle)
+                .accessibilityAddTraits(.isHeader)
+
+            Text("Sessions are shared with your followers by default. You can turn sharing off for any session, or enable Default to Private Posts in Profile.")
+                .connectedBody()
+
+            Text("Thoughts and attachments start private. Choose individual attachments to include when sharing, and keep session notes personal when you want to.")
+                .connectedBody()
+
+            Text("Your personal journal remains available whether or not you share anything.")
+                .connectedBody()
+        }
+        .editorialMargins()
+    }
+
+    private var conversationSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            Text("Stay in conversation")
+                .font(Theme.Text.pageTitle)
+                .accessibilityAddTraits(.isHeader)
+
+            Text("The Feed presents shared work in chronological order.")
+                .connectedBody()
+
+            Text("Comments are private conversations between you and the author of a post. Favourites are personal bookmarks, never public reactions.")
                 .connectedBody()
         }
         .editorialMargins()
@@ -139,7 +173,7 @@ struct ConnectedIntroductionView: View {
             .foregroundStyle(.primary)
 
             VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
-                Text("Start with the people already part of your musical life.")
+                Text("Start with the people you already make music with.")
                     .connectedBody()
 
                 Text("If someone isn't using Études Connected yet, you can invite them.")
@@ -177,7 +211,7 @@ struct ConnectedIntroductionView: View {
     }
 }
 
-private struct PracticeWindowSeparator: View {
+struct PracticeWindowSeparator: View {
     let animationDelay: Double
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

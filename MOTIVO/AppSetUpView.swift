@@ -39,6 +39,7 @@ struct AppSetUpView: View {
     @State private var statusMessage: String? = nil
     @State private var isEnsuringProfile: Bool = false
     @State private var isCompleting: Bool = false
+    @State private var showAboutEtudes: Bool = false
 
     private var profile: Profile? {
         profiles.first
@@ -78,12 +79,30 @@ struct AppSetUpView: View {
                 }
 
                 primaryCTA
+
+                Button("About Études") {
+                    showAboutEtudes = true
+                }
+                .font(Theme.Text.body)
+                .foregroundStyle(Theme.Colors.accent)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .buttonStyle(.plain)
             }
             .padding(.vertical, Theme.Spacing.xl)
             .padding(.horizontal, Theme.Spacing.l)
         }
         .appBackground()
         .tint(Theme.Colors.accent)
+        .sheet(isPresented: $showAboutEtudes) {
+            NavigationStack {
+                AboutEtudesView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showAboutEtudes = false }
+                        }
+                    }
+            }
+        }
         .onAppear {
             ensureProfileExistsIfNeeded()
             seedFieldsIfNeeded()
