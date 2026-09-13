@@ -402,9 +402,7 @@ struct PracticeTimerView: View {
     // MARK: - Metronome State
 
     @State var metronomeIsOn: Bool = false
-    @State private var metronomeBPM: Int = 80
-    @State private var metronomeAccentEvery: Int = 0   // 0 = no accent, 2–15 = every N beats
-    @State private var metronomeVolume: Double = 0.7
+    @State private var metronomeSettings = MetronomeSettings()
 
 
 
@@ -1623,6 +1621,15 @@ private func loadPracticeDefaultsIfNeeded() {
         } else {
             NavigationStack {
                 mainScrollView
+                    .onChange(of: metronomeSettings) { _, value in
+                        audioServices.metronomeEngine.update(settings: value)
+                    }
+                    .onReceive(audioServices.metronomeEngine.$availability) { value in
+                        metronomeIsOn = value == .running
+                        if case .unavailable = value, showMetronomeStrip, !isTunerOpen {
+                            withAnimation(.easeInOut(duration: 0.18)) { showMetronomeControlsExpanded = true }
+                        }
+                    }
                     .navigationDestination(isPresented: $showMeView) {
                         MeView()
                     }
@@ -2591,9 +2598,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 if showMetronomeStrip {
                     MetronomeCompactTrigger(
                         metronomeIsOn: $metronomeIsOn,
-                        metronomeBPM: $metronomeBPM,
-                        metronomeAccentEvery: $metronomeAccentEvery,
-                        metronomeVolume: $metronomeVolume,
+                        settings: $metronomeSettings,
                         metronomeEngine: audioServices.metronomeEngine,
                         recorderIcon: recorderIcon,
                         shouldAnimateCompactIcon: !showMetronomeControlsExpanded,
@@ -2661,9 +2666,7 @@ private func loadPracticeDefaultsIfNeeded() {
             if showMetronomeStrip && showMetronomeControlsExpanded {
                 MetronomeControlStripCard(
                     metronomeIsOn: $metronomeIsOn,
-                    metronomeBPM: $metronomeBPM,
-                    metronomeAccentEvery: $metronomeAccentEvery,
-                    metronomeVolume: $metronomeVolume,
+                    settings: $metronomeSettings,
                     metronomeEngine: audioServices.metronomeEngine,
                     recorderIcon: recorderIcon
                 )
@@ -2800,75 +2803,19 @@ private func loadPracticeDefaultsIfNeeded() {
 
     @ViewBuilder
     private var tunerPanel: some View {
-        VStack(spacing: Theme.Spacing.m) {
-            Text(tunerPrimaryLabel)
-                .font(.system(size: 32, weight: .medium, design: .rounded))
-                .foregroundStyle(
-                    tunerService.state.noteName == nil
-                        ? Theme.Colors.secondaryText.opacity(0.62)
-                        : (tunerService.state.isInTune
-                            ? Theme.Colors.primaryAction.opacity(0.88)
-                            : Theme.Colors.secondaryText.opacity(0.84))
-                )
-                .frame(maxWidth: .infinity, alignment: .center)
-
-            VStack(spacing: Theme.Spacing.s) {
-                GeometryReader { proxy in
-                    let trackWidth = max(proxy.size.width - 20, 1)
-                    let markerX = ((tunerService.state.indicatorOffset + 1) / 2) * trackWidth + 10
-
-                    ZStack(alignment: .leading) {
-                        Capsule(style: .continuous)
-                            .fill(Color.secondary.opacity(0.16))
-                            .frame(height: 4)
-
-                        Capsule(style: .continuous)
-                            .fill(tunerService.state.isInTune ? Theme.Colors.primaryAction.opacity(0.18) : Color.clear)
-                            .frame(width: 52, height: 8)
-                            .frame(maxWidth: .infinity, alignment: .center)
-
-                        Rectangle()
-                            .fill(tunerService.state.isInTune ? Theme.Colors.primaryAction : recorderIcon)
-                            .frame(width: 2, height: 18)
-                            .offset(x: markerX - 1)
-                    }
-                }
-                .frame(height: 18)
-
-                HStack {
-                    Text(tunerStatusLine)
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Spacer()
-
-                    Text(tunerFrequencyLine)
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .monospacedDigit()
-                }
-            }
+        TunerPanelView(
+            state: tunerService.state,
+            availability: tunerService.availability,
+            referenceA4: $droneFreq,
+            indicatorColor: recorderIcon,
+            retry: { tunerService.start(referenceA4: droneFreq) }
+        )
+        .onChange(of: droneFreq) { _, newValue in
+            tunerService.setReferenceA4(newValue)
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .cardSurfaceNonClipping(padding: Theme.Spacing.m)
         .transition(.move(edge: .top).combined(with: .opacity))
-    }
-
-    private var tunerPrimaryLabel: String {
-        tunerService.state.noteName ?? "—"
-    }
-
-    private var tunerStatusLine: String {
-        guard tunerService.state.noteName != nil else { return "Listening…" }
-        guard let cents = tunerService.state.cents else { return "Listening…" }
-        if tunerService.state.isInTune { return "In tune" }
-        if cents == 0 { return "Listening…" }
-        return cents < 0 ? "\(abs(cents)) cents flat" : "\(cents) cents sharp"
-    }
-
-    private var tunerFrequencyLine: String {
-        guard let frequency = tunerService.state.frequencyHz, frequency > 0 else { return "— Hz" }
-        return String(format: "%.1f Hz", frequency)
     }
 
     private var hasAttachments: Bool {
@@ -5218,7 +5165,7 @@ private func openAudioViewer(_ id: UUID) {
         showAudioRecorder = false
         showVideoRecorder = false
         isTunerOpen = true
-        tunerService.start()
+        tunerService.start(referenceA4: droneFreq)
     }
 
     private func closeTuner() {

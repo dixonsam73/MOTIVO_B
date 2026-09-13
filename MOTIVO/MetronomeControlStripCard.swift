@@ -1,455 +1,300 @@
-// MetronomeControlStripCard.swift
-// Companion control strip for MetronomeEngine.
-// UI parity with DroneControlStripCard: start/stop, BPM wheel, accent-every-N, volume overlay.
-// CHANGE-ID: 20260326_145800_stage3b_longpress_reveal
-// SCOPE: Stage 3B — preserve compact short-tap metronome toggle and live pulse feedback while adding long-press inline reveal support and a subtle close affordance for the full controls.
-
-// CHANGE-ID: 20260505_174500_LongPressControlsHint
-// SCOPE: Report Metronome compact trigger tap/long-press discovery for one-time parent hint; no audio/control logic changes.
-// SEARCH-TOKEN: 20260505_174500_LongPressControlsHint
-
 import SwiftUI
 
 struct MetronomeControlStripCard: View {
     @Binding var metronomeIsOn: Bool
-    @Binding var metronomeBPM: Int          // e.g. 20–400
-    @Binding var metronomeAccentEvery: Int  // 0 = off, 1…N = accent every N beats
-    @Binding var metronomeVolume: Double    // 0–1
-
-    let metronomeEngine: MetronomeEngine
+    @Binding var settings: MetronomeSettings
+    @ObservedObject var metronomeEngine: MetronomeEngine
     let recorderIcon: Color
-
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showMetronomeVolumePopover = false
-
-    // UI beat/animation state
-    @State private var accentFlashIntensity: Double = 0.0
-    @State private var metronomeSwingRight: Bool = false
+    @State private var metronomeSwingRight = false
     @State private var beatListenerToken: UUID?
-
-    // Tap tempo state (dedicated Tap button)
-    @State private var tapTempoTimestamps: [Date] = []
-
-    private let bpmRange: ClosedRange<Int> = 20...400
-    /// 0 = off, then 1…15 (covers practical subdivisions).
-    private let accentValues: [Int] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-
-    // Tap tempo tuning
-    private let tapTempoMaxInterval: TimeInterval = 2.0  // window for considering taps (seconds)
-    private let tapTempoMinTaps: Int = 2                 // minimum taps to compute BPM
+    @State private var tapTempo = MetronomeTapTempo()
+    @State private var beatFlash: Color?
+    @State private var showBeatGrouping = false
+    @State private var showGroupingHint = false
+    @AppStorage("metronomeGroupingPatterns_v1") private var storedGroupings = Data()
+    @AppStorage("metronome_hasSeenGroupingHint_v1") private var hasSeenGroupingHint = false
+    @ScaledMetric(relativeTo: .body) private var wheelHeight: CGFloat = 56
+    @ScaledMetric(relativeTo: .body) private var tempoWidth: CGFloat = 56
+    @ScaledMetric(relativeTo: .body) private var controlMinWidth: CGFloat = 64
 
     var body: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: Theme.Spacing.s) {
-
-                // Start / Stop
-                Button(action: toggleMetronome) {
-                    MetronomeIcon(
-                        isOn: metronomeIsOn,
-                        swingRight: metronomeSwingRight,
-                        color: recorderIcon,
-                        animateArm: true
-                    )
-                    .frame(width: 36, height: 36)
-                    .contentShape(Circle())
-                }
-                .buttonStyle(.bordered)
-                .background(
-                    Group {
-                        if metronomeIsOn {
-                            Color.clear
-                                .overlay(
-                                    Capsule(style: .continuous)
-                                        .fill(Theme.Colors.primaryAction.opacity(0.18))
-                                )
-                        }
-                    }
-                )
-                .clipShape(Capsule(style: .continuous))
-                .accessibilityLabel(metronomeIsOn ? "Stop metronome" : "Start metronome")
-
-                // Tap tempo button
-                Button(action: handleTapTempoTap) {
-                    Text("Tap")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(recorderIcon)
-                        .frame(width: 36, height: 36)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.bordered)
-                .clipShape(Capsule(style: .continuous))
-                .accessibilityLabel("Tap tempo")
-
-                // BPM wheel
-                Picker("", selection: $metronomeBPM) {
-                    ForEach(bpmRange, id: \.self) { bpm in
-                        Text("\(bpm)")
-                            .font(Theme.Text.body)
-                            .tag(bpm)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.wheel)
-                .frame(width: 56, height: 56)
-                .clipped()
-                .tint(recorderIcon)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                )
-                .onChange(of: metronomeBPM) { _, newBPM in
-                    let clamped = min(max(newBPM, bpmRange.lowerBound), bpmRange.upperBound)
-                    if clamped != metronomeBPM {
-                        metronomeBPM = clamped
-                    }
-                    if metronomeIsOn {
-                        metronomeEngine.update(
-                            bpm: metronomeBPM,
-                            accentEvery: metronomeAccentEvery,
-                            volume: metronomeVolume
-                        )
-                    }
-                }
-                .accessibilityLabel("Tempo in beats per minute")
-
-                // Accent-every-N-beats wheel (0 = off)
-                Picker("", selection: $metronomeAccentEvery) {
-                    ForEach(accentValues, id: \.self) { value in
-                        Text(accentLabel(for: value))
-                            .font(.caption2)
-                            .tag(value)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.wheel)
-                .frame(width: 78, height: 56)   // match drone frequency wheel width
-                .clipped()
-                .tint(recorderIcon)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .fill(Color.orange.opacity(0.18 * accentFlashIntensity))
-                        )
-                )
-                .onChange(of: metronomeAccentEvery) { _, rawValue in
-                    let clamped = clampAccent(raw: rawValue)
-                    if clamped != metronomeAccentEvery {
-                        metronomeAccentEvery = clamped
-                    }
-                    if metronomeIsOn {
-                        metronomeEngine.update(
-                            bpm: metronomeBPM,
-                            accentEvery: metronomeAccentEvery,
-                            volume: metronomeVolume
-                        )
-                    }
-                }
-                .accessibilityLabel("Accent every N beats")
-
-                // Volume button with anchored vertical slider overlay (as an overlay to avoid resizing the row)
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        showMetronomeVolumePopover.toggle()
-                    }
-                } label: {
-                    Image(systemName: "speaker.wave.2.fill")
-                        .symbolRenderingMode(.monochrome)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(recorderIcon)
-                        .frame(width: 36, height: 36)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Metronome volume")
-                .overlay(alignment: .top) {
-                    if showMetronomeVolumePopover {
-                        MetronomeVolumePopover(
-                            value: $metronomeVolume,
-                            onChanged: { _ in
-                                if metronomeIsOn {
-                                    metronomeEngine.updateVolume(metronomeVolume)
-                                }
-                            },
-                            onEditingEnded: {
-                                withAnimation(.easeInOut(duration: 0.18)) {
-                                    showMetronomeVolumePopover = false
-                                }
-                            }
-                        )
-                        .offset(y: -24)
-                        .transition(
-                            .asymmetric(
-                                insertion: .opacity.combined(with: .scale(scale: 0.95, anchor: .bottom)),
-                                removal: .opacity.combined(with: .scale(scale: 0.95, anchor: .bottom))
-                            )
-                        )
-                        .zIndex(1)
-                    }
+        VStack(spacing: 10) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { transport; tap; tempo; volume }
+                VStack(spacing: 8) {
+                    HStack(spacing: 12) { transport; tap }
+                    HStack(spacing: 12) { tempo; volume }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity)
+
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 8) { meter; downbeat; subdivision }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { meter; downbeat; subdivision }
+                    VStack(spacing: 8) { meter; downbeat; subdivision }
+                }
+            }
+
+            if case .unavailable(let failure) = metronomeEngine.availability {
+                VStack(spacing: 6) {
+                    Text("Metronome unavailable").font(.headline)
+                    Text(failure.explanation).font(.caption).foregroundStyle(.secondary)
+                    Button("Try again") { start() }.buttonStyle(.bordered)
+                }.frame(maxWidth: .infinity)
+            }
         }
+        .tint(Theme.Colors.accent)
         .onAppear {
-            // Ensure UI flag matches the real engine state on entry/return
+            settings.restoreGroupings(from: storedGroupings)
             metronomeIsOn = metronomeEngine.isRunning
-            registerBeatListenerIfNeeded()
+            if let beatListenerToken { metronomeEngine.removeBeatListener(beatListenerToken) }
+            beatListenerToken = metronomeEngine.addBeatListener { isDownbeat in
+                let duration = 60 / Double(max(20, settings.bpm))
+                withAnimation(.spring(response: max(0.12, min(duration * 0.55, 0.35)), dampingFraction: 0.72, blendDuration: 0.1)) {
+                    metronomeSwingRight.toggle()
+                }
+                flashBeat(isDownbeat: isDownbeat, duration: duration)
+            }
         }
         .onDisappear {
-            unregisterBeatListener()
+            if let beatListenerToken { metronomeEngine.removeBeatListener(beatListenerToken) }
+            beatListenerToken = nil
+            clearBeatFlash()
         }
+        .onChange(of: settings.rememberedGroupings) { _, _ in storedGroupings = settings.encodedGroupings() }
+        .onChange(of: settings.meter) { _, _ in showBeatGrouping = false }
+        .task(id: settings.meter) {
+            showGroupingHint = false
+            guard settings.meter.supportsGrouping, !hasSeenGroupingHint else { return }
+            hasSeenGroupingHint = true
+            withAnimation(.easeInOut(duration: 0.15)) { showGroupingHint = true }
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            withAnimation(.easeOut(duration: 0.3)) { showGroupingHint = false }
+        }
+        .onChange(of: settings.meter.beatUnit) { _, _ in tapTempo.reset() }
+        .onChange(of: settings.accent) { _, _ in clearBeatFlash() }
+        .onChange(of: metronomeEngine.availability) { _, value in
+            if value != .running { clearBeatFlash() }
+        }
+        .onChange(of: reduceMotion) { _, _ in clearBeatFlash() }
     }
 
-    // MARK: - Actions
-
-    private func toggleMetronome() {
-        // Use the engine as the source of truth, then sync the binding.
-        let currentlyRunning = metronomeEngine.isRunning
-
-        if currentlyRunning {
-            metronomeEngine.stop()
-            metronomeIsOn = false
-        } else {
-            metronomeEngine.start(
-                bpm: metronomeBPM,
-                accentEvery: metronomeAccentEvery,
-                volume: metronomeVolume
-            )
-            metronomeIsOn = true
+    private var transport: some View {
+        Button {
+            if metronomeEngine.isRunning { metronomeEngine.stop(); metronomeIsOn = false }
+            else { start() }
+        } label: {
+            MetronomeIcon(isOn: metronomeIsOn, swingRight: metronomeSwingRight,
+                          color: metronomeIsOn ? Theme.Colors.primaryAction : recorderIcon, animateArm: true)
+                .frame(minWidth: controlMinWidth, maxWidth: .infinity)
+                .frame(height: wheelHeight)
+                .background(metronomeIsOn ? Theme.Colors.primaryAction.opacity(0.18) : recorderIcon.opacity(0.12), in: Capsule())
+                .contentShape(Capsule())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(metronomeIsOn ? "Stop metronome" : "Start metronome")
     }
 
-    /// Handle a tap-tempo tap (from the dedicated Tap button).
-    private func handleTapTempoTap() {
-        let now = Date()
-
-        // Add this tap and keep only recent ones
-        tapTempoTimestamps.append(now)
-        tapTempoTimestamps = tapTempoTimestamps.filter {
-            now.timeIntervalSince($0) <= tapTempoMaxInterval
-        }
-
-        guard tapTempoTimestamps.count >= tapTempoMinTaps else { return }
-
-        // Compute average interval between taps
-        let sorted = tapTempoTimestamps.sorted()
-        let pairs = zip(sorted.dropFirst(), sorted)
-        let intervals = pairs.map { $0.0.timeIntervalSince($0.1) }
-        guard !intervals.isEmpty else { return }
-
-        let total = intervals.reduce(0, +)
-        guard total > 0 else { return }
-
-        let averageInterval = total / Double(intervals.count)
-        guard averageInterval > 0 else { return }
-
-        let bpmDouble = 60.0 / averageInterval
-        let clampedBPM = max(Double(bpmRange.lowerBound),
-                             min(Double(bpmRange.upperBound), bpmDouble))
-        let newBPM = Int(clampedBPM.rounded())
-
-        metronomeBPM = newBPM
-
-        if metronomeIsOn {
-            metronomeEngine.update(
-                bpm: metronomeBPM,
-                accentEvery: metronomeAccentEvery,
-                volume: metronomeVolume
-            )
-        }
+    private var tap: some View {
+        Button {
+            if let value = tapTempo.tap(at: ProcessInfo.processInfo.systemUptime) { settings.bpm = value }
+        } label: {
+            Text("Tap").font(Theme.Text.body).foregroundStyle(recorderIcon)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 8)
+                .frame(minWidth: controlMinWidth, maxWidth: .infinity)
+                .frame(height: wheelHeight)
+                .background(recorderIcon.opacity(0.12), in: Capsule())
+        }.buttonStyle(.plain).accessibilityLabel("Tap tempo")
     }
 
-
-    private func registerBeatListenerIfNeeded() {
-        unregisterBeatListener()
-        beatListenerToken = metronomeEngine.addBeatListener { isAccent in
-            let beatDuration = 60.0 / Double(max(metronomeBPM, 1))
-
-            // Swing the arm every beat with spring/inertia (arm "mass")
-            let response = max(0.12, min(beatDuration * 0.55, 0.35))
-            withAnimation(
-                .spring(
-                    response: response,
-                    dampingFraction: 0.72,
-                    blendDuration: 0.1
-                )
-            ) {
-                metronomeSwingRight.toggle()
-            }
-
-            // Flash the accent bubble only on accented beats
-            if isAccent {
-                accentFlashIntensity = 1.0
-                withAnimation(.linear(duration: beatDuration)) {
-                    accentFlashIntensity = 0.0
+    private var tempo: some View {
+        HStack(spacing: 2) {
+            MetronomeRhythmGlyph(beatUnit: settings.meter.beatUnit)
+            Text("=").font(.title3).accessibilityHidden(true)
+            Picker("Tempo", selection: $settings.bpm) {
+                ForEach(20...400, id: \.self) { value in
+                    Text("\(value)").font(Theme.Text.body).monospacedDigit().tag(value)
                 }
-            } else {
-                accentFlashIntensity = 0.0
+            }
+            .labelsHidden().pickerStyle(.wheel)
+            .frame(width: tempoWidth, height: wheelHeight).clipped()
+            .accessibilityLabel("Tempo in \(settings.meter.beatLabel.lowercased()) beats per minute")
+        }
+        .foregroundStyle(recorderIcon)
+        .padding(.horizontal, 8)
+        .fixedSize(horizontal: true, vertical: false)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var volume: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) { showMetronomeVolumePopover.toggle() }
+        } label: {
+            Image(systemName: "speaker.wave.2.fill").font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(recorderIcon)
+                .frame(minWidth: controlMinWidth, maxWidth: .infinity)
+                .frame(height: wheelHeight)
+                .background(recorderIcon.opacity(0.12), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Metronome volume")
+        .accessibilityValue("\(Int(settings.volume * 100)) percent")
+        .overlay(alignment: .top) {
+            if showMetronomeVolumePopover {
+                MetronomeVolumePopover(value: $settings.volume, onChanged: { _ in }, onEditingEnded: {
+                    withAnimation(.easeInOut(duration: 0.18)) { showMetronomeVolumePopover = false }
+                })
+                .offset(y: -24)
+                .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.95, anchor: .bottom)),
+                                       removal: .opacity.combined(with: .scale(scale: 0.95, anchor: .bottom))))
+                .zIndex(1)
+            }
+        }.zIndex(2)
+    }
+
+    private var meter: some View {
+        MetronomeNotationWheel(values: MetronomeMeter.standard,
+                                selection: Binding(get: { settings.meter }, set: { settings.selectMeter($0) }),
+                                label: "Time signature", valueLabel: { $0.label },
+                                height: wheelHeight, contentID: dynamicTypeSize) { value in
+            MetronomeMeterGlyph(meter: value)
+                .foregroundStyle(recorderIcon).environment(\.dynamicTypeSize, dynamicTypeSize)
+        }
+        .frame(minWidth: 64, idealWidth: 80, maxWidth: .infinity)
+        .frame(height: wheelHeight).clipped()
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var downbeat: some View {
+        MetronomeDownbeatControl(accent: settings.accent, grouping: settings.grouping,
+            supportsGrouping: settings.meter.supportsGrouping, height: wheelHeight,
+            recorderIcon: recorderIcon,
+            fill: beatFlash ?? (settings.accent && !metronomeEngine.isRunning ? Color.orange.opacity(0.12) : .clear),
+            onToggle: { settings.accent.toggle() }, onGrouping: {
+                hasSeenGroupingHint = true
+                showGroupingHint = false
+                showBeatGrouping = true
+            })
+        .popover(isPresented: $showBeatGrouping, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+            MetronomeGroupingPopover(meter: settings.meter, selected: settings.grouping, recorderIcon: recorderIcon) { value in
+                settings.selectGrouping(value)
+                showBeatGrouping = false
+            }
+            .environment(\.dynamicTypeSize, dynamicTypeSize)
+            .presentationCompactAdaptation(.popover)
+        }
+        .overlay(alignment: .top) {
+            if showGroupingHint {
+                Text("Touch and hold\nfor beat grouping")
+                    .font(.caption).multilineTextAlignment(.center)
+                    .foregroundStyle(recorderIcon)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .fixedSize().offset(y: -60)
+                    .allowsHitTesting(false).transition(.opacity)
             }
         }
+        .zIndex(showGroupingHint ? 3 : 0)
     }
 
-    private func unregisterBeatListener(resetSwing: Bool = false) {
-        if let beatListenerToken {
-            metronomeEngine.removeBeatListener(beatListenerToken)
-            self.beatListenerToken = nil
+    private var subdivision: some View {
+        MetronomeNotationWheel(values: MetronomeSubdivision.choices(in: settings.meter),
+                                selection: $settings.subdivision, label: "Subdivision",
+                                valueLabel: { $0.label(in: settings.meter) }, height: wheelHeight,
+                                contentID: "\(settings.meter.code)-\(dynamicTypeSize)") { value in
+            MetronomeRhythmGlyph(subdivision: value, meter: settings.meter)
+                .foregroundStyle(recorderIcon).environment(\.dynamicTypeSize, dynamicTypeSize)
         }
-
-        if resetSwing {
-            withAnimation(.easeOut(duration: 0.12)) {
-                metronomeSwingRight = false
-            }
-        }
+        .frame(minWidth: 80, idealWidth: 88, maxWidth: .infinity)
+        .frame(height: wheelHeight).clipped()
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 
-    // MARK: - Helpers
-
-    private func accentLabel(for value: Int) -> String {
-        if value <= 0 {
-            return "None"
-        } else {
-            return "Every \(value)"
+    private func flashBeat(isDownbeat: Bool, duration: Double) {
+        guard metronomeEngine.isRunning, !reduceMotion else { return }
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            beatFlash = isDownbeat && settings.accent
+                ? Color.orange.opacity(0.24)
+                : Theme.Colors.primaryAction.opacity(0.14)
         }
+        withAnimation(.easeOut(duration: min(0.24, duration * 0.65))) { beatFlash = nil }
     }
 
-    private func clampAccent(raw: Int) -> Int {
-        if raw <= 0 { return 0 }
-        if accentValues.contains(raw) { return raw }
-        let positive = accentValues.filter { $0 > 0 }
-        guard let nearest = positive.min(by: { abs($0 - raw) < abs($1 - raw) }) else {
-            return 0
-        }
-        return nearest
+    private func clearBeatFlash() {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { beatFlash = nil }
     }
+
+    private func start() { metronomeIsOn = metronomeEngine.start(settings: settings) }
 }
-
 
 struct MetronomeCompactTrigger: View {
     @Binding var metronomeIsOn: Bool
-    @Binding var metronomeBPM: Int
-    @Binding var metronomeAccentEvery: Int
-    @Binding var metronomeVolume: Double
-
-    let metronomeEngine: MetronomeEngine
+    @Binding var settings: MetronomeSettings
+    @ObservedObject var metronomeEngine: MetronomeEngine
     let recorderIcon: Color
     let shouldAnimateCompactIcon: Bool
     var onTapHintRequest: (() -> Void)? = nil
     var onLongPressDiscovered: (() -> Void)? = nil
     var onRevealControls: (() -> Void)? = nil
-
-    @State private var metronomeSwingRight: Bool = false
+    @State private var metronomeSwingRight = false
     @State private var suppressNextTap = false
     @State private var beatListenerToken: UUID?
 
     var body: some View {
         Button(action: handleTap) {
-            MetronomeIcon(
-                isOn: metronomeIsOn,
-                swingRight: metronomeSwingRight,
-                color: metronomeIsOn ? Theme.Colors.primaryAction : recorderIcon,
-                animateArm: shouldAnimateCompactIcon
-            )
-            .frame(width: 24, height: 24)
-            .frame(width: 48, height: 48)
-            .contentShape(Circle())
+            MetronomeIcon(isOn: metronomeIsOn, swingRight: metronomeSwingRight,
+                          color: metronomeIsOn ? Theme.Colors.primaryAction : recorderIcon,
+                          animateArm: shouldAnimateCompactIcon)
+                .frame(width: 24, height: 24).frame(width: 48, height: 48).contentShape(Circle())
         }
         .buttonStyle(.bordered)
-        .background(
-            Capsule(style: .continuous)
-                .fill(metronomeIsOn ? Theme.Colors.primaryAction.opacity(0.18) : Color.clear)
-        )
+        .background(Capsule(style: .continuous)
+            .fill(metronomeIsOn ? Theme.Colors.primaryAction.opacity(0.18) : Color.clear))
         .clipShape(Capsule(style: .continuous))
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.45)
-                .onEnded { _ in
-                    suppressNextTap = true
-                    onLongPressDiscovered?()
-                    onRevealControls?()
-                }
-        )
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+            suppressNextTap = true
+            onLongPressDiscovered?()
+            onRevealControls?()
+        })
         .accessibilityLabel(metronomeIsOn ? "Stop metronome" : "Start metronome")
         .accessibilityHint("Tap to toggle the metronome. Long press to show controls.")
-        .onAppear {
-            metronomeIsOn = metronomeEngine.isRunning
-            updateCompactBeatHandler()
-        }
-        .onChange(of: shouldAnimateCompactIcon) {
-            updateCompactBeatHandler()
-        }
-        .onChange(of: metronomeIsOn) {
-            updateCompactBeatHandler()
-        }
-        .onDisappear {
-            unregisterBeatListener(resetSwing: true)
-        }
+        .onAppear { metronomeIsOn = metronomeEngine.isRunning; updateCompactBeatHandler() }
+        .onChange(of: shouldAnimateCompactIcon) { updateCompactBeatHandler() }
+        .onChange(of: metronomeIsOn) { updateCompactBeatHandler() }
+        .onDisappear { unregisterBeatListener(resetSwing: true) }
     }
-
     private func handleTap() {
-        if suppressNextTap {
-            suppressNextTap = false
-            return
-        }
+        if suppressNextTap { suppressNextTap = false; return }
         onTapHintRequest?()
-        toggleMetronome()
-    }
-
-    private func toggleMetronome() {
-        let currentlyRunning = metronomeEngine.isRunning
-
-        if currentlyRunning {
-            metronomeEngine.stop()
-            metronomeIsOn = false
-        } else {
-            metronomeEngine.start(
-                bpm: metronomeBPM,
-                accentEvery: metronomeAccentEvery,
-                volume: metronomeVolume
-            )
-            metronomeIsOn = true
-        }
-
+        if metronomeEngine.isRunning { metronomeEngine.stop(); metronomeIsOn = false }
+        else { metronomeIsOn = metronomeEngine.start(settings: settings) }
         updateCompactBeatHandler()
     }
-
     private func updateCompactBeatHandler() {
         metronomeIsOn = metronomeEngine.isRunning
-
-        guard shouldAnimateCompactIcon, metronomeIsOn else {
-            unregisterBeatListener(resetSwing: true)
-            return
-        }
-
-        registerBeatListenerIfNeeded()
-    }
-
-    private func registerBeatListenerIfNeeded() {
-        unregisterBeatListener(resetSwing: false)
+        unregisterBeatListener(resetSwing: !shouldAnimateCompactIcon || !metronomeIsOn)
+        guard shouldAnimateCompactIcon, metronomeIsOn else { return }
         beatListenerToken = metronomeEngine.addBeatListener { _ in
-            let beatDuration = 60.0 / Double(max(metronomeBPM, 1))
-            let response = max(0.12, min(beatDuration * 0.55, 0.35))
-            withAnimation(
-                .spring(
-                    response: response,
-                    dampingFraction: 0.72,
-                    blendDuration: 0.1
-                )
-            ) {
+            let duration = 60 / Double(max(20, settings.bpm))
+            withAnimation(.spring(response: max(0.12, min(duration * 0.55, 0.35)), dampingFraction: 0.72, blendDuration: 0.1)) {
                 metronomeSwingRight.toggle()
             }
         }
     }
-
-    private func unregisterBeatListener(resetSwing: Bool = false) {
-        if let beatListenerToken {
-            metronomeEngine.removeBeatListener(beatListenerToken)
-            self.beatListenerToken = nil
-        }
-
-        if resetSwing {
-            withAnimation(.easeOut(duration: 0.12)) {
-                metronomeSwingRight = false
-            }
-        }
+    private func unregisterBeatListener(resetSwing: Bool) {
+        if let beatListenerToken { metronomeEngine.removeBeatListener(beatListenerToken) }
+        beatListenerToken = nil
+        if resetSwing { withAnimation(.easeOut(duration: 0.12)) { metronomeSwingRight = false } }
     }
 }
 
@@ -560,5 +405,92 @@ private struct MetronomeVolumePopover: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Metronome volume")
         .accessibilityHint("Swipe up or down to adjust the metronome volume.")
+    }
+}
+
+// A single exclusive gesture prevents a long press from also toggling the downbeat.
+struct MetronomeDownbeatControl: View {
+    let accent: Bool
+    let grouping: MetronomeGrouping
+    let supportsGrouping: Bool
+    let height: CGFloat
+    let recorderIcon: Color
+    let fill: Color
+    var onToggle: () -> Void
+    var onGrouping: () -> Void
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Text("Downbeat").font(Theme.Text.body).fixedSize()
+            if grouping != .even {
+                Text(grouping.label).font(.caption2).monospacedDigit().fixedSize()
+            }
+        }
+        .foregroundStyle(recorderIcon).padding(.horizontal, 8)
+        .frame(maxWidth: .infinity).frame(height: height)
+        .background {
+            RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial)
+                .overlay { RoundedRectangle(cornerRadius: 16).fill(fill) }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .gesture(LongPressGesture(minimumDuration: 0.45)
+            .exclusively(before: TapGesture()).onEnded { value in
+                switch value {
+                case .first(true): if supportsGrouping { onGrouping() }
+                case .second: onToggle()
+                default: break
+                }
+            })
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Accent downbeat")
+        .accessibilityValue((accent ? "On" : "Off") + (grouping == .even ? "" : ", grouping " + grouping.accessibilityLabel))
+        .accessibilityAddTraits(accent ? [.isButton, .isSelected] : [.isButton])
+        .accessibilityAction { onToggle() }
+        .accessibilityHint(supportsGrouping ? "Touch and hold for beat grouping" : "")
+        .accessibilityActions {
+            if supportsGrouping { Button("Beat grouping", action: onGrouping) }
+        }
+    }
+}
+
+struct MetronomeGroupingPopover: View {
+    let meter: MetronomeMeter
+    let selected: MetronomeGrouping
+    let recorderIcon: Color
+    var onSelect: (MetronomeGrouping) -> Void
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var rowHeight: CGFloat = 44
+
+    private var columnCount: Int { dynamicTypeSize.isAccessibilitySize ? 1 : 2 }
+    private var listHeight: CGFloat {
+        let rows = (meter.groupingChoices.count + columnCount - 1) / columnCount
+        return min(300, CGFloat(rows) * rowHeight + CGFloat(max(0, rows - 1)) * 8)
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Beat grouping").font(.headline).foregroundStyle(recorderIcon)
+            ScrollView {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columnCount), spacing: 8) {
+                    ForEach(meter.groupingChoices, id: \.self) { grouping in
+                        Button { onSelect(grouping) } label: {
+                            Text(grouping.label).font(Theme.Text.body).monospacedDigit()
+                                .fixedSize(horizontal: true, vertical: false)
+                                .frame(maxWidth: .infinity).frame(minHeight: rowHeight)
+                                .background(recorderIcon.opacity(grouping == selected ? 0.22 : 0.07), in: Capsule())
+                        }
+                        .buttonStyle(.plain).foregroundStyle(recorderIcon)
+                        .accessibilityLabel(grouping.accessibilityLabel)
+                        .accessibilityAddTraits(grouping == selected ? .isSelected : [])
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: listHeight)
+        }
+        .padding(16).frame(idealWidth: 300, maxWidth: 340)
+        .background(Theme.Colors.surface(colorScheme))
+        .tint(Theme.Colors.accent)
     }
 }

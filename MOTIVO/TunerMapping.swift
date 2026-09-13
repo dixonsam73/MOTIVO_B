@@ -1,14 +1,6 @@
-//
-//  TunerMapping.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 02/04/2026.
-//
-
-
 import Foundation
 
-struct TunerDisplayState: Equatable {
+struct TunerDisplayState: Equatable, Sendable {
     let noteName: String?
     let cents: Int?
     let frequencyHz: Double?
@@ -16,30 +8,32 @@ struct TunerDisplayState: Equatable {
     let isInTune: Bool
     let indicatorOffset: Double
 
-    static let listening = TunerDisplayState(
-        noteName: nil,
-        cents: nil,
-        frequencyHz: nil,
-        hasSignal: false,
-        isInTune: false,
-        indicatorOffset: 0
-    )
+    static let listening = TunerDisplayState(noteName: nil, cents: nil, frequencyHz: nil,
+                                             hasSignal: false, isInTune: false, indicatorOffset: 0)
+
+    var spokenNote: String? {
+        noteName?.replacingOccurrences(of: "♯", with: " sharp ")
+            .replacingOccurrences(of: "♭", with: " flat ")
+            .replacingOccurrences(of: "([A-G])([0-9])", with: "$1 $2", options: .regularExpression)
+    }
 }
 
 struct TunerMappingConfiguration {
     var amplitudeThreshold: Double = 0.02
     var smoothingWindowSize: Int = 5
     var noteLockReleaseCents: Double = 58
-    var noteLockCaptureCents: Double = 32
     var holdDuration: TimeInterval = 0.40
     var inTuneThresholdCents: Double = 6
     var maxDisplayCents: Double = 50
 }
 
+/// Maps only estimates already qualified by TunerSignalAnalyzer. All state belongs to one tuner run.
 final class TunerMapper {
     private let configuration: TunerMappingConfiguration
-
-    private var smoothedMIDIBuffer: [Double] = []
+    private var referenceA4: Double = 440
+    private var history: [Double] = []
+    private var acceptedMIDI: Double?
+    private var pendingMIDI: Double?
     private var lockedMIDINote: Int?
     private var lastStableState: TunerDisplayState = .listening
     private var lastSignalTimestamp: TimeInterval?
@@ -48,123 +42,95 @@ final class TunerMapper {
         self.configuration = configuration
     }
 
+    func setReferenceA4(_ frequency: Double) {
+        guard frequency.isFinite else { return }
+        let value = min(460, max(392, frequency))
+        guard referenceA4 != value else { return }
+        referenceA4 = value
+        reset()
+    }
+
     func reset() {
-        smoothedMIDIBuffer.removeAll()
+        history.removeAll(keepingCapacity: true)
+        acceptedMIDI = nil
+        pendingMIDI = nil
         lockedMIDINote = nil
         lastStableState = .listening
         lastSignalTimestamp = nil
     }
 
-    func process(
-        frequency: Double,
-        amplitude: Double,
-        timestamp: TimeInterval = Date.timeIntervalSinceReferenceDate
-    ) -> TunerDisplayState {
-        guard frequency.isFinite, frequency > 0 else {
-            return stateForNoSignal(at: timestamp)
+    func process(frequency: Double, amplitude: Double,
+                 timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TunerDisplayState {
+        guard frequency.isFinite, frequency > 0, amplitude.isFinite,
+              amplitude >= configuration.amplitudeThreshold, timestamp.isFinite else {
+            pendingMIDI = nil
+            return noSignal(at: timestamp)
+        }
+        let rawMIDI = 69 + 12 * log2(frequency / referenceA4)
+        guard rawMIDI.isFinite, (-120...200).contains(rawMIDI) else {
+            pendingMIDI = nil
+            return noSignal(at: timestamp)
         }
 
-        guard amplitude.isFinite, amplitude >= configuration.amplitudeThreshold else {
-            return stateForNoSignal(at: timestamp)
+        // A large change needs corroboration, not an average through unrelated notes.
+        // One bad octave frame is held neutrally; a sustained change is acquired on frame two.
+        if let acceptedMIDI, abs(rawMIDI - acceptedMIDI) > 0.8 {
+            if let pendingMIDI, abs(rawMIDI - pendingMIDI) <= 0.25 {
+                history.removeAll(keepingCapacity: true)
+                lockedMIDINote = nil
+                self.pendingMIDI = nil
+            } else {
+                pendingMIDI = rawMIDI
+                return noSignal(at: timestamp, preservePending: true)
+            }
+        } else {
+            pendingMIDI = nil
         }
 
-        lastSignalTimestamp = timestamp
-
-        let rawMIDI = Self.midiNoteValue(for: frequency)
-        let smoothedMIDI = smoothedValue(for: rawMIDI)
-
-        let targetMIDINote = resolvedLockedMIDINote(for: smoothedMIDI)
-        let cents = Self.centsOffset(from: smoothedMIDI, toNearest: targetMIDINote)
-
-        let noteName = Self.noteName(for: targetMIDINote)
-        let clampedOffset = max(
-            -1,
-            min(1, cents / configuration.maxDisplayCents)
-        )
-
+        history.append(rawMIDI)
+        let window = max(1, configuration.smoothingWindowSize)
+        if history.count > window { history.removeFirst(history.count - window) }
+        let sorted = history.sorted()
+        let middle = sorted.count / 2
+        let estimate = sorted.count.isMultiple(of: 2)
+            ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+        acceptedMIDI = estimate
+        let nearest = Int(estimate.rounded())
+        let target: Int
+        if let lockedMIDINote,
+           abs((estimate - Double(lockedMIDINote)) * 100) <= configuration.noteLockReleaseCents {
+            target = lockedMIDINote
+        } else {
+            target = nearest
+            lockedMIDINote = nearest
+        }
+        let cents = (estimate - Double(target)) * 100
+        let names = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"]
+        let octave = Int(floor(Double(target) / 12)) - 1
         let state = TunerDisplayState(
-            noteName: noteName,
+            noteName: "\(names[((target % 12) + 12) % 12])\(octave)",
             cents: Int(cents.rounded()),
-            frequencyHz: frequency,
+            frequencyHz: referenceA4 * pow(2, (estimate - 69) / 12),
             hasSignal: true,
             isInTune: abs(cents) <= configuration.inTuneThresholdCents,
-            indicatorOffset: clampedOffset
-        )
-
+            indicatorOffset: max(-1, min(1, cents / configuration.maxDisplayCents)))
         lastStableState = state
+        lastSignalTimestamp = timestamp
         return state
     }
 
-    private func stateForNoSignal(at timestamp: TimeInterval) -> TunerDisplayState {
-        guard
-            let lastSignalTimestamp,
-            timestamp - lastSignalTimestamp <= configuration.holdDuration
-        else {
-            resetLockedStatePreservingLastStable()
+    /// Also called by the service watchdog when no fresh audio arrives.
+    func noSignal(at timestamp: TimeInterval, preservePending: Bool = false) -> TunerDisplayState {
+        guard timestamp.isFinite, let lastSignalTimestamp,
+              timestamp >= lastSignalTimestamp,
+              timestamp - lastSignalTimestamp <= configuration.holdDuration else {
+            let pending = preservePending ? pendingMIDI : nil
+            reset()
+            pendingMIDI = pending
             return .listening
         }
-
-        return TunerDisplayState(
-            noteName: lastStableState.noteName,
-            cents: lastStableState.cents,
-            frequencyHz: lastStableState.frequencyHz,
-            hasSignal: false,
-            isInTune: lastStableState.isInTune,
-            indicatorOffset: lastStableState.indicatorOffset
-        )
-    }
-
-    private func resetLockedStatePreservingLastStable() {
-        smoothedMIDIBuffer.removeAll()
-        lockedMIDINote = nil
-        lastSignalTimestamp = nil
-    }
-
-    private func smoothedValue(for midiValue: Double) -> Double {
-        smoothedMIDIBuffer.append(midiValue)
-
-        if smoothedMIDIBuffer.count > configuration.smoothingWindowSize {
-            smoothedMIDIBuffer.removeFirst(smoothedMIDIBuffer.count - configuration.smoothingWindowSize)
-        }
-
-        let total = smoothedMIDIBuffer.reduce(0, +)
-        return total / Double(smoothedMIDIBuffer.count)
-    }
-
-    private func resolvedLockedMIDINote(for smoothedMIDI: Double) -> Int {
-        let nearest = Int(smoothedMIDI.rounded())
-
-        guard let lockedMIDINote else {
-            self.lockedMIDINote = nearest
-            return nearest
-        }
-
-        let centsFromLocked = Self.centsOffset(from: smoothedMIDI, toNearest: lockedMIDINote)
-        if abs(centsFromLocked) <= configuration.noteLockReleaseCents {
-            return lockedMIDINote
-        }
-
-        let centsFromNearest = Self.centsOffset(from: smoothedMIDI, toNearest: nearest)
-        if abs(centsFromNearest) <= configuration.noteLockCaptureCents {
-            self.lockedMIDINote = nearest
-            return nearest
-        }
-
-        return lockedMIDINote
-    }
-
-    private static func midiNoteValue(for frequency: Double) -> Double {
-        69 + (12 * log2(frequency / 440.0))
-    }
-
-    private static func centsOffset(from midiValue: Double, toNearest midiNote: Int) -> Double {
-        (midiValue - Double(midiNote)) * 100
-    }
-
-    private static func noteName(for midiNote: Int) -> String {
-        let noteNames = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"]
-        let noteIndex = ((midiNote % 12) + 12) % 12
-        let octave = (midiNote / 12) - 1
-        return "\(noteNames[noteIndex])\(octave)"
+        return TunerDisplayState(noteName: lastStableState.noteName, cents: lastStableState.cents,
+                                 frequencyHz: lastStableState.frequencyHz, hasSignal: false,
+                                 isInTune: false, indicatorOffset: lastStableState.indicatorOffset)
     }
 }
