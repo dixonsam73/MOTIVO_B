@@ -86,11 +86,11 @@ final class TunerMappingTests: XCTestCase {
     func testSignalHoldIsNeutralAndExpiresWithoutAnAudioCallback() {
         let mapper = TunerMapper()
         _ = mapper.process(frequency: 440, amplitude: 0.5, timestamp: 0)
-        let held = mapper.noSignal(at: 0.399)
+        let held = mapper.noSignal(at: 0.899)
         XCTAssertEqual(held.noteName, "A4")
         XCTAssertFalse(held.hasSignal)
         XCTAssertFalse(held.isInTune)
-        XCTAssertEqual(mapper.noSignal(at: 0.401), .listening)
+        XCTAssertEqual(mapper.noSignal(at: 0.901), .listening)
     }
 
     func testInvalidInputNeverProducesAPitch() {
@@ -128,4 +128,57 @@ final class TunerMappingTests: XCTestCase {
             XCTAssertTrue(state.isInTune)
         }
     }
+    func testEstablishedNoteContinuesQuietlyAndTracksSmallPitchChanges() {
+        let mapper = TunerMapper()
+        _ = settle(mapper, midi: 45)
+        var state = TunerDisplayState.listening
+        for i in 0..<10 {
+            state = mapper.process(frequency: frequency(45.2), amplitude: 0.008,
+                                   timestamp: 0.7 + Double(i) * 0.085)
+            XCTAssertTrue(state.hasSignal)
+        }
+        XCTAssertEqual(state.noteName, "A2")
+        XCTAssertEqual(state.cents, 20)
+        XCTAssertFalse(state.isInTune)
+    }
+
+    func testQuietContinuationDoesNotAcquireADifferentNote() {
+        let mapper = TunerMapper(); settle(mapper, midi: 45)
+        let quiet = mapper.process(frequency: frequency(57), amplitude: 0.008, timestamp: 0.7)
+        XCTAssertFalse(quiet.hasSignal)
+        XCTAssertFalse(quiet.isInTune)
+        let changed = settle(mapper, midi: 57, start: 0.785, count: 2)
+        XCTAssertEqual(changed.noteName, "A3")
+        XCTAssertTrue(changed.hasSignal)
+    }
+
+    func testQuietContinuationEndsWithSignalLossOrAnAudioGap() {
+        for loss in ["invalid", "watchdog", "gap", "reset", "reference"] {
+            let mapper = TunerMapper()
+            _ = mapper.process(frequency: 440, amplitude: 0.5, timestamp: 0)
+            switch loss {
+            case "invalid":
+                let state = mapper.process(frequency: 0, amplitude: 0, timestamp: 0.085)
+                XCTAssertFalse(state.hasSignal); XCTAssertFalse(state.isInTune)
+            case "watchdog":
+                XCTAssertFalse(mapper.noSignal(at: 0.2).isInTune)
+            case "reset": mapper.reset()
+            case "reference": mapper.setReferenceA4(442)
+            default: break
+            }
+            let resumed = mapper.process(frequency: 440, amplitude: 0.008, timestamp: 0.3)
+            XCTAssertFalse(resumed.hasSignal, loss)
+            XCTAssertFalse(resumed.isInTune, loss)
+        }
+    }
+
+    func testNeutralHoldDoesNotDelayARealNewNote() {
+        let mapper = TunerMapper()
+        _ = mapper.process(frequency: 440, amplitude: 0.5, timestamp: 0)
+        XCTAssertEqual(mapper.noSignal(at: 0.7).noteName, "A4")
+        let changed = settle(mapper, midi: 40, start: 0.72, count: 2)
+        XCTAssertEqual(changed.noteName, "E2")
+        XCTAssertTrue(changed.hasSignal)
+    }
+
 }

@@ -19,10 +19,11 @@ struct TunerDisplayState: Equatable, Sendable {
 }
 
 struct TunerMappingConfiguration {
-    var amplitudeThreshold: Double = 0.02
+    var amplitudeThreshold: Double = TunerSignalLevel.acquisition
+    var continuationAmplitudeThreshold: Double = TunerSignalLevel.continuation
     var smoothingWindowSize: Int = 5
     var noteLockReleaseCents: Double = 58
-    var holdDuration: TimeInterval = 0.40
+    var holdDuration: TimeInterval = 0.90
     var inTuneThresholdCents: Double = 6
     var maxDisplayCents: Double = 50
 }
@@ -37,6 +38,7 @@ final class TunerMapper {
     private var lockedMIDINote: Int?
     private var lastStableState: TunerDisplayState = .listening
     private var lastSignalTimestamp: TimeInterval?
+    private var canContinueQuietPitch = false
 
     init(configuration: TunerMappingConfiguration = TunerMappingConfiguration()) {
         self.configuration = configuration
@@ -57,17 +59,35 @@ final class TunerMapper {
         lockedMIDINote = nil
         lastStableState = .listening
         lastSignalTimestamp = nil
+        canContinueQuietPitch = false
     }
 
     func process(frequency: Double, amplitude: Double,
                  timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TunerDisplayState {
         guard frequency.isFinite, frequency > 0, amplitude.isFinite,
-              amplitude >= configuration.amplitudeThreshold, timestamp.isFinite else {
+              timestamp.isFinite else {
             pendingMIDI = nil
             return noSignal(at: timestamp)
         }
         let rawMIDI = 69 + 12 * log2(frequency / referenceA4)
         guard rawMIDI.isFinite, (-120...200).contains(rawMIDI) else {
+            pendingMIDI = nil
+            return noSignal(at: timestamp)
+        }
+
+        // Only a recent, continuously validated version of the same pitch can use the
+        // lower release level. The longer neutral display hold does not extend this permission.
+        let continuing: Bool
+        if canContinueQuietPitch, let acceptedMIDI, let lastSignalTimestamp {
+            continuing = timestamp >= lastSignalTimestamp && timestamp - lastSignalTimestamp <= 0.2
+                && abs(rawMIDI - acceptedMIDI) <= 0.8
+        } else {
+            continuing = false
+        }
+        let threshold = continuing
+            ? min(configuration.amplitudeThreshold, configuration.continuationAmplitudeThreshold)
+            : configuration.amplitudeThreshold
+        guard amplitude >= threshold else {
             pendingMIDI = nil
             return noSignal(at: timestamp)
         }
@@ -116,11 +136,13 @@ final class TunerMapper {
             indicatorOffset: max(-1, min(1, cents / configuration.maxDisplayCents)))
         lastStableState = state
         lastSignalTimestamp = timestamp
+        canContinueQuietPitch = true
         return state
     }
 
     /// Also called by the service watchdog when no fresh audio arrives.
     func noSignal(at timestamp: TimeInterval, preservePending: Bool = false) -> TunerDisplayState {
+        canContinueQuietPitch = false
         guard timestamp.isFinite, let lastSignalTimestamp,
               timestamp >= lastSignalTimestamp,
               timestamp - lastSignalTimestamp <= configuration.holdDuration else {

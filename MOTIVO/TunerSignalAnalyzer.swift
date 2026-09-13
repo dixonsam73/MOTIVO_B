@@ -1,6 +1,13 @@
 import Foundation
 import Accelerate
 
+/// Acquire normally; follow an already validated pitch further into its decay.
+/// These are detector-amplitude levels, not a claim about acoustic loudness.
+enum TunerSignalLevel {
+    static let acquisition = 0.02
+    static let continuation = 0.005
+}
+
 struct TunerPitchEstimate: Sendable {
     let frequency: Double
     let amplitude: Double
@@ -16,12 +23,14 @@ final class TunerSignalAnalyzer {
     private let capacity = 8192
     private var lastValidatedFrequency: Double?
     private var usedOctaveRecovery = false
+    private var quietContinuationFrequency: Double?
 
     func reset() {
         samples.removeAll(keepingCapacity: true)
         sampleRate = 0
         lastValidatedFrequency = nil
         usedOctaveRecovery = false
+        quietContinuationFrequency = nil
     }
 
     func process(samples input: [Float], sampleRate rate: Double,
@@ -32,20 +41,29 @@ final class TunerSignalAnalyzer {
         samples.append(contentsOf: input.suffix(capacity).map(Double.init))
         if samples.count > capacity { samples.removeFirst(samples.count - capacity) }
         guard candidateFrequency.isFinite, (20...5000).contains(candidateFrequency),
-              amplitude.isFinite, amplitude >= 0.02 else { return nil }
+              amplitude.isFinite else { quietContinuationFrequency = nil; return nil }
+        let continuing = quietContinuationFrequency.map {
+            abs(1200 * log2(candidateFrequency / $0)) <= 80
+        } ?? false
+        let threshold = continuing ? TunerSignalLevel.continuation : TunerSignalLevel.acquisition
+        guard amplitude >= threshold else { quietContinuationFrequency = nil; return nil }
 
         if let estimate = analyseCandidate(candidateFrequency, rate: rate, amplitude: amplitude) {
             lastValidatedFrequency = estimate.frequency
+            quietContinuationFrequency = estimate.frequency
             usedOctaveRecovery = false
             return estimate
         }
+        quietContinuationFrequency = nil
         // PTrack can emit one octave error on a weak bass fundamental. Recover only one
         // such frame, and only by validating the previous pitch against CURRENT samples.
         // A genuine new octave validates above and is never held back by this recovery.
         guard !usedOctaveRecovery, let previous = lastValidatedFrequency,
               abs(abs(1200 * log2(candidateFrequency / previous)) - 1200) < 50 else { return nil }
         usedOctaveRecovery = true
-        return analyseCandidate(previous, rate: rate, amplitude: amplitude)
+        let recovered = analyseCandidate(previous, rate: rate, amplitude: amplitude)
+        quietContinuationFrequency = recovered?.frequency
+        return recovered
     }
 
     private func analyseCandidate(_ candidateFrequency: Double, rate: Double,
@@ -53,7 +71,11 @@ final class TunerSignalAnalyzer {
         let period = rate / candidateFrequency
         // Several cycles are essential for low notes. A short onset must not validate an old candidate.
         guard samples.count >= max(2048, Int(ceil(period * 3))) else { return nil }
-        let count = min(samples.count, max(2048, Int(ceil(period * 4))))
+        let isQuietContinuation = amplitude < TunerSignalLevel.acquisition
+        // More of the existing bounded history steadies low-level lag estimates as the note fades.
+        // Normal acquisition keeps its original window and response to new notes.
+        let count = min(samples.count, max(isQuietContinuation ? 4096 : 2048,
+                                          Int(ceil(period * (isQuietContinuation ? 6 : 4)))))
         let data = Array(samples.suffix(count))
         var sum = [Double](repeating: 0, count: count + 1)
         var squares = sum
@@ -103,7 +125,9 @@ final class TunerSignalAnalyzer {
         var best = 1
         for i in 2..<(correlations.count - 1) where correlations[i] > correlations[best] { best = i }
         let confidence = min(1, max(0, max(correlations[best], multiplePeriodConfidence)))
-        guard confidence >= 0.88 else { return nil }
+        // A quieter continuation must be more clearly tonal, not merely above the noise floor.
+        let minimumConfidence = isQuietContinuation ? 0.97 : 0.88
+        guard confidence >= minimumConfidence else { return nil }
 
         // Refine bass/low-mid notes where PTrack's FFT estimate wobbles. At high notes its
         // spectral estimate is more precise than a parabola over only a few samples per period.

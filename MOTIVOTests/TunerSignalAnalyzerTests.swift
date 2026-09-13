@@ -153,4 +153,87 @@ final class TunerSignalAnalyzerTests: XCTestCase {
         XCTAssertNil(TunerSignalAnalyzer().process(samples: tone, sampleRate: 48000,
                                                  candidateFrequency: 440, amplitude: 0.0199))
     }
+    func testEstablishedBassGuitarAndPianoPitchesContinueIntoQuietDecay() throws {
+        for rate in [44100.0, 48000] {
+            for hz in [30.867706, 41.203445, 82.406889, 110, 261.625565, 440] {
+                let analyzer = TunerSignalAnalyzer()
+                XCTAssertNotNil(analyzer.process(samples: wave(frequency: hz, rate: rate),
+                    sampleRate: rate, candidateFrequency: hz, amplitude: 0.5))
+                for (index, level) in [0.03, 0.019, 0.012, 0.008, 0.006].enumerated() {
+                    let current = hz * pow(2, Double(index) * 4 / 1200)
+                    let tone = wave(frequency: current, rate: rate, harmonics: true).map { $0 * Float(level) }
+                    let estimate = try XCTUnwrap(analyzer.process(samples: tone, sampleRate: rate,
+                        candidateFrequency: current, amplitude: level))
+                    XCTAssertEqual(1200 * log2(estimate.frequency / current), 0, accuracy: 3)
+                    XCTAssertGreaterThanOrEqual(estimate.confidence, 0.88)
+                }
+            }
+        }
+    }
+
+    func testQuietContinuationCannotValidateNoiseOrPersistAfterIt() {
+        let hz = 110.0, rate = 48000.0
+        for seed: UInt32 in [1, 317, 1234567] {
+            let analyzer = TunerSignalAnalyzer()
+            let tone = wave(frequency: hz, rate: rate)
+            XCTAssertNotNil(analyzer.process(samples: tone, sampleRate: rate,
+                candidateFrequency: hz, amplitude: 0.5))
+            XCTAssertNil(analyzer.process(samples: noise(seed: seed).map { $0 * 0.008 },
+                sampleRate: rate, candidateFrequency: hz, amplitude: 0.008))
+            XCTAssertNil(analyzer.process(samples: tone.map { $0 * 0.008 },
+                sampleRate: rate, candidateFrequency: hz, amplitude: 0.008))
+        }
+    }
+
+    func testQuietContinuationCannotStartANewPitchOrSurviveReset() {
+        for action in ["note", "reset", "rate", "silence", "tooQuiet"] {
+            let analyzer = TunerSignalAnalyzer()
+            XCTAssertNotNil(analyzer.process(samples: wave(frequency: 110, rate: 44100),
+                sampleRate: 44100, candidateFrequency: 110, amplitude: 0.5))
+            if action == "reset" { analyzer.reset() }
+            if action == "silence" {
+                XCTAssertNil(analyzer.process(samples: [Float](repeating: 0, count: 8192),
+                    sampleRate: 44100, candidateFrequency: 110, amplitude: 0.008))
+            }
+            let rate = action == "rate" ? 48000.0 : 44100.0
+            let hz = action == "note" ? 220.0 : 110.0
+            XCTAssertNil(analyzer.process(samples: wave(frequency: hz, rate: rate).map { $0 * 0.008 },
+                sampleRate: rate, candidateFrequency: hz, amplitude: action == "tooQuiet" ? 0.004 : 0.008), action)
+            XCTAssertNotNil(analyzer.process(samples: wave(frequency: hz, rate: rate),
+                sampleRate: rate, candidateFrequency: hz, amplitude: 0.5), action)
+        }
+    }
+
+    func testQuietContinuationRequiresStrongerTonalEvidence() {
+        let tone = wave(frequency: 110, rate: 48000)
+        let mixed = zip(tone, noise(seed: 317)).map { $0 * 0.008 + $1 * 0.002 }
+        // The same periodic signal qualifies at the existing acquisition confidence threshold.
+        XCTAssertNotNil(TunerSignalAnalyzer().process(samples: mixed, sampleRate: 48000,
+            candidateFrequency: 110, amplitude: 0.5))
+        let analyzer = TunerSignalAnalyzer()
+        XCTAssertNotNil(analyzer.process(samples: tone, sampleRate: 48000,
+            candidateFrequency: 110, amplitude: 0.5))
+        XCTAssertNil(analyzer.process(samples: mixed, sampleRate: 48000,
+            candidateFrequency: 110, amplitude: 0.008))
+    }
+
+    func testQuietBassContinuationStopsOnTheNextNoiseOrSilenceBlock() {
+        for rate in [44100.0, 48000] {
+            for hz in [30.867706, 41.203445, 82.406889] {
+                for silent in [true, false] {
+                    let analyzer = TunerSignalAnalyzer()
+                    let tone = wave(frequency: hz, rate: rate)
+                    XCTAssertNotNil(analyzer.process(samples: tone, sampleRate: rate,
+                        candidateFrequency: hz, amplitude: 0.5))
+                    XCTAssertNotNil(analyzer.process(samples: tone.map { $0 * 0.008 }, sampleRate: rate,
+                        candidateFrequency: hz, amplitude: 0.008))
+                    let absent = silent ? [Float](repeating: 0, count: 4096)
+                        : noise(seed: 97, count: 4096).map { $0 * 0.008 }
+                    XCTAssertNil(analyzer.process(samples: absent, sampleRate: rate,
+                        candidateFrequency: hz, amplitude: 0.008), "\(hz) Hz must not survive on older samples")
+                }
+            }
+        }
+    }
+
 }
