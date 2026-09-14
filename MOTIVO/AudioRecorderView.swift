@@ -35,6 +35,8 @@ struct AudioRecorderView: View {
 
     // MARK: - State
     @State private var recorder: AVAudioRecorder?
+    @State private var recorderEvents: AudioRecorderEvents?
+    @State private var recordingRequestID: UUID?
     @State private var player: AVAudioPlayer?
     @State private var recordingURL: URL?
     @State private var playbackPosition: TimeInterval = 0
@@ -49,8 +51,6 @@ struct AudioRecorderView: View {
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
     // Timer for elapsed recording time
-    @State private var startTime: Date?
-    @State private var elapsed: TimeInterval = 0
     @State private var accumulatedRecordedTime: TimeInterval = 0
     @State private var finalRecordedTime: TimeInterval = 0
     @State private var timer: Timer?
@@ -67,7 +67,7 @@ struct AudioRecorderView: View {
     
     @State private var wasRecordingBeforeInterruption: Bool = false
     @State private var wasPlayingBeforeInterruption: Bool = false
-    @State private var observersInstalled: Bool = false
+    @StateObject private var audioObservers = AudioNotificationObservers()
     @State private var meteringTimer: Timer?
     @State private var postStopLock: Bool = false // When true: only delete, play, save are enabled until delete
 
@@ -181,6 +181,7 @@ struct AudioRecorderView: View {
             installObserversIfNeeded()
         }
         .onDisappear {
+            recordingRequestID = nil
             stopAll()
             stopElapsedTimer()
             clearEphemeralFlagIfNoRecorderArtifactRemains()
@@ -275,26 +276,19 @@ struct AudioRecorderView: View {
         }
     }
 
-    func configureSessionIfNeeded() async {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
-            try session.setActive(true, options: [])
-        } catch {
-            setError("Failed to configure audio session: \(error.localizedDescription)")
-        }
-    }
-
     func startRecording() async {
         // Start a new recording (fresh). Only allowed when not currently recording or pausedRecording.
-        guard state != .recording && state != .pausedRecording else { return }
+        guard state != .recording && state != .pausedRecording,
+              !postStopLock, recordingRequestID == nil else { return }
+        let requestID = UUID()
+        recordingRequestID = requestID
+        defer { if recordingRequestID == requestID { recordingRequestID = nil } }
         let hasPermission = await ensureRecordPermission()
+        guard recordingRequestID == requestID else { return }
         guard hasPermission else {
             setError("Microphone permission is required to record.")
             return
         }
-        await configureSessionIfNeeded()
-        
         let fileURL = newRecordingURL() // ensure .m4a extension
 
         let settings: [String: Any] = [
@@ -307,55 +301,83 @@ struct AudioRecorderView: View {
 
         stopAll()
         do {
-            recorder = try AVAudioRecorder(url: fileURL, settings: settings)
-            recorder?.isMeteringEnabled = true
-            recorder?.prepareToRecord()
-            if recorder?.record() == true {
-                recordingURL = fileURL
-                // Reset accumulated time because this is a new file
-                accumulatedRecordedTime = 0
-                finalRecordedTime = 0
-                displayTime = 0
-                startElapsedTimer()
-                startWaveform()
-                state = .recording
-                errorMessage = nil
-                UserDefaults.standard.set(true, forKey: ephemeralMediaFlagKey)
-                #if DEBUG
-                print("[AudioRecorder] Ephemeral flag set true (recording started, mode=\(recordingMode.rawValue))")
-                #endif
-            } else {
-                setError("Failed to start recording.")
+            let capture = try AVAudioRecorder(url: fileURL, settings: settings)
+            recorder = capture
+            capture.isMeteringEnabled = true
+            let events = AudioRecorderEvents()
+            events.onEnd = { endedRecorder, message in
+                handleUnexpectedRecordingEnd(endedRecorder, message: message)
             }
+            recorderEvents = events
+            capture.delegate = events
+            try AudioRecordingAttempt.begin(session: SystemRecordingInputSession(), record: {
+                capture.prepareToRecord() && capture.record()
+            }, isRecording: { capture.isRecording }, pause: { capture.pause() })
+            recordingURL = fileURL
+            // Reset accumulated time because this is a new file
+            accumulatedRecordedTime = 0
+            finalRecordedTime = 0
+            displayTime = 0
+            startElapsedTimer()
+            startWaveform()
+            state = .recording
+            errorMessage = nil
+            UserDefaults.standard.set(true, forKey: ephemeralMediaFlagKey)
+            #if DEBUG
+            print("[AudioRecorder] Ephemeral flag set true (recording started, mode=\(recordingMode.rawValue))")
+            #endif
         } catch {
+            recorderEvents?.onEnd = nil
+            recorder?.delegate = nil
+            recorder?.stop()
+            recorder = nil
+            recorderEvents = nil
+            try? FileManager.default.removeItem(at: fileURL)
             setError("Recorder error: \(error.localizedDescription)")
         }
     }
 
     func pauseRecording() {
         guard state == .recording else { return }
-        recorder?.pause()
         stopElapsedTimer()
+        recorder?.pause()
         state = .pausedRecording
     }
 
     func resumeRecording() {
-        guard state == .pausedRecording else { return }
-        recorder?.record()
-        startElapsedTimer()
-        state = .recording
+        guard state == .pausedRecording, let capture = recorder else { return }
+        do {
+            try AudioRecordingAttempt.begin(session: SystemRecordingInputSession(),
+                                            record: { capture.record() },
+                                            isRecording: { capture.isRecording }, pause: { capture.pause() })
+            startElapsedTimer()
+            state = .recording
+            errorMessage = nil
+        } catch {
+            setError(error.localizedDescription)
+        }
     }
 
     func stopRecording() {
         guard state == .recording || state == .pausedRecording else { return }
+        stopElapsedTimer()
+        recorderEvents?.onEnd = nil
+        recorder?.delegate = nil
         recorder?.stop()
         recorder = nil
-        stopElapsedTimer()
+        recorderEvents = nil
         stopWaveformAndFreeze()
         finalRecordedTime = accumulatedRecordedTime
         displayTime = finalRecordedTime
         state = .idle
         postStopLock = true
+    }
+
+    func handleUnexpectedRecordingEnd(_ capture: AVAudioRecorder, message: String?) {
+        guard recorder === capture, state == .recording || state == .pausedRecording else { return }
+        stopRecording()
+        // Keep the existing URL for review/save; never start a replacement take automatically.
+        setError(message ?? "Recording ended. Review the existing take before keeping it.")
     }
 
     func stopPlayback() {
@@ -447,20 +469,19 @@ struct AudioRecorderView: View {
 
     func startElapsedTimer() {
         stopElapsedTimer()
-        startTime = Date()
         timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
-            guard let startTime else { return }
-            let now = Date()
-            elapsed = now.timeIntervalSince(startTime)
-            displayTime = accumulatedRecordedTime + elapsed
+            guard state == .recording, let recorder else { return }
+            // Captured time does not advance if AVAudioRecorder unexpectedly stops.
+            accumulatedRecordedTime = max(accumulatedRecordedTime, recorder.currentTime)
+            displayTime = accumulatedRecordedTime
         }
         RunLoop.main.add(timer!, forMode: .common)
     }
 
     func stopElapsedTimer() {
-        accumulatedRecordedTime += elapsed
-        elapsed = 0
-        startTime = nil
+        if let recorder, state == .recording || state == .pausedRecording {
+            accumulatedRecordedTime = max(accumulatedRecordedTime, recorder.currentTime)
+        }
         timer?.invalidate()
         timer = nil
         displayTime = accumulatedRecordedTime
@@ -506,6 +527,8 @@ struct AudioRecorderView: View {
         }
 
         recordingURL = nil
+        // A terminal failure without an artifact must leave Record available for a fresh retry.
+        postStopLock = false
         UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
         #if DEBUG
         print("[AudioRecorder] Ephemeral flag reset false (no recorder artifact remains)")
@@ -631,35 +654,6 @@ struct AudioRecorderView: View {
     }
 
 
-    // MARK: - Preferred input policy (minimal)
-
-    /// If a headset mic becomes available (e.g. AirPods), prefer the iPhone built-in mic for recording input
-    /// when both are selectable. This does not touch output routing or session activation.
-    func preferBuiltInMicIfAvailable() {
-        let session = AVAudioSession.sharedInstance()
-        guard let inputs = session.availableInputs else { return }
-
-        let builtIn = inputs.first(where: { $0.portType == .builtInMic })
-        let bluetooth = inputs.first(where: {
-            $0.portType == .bluetoothHFP ||
-            $0.portType == .bluetoothA2DP ||
-            $0.portType == .bluetoothLE
-        })
-
-        guard let builtInMic = builtIn, bluetooth != nil else { return }
-
-        do {
-            try session.setPreferredInput(builtInMic)
-            #if DEBUG
-            print("[AudioRecorder] preferredInput=BuiltInMic")
-            #endif
-        } catch {
-            #if DEBUG
-            print("[AudioRecorder] preferredInput FAILED: \(error)")
-            #endif
-        }
-    }
-
     // MARK: - Interruption & ScenePhase Handling
 
     /// Respond to app moving between active/inactive/background.
@@ -683,32 +677,22 @@ struct AudioRecorderView: View {
     }
 
     func installObserversIfNeeded() {
-        guard !observersInstalled else { return }
-        observersInstalled = true
-
-        let center = NotificationCenter.default
-        center.addObserver(
-            forName: AVAudioSession.interruptionNotification,
-            object: AVAudioSession.sharedInstance(),
-            queue: .main
-        ) { notification in
+        audioObservers.observe(AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance()) { notification in
             handleInterruption(notification: notification)
         }
-
-        center.addObserver(
-            forName: AVAudioSession.routeChangeNotification,
-            object: AVAudioSession.sharedInstance(),
-            queue: .main
-        ) { notification in
+        audioObservers.observe(AVAudioSession.routeChangeNotification, object: AVAudioSession.sharedInstance()) { notification in
             handleRouteChange(notification: notification)
+        }
+        audioObservers.observe(AVAudioSession.mediaServicesWereResetNotification) { _ in
+            if let recorder {
+                handleUnexpectedRecordingEnd(recorder, message: "Audio was reset. Review the existing take before recording again.")
+            }
+            if player != nil { stopPlayback() }
         }
     }
 
     func removeObservers() {
-        guard observersInstalled else { return }
-        observersInstalled = false
-        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance())
-        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: AVAudioSession.sharedInstance())
+        audioObservers.removeAll()
     }
 
     func handleInterruption(notification: Notification) {
@@ -749,7 +733,15 @@ struct AudioRecorderView: View {
 
         switch reason {
         case .oldDeviceUnavailable, .categoryChange, .override, .wakeFromSleep, .noSuitableRouteForCategory, .routeConfigurationChange, .newDeviceAvailable:
-            preferBuiltInMicIfAvailable()
+            if state == .recording || state == .pausedRecording {
+                do {
+                    // Do not reconfigure/activate during a route notification or while interrupted.
+                    try RecordingInputPolicy.applyAndVerify(SystemRecordingInputSession())
+                } catch {
+                    if state == .recording { pauseRecording() }
+                    setError(error.localizedDescription)
+                }
+            }
             if state == .playing {
                 togglePlayback()
             }
@@ -842,5 +834,3 @@ struct AudioRecorderView_Previews: PreviewProvider {
         .previewLayout(.sizeThatFits)
     }
 }
-
-

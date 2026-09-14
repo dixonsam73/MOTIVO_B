@@ -424,7 +424,7 @@ struct PracticeTimerView: View {
     @State var audioTitleDebounceWork: [UUID: DispatchWorkItem] = [:]
     @State var audioTitleDidImmediatePersist: Set<UUID> = []
 
-    @State var audioObserversInstalled: Bool = false
+    @StateObject var audioObservers = AudioNotificationObservers()
     @State var wasPlayingBeforeInterruption_timer: Bool = false
 
     // Image capture state (mirrors AddEdit/PostRecord behavior)
@@ -1630,6 +1630,9 @@ private func loadPracticeDefaultsIfNeeded() {
                             withAnimation(.easeInOut(duration: 0.18)) { showMetronomeControlsExpanded = true }
                         }
                     }
+                    .onReceive(audioServices.droneEngine.$isRunning) { running in
+                        droneIsOn = running
+                    }
                     .navigationDestination(isPresented: $showMeView) {
                         MeView()
                     }
@@ -1890,6 +1893,7 @@ private func loadPracticeDefaultsIfNeeded() {
         
         .onDisappear {
             closeTuner()
+            removeAudioObserversIfNeeded()
 
             // Remove willResignActive observer to avoid leaks
             NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)

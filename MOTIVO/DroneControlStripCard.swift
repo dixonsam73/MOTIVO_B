@@ -33,7 +33,7 @@ struct DroneControlStripCard: View {
                         let note = droneNotes[droneNoteIndex]
                         let base = Double(droneFreq)   // A4 reference from the wheel
                         let freq = DroneEngine.frequency(for: note, baseA4: base)
-                        droneEngine.start(frequency: freq, volume: droneVolume)
+                        droneIsOn = droneEngine.start(frequency: freq, volume: droneVolume)
                     } else {
                         droneEngine.stop()
                     }
@@ -224,7 +224,7 @@ struct DroneCompactTrigger: View {
             let note = droneNotes[droneNoteIndex]
             let base = Double(droneFreq)
             let freq = DroneEngine.frequency(for: note, baseA4: base)
-            droneEngine.start(frequency: freq, volume: droneVolume)
+            droneIsOn = droneEngine.start(frequency: freq, volume: droneVolume)
         } else {
             droneEngine.stop()
         }

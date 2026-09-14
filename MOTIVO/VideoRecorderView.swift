@@ -193,6 +193,7 @@ public struct VideoRecorderView: View {
                                           action: { controller.saveTapped() },
                                           isDisabled: !controller.isReadyToSave)
                         }
+                        .disabled(controller.isFinishingRecording)
                         .accessibilityIdentifier("VideoRecorderView_Controls")
                         .layoutPriority(1)
                         .minimumScaleFactor(0.8)
@@ -238,8 +239,7 @@ public struct VideoRecorderView: View {
             RecordingIdleTimerGuard.setHolding(newState == .recording, owner: "video-recorder")
         }
         .onDisappear {
-            // C-50. `controller.onDisappear()` does NOT reset `state`, so
-            // teardown while recording is the one exit `.onChange` cannot see.
+            // C-50. Release explicitly: teardown need not deliver a final SwiftUI onChange.
             RecordingIdleTimerGuard.release("video-recorder")
             controller.onDisappear()
             preparingOverlayTask?.cancel()
@@ -248,6 +248,14 @@ public struct VideoRecorderView: View {
             Task {
                 try? StagingStore.bootstrap()
             }
+        }
+        .alert("Recording audio", isPresented: Binding(
+            get: { controller.recordingError != nil },
+            set: { if !$0 { controller.recordingError = nil } }
+        )) {
+            Button("OK", role: .cancel) { controller.recordingError = nil }
+        } message: {
+            Text(controller.recordingError ?? "")
         }
         .toolbar(.hidden, for: .navigationBar)
     }
@@ -335,6 +343,9 @@ final class VideoRecorderController: NSObject,
     // MARK: - Published State
 
     @Published var state: RecordingState = .idle
+    @Published private(set) var isFinishingRecording = false
+    @Published var recordingError: String?
+    private var presentationID = UUID()
     @Published var elapsedRecordingTime: TimeInterval = 0
     @Published var elapsedPausedTime: TimeInterval = 0
     @Published var playerCurrentTime: TimeInterval = 0
@@ -389,9 +400,8 @@ final class VideoRecorderController: NSObject,
     private var pendingVideoBuffers: [CMSampleBuffer] = []
     private let maxPendingVideoBuffers = 180 // ~3s @ 60fps, ~6s @ 30fps
 
-    // Pending audio frames until writer session start time is established (keeps A/V aligned)
-    private var pendingAudioBuffers: [CMSampleBuffer] = []
-    private let maxPendingAudioBuffers = 240 // bounded buffer during writer startup
+    // Accessed only on writerQueue; created lazily after the existing A/V origin is committed.
+    private var audioDelivery: BufferedRecordingAudio<CMSampleBuffer>?
 
     // Added: Track last appended video PTS for monotonicity enforcement
     private var lastAppendedVideoPTS: CMTime? = nil
@@ -497,6 +507,7 @@ final class VideoRecorderController: NSObject,
 
 
     func onAppear() {
+        presentationID = UUID()
         installNotifications()
         DispatchQueue.main.async {
             self.isShowingLivePreview = true
@@ -519,15 +530,27 @@ final class VideoRecorderController: NSObject,
         // explanation of C-50.
         player?.pause()
         player = nil
-        sessionQueue.async {
-            self.stopCaptureSession()
-            self.cleanupRecordingFile()
+        presentationID = UUID()
+        let closingPresentation = presentationID
+        isArmedToRecord = false
+        state = .idle
+        writerQueue.async {
+            self.audioDelivery?.cancel()
+            self.audioDelivery = nil
+            if self.assetWriter?.status == .writing { self.assetWriter?.cancelWriting() }
+            DispatchQueue.main.async {
+                guard self.presentationID == closingPresentation else { return }
+                self.cleanupRecordingFile()
+                self.isFinishingRecording = false
+            }
         }
+        sessionQueue.async { self.stopCaptureSession() }
     }
 
     // MARK: - UI Computed
 
     var title: String {
+        if isFinishingRecording { return "Finishing…" }
         switch state {
         case .idle:
             if !isRecorderReady {
@@ -576,7 +599,7 @@ final class VideoRecorderController: NSObject,
         }
     }
 
-    var recordingButtonDisabled: Bool { state == .recording }
+    var recordingButtonDisabled: Bool { state == .recording || isFinishingRecording }
 
     var playPauseButtonSystemName: String {
         switch state {
@@ -597,6 +620,8 @@ final class VideoRecorderController: NSObject,
     // MARK: - Actions
 
     func recordPauseResumeTapped() {
+        guard !isFinishingRecording else { return }
+        recordingError = nil
         switch state {
         case .idle, .pausedRecording:
             startRecording()
@@ -618,6 +643,7 @@ final class VideoRecorderController: NSObject,
     }
 
     func playPauseTapped() {
+        guard !isFinishingRecording else { return }
         switch state {
         case .playing:
             pausePlayback()
@@ -629,7 +655,7 @@ final class VideoRecorderController: NSObject,
     }
 
     func saveTapped() {
-        guard isReadyToSave, let url = recordingURL else { return }
+        guard !isFinishingRecording, isReadyToSave, let url = recordingURL else { return }
         // [RecorderDebug] saveTapped
         print("[RecorderDebug] saveTapped")
         print("  url=\(url.path)")
@@ -645,10 +671,27 @@ final class VideoRecorderController: NSObject,
     }
 
     func deleteTapped() {
+        guard !isFinishingRecording else { return }
+        recordingError = nil
         stopPlaybackIfNeeded()
-        cleanupRecordingFile()
-        resetState()
+        stopTimer()
+        isArmedToRecord = false
+        state = .idle
         isReadyToSave = false
+        isFinishingRecording = true
+        let presentation = presentationID
+        // Cancel queued audio before deleting its writer/file, including Delete during a take.
+        writerQueue.async {
+            self.audioDelivery?.cancel()
+            self.audioDelivery = nil
+            if self.assetWriter?.status == .writing { self.assetWriter?.cancelWriting() }
+            DispatchQueue.main.async {
+                guard self.presentationID == presentation else { return }
+                self.cleanupRecordingFile()
+                self.resetState()
+                self.isFinishingRecording = false
+            }
+        }
     }
 
     // MARK: - Timer
@@ -1027,7 +1070,6 @@ final class VideoRecorderController: NSObject,
 
             // Clear any pre-session buffers (we intentionally drop pre-roll).
             self.pendingVideoBuffers.removeAll(keepingCapacity: true)
-            self.pendingAudioBuffers.removeAll(keepingCapacity: true)
             self.pendingVideoDuringSessionStart.removeAll(keepingCapacity: true)
             self.pendingAudioDuringSessionStart.removeAll(keepingCapacity: true)
 
@@ -1170,65 +1212,72 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
     }
 
     private func stopRecording() {
-        guard state == .recording || state == .pausedRecording else { return }
-
-        // Stop must be serialized against ongoing sample appends to avoid races/crashes (especially rear camera in landscape).
-        // We stop accepting new samples immediately, then finish the writer on writerQueue.
-       
+        guard !isFinishingRecording, state == .recording || state == .pausedRecording else { return }
+        isFinishingRecording = true
+        isReadyToSave = false
+        let presentation = presentationID
         pendingStartRecordingToken = nil
         stopTimer()
         recordingWallClockStart = nil
-
-        // Prevent any further sample processing as early as possible.
         isArmedToRecord = false
         isRecordStartInProgress = false
-        writerQueue.async { [weak self] in
-            self?.isStoppingRecording = true
-        }
 
         guard let finishURL = recordingURL else {
             state = .idle
+            isFinishingRecording = false
             finishRecordingWithError()
             return
         }
 
-        // Finish on writerQueue to avoid calling markAsFinished/finishWriting concurrently with append on writerQueue.
         writerQueue.async { [weak self] in
-            guard let self = self else { return }
-
+            guard let self else { return }
+            self.isStoppingRecording = true
             guard let writer = self.assetWriter else {
                 DispatchQueue.main.async {
-                    self.state = .idle
+                    guard self.presentationID == presentation else { return }
+                    self.isFinishingRecording = false
                     self.finishRecordingWithError()
                 }
                 return
             }
-
-         
-
-            // Best effort: drain any buffered video that can still be appended before closing.
+            // Preserve the existing video drain/finish behavior. Audio gets its own
+            // bounded asynchronous drain, retaining the timestamps chosen at startup.
             if let vInput = self.videoInput {
                 self.drainPendingVideo(vInput)
                 vInput.markAsFinished()
             }
-            if let aInput = self.audioInput {
-                aInput.markAsFinished()
-            }
-
-            writer.finishWriting { [weak self] in
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    if writer.status == .completed {
-                        self.handleRecordingFinishedSuccessfully(url: finishURL)
-                    } else {
-                        self.finishRecordingWithError()
+            let finish: (RecordingAudioDeliveryFailure?) -> Void = { [weak self] failure in
+                guard let self, self.assetWriter === writer else { return }
+                if writer.status == .writing { self.audioInput?.markAsFinished() }
+                let completed: () -> Void = { [weak self] in
+                    DispatchQueue.main.async {
+                        guard let self, self.presentationID == presentation, self.assetWriter === writer else { return }
+                        if writer.status == .completed {
+                            self.handleRecordingFinishedSuccessfully(url: finishURL)
+                            if failure != nil {
+                                self.recordingError = "Recording stopped because some audio could not be saved. The available video has been kept; review its soundtrack before saving it."
+                            }
+                        } else {
+                            self.finishRecordingWithError()
+                            self.recordingError = "The recording could not be completed. Please try again."
+                        }
+                        self.isFinishingRecording = false
+                        self.state = .idle
                     }
-                    self.state = .idle
                 }
+                if writer.status == .writing {
+                    writer.finishWriting(completionHandler: completed)
+                    // Stop must also recover if the writer itself never finishes after the drain.
+                    self.writerQueue.asyncAfter(deadline: .now() + 5) { [weak self] in
+                        guard let self, self.assetWriter === writer else { return }
+                        if writer.status == .writing { writer.cancelWriting() }
+                        completed()
+                    }
+                } else { completed() }
             }
+            if let delivery = self.audioDelivery { delivery.finish(finish) }
+            else { finish(nil) }
         }
-
-        // Immediately reflect stopped state in UI.
         state = .idle
     }
 
@@ -1280,11 +1329,12 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         lastVideoPTS = nil
         lastAppendedVideoPTS = nil
         pendingVideoBuffers.removeAll(keepingCapacity: true)
-        pendingAudioBuffers.removeAll(keepingCapacity: true)
         isArmedToRecord = false
         isRecordStartInProgress = false
         writerQueue.async { [weak self] in
             guard let self = self else { return }
+            self.audioDelivery?.cancel()
+            self.audioDelivery = nil
             self.isRecordingArmed = false
             self.isStartingWriterSession = false
             self.pendingSessionStartPTS = nil
@@ -1340,11 +1390,12 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         lastVideoPTS = nil
         lastAppendedVideoPTS = nil
         pendingVideoBuffers.removeAll(keepingCapacity: true)
-        pendingAudioBuffers.removeAll(keepingCapacity: true)
         isArmedToRecord = false
         isRecordStartInProgress = false
         writerQueue.async { [weak self] in
             guard let self = self else { return }
+            self.audioDelivery?.cancel()
+            self.audioDelivery = nil
             self.isRecordingArmed = false
             self.isStartingWriterSession = false
             self.pendingSessionStartPTS = nil
@@ -1373,11 +1424,12 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         lastVideoPTS = nil
         lastAppendedVideoPTS = nil
         pendingVideoBuffers.removeAll(keepingCapacity: true)
-        pendingAudioBuffers.removeAll(keepingCapacity: true)
         isArmedToRecord = false
         isRecordStartInProgress = false
         writerQueue.async { [weak self] in
             guard let self = self else { return }
+            self.audioDelivery?.cancel()
+            self.audioDelivery = nil
             self.isRecordingArmed = false
             self.isStartingWriterSession = false
             self.pendingSessionStartPTS = nil
@@ -1953,13 +2005,32 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
               let aInput = audioInput,
               let outSB = retimedSampleBuffer(sampleBuffer, basePTS: base) else { return }
 
-        if writer.status == .writing, aInput.isReadyForMoreMediaData {
-            _ = aInput.append(outSB)
-        } else {
-            if pendingAudioBuffers.count < maxPendingAudioBuffers {
-                pendingAudioBuffers.append(outSB)
-            }
+        guard !isStoppingRecording else { return }
+        if audioDelivery == nil {
+            var loggedFirstAppend = false
+            audioDelivery = BufferedRecordingAudio(queue: writerQueue,
+                isWriting: { writer.status == .writing },
+                isReady: { aInput.isReadyForMoreMediaData },
+                append: { buffer in
+                    let appended = aInput.append(buffer)
+                    #if DEBUG
+                    if appended, !loggedFirstAppend {
+                        loggedFirstAppend = true
+                        let session = AVAudioSession.sharedInstance()
+                        print("[RecordingAudio] firstVideoAudioPTS=\(CMSampleBufferGetPresentationTimeStamp(buffer).seconds) input=\(session.currentRoute.inputs.map { $0.portType.rawValue }) rate=\(session.sampleRate)")
+                    }
+                    #endif
+                    return appended
+                },
+                timestamp: { CMSampleBufferGetPresentationTimeStamp($0).seconds },
+                onFailure: { [weak self] _ in
+                    DispatchQueue.main.async {
+                        guard let self, self.assetWriter === writer, !self.isFinishingRecording else { return }
+                        self.stopRecording()
+                    }
+                })
         }
+        audioDelivery?.receive(outSB)
     }
 
 }
@@ -2113,4 +2184,3 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
-

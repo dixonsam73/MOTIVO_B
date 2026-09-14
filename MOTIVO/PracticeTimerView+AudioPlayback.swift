@@ -16,6 +16,7 @@ extension PracticeTimerView {
         if showAudioRecorder {
             return
         }
+        installAudioObserversIfNeeded()
 
         // Kill both drone and metronome before starting or resuming attachment playback
         if droneIsOn {
@@ -47,6 +48,7 @@ extension PracticeTimerView {
                         // Resume failed; clear selection to avoid stuck icon
                         currentlyPlayingID = nil
                         isAudioPlaying = false
+                        removeAudioObserversIfNeeded()
                     }
                 }
             } else {
@@ -81,17 +83,19 @@ extension PracticeTimerView {
                     if currentlyPlayingID == id {
                         currentlyPlayingID = nil
                         isAudioPlaying = false
+                        wasPlayingBeforeInterruption_timer = false
+                        removeAudioObserversIfNeeded()
                     }
                 }
             })
             audioPlayer?.delegate = delegate
             audioPlayerDelegate = delegate // retain delegate so callbacks fire
-            installAudioObserversIfNeeded()
             audioPlayer?.play()
             isAudioPlaying = (audioPlayer?.isPlaying == true)
             currentlyPlayingID = id
         } catch {
             print("Playback error: \(error)")
+            removeAudioObserversIfNeeded()
         }
     }
 
@@ -101,6 +105,7 @@ extension PracticeTimerView {
             audioPlayer = nil
             currentlyPlayingID = nil
             isAudioPlaying = false
+            removeAudioObserversIfNeeded()
         }
 
         // Remove surrogate temp file best-effort
@@ -130,33 +135,21 @@ extension PracticeTimerView {
         audioPlayer = nil
         isAudioPlaying = false
         currentlyPlayingID = nil
+        removeAudioObserversIfNeeded()
     }
 
    func installAudioObserversIfNeeded() {
-        guard !audioObserversInstalled else { return }
+        guard audioObservers.isEmpty else { return }
 
-        let nc = NotificationCenter.default
-        nc.addObserver(
-            forName: AVAudioSession.interruptionNotification,
-            object: nil,
-            queue: .main
-        ) { note in
+        audioObservers.observe(AVAudioSession.interruptionNotification) { note in
             handleTimerAudioInterruption(note)
         }
-        nc.addObserver(
-            forName: AVAudioSession.routeChangeNotification,
-            object: nil,
-            queue: .main
-        ) { note in
+        audioObservers.observe(AVAudioSession.routeChangeNotification) { note in
             handleTimerAudioRouteChange(note)
         }
 
         #if canImport(UIKit)
-        nc.addObserver(
-            forName: UIApplication.willResignActiveNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
+        audioObservers.observe(UIApplication.willResignActiveNotification) { _ in
             if audioPlayer?.isPlaying == true {
                 wasPlayingBeforeInterruption_timer = true
                 audioPlayer?.pause()
@@ -165,11 +158,7 @@ extension PracticeTimerView {
             }
         }
 
-        nc.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
+        audioObservers.observe(UIApplication.didBecomeActiveNotification) { _ in
             if wasPlayingBeforeInterruption_timer, audioPlayer != nil {
                 audioPlayer?.play()
                 isAudioPlaying = true
@@ -182,22 +171,14 @@ extension PracticeTimerView {
         }
         #endif
 
-        audioObserversInstalled = true
     }
 
     func removeAudioObserversIfNeeded() {
-        guard audioObserversInstalled else { return }
-
-        let nc = NotificationCenter.default
-        nc.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
-        nc.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
-
-        #if canImport(UIKit)
-        nc.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
-        nc.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
-        #endif
-
-        audioObserversInstalled = false
+        // An active/paused player still owns these listeners across scene changes:
+        // removing didBecomeActive here would silently remove the existing resume policy.
+        guard audioPlayer == nil || (currentlyPlayingID == nil && !isAudioPlaying && !wasPlayingBeforeInterruption_timer) else { return }
+        audioObservers.removeAll()
+        if audioPlayer == nil { wasPlayingBeforeInterruption_timer = false }
     }
 
     func handleTimerAudioInterruption(_ notification: Notification) {
