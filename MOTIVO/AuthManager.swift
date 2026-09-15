@@ -570,6 +570,9 @@ final class AuthManager: NSObject, ObservableObject {
     /// Hydrate local ProfileStore values (discovery mode + account handle) from the backend account_directory row.
     /// This keeps Profile privacy UI consistent on fresh installs / new devices.
     private func scheduleDirectoryHydrationIfNeeded(reason: String) {
+        #if DEBUG
+        if UnitTestHost.isActive && Self.unitTestSuppressesPostSessionScheduling { return }   // C-98 test-only
+        #endif
         // Delete Account v2: do not schedule hydration during/after factory reset or when backend not configured.
         guard !LocalFactoryReset.isInProgress else { return }
         guard BackendEnvironment.shared.isConnected else { return }
@@ -618,6 +621,9 @@ final class AuthManager: NSObject, ObservableObject {
     }
 
     private func scheduleAccountIDBackfillIfNeeded(reason: String) {
+        #if DEBUG
+        if UnitTestHost.isActive && Self.unitTestSuppressesPostSessionScheduling { return }   // C-98 test-only
+        #endif
         // Account ID generation is only meaningful for an authenticated Connected backend user.
         guard !LocalFactoryReset.isInProgress else { return }
         guard BackendEnvironment.shared.isConnected else { return }
@@ -888,6 +894,9 @@ final class AuthManager: NSObject, ObservableObject {
         // that attempt may have begun before the token was rejected, so its
         // success would not clear the challenge.
         if !force, let existing = sessionRefreshInFlight {
+            #if DEBUG
+            unitTestReachSlot(.coalesced(reason))
+            #endif
             return await existing.value
         }
 
@@ -896,8 +905,17 @@ final class AuthManager: NSObject, ObservableObject {
             return await self.refreshSupabaseSession(reason: reason, force: force)
         }
         sessionRefreshInFlight = task
+        #if DEBUG
+        unitTestReachSlot(.startedNew(reason))
+        #endif
         let ok = await task.value
-        sessionRefreshInFlight = nil
+        #if DEBUG
+        unitTestReachSlot(.finished(reason))
+        #endif
+        // C-98 — release only a slot this caller still owns. A forced refresh can
+        // replace the slot while this task is in flight; clearing it unconditionally
+        // let a later caller start another refresh instead of joining the newer one.
+        if sessionRefreshInFlight == task { sessionRefreshInFlight = nil }
         return ok
     }
 
@@ -997,6 +1015,27 @@ final class AuthManager: NSObject, ObservableObject {
             let newRefresh = session.refreshToken
             let supaUserID = session.user.id.uuidString
 
+            // C-98 — COMMIT ONLY IF THE TOKEN WE PRESENTED IS STILL THE PERSISTED ONE.
+            // The await above is a window: a sign-out, an identity withdrawal, a newer
+            // sign-in or a forced refresh can all replace or delete the persisted token
+            // while this response is in flight. Writing regardless resurrected tokens,
+            // the bearer and the backend user id after sign-out, and overwrote a newer
+            // session. The check and every write below run in ONE main-actor segment,
+            // with no suspension between them. A discarded result writes and schedules
+            // nothing; it reports only whether the session that replaced it is usable.
+            // A guard against persisted-token change, not proof that every lifecycle
+            // transition changes the token.
+            let persistedRefreshToken = Keychain.get(Self.supabaseRefreshTokenKeychainKey)
+            guard persistedRefreshToken == refreshToken else {
+                #if DEBUG
+                NSLog("[Auth] refreshSupabaseSession: presented token no longer current; discarding result. reason=%@", reason)
+                #endif
+                return self.changedSessionIsUsable(presentedRefreshToken: refreshToken,
+                                                   persistedRefreshToken: persistedRefreshToken,
+                                                   persistedAccessToken: Keychain.get(Self.supabaseAccessTokenKeychainKey),
+                                                   now: Date())
+            }
+
             Keychain.set(accessToken, for: Self.supabaseAccessTokenKeychainKey)
             Keychain.set(newRefresh, for: Self.supabaseRefreshTokenKeychainKey)
             UserDefaults.standard.set(supaUserID, forKey: Self.supabaseUserIDDefaultsKey)
@@ -1004,12 +1043,10 @@ final class AuthManager: NSObject, ObservableObject {
 
             NetworkManager.shared.setBearerToken(accessToken)
 
-            await MainActor.run {
-                self.backendUserID = supaUserID
-                self.backendAvatarKey = nil
-                self.scheduleDirectoryHydrationIfNeeded(reason: "refreshSupabaseSession")
-                self.scheduleAccountIDBackfillIfNeeded(reason: "refreshSupabaseSession")
-            }
+            self.backendUserID = supaUserID
+            self.backendAvatarKey = nil
+            self.scheduleDirectoryHydrationIfNeeded(reason: "refreshSupabaseSession")
+            self.scheduleAccountIDBackfillIfNeeded(reason: "refreshSupabaseSession")
 
             #if DEBUG
             NSLog("[Auth] refreshSupabaseSession OK user=%@ reason=%@", supaUserID, reason)
@@ -1025,12 +1062,24 @@ final class AuthManager: NSObject, ObservableObject {
             // and "destroy everything". Reconciliation evidence is re-read
             // HERE, after the failure, because a concurrent refresh that won
             // the race will have replaced the token we presented.
+            let persistedRefreshToken = Keychain.get(Self.supabaseRefreshTokenKeychainKey)
+            let persistedAccessToken = Keychain.get(Self.supabaseAccessTokenKeychainKey)
+            let now = Date()
             let reconciliation = SessionRefreshPolicy.SessionReconciliation(
                 attemptedRefreshToken: refreshToken,
-                persistedRefreshToken: Keychain.get(Self.supabaseRefreshTokenKeychainKey),
-                persistedAccessTokenExpiry: SessionRefreshPolicy.accessTokenExpiry(
-                    Keychain.get(Self.supabaseAccessTokenKeychainKey)),
-                now: Date())
+                persistedRefreshToken: persistedRefreshToken,
+                persistedAccessTokenExpiry: SessionRefreshPolicy.accessTokenExpiry(persistedAccessToken),
+                now: now)
+
+            // C-98 — A FAILURE MAY ONLY WITHDRAW THE SESSION IT PRESENTED. If the persisted
+            // token changed while this request was in flight, that newer state is not this
+            // refresh's to delete; report only whether it is usable (the reconciliation's
+            // own skew-0 rule, for a locally signed-in identity).
+            let presentedTokenIsCurrent = persistedRefreshToken == refreshToken
+            let changedSessionIsUsable = self.changedSessionIsUsable(presentedRefreshToken: refreshToken,
+                                                                     persistedRefreshToken: persistedRefreshToken,
+                                                                     persistedAccessToken: persistedAccessToken,
+                                                                     now: now)
 
             switch SessionRefreshPolicy.refreshFailureDisposition(error, reconciliation: reconciliation) {
             case .ignore:
@@ -1043,15 +1092,18 @@ final class AuthManager: NSObject, ObservableObject {
             case .recoverWithNewerSession:
                 // Our token was superseded and a newer usable session is
                 // actually present — the race was lost, not the credential.
-                if let recovered = Keychain.get(Self.supabaseAccessTokenKeychainKey), !recovered.isEmpty {
-                    NetworkManager.shared.setBearerToken(recovered)
+                // C-98: adopted only while a locally signed-in identity holds it.
+                guard changedSessionIsUsable, let recovered = persistedAccessToken, !recovered.isEmpty else {
+                    #if DEBUG
+                    NSLog("[Auth] refreshSupabaseSession: superseded token, but no signed-in usable session to adopt. reason=%@", reason)
+                    #endif
+                    return false
                 }
+                NetworkManager.shared.setBearerToken(recovered)
                 // Same rule as the early return: a usable session schedules.
                 if SessionRefreshPolicy.schedulesDirectoryHydration(after: .recoveredNewerSession) {
-                    await MainActor.run {
-                        self.scheduleDirectoryHydrationIfNeeded(reason: "\(reason)-recovered")
-                        self.scheduleAccountIDBackfillIfNeeded(reason: "\(reason)-recovered")
-                    }
+                    self.scheduleDirectoryHydrationIfNeeded(reason: "\(reason)-recovered")
+                    self.scheduleAccountIDBackfillIfNeeded(reason: "\(reason)-recovered")
                 }
                 #if DEBUG
                 NSLog("[Auth] refreshSupabaseSession: superseded token; adopted newer session. reason=%@", reason)
@@ -1061,17 +1113,29 @@ final class AuthManager: NSObject, ObservableObject {
             case .withdrawIdentity:
                 // Could not confirm authentication and found nothing newer.
                 // NOT `signOut()` — see clearConnectedIdentity's own rule.
+                guard presentedTokenIsCurrent else {
+                    #if DEBUG
+                    NSLog("[Auth] refreshSupabaseSession: unconfirmed, but the persisted session changed; withdrawing nothing. reason=%@", reason)
+                    #endif
+                    return changedSessionIsUsable
+                }
                 #if DEBUG
                 NSLog("[Auth] refreshSupabaseSession: unconfirmed session; withdrawing identity. reason=%@", reason)
                 #endif
-                await MainActor.run { self.clearConnectedIdentity(reason: "refresh-unconfirmed") }
+                self.clearConnectedIdentity(reason: "refresh-unconfirmed")
                 return false
 
             case .terminal:
+                guard presentedTokenIsCurrent else {
+                    #if DEBUG
+                    NSLog("[Auth] refreshSupabaseSession: terminal, but the persisted session changed; withdrawing nothing. reason=%@", reason)
+                    #endif
+                    return changedSessionIsUsable
+                }
                 #if DEBUG
                 NSLog("[Auth] refreshSupabaseSession: terminal credential failure; withdrawing identity. reason=%@", reason)
                 #endif
-                await MainActor.run { self.clearConnectedIdentity(reason: "refresh-terminal") }
+                self.clearConnectedIdentity(reason: "refresh-terminal")
                 return false
             }
         }
@@ -1086,6 +1150,23 @@ final class AuthManager: NSObject, ObservableObject {
         #endif
     }
 
+
+    /// C-98 — whether a session that REPLACED the refresh token a refresh presented is
+    /// usable now: a locally signed-in identity, non-empty persisted tokens, and the
+    /// reconciliation's own positive-evidence rule (changed token, unexpired at skew 0).
+    /// Deliberately NOT the preflight's 60 s skew: a session valid for 30 s is usable.
+    private func changedSessionIsUsable(presentedRefreshToken: String,
+                                        persistedRefreshToken: String?,
+                                        persistedAccessToken: String?,
+                                        now: Date) -> Bool {
+        guard self.currentUserID != nil else { return false }
+        guard let persistedAccessToken, !persistedAccessToken.isEmpty else { return false }
+        return SessionRefreshPolicy.SessionReconciliation(
+            attemptedRefreshToken: presentedRefreshToken,
+            persistedRefreshToken: persistedRefreshToken,
+            persistedAccessTokenExpiry: SessionRefreshPolicy.accessTokenExpiry(persistedAccessToken),
+            now: now).hasNewerUsableSession
+    }
 
     /// Refreshes the stored Connected session **independently of the current app
     /// mode**, and does nothing else.
@@ -1137,6 +1218,9 @@ final class AuthManager: NSObject, ObservableObject {
         }
 
         if let existing = sessionRefreshInFlight {
+            #if DEBUG
+            unitTestReachSlot(.coalesced(reason))
+            #endif
             return await existing.value
         }
 
@@ -1145,8 +1229,17 @@ final class AuthManager: NSObject, ObservableObject {
             return await self.refreshSupabaseSession(reason: reason)
         }
         sessionRefreshInFlight = task
+        #if DEBUG
+        unitTestReachSlot(.startedNew(reason))
+        #endif
         let ok = await task.value
-        sessionRefreshInFlight = nil
+        #if DEBUG
+        unitTestReachSlot(.finished(reason))
+        #endif
+        // C-98 — release only a slot this caller still owns. A forced refresh can
+        // replace the slot while this task is in flight; clearing it unconditionally
+        // let a later caller start another refresh instead of joining the newer one.
+        if sessionRefreshInFlight == task { sessionRefreshInFlight = nil }
         return ok
     }
 
@@ -1497,3 +1590,24 @@ final class AuthManager: NSObject, ObservableObject {
         return result
     }
 }
+
+#if DEBUG
+/// C-98 — TEST-ONLY observation of the session-refresh slot. Recorded
+/// synchronously; the hook changes no slot or token state and starts no work.
+enum AuthRefreshSlotEvent: Equatable {
+    case coalesced(String)    // this caller joined an existing sessionRefreshInFlight
+    case startedNew(String)   // this caller installed a new task in the slot
+    case finished(String)     // this caller's awaited task returned (before the slot line)
+}
+
+extension AuthManager {
+    /// C-98 — TEST-ONLY. Honoured only when `UnitTestHost.isActive`; defaults to false.
+    static var unitTestSuppressesPostSessionScheduling = false
+    /// C-98 — TEST-ONLY. Nil outside a hosted unit test that sets it.
+    static var unitTestRefreshSlotHook: ((AuthRefreshSlotEvent) -> Void)?
+
+    fileprivate func unitTestReachSlot(_ event: AuthRefreshSlotEvent) {
+        if UnitTestHost.isActive { Self.unitTestRefreshSlotHook?(event) }
+    }
+}
+#endif
