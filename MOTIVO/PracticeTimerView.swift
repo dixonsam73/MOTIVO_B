@@ -4863,7 +4863,11 @@ private func openAudioViewer(_ id: UUID) {
     func stageImage(_ image: UIImage) {
         if let data = image.jpegData(compressionQuality: 0.8) {
             let id = UUID()
+            let shouldRevealAttachmentsAfterStaging = !hasAttachments
             stagedImages.append(StagedAttachment(id: id, data: data, kind: .image))
+            if shouldRevealAttachmentsAfterStaging {
+                isAttachmentsVisible = true
+            }
             // Auto-select first image as thumbnail
             let imageCount = stagedImages.count
             if imageCount == 1 { /* no auto-thumbnail */ }
