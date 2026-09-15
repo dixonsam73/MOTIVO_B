@@ -225,6 +225,11 @@ export function deriveFromReconciliation(
  * path branches on it.
  */
 export function entitledAt(s: MembershipState, now: Date): boolean {
+  // B-39: Apple's subscription-level status 5 (revoked: refunded, or revoked
+  // from Family Sharing) ends entitlement whatever the dates say. A
+  // transaction's revocation_date alone does not -- it may describe an earlier
+  // period. Mirrors connected_member().
+  if (s.apple_status === 5) return false;
   const renewal = s.renewal_date ? new Date(s.renewal_date) : null;
   const grace = s.grace_period_expires_date ? new Date(s.grace_period_expires_date) : null;
   return (renewal !== null && renewal > now) ||
