@@ -75,7 +75,9 @@ insert into public.membership (user_id, environment, original_transaction_id, pr
 values ('$A','Sandbox','TXN-SBX-LIVE','com.sdsongs.etudes.connected.monthly',
         now() + interval '30 days', now(), 'purchase', now());
 SQL
-is A60  "$(psq "select public.connected_member('$A');")" "f" "live SANDBOX row in snapshot does NOT entitle"
+# Scope 011 (2026-09-15): A60, A60f and A60g re-pointed, not weakened -- D4 revised in principle
+# to count verified Sandbox membership. A60c, A60m and A60n are unchanged.
+is A60  "$(psq "select public.connected_member('$A');")" "t" "scope 011: a live SANDBOX row entitles"
 is A60b "$(psq "select public.membership_state('$A');")" "sandbox_only" "state(sandbox_only)"
 
 # Same identity, but with every derivation input NULL — U3's coalesce lesson in
@@ -109,8 +111,8 @@ values ('$B','Sandbox','TXN-SBX-B','com.sdsongs.etudes.connected.monthly',
 update public.membership set renewal_date = now() - interval '1 day'
  where user_id='$B' and environment='Production';
 SQL
-is A60f "$(psq "select public.connected_member('$B');")" "f" "live Sandbox does NOT rescue lapsed Production"
-is A60g "$(psq "select public.membership_state('$B');")" "expired" "state(expired), not sandbox_only"
+is A60f "$(psq "select public.connected_member('$B');")" "t" "scope 011 consequence: a live Sandbox row entitles despite lapsed Production"
+is A60g "$(psq "select public.membership_state('$B');")" "entitled" "scope 011: state(entitled) -- a Production row exists and connected_member is true"
 
 # No rows at all -> NOT entitled. This is the retirement's whole point: absence
 # of a membership record was the ONE case the grandfather clause converted into

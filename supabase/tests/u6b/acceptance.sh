@@ -28,13 +28,14 @@ V_ENT=00000000-0000-0000-0000-0000000c0001   # entitled viewer
 V_LAP=00000000-0000-0000-0000-0000000c0002   # lapsed viewer
 V_GRC=00000000-0000-0000-0000-0000000c0003   # billing retry + grace unexpired -> ENTITLED
 V_RTY=00000000-0000-0000-0000-0000000c0004   # billing retry, grace EXPIRED    -> NOT entitled
-V_SBX=00000000-0000-0000-0000-0000000c0005   # sandbox only
+V_SBX=00000000-0000-0000-0000-0000000c0005   # sandbox only, ACTIVE -> entitled since scope 011
+V_SBL=00000000-0000-0000-0000-0000000c0007   # sandbox only, LAPSED -> not entitled (scope 011)
 V_NON=00000000-0000-0000-0000-0000000c0006   # no membership row
 A_OK=00000000-0000-0000-0000-0000000c00a1    # entitled AUTHOR
 A_LAP=00000000-0000-0000-0000-0000000c00a2   # lapsed AUTHOR
-for p in "$V_ENT ent" "$V_LAP lap" "$V_GRC grc" "$V_RTY rty" "$V_SBX sbx" "$V_NON non" "$A_OK aok" "$A_LAP alap"; do
+for p in "$V_ENT ent" "$V_LAP lap" "$V_GRC grc" "$V_RTY rty" "$V_SBX sbx" "$V_SBL sbl" "$V_NON non" "$A_OK aok" "$A_LAP alap"; do
   set -- $p; mkid "$1" "u6b-$2"; done
-is U6b-fix1 "$(psq "select count(*) from auth.users where id::text like '00000000-0000-0000-0000-0000000c%';")" "8" "eight fixtures exist before use"
+is U6b-fix1 "$(psq "select count(*) from auth.users where id::text like '00000000-0000-0000-0000-0000000c%';")" "9" "nine fixtures exist before use"
 
 # Membership BEFORE posts for A_OK (exercises the BEFORE trigger); posts BEFORE
 # membership for A_LAP (exercises the propagation trigger). Both paths must land.
@@ -45,6 +46,7 @@ insert into public.membership (user_id,environment,original_transaction_id,produ
  ('$V_GRC','Production','u6b-grc','p',4, now()-interval '1 day',   true,  now()+interval '10 days',now(),'purchase',now()),
  ('$V_RTY','Production','u6b-rty','p',3, now()-interval '9 days',  true,  now()-interval '1 day',  now(),'purchase',now()),
  ('$V_SBX','Sandbox',   'u6b-sbx','p',1, now()+interval '30 days', false, null,                    now(),'purchase',now()),
+ ('$V_SBL','Sandbox',   'u6b-sbl','p',2, now()-interval '2 days',  false, null,                    now(),'purchase',now()),
  ('$A_OK', 'Production','u6b-aok','p',1, now()+interval '30 days', false, null,                    now(),'purchase',now());
 insert into public.posts (id,owner_user_id,is_public,created_at,attachments)
 select gen_random_uuid(),'$A_OK',true,now(),'[]'::jsonb from generate_series(1,3);
@@ -109,7 +111,10 @@ is U6b-E1 "$(gate "$V_ENT")" "true"  "entitled Production member -> GRANT"
 is U6b-E2 "$(gate "$V_LAP")" "false" "expired -> DENY"
 is U6b-E3 "$(gate "$V_GRC")" "true"  "billing retry WITH unexpired grace -> GRANT"
 is U6b-E4 "$(gate "$V_RTY")" "false" "billing retry with grace EXPIRED -> DENY (retry alone never entitles)"
-is U6b-E5 "$(gate "$V_SBX")" "false" "sandbox_only -> DENY"
+# Scope 011 (2026-09-15): re-pointed, not weakened -- D4 revised in principle to count
+# VERIFIED Sandbox membership. An active Sandbox member is served; a lapsed one is not.
+is U6b-E5 "$(gate "$V_SBX")" "true" "ACTIVE verified Sandbox member -> GRANT (scope 011)"
+is U6b-E5b "$(gate "$V_SBL")" "false" "LAPSED Sandbox member -> DENY (Apple formula, unchanged)"
 is U6b-E6 "$(gate "$V_NON")" "false" "no membership row -> DENY"
 
 echo; echo "-- F  BOUND: subject-side visibility --"

@@ -152,7 +152,9 @@ is E16  "$(psq "select (renewal_info_signed_date > now() - interval '1 day')::te
 # the real deployed function rather than argued in SQL.
 is E17  "$(psq "select environment from public.membership where user_id='$A';")" "Sandbox" "state applied to the notification's OWN environment"
 is E17c "$(psq "select (renewal_date > now())::text from public.membership where user_id='$A';")" "true" "...carrying Apple's future paid-through date"
-is E17d "$(psq "select public.connected_member('$A');")" "f" "D4: a live-looking SANDBOX row confers NO Production entitlement"
+# Scope 011 (2026-09-15): re-pointed -- a live VERIFIED Sandbox row now entitles (D4 revised);
+# the row stays labelled Sandbox (E17) and the state stays sandbox_only (E17e).
+is E17d "$(psq "select public.connected_member('$A');")" "t" "scope 011: a live verified SANDBOX row now confers entitlement"
 is E17e "$(psq "select public.membership_state('$A');")" "sandbox_only" "...and reports sandbox_only, never expired"
 is E17b "$(psq "select binding_method from public.membership where user_id='$A';")" "purchase" "binding_method untouched by ingestion"
 is E18 "$(post "$(fixture fallback_expires_date)")" "200" "replay -> 200"

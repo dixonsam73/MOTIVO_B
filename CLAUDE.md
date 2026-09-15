@@ -970,6 +970,37 @@ claim completing on the second pass is invisible to the user.
 
 ### D4 — DECIDED, AND THE FIRST PROPOSAL WAS REJECTED. 2026-08-20
 
+**AMENDED IN PRINCIPLE 2026-09-15 (scope 011). ACCEPTED LOCALLY, NOT DEPLOYED.**
+The original decision below is **preserved unchanged** and is still what production
+runs. Samuel approved counting **verified** Apple Sandbox membership as Connected
+entitlement, because App Review, TestFlight and Xcode Release purchases are Sandbox
+and live enforcement refuses them (**B-44**).
+
+**The change is two literals:** `m.environment in ('Production', 'Sandbox')`, still
+inside `bool_or`. There is **no** allowlist, per-identity exception, new state value
+or flag, so the reason the tester allowlist was rejected still holds. Unchanged:
+ownership binding, JWS claim checks, B-39's revoked rule, cleanup authority and
+retention.
+
+**Consequence:** an active Sandbox subscription entitles even beside an expired or
+revoked Production row. A revoked row itself never entitles.
+
+Migration `20260915160000_scope011_verified_sandbox_entitlement.sql` needs **B-39
+deployed first**. B-40 is excluded, and no `supabase db push` is used. Codex review
+011 accepted it on a disposable local stack pinned to the retained images: focused
+suite 6 then 12 of 12, 264 legacy passes, and exactly the six-object expected gate
+delta.
+
+**DEPLOYMENT IS BLOCKED ON THREE GATES:**
+1. **Samuel's current personal-account identification.** The recorded prefix matched
+   zero hosted identities on 2026-09-15. That is **not** evidence of data loss, and
+   local device history was not inspected.
+2. **Exact guarded SQL/Edge/rollback artifacts and a rehearsal.** Not yet prepared.
+3. **Separate deployment approval**, for B-39 and then scope 011.
+
+**Real two-device Connected QA remains pending deployment.** Record:
+`docs/phase-5-scope011-sandbox-entitlement-prediction.md`.
+
 **Production `connected_member()` means PRODUCTION ENTITLEMENT ONLY. A Sandbox
 membership row must never make the production membership predicate return true,
 and there is no exception mechanism inside the predicate.**

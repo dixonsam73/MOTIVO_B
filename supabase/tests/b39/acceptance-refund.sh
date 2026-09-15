@@ -163,9 +163,12 @@ is B39-V5 "$(eu "$R_REV")" "true" "the cached deadline is in the future again"
 
 echo "— multiple membership rows"
 apply "$R_MIX" Production 5 "now() + interval '20 days'" "$REVOKED" "now()" >/dev/null
-is B39-M1 "$(cm "$R_MIX")" "false"   "a live SANDBOX row cannot rescue a refunded Production row"
-is B39-M2 "$(ms "$R_MIX")" "expired" "state is expired, not sandbox_only"
-is B39-M3 "$(eu "$R_MIX")" "false"   "the cached deadline ignores the Sandbox row"
+# Scope 011 (2026-09-15): M1-M3 re-pointed -- a live VERIFIED Sandbox row now entitles, so it
+# rescues a refunded Production row (recorded consequence). The refunded row itself still
+# confers nothing (M5/M6, S*), and the revoked rule is unchanged.
+is B39-M1 "$(cm "$R_MIX")" "true"    "scope 011: a live SANDBOX row entitles despite a refunded Production row"
+is B39-M2 "$(ms "$R_MIX")" "entitled" "scope 011: state is entitled (a Production row exists, connected_member true)"
+is B39-M3 "$(eu "$R_MIX")" "true"    "scope 011: the cached deadline includes the live Sandbox row"
 is B39-M4 "$(row "$R_MIX" Sandbox "(pending_cleanup_at is null and revocation_date is null)::text")" "true" "the Sandbox row is untouched"
 apply "$R_MX2" Sandbox 5 "now() + interval '20 days'" "$REVOKED" "now()" >/dev/null
 is B39-M5 "$(cm "$R_MX2")" "true" "control: a refunded SANDBOX row does not deny a live Production member"

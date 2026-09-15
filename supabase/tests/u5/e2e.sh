@@ -132,7 +132,8 @@ is E5d-15 "$(psq "select environment from public.membership where user_id='$A';"
 is E5d-16 "$(psq "select original_transaction_id from public.membership where user_id='$A';")" "2000000999999999" "otid from the verified claims"
 is E5d-17 "$(calls)" "GET:2000000999999999" "live Apple read happened, and NO PUT was needed"
 is E5d-18 "$(psq "select coalesce(pending_cleanup_at::text,'null')||'/'||coalesce(entitlement_ended_at::text,'null') from public.membership where user_id='$A';")" "null/null" "F11 preserved through the endpoint"
-is E5d-19 "$(psq "select public.connected_member('$A');")" "f" "D4: a Sandbox row confers no Production entitlement"
+# Scope 011 (2026-09-15): re-pointed -- a live verified Sandbox membership entitles (D4 revised).
+is E5d-19 "$(psq "select public.connected_member('$A');")" "t" "scope 011: a live verified Sandbox row confers entitlement"
 is E5d-20 "$(psq "select public.membership_state('$A');")" "sandbox_only" "...and reports sandbox_only"
 
 # ---- idempotent refresh: ownership provenance is IMMUTABLE
