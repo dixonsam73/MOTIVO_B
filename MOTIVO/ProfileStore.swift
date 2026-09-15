@@ -169,6 +169,21 @@ struct ProfileStore {
         let uid = profileStorageID(for: userID)
         return UserDefaults.standard.string(forKey: locationKey(for: uid)) ?? ""
     }
+    /// C-36 — the location a profile PRESENTS for `userID`.
+    ///
+    /// Identical to `location(for:)` whenever the scoped key exists, including an
+    /// explicit "" (a deliberate clear). ONLY when the scoped key has never been
+    /// written — a first Connected join, before any writer has run — it presents
+    /// the local Études location instead of a blank, because a blank presented
+    /// in `ProfileView` is synced to the directory as NULL. Persists nothing.
+    static func presentedLocation(for userID: String?) -> String {
+        let uid = profileStorageID(for: userID)
+        guard UserDefaults.standard.object(forKey: locationKey(for: uid)) != nil else {
+            return location(for: nil)
+        }
+        return location(for: userID)
+    }
+
     static func setLocation(_ value: String, for userID: String?) {
         let uid = profileStorageID(for: userID)
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -1111,7 +1111,7 @@ private var sessionSetupSection: some View {
              primaryFallbackNoticeNeeded = false
          }
          refreshAvatarDisplay()
-         self.locationText = ProfileStore.location(for: auth.backendUserID)
+         self.locationText = ProfileStore.presentedLocation(for: auth.backendUserID) // C-36
 
          // CP-3: discovery is server-authoritative. AuthManager hydrates the
          // EFFECTIVE value from account_privacy; this no longer forces it on.
@@ -2054,7 +2054,7 @@ private func initials(from string: String) -> String {
                 } else {
                     discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
                     accountIDText = ProfileStore.accountID(for: auth.backendUserID)
-                    locationText = ProfileStore.location(for: auth.backendUserID)
+                    locationText = ProfileStore.presentedLocation(for: auth.backendUserID) // C-36
                 }
             }
             .onChange(of: primaryActivityRef) {
