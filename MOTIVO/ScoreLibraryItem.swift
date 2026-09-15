@@ -14,6 +14,8 @@ struct ScoreLibraryItem: Identifiable, Codable, Equatable {
     var createdAt: Date
     var lastOpenedAt: Date?
     var lastViewedPage: Int?
+    /// C-5 — the received attachment this Score was adopted from; nil for manual imports and scans.
+    var sourceAttachmentID: UUID?
 
     init(
         id: UUID = UUID(),
@@ -24,7 +26,8 @@ struct ScoreLibraryItem: Identifiable, Codable, Equatable {
         isFavourite: Bool = false,
         createdAt: Date = Date(),
         lastOpenedAt: Date? = nil,
-        lastViewedPage: Int? = nil
+        lastViewedPage: Int? = nil,
+        sourceAttachmentID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -39,5 +42,6 @@ struct ScoreLibraryItem: Identifiable, Codable, Equatable {
         } else {
             self.lastViewedPage = nil
         }
+        self.sourceAttachmentID = sourceAttachmentID
     }
 }

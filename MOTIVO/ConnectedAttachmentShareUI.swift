@@ -803,7 +803,8 @@ struct ReceivedConnectedAttachmentDetailView: View {
 
             _ = try ScoreLibraryStore.shared.importPDF(
                 from: url,
-                displayName: attachment.attachmentName ?? attachment.filename
+                displayName: attachment.attachmentName ?? attachment.filename,
+                sourceAttachmentID: attachment.id // C-5
             )
 
             await store.markSavedToScores(attachment)

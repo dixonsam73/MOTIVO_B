@@ -45,8 +45,20 @@ final class ScoreLibraryStore: ObservableObject {
     @discardableResult
     func importPDF(
         from sourceURL: URL,
-        displayName: String? = nil
+        displayName: String? = nil,
+        sourceAttachmentID: UUID? = nil
     ) throws -> ScoreLibraryItem {
+        // C-5 — adopting the same received attachment again returns its Score untouched,
+        // but only while that Score's file still exists: a Score (or file) the member
+        // removed does not block re-adoption. Manual imports pass no id and are unchanged.
+        if let sourceAttachmentID,
+           let existing = items.first(where: {
+               $0.sourceAttachmentID == sourceAttachmentID
+                   && fileManager.fileExists(atPath: url(for: $0).path)
+           }) {
+            return existing
+        }
+
         let didStartSecurityScope = sourceURL.startAccessingSecurityScopedResource()
         defer {
             if didStartSecurityScope {
@@ -76,7 +88,8 @@ final class ScoreLibraryStore: ObservableObject {
             isFavourite: false,
             createdAt: Date(),
             lastOpenedAt: nil,
-            lastViewedPage: nil
+            lastViewedPage: nil,
+            sourceAttachmentID: sourceAttachmentID
         )
 
         items.append(item)
