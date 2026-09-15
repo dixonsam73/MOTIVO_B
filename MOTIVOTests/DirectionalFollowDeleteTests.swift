@@ -29,6 +29,9 @@ import CryptoKit
 @MainActor
 final class DirectionalFollowDeleteTests: XCTestCase {
 
+    /// C-100: fails the test if the host app's launch activation writes the backend mode.
+    private let activationSentinel = AppActivationWriteSentinel()
+
     private static let baseURLString = "http://127.0.0.1:54321"
     private static let jwtSecret = "super-secret-jwt-token-with-at-least-32-characters-long"
     /// Local-stack service role, used ONLY for fixture setup and read-back so
@@ -67,16 +70,24 @@ final class DirectionalFollowDeleteTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
+        activationSentinel.start()
         BackendConfig.apiBaseURL = URL(string: Self.baseURLString)
         BackendConfig.apiToken = Self.anonKey
         NetworkManager.shared.baseURL = URL(string: Self.baseURLString)
         NetworkManager.shared.setBearerToken(Self.mintJWT(sub: Self.A))
         UserDefaults.standard.set(Self.A, forKey: "supabaseUserID_v1")
         setBackendMode(.backendConnected)
+        // C-100: own disposable identities, and REALLY wired to the local stack,
+        // or this test fails here. An unreachable stack still skips in the test.
+        if LocalStackSupport.isReachable() {
+            try await LocalStackSupport.ensureIdentities([Self.A, Self.B])
+            try LocalStackSupport.requireRealBackend()
+        }
         await Self.clearFixtures()
     }
 
     override func tearDown() async throws {
+        activationSentinel.assertNoHostActivationWrites()
         await Self.clearFixtures()
         NetworkManager.shared.setBearerToken(nil)
         UserDefaults.standard.removeObject(forKey: "supabaseUserID_v1")

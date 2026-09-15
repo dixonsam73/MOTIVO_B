@@ -279,8 +279,8 @@ struct MOTIVOApp: App {
                 // `AgeBandRecoveryTrigger`.
                 .ageBandRecovery(coordinator: ageBandRecovery, auth: auth)
                 .onAppear {
-                    connectedMembershipStore.start()
-                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
+                    if !UnitTestHost.isActive { connectedMembershipStore.start() } // C-100
+                    if !UnitTestHost.isActive { appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled) } // C-100
 
                     // M7B: AppMode activation must complete before a pending Études avatar can
                     // be promoted into the Connected namespace/backend. AuthManager may discover
@@ -395,7 +395,7 @@ struct MOTIVOApp: App {
                     handleMembershipState(state)
                 }
                 .onReceive(auth.$currentUserID.removeDuplicates()) { uid in
-                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
+                    if !UnitTestHost.isActive { appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled) } // C-100
                     persistenceController.currentUserID = uid
                     if let id = uid {
                         Task { await persistenceController.runOneTimeBackfillIfNeeded(for: id) }
@@ -416,7 +416,7 @@ struct MOTIVOApp: App {
                     }
                 }
                 .onReceive(auth.$backendUserID.removeDuplicates()) { backendUserID in
-                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
+                    if !UnitTestHost.isActive { appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled) } // C-100
 
                     // U5f — the identity half of the invariant just became true.
                     // Covers the member who was already entitled and has only now
@@ -453,7 +453,7 @@ struct MOTIVOApp: App {
             return
 
         case .entitled:
-            appModeManager.applyActivation(auth: auth, isEntitled: true)
+            if !UnitTestHost.isActive { appModeManager.applyActivation(auth: auth, isEntitled: true) } // C-100
 
             // U5f — the entitlement half of the invariant just became true. On a
             // cold launch this is the trigger that actually fires, because
@@ -467,7 +467,7 @@ struct MOTIVOApp: App {
             }
 
         case .notEntitled:
-            appModeManager.applyActivation(auth: auth, isEntitled: false)
+            if !UnitTestHost.isActive { appModeManager.applyActivation(auth: auth, isEntitled: false) } // C-100
         }
     }
 }

@@ -17,6 +17,9 @@ import CryptoKit
 @MainActor
 final class UnshareDurabilityTests: XCTestCase {
 
+    /// C-100: fails the test if the host app's launch activation writes the backend mode.
+    private let activationSentinel = AppActivationWriteSentinel()
+
     private static let baseURLString = "http://127.0.0.1:54321"
     private static let offlineURL = URL(string: "http://127.0.0.1:1")!
     private static let jwtSecret = "super-secret-jwt-token-with-at-least-32-characters-long"
@@ -59,6 +62,7 @@ final class UnshareDurabilityTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
+        activationSentinel.start()
         BackendConfig.apiBaseURL = URL(string: Self.baseURLString)
         BackendConfig.apiToken = Self.anonKey
         NetworkManager.shared.baseURL = URL(string: Self.baseURLString)
@@ -66,9 +70,16 @@ final class UnshareDurabilityTests: XCTestCase {
         UserDefaults.standard.set(Self.ownerUID, forKey: "supabaseUserID_v1")
         SessionSyncQueue.shared.clear()
         setBackendMode(.backendConnected)
+        // C-100: own disposable identities, and REALLY wired to the local stack,
+        // or this test fails here. An unreachable stack still skips in the test.
+        if LocalStackSupport.isReachable() {
+            try await LocalStackSupport.ensureIdentities([Self.ownerUID])
+            try LocalStackSupport.requireRealBackend()
+        }
     }
 
     override func tearDown() async throws {
+        activationSentinel.assertNoHostActivationWrites()
         NetworkManager.shared.baseURL = URL(string: Self.baseURLString)
         // Delete each object AS THE OWNER ENCODED IN ITS OWN PATH. Deleting
         // everything as `ownerUID` silently leaves any foreign-prefix fixture

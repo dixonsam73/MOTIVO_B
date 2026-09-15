@@ -34,6 +34,9 @@ import CryptoKit
 @MainActor
 final class PublishServiceConnectedDeleteTests: XCTestCase {
 
+    /// C-100: fails the test if the host app's launch activation writes the backend mode.
+    private let activationSentinel = AppActivationWriteSentinel()
+
     // MARK: - Local stack constants (published by `supabase status`, dev-only)
 
     private static let baseURLString = "http://127.0.0.1:54321"
@@ -84,6 +87,7 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
+        activationSentinel.start()
         BackendConfig.apiBaseURL = URL(string: Self.baseURLString)
         BackendConfig.apiToken = Self.anonKey
         NetworkManager.shared.baseURL = URL(string: Self.baseURLString)
@@ -93,9 +97,16 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
         // this the Share-ON / demote cases pass or fail for the wrong reason --
         // which is exactly what happened on this suite's first attempt.
         UserDefaults.standard.set(Self.ownerUID, forKey: "supabaseUserID_v1")
+        // C-100: own disposable identities. This class sets the backend mode per
+        // test (including backendPreview on purpose), so the mode is not required
+        // here; the sentinel still fails any host-app activation write.
+        if LocalStackSupport.isReachable() {
+            try await LocalStackSupport.ensureIdentities([Self.ownerUID, Self.otherUID])
+        }
     }
 
     override func tearDown() async throws {
+        activationSentinel.assertNoHostActivationWrites()
         // Explicit-id cleanup only. NEVER a predicate sweep -- B-22's rule.
         for path in createdObjectPaths { _ = await Self.adminDeleteObject(path) }
         for id in createdPostIDs { _ = await Self.adminDeletePost(id) }
