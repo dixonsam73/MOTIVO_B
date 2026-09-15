@@ -4872,7 +4872,9 @@ private func openAudioViewer(_ id: UUID) {
             // Double-write to staging store
             let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("jpg")
             try? data.write(to: tmp, options: .atomic)
-            Task { _ = try? await StagingStore.saveNew(from: tmp, kind: .image, suggestedName: id.uuidString, duration: nil, poster: nil) }
+            // C-89 — the store is given THIS id, so the visible photo, its staged
+            // file and its ref agree, and a delete by the visible id finds the ref.
+            Task { _ = try? await StagingStore.saveNew(from: tmp, kind: .image, suggestedName: id.uuidString, duration: nil, poster: nil, id: id) }
         }
     }
 

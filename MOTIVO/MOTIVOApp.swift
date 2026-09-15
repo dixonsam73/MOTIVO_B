@@ -229,10 +229,17 @@ struct MOTIVOApp: App {
                 Group {
                     switch appRoute.route {
                     case .timer:
-                        PracticeTimerView(
-                            isPresented: .constant(false),
-                            presentationMode: .home
-                        )
+                        // C-90 — a hosted unit-test process does not build the timer
+                        // screen, so its launch cleanup and store reconciliation never
+                        // touch a store a test is using. Ordinary launches are unchanged.
+                        if UnitTestHost.isActive {
+                            Color.clear
+                        } else {
+                            PracticeTimerView(
+                                isPresented: .constant(false),
+                                presentationMode: .home
+                            )
+                        }
                     case .content:
                         ContentView()
                     }

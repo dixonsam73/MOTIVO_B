@@ -25,6 +25,23 @@ struct StagedAttachmentRef: Codable, Hashable, Identifiable {
     var audioDisplayTitle: String? // denormalized convenience: user if present, else auto (kept in sync on updates)
 }
 
+/// C-90 — a staging destination already holds bytes this operation does not own.
+enum StagingStoreError: Error, Equatable {
+    case destinationExists(String)
+}
+
+#if DEBUG
+/// C-99 — TEST-ONLY observation and barrier points around the refs load/save.
+/// Reached only inside a hosted unit-test run; absent from Release.
+enum UnitTestRefsPoint: Hashable {
+    case saveNewPlaced(UUID)        // background: after media/poster placement, before the refs load
+    case saveNewLoaded(UUID)        // background: immediately after the refs load
+    case saveNewCommitted(UUID)     // background: immediately after a successful refs save
+    case replaceLoaded(UUID)        // background: immediately after the refs load (extension branch)
+    case removeManyFilesDeleted     // main actor: after deleteFiles, before the refs save
+}
+#endif
+
 /// StagingStore manages persistence of large staged media outside of UserDefaults.
 ///
 /// - Stores media under Application Support/MOTIVO/Staging
@@ -35,8 +52,28 @@ struct StagedAttachmentRef: Codable, Hashable, Identifiable {
 enum StagingStore {
     // MARK: - Public API
 
+    #if DEBUG
+    /// C-90 — TEST-ONLY. A store root used ONLY inside a hosted unit-test run
+    /// (`UnitTestHost.isActive`); ignored in every ordinary Debug launch and absent
+    /// from Release. Set and cleared by `C90StagingMetadataWriteFailureTests` and
+    /// `C99StagingRefsConcurrencyTests` only, never while their store work could still
+    /// run — it is process-global and not safe for concurrent test classes.
+    nonisolated(unsafe) static var unitTestRootOverride: URL?
+
+    /// C-99 — TEST-ONLY hook, invoked at `UnitTestRefsPoint`s only inside a hosted
+    /// unit-test run. Nil everywhere else.
+    nonisolated(unsafe) static var unitTestRefsHook: ((UnitTestRefsPoint) -> Void)?
+
+    nonisolated static func unitTestReach(_ point: UnitTestRefsPoint) {
+        if UnitTestHost.isActive { unitTestRefsHook?(point) }
+    }
+    #endif
+
     /// Base folder: Application Support/MOTIVO/Staging
     nonisolated static var baseURL: URL {
+        #if DEBUG
+        if UnitTestHost.isActive, let root = unitTestRootOverride { return root }
+        #endif
         let fm = FileManager.default
         let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return appSupport.appendingPathComponent("MOTIVO", isDirectory: true)
@@ -81,42 +118,76 @@ enum StagingStore {
                     let baseName = (suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? suggestedName! : id.uuidString
                     var targetURL = targetDir.appendingPathComponent(baseName).appendingPathExtension(ext)
 
-                    // Move if possible, else copy
                     if fm.fileExists(atPath: targetURL.path) {
                         // Avoid collision by appending UUID
                         targetURL = targetDir.appendingPathComponent("\(baseName)-\(id.uuidString)").appendingPathExtension(ext)
+                        // C-90 — never overwrite bytes this call does not own.
+                        if fm.fileExists(atPath: targetURL.path) {
+                            throw StagingStoreError.destinationExists(relativePath(for: targetURL))
+                        }
                     }
-                    try moveOrCopy(sourceURL: sourceURL, to: targetURL)
 
-                    var posterPath: String? = nil
+                    var posterURL: URL? = nil
                     if let poster {
                         let posterExt = poster.pathExtension.isEmpty ? "jpg" : poster.pathExtension
-                        let posterURL = targetDir.appendingPathComponent("\(baseName)_poster").appendingPathExtension(posterExt)
-                        if fm.fileExists(atPath: posterURL.path) {
-                            try? fm.removeItem(at: posterURL)
+                        let url = targetDir.appendingPathComponent("\(baseName)_poster").appendingPathExtension(posterExt)
+                        // C-90 — an existing poster here may be another item's; refuse rather than delete it.
+                        if fm.fileExists(atPath: url.path) {
+                            throw StagingStoreError.destinationExists(relativePath(for: url))
                         }
-                        try fm.copyItem(at: poster, to: posterURL)
-                        posterPath = relativePath(for: posterURL)
+                        posterURL = url
                     }
 
-                    let rel = relativePath(for: targetURL)
-                    #if DEBUG
-                    print("[StagingStore] Saved new item id=\(id) kind=\(kind) target=\(targetURL.path) rel=\(rel)")
-                    #endif
-                    var newRef = StagedAttachmentRef(id: id, kind: kind, relativePath: rel, createdAt: Date(), duration: duration, posterPath: posterPath, audioUserTitle: nil, audioAutoTitle: nil, audioDisplayTitle: nil)
-                    if kind == .audio {
-                        let stem = (targetURL.deletingPathExtension().lastPathComponent)
-                        let auto = (suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? suggestedName! : stem
-                        newRef.audioAutoTitle = auto
-                        newRef.audioUserTitle = nil
-                        newRef.audioDisplayTitle = auto
+                    // Move if possible, else copy
+                    try moveOrCopy(sourceURL: sourceURL, to: targetURL)
+
+                    // C-90 — from here on, any failure undoes only what THIS call created,
+                    // and is reported. It used to report success for a ref never written.
+                    var createdPoster: URL? = nil
+                    do {
+                        var posterPath: String? = nil
+                        if let poster, let posterURL {
+                            try fm.copyItem(at: poster, to: posterURL)
+                            createdPoster = posterURL
+                            posterPath = relativePath(for: posterURL)
+                        }
+
+                        let rel = relativePath(for: targetURL)
+                        #if DEBUG
+                        print("[StagingStore] Saved new item id=\(id) kind=\(kind) target=\(targetURL.path) rel=\(rel)")
+                        #endif
+                        var newRef = StagedAttachmentRef(id: id, kind: kind, relativePath: rel, createdAt: Date(), duration: duration, posterPath: posterPath, audioUserTitle: nil, audioAutoTitle: nil, audioDisplayTitle: nil)
+                        if kind == .audio {
+                            let stem = (targetURL.deletingPathExtension().lastPathComponent)
+                            let auto = (suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? suggestedName! : stem
+                            newRef.audioAutoTitle = auto
+                            newRef.audioUserTitle = nil
+                            newRef.audioDisplayTitle = auto
+                        }
+
+                        #if DEBUG
+                        unitTestReach(.saveNewPlaced(id))
+                        #endif
+                        // C-99 — the refs load, append and save in ONE critical section, so a
+                        // concurrent writer can neither be overwritten by nor overwrite this ref.
+                        try withRefsLock {
+                            var list = loadRefs()
+                            #if DEBUG
+                            unitTestReach(.saveNewLoaded(id))
+                            #endif
+                            list.append(newRef)
+                            try saveRefs(list)
+                            #if DEBUG
+                            unitTestReach(.saveNewCommitted(id))
+                            #endif
+                        }
+
+                        cont.resume(returning: newRef)
+                    } catch {
+                        if let createdPoster { try? fm.removeItem(at: createdPoster) }
+                        undoPlacement(of: targetURL, source: sourceURL)
+                        throw error
                     }
-
-                    var list = loadRefs()
-                    list.append(newRef)
-                    saveRefs(list)
-
-                    cont.resume(returning: newRef)
                 } catch {
                     cont.resume(throwing: error)
                 }
@@ -141,12 +212,35 @@ enum StagingStore {
                         // ref points at it, then the old container goes: no step leaves the
                         // recording without a referenced file.
                         let target = abs.deletingPathExtension().appendingPathExtension(newExt)
-                        if fm.fileExists(atPath: target.path) { try? fm.removeItem(at: target) }
+                        // C-90 — an existing file here may be another staged item's media;
+                        // refuse rather than delete it.
+                        if fm.fileExists(atPath: target.path) {
+                            throw StagingStoreError.destinationExists(relativePath(for: target))
+                        }
                         try moveOrCopy(sourceURL: sourceURL, to: target)
                         newRef = StagingStore.refByChangingPath(ref, to: relativePath(for: target))
-                        var list = loadRefs()
-                        if let idx = list.firstIndex(where: { $0.id == ref.id }) { list[idx] = newRef }
-                        saveRefs(list)
+                        let newRelative = newRef.relativePath
+                        do {
+                            // C-99 — load, merge and save in one critical section, applying ONLY
+                            // the path change to the ref as it is NOW: a rename made after the
+                            // caller took `ref` is kept, and no concurrent list write is lost.
+                            let merged: StagedAttachmentRef? = try withRefsLock {
+                                var list = loadRefs()
+                                #if DEBUG
+                                unitTestReach(.replaceLoaded(ref.id))
+                                #endif
+                                guard let idx = list.firstIndex(where: { $0.id == ref.id }) else { return nil }
+                                list[idx] = StagingStore.refByChangingPath(list[idx], to: newRelative)
+                                try saveRefs(list)
+                                return list[idx]
+                            }
+                            if let merged { newRef = merged }
+                        } catch {
+                            // C-90 — the ref still names the original, so the original stays.
+                            // Undo only the trim this call placed (outside the lock), and report it.
+                            undoPlacement(of: target, source: sourceURL)
+                            throw error
+                        }
                         try? fm.removeItem(at: abs)
                     } else {
                         let dir = abs.deletingLastPathComponent()
@@ -154,9 +248,10 @@ enum StagingStore {
                         if fm.fileExists(atPath: tmp.path) { try? fm.removeItem(at: tmp) }
                         try moveOrCopy(sourceURL: sourceURL, to: tmp)
                         _ = try fm.replaceItemAt(abs, withItemAt: tmp, backupItemName: nil, options: [.usingNewMetadataOnly])
-                        var list = loadRefs()
-                        if let idx = list.firstIndex(where: { $0.id == ref.id }) { list[idx] = newRef }
-                        saveRefs(list)
+                        // C-99 — the path is unchanged, so no ref is written. Writing the caller's
+                        // `ref` back here used to undo a rename made after the caller took it. The
+                        // returned ref is that caller snapshot: its path is current; its other
+                        // metadata may not be.
                     }
 
                     cont.resume(returning: newRef)
@@ -168,7 +263,7 @@ enum StagingStore {
         return updated
     }
 
-    static func list() -> [StagedAttachmentRef] { loadRefs() }
+    static func list() -> [StagedAttachmentRef] { withRefsLock { loadRefs() } }
 
     /// C-84 / P4 — clean up only what is genuinely abandoned: empty folders, and
     /// refs whose file is already gone. **Unreferenced media is KEPT** —
@@ -178,11 +273,15 @@ enum StagingStore {
     @discardableResult
     static func cleanupAbandoned() -> (removedFolders: Int, removedRefs: Int) {
         let fm = FileManager.default
-        var list = loadRefs()
-        let before = list.count
-        list.removeAll { !fm.fileExists(atPath: absoluteURL(for: $0).path) }
-        let removedRefs = before - list.count
-        if removedRefs > 0 { saveRefs(list) }
+        // C-99 — the refs part in one critical section; empty-folder removal stays outside.
+        let removedRefs: Int = withRefsLock {
+            var list = loadRefs()
+            let before = list.count
+            list.removeAll { !fm.fileExists(atPath: absoluteURL(for: $0).path) }
+            let removed = before - list.count
+            if removed > 0 { try? saveRefs(list) }
+            return removed
+        }
 
         var removedFolders = 0
         if let items = try? fm.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.isDirectoryKey]) {
@@ -200,10 +299,13 @@ enum StagingStore {
     /// decodes nothing still shows the right frame after a trim.
     @discardableResult
     static func writePoster(for id: UUID, jpeg: Data) -> Bool {
-        var list = loadRefs()
-        guard let idx = list.firstIndex(where: { $0.id == id }) else { return false }
-        let media = absoluteURL(for: list[idx])
-        let posterURL = list[idx].posterPath.map { absoluteURL(forRelative: $0) }
+        // C-99 — snapshot the ref under the lock, write the JPEG OUTSIDE it, then commit
+        // against a fresh load, so the poster write never holds the lock and a concurrent
+        // change to the list is not overwritten.
+        let snapshot: StagedAttachmentRef? = withRefsLock { loadRefs().first(where: { $0.id == id }) }
+        guard let snapshot else { return false }
+        let media = absoluteURL(for: snapshot)
+        let posterURL = snapshot.posterPath.map { absoluteURL(forRelative: $0) }
             ?? media.deletingLastPathComponent()
                 .appendingPathComponent(media.deletingPathExtension().lastPathComponent + "_poster")
                 .appendingPathExtension("jpg")
@@ -212,46 +314,61 @@ enum StagingStore {
         } catch {
             return false
         }
-        list[idx].posterPath = relativePath(for: posterURL)
-        saveRefs(list)
-        return true
+        let posterRelative = relativePath(for: posterURL)
+        // C-90 — report a failed metadata write. The poster bytes written above are
+        // NOT rolled back; `false` does not promise that they were.
+        return withRefsLock {
+            var list = loadRefs()
+            guard let idx = list.firstIndex(where: { $0.id == id }) else { return false }
+            list[idx].posterPath = posterRelative
+            do { try saveRefs(list) } catch { return false }
+            return true
+        }
     }
 
+    /// C-99 — serialised with every other refs write. It still writes the CALLER'S
+    /// whole ref, so a change made after the caller took it is overwritten (residual
+    /// R-c; no production caller).
     static func update(_ ref: StagedAttachmentRef) {
-        var list = loadRefs()
-        if let idx = list.firstIndex(where: { $0.id == ref.id }) { list[idx] = ref }
-        saveRefs(list)
+        withRefsLock {
+            var list = loadRefs()
+            if let idx = list.firstIndex(where: { $0.id == ref.id }) { list[idx] = ref }
+            try? saveRefs(list)
+        }
     }
 
     static func updateAudioMetadata(id: UUID, title: String?, autoTitle: String?, duration: Double?) {
-        var list = loadRefs()
-        if let idx = list.firstIndex(where: { $0.id == id }) {
-            var r = list[idx]
-            if let duration { r.duration = duration }
+        // C-99 — the load, merge and save in one critical section.
+        withRefsLock {
+            var list = loadRefs()
+            if let idx = list.firstIndex(where: { $0.id == id }) {
+                var r = list[idx]
+                if let duration { r.duration = duration }
 
-            if let at = autoTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !at.isEmpty {
-                r.audioAutoTitle = at
-            }
-            if let t = title {
-                let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
-                r.audioUserTitle = trimmed.isEmpty ? nil : trimmed
-            }
+                if let at = autoTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !at.isEmpty {
+                    r.audioAutoTitle = at
+                }
+                if let t = title {
+                    let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                    r.audioUserTitle = trimmed.isEmpty ? nil : trimmed
+                }
 
-            if let user = r.audioUserTitle, !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                r.audioDisplayTitle = user
-            } else if let auto = r.audioAutoTitle, !auto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                r.audioDisplayTitle = auto
-            } else {
-                r.audioDisplayTitle = nil
-            }
+                if let user = r.audioUserTitle, !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    r.audioDisplayTitle = user
+                } else if let auto = r.audioAutoTitle, !auto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    r.audioDisplayTitle = auto
+                } else {
+                    r.audioDisplayTitle = nil
+                }
 
-            list[idx] = r
-            saveRefs(list)
+                list[idx] = r
+                try? saveRefs(list)
+            }
         }
     }
 
     static func ref(withId id: UUID) -> StagedAttachmentRef? {
-        loadRefs().first(where: { $0.id == id })
+        withRefsLock { loadRefs().first(where: { $0.id == id }) }
     }
 
     /// Remove ref and delete associated files (media + poster if any).
@@ -282,9 +399,13 @@ enum StagingStore {
         }
     }
 
-    var list = loadRefs()
-    list.removeAll { $0.id == ref.id }
-    saveRefs(list)
+    // C-99 — the files above are deleted by the caller's paths (residual R-d); the
+    // index is updated against a fresh load in one critical section.
+    withRefsLock {
+        var list = loadRefs()
+        list.removeAll { $0.id == ref.id }
+        try? saveRefs(list)
+    }
 }
 
     static func absoluteURL(for ref: StagedAttachmentRef) -> URL {
@@ -425,15 +546,14 @@ enum StagingStore {
     /// - Safety: never deletes outside the Staging baseURL; ignores missing files; tolerates unknown ids.
     static func removeMany(ids: [UUID]) {
         guard !ids.isEmpty else { return }
-        // Load refs once
-        var list = loadRefs()
-        if list.isEmpty { return }
-
         // Build lookup for fast membership test
         let toRemove = Set(ids)
 
-        // Collect refs we are going to delete to reuse existing file deletion logic
-        let doomed = list.filter { toRemove.contains($0.id) }
+        // C-99 — a locked SNAPSHOT names the refs to delete; their files are deleted
+        // outside the lock; the index is then updated against a FRESH load, so a ref
+        // committed by another writer meanwhile is not dropped by a stale list.
+        let doomed: [StagedAttachmentRef] = withRefsLock { loadRefs().filter { toRemove.contains($0.id) } }
+        if doomed.isEmpty { return }
 
         #if DEBUG
         // Pre-deletion accounting
@@ -486,11 +606,18 @@ enum StagingStore {
 
         // Best-effort delete of files
         deleteFiles(for: doomed)
+        #if DEBUG
+        unitTestReach(.removeManyFilesDeleted)
+        #endif
 
-        // Remove from index
-        if !doomed.isEmpty {
-            list.removeAll { toRemove.contains($0.id) }
-            saveRefs(list)
+        // Remove from index — a fresh load, filtered to the refs whose files were deleted above.
+        // Same-id limitation (R-b): if that id was replaced or re-staged meanwhile, its
+        // current ref is still removed and any new file is left unreferenced.
+        let gone = Set(doomed.map(\.id))
+        withRefsLock {
+            var list = loadRefs()
+            list.removeAll { gone.contains($0.id) }
+            try? saveRefs(list)
         }
 
         #if DEBUG
@@ -542,11 +669,20 @@ enum StagingStore {
             if let data = d.data(forKey: defaultsKey) {
                 do {
                     let refs = try JSONDecoder().decode([StagedAttachmentRef].self, from: data)
-                    saveRefs(refs)
-                    d.removeObject(forKey: defaultsKey)
-                    #if DEBUG
-                    print("[StagingStore] Migrated refs from UserDefaults to file (count: \(refs.count))")
-                    #endif
+                    // C-90 — the defaults key is the only copy until the file is written, so it
+                    // is removed only after a successful write. A failed write is caught HERE,
+                    // so the decoded refs are still returned below rather than `[]`.
+                    do {
+                        try saveRefs(refs)
+                        d.removeObject(forKey: defaultsKey)
+                        #if DEBUG
+                        print("[StagingStore] Migrated refs from UserDefaults to file (count: \(refs.count))")
+                        #endif
+                    } catch {
+                        #if DEBUG
+                        print("[StagingStore] Migration write failed; legacy key kept: \(error)")
+                        #endif
+                    }
                     var normalized = refs
                     for i in normalized.indices {
                         if normalized[i].audioDisplayTitle == nil {
@@ -567,12 +703,42 @@ enum StagingStore {
         }
     }
 
-    nonisolated private static func saveRefs(_ refs: [StagedAttachmentRef]) {
+    /// C-99 — ONE process-wide critical section for every refs load → modify → save and
+    /// for reads (a load can migrate-write). Never held across media or poster file work,
+    /// an `await` or a main-actor hop, and never taken re-entrantly: `loadRefs`/`saveRefs`
+    /// do not take it. How long the main thread can wait under contention is NOT bounded
+    /// or measured.
+    nonisolated(unsafe) private static let refsLock = NSLock()
+
+    nonisolated private static func withRefsLock<T>(_ body: () throws -> T) rethrows -> T {
+        refsLock.lock()
+        defer { refsLock.unlock() }
+        return try body()
+    }
+
+    /// C-90 — THROWS. It used to swallow its error, so every writer reported success
+    /// for a reference list that was never written. `saveNew`, extension-changing
+    /// `replace`, `writePoster` and the legacy migration act on the failure; every
+    /// other writer calls it with `try?`, keeping its existing best-effort behaviour —
+    /// their metadata durability is NOT addressed by C-90.
+    nonisolated private static func saveRefs(_ refs: [StagedAttachmentRef]) throws {
         let url = refsFileURL()
-        do {
-            let data = try JSONEncoder().encode(refs)
-            try data.write(to: url, options: [.atomic])
-        } catch {}
+        let data = try JSONEncoder().encode(refs)
+        try data.write(to: url, options: [.atomic])
+    }
+
+    /// C-90 — undo a placement this call made. If the source still exists (a copy, or a
+    /// move whose source removal did not happen) it is never overwritten or deleted:
+    /// only the staged copy this call created is removed. If the source is gone, the
+    /// file is moved back. If that move fails, the bytes stay where they are
+    /// (unreferenced media is kept) and the caller still reports the original error.
+    nonisolated private static func undoPlacement(of placed: URL, source: URL) {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: source.path) {
+            try? fm.removeItem(at: placed)
+        } else {
+            try? fm.moveItem(at: placed, to: source)
+        }
     }
 
     // MARK: - Delete Account v2 (Local Factory Reset)
