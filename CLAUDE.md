@@ -970,6 +970,26 @@ claim completing on the second pass is invisible to the user.
 
 ### D4 — DECIDED, AND THE FIRST PROPOSAL WAS REJECTED. 2026-08-20
 
+**DEPLOYED TO PRODUCTION 2026-09-15, TOGETHER WITH B-39, under Samuel's explicit
+approval and within the reviewed runbook.**
+
+| Step | UTC | Change |
+|---|---|---|
+| A1, B-39 SQL | 19:42:18 | Committed |
+| Edge parity redeploy (`verify_jwt` false) | 19:44–19:46 | `appstore_notifications_v1` v4, `appstore_reconcile_v1` v5, `membership_cleanup_v1` v7, `membership_attest_v1` v3 |
+| A2, scope 011 SQL | 19:47:14 | Committed |
+
+Every PRE and POST guard, verification row, recapture and download comparison
+matched the rehearsal. Production structure now differs from the pre-deploy
+snapshot in exactly three function definitions, and `supabase/schema/` records
+that capture.
+
+**Not claimed:** the two live Sandbox identities' entitlement is a timestamped
+query observation, not end-to-end acceptance. Two-device Connected QA has not run.
+
+Record: `supabase/sql/README-b39-scope011-deployment-results.md`. The amendment
+below is the pre-deploy record, preserved as written.
+
 **AMENDED IN PRINCIPLE 2026-09-15 (scope 011). ACCEPTED LOCALLY, NOT DEPLOYED.**
 The original decision below is **preserved unchanged** and is still what production
 runs. Samuel approved counting **verified** Apple Sandbox membership as Connected
