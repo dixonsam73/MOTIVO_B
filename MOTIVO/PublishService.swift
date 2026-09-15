@@ -255,8 +255,13 @@ final class PublishService: ObservableObject {
             if shouldPublish {
                 // Step 12 parity: enrich payload with Core Data Session.notes + areNotesPrivate via objectID.
                 // This avoids UI changes (views can keep constructing payload without notes).
-                var resolvedNotes: String? = nil
-                var resolvedAreNotesPrivate: Bool = false
+                //
+                // C-88. Start from the INCOMING values. These used to start as
+                // nil/false, so a Session that could not be read replaced the
+                // caller's notes and privacy with "no notes, not private" -- the
+                // opposite of what the catch below says it does.
+                var resolvedNotes: String? = payload.notes
+                var resolvedAreNotesPrivate: Bool = payload.areNotesPrivate
 
                 do {
                     let viewContext = PersistenceController.shared.container.viewContext
@@ -264,15 +269,21 @@ final class PublishService: ObservableObject {
                     viewContext.refresh(obj, mergeChanges: true)
 
                     func hasAttr(_ name: String) -> Bool { (obj.entity.attributesByName[name] != nil) }
-                    if hasAttr("notes"), let val = obj.value(forKey: "notes") as? String {
-                        let trimmed = val.trimmingCharacters(in: .whitespacesAndNewlines)
-                        resolvedNotes = trimmed.isEmpty ? nil : trimmed
+                    // C-88. A Session that was READ has definite notes. Empty,
+                    // whitespace-only or nil means the member has no notes, and is
+                    // queued as "" -- an explicit clear. It used to be queued as nil,
+                    // which the queue merge reads as "unspecified", so an older
+                    // queued publish kept its old notes and published them.
+                    if hasAttr("notes") {
+                        let saved = obj.value(forKey: "notes") as? String
+                        resolvedNotes = (saved ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                     }
                     if hasAttr("areNotesPrivate"), let val = obj.value(forKey: "areNotesPrivate") as? Bool {
                         resolvedAreNotesPrivate = val
                     }
                 } catch {
                     // If we can't resolve notes, proceed with the incoming payload unchanged.
+                    // Unknown is not a clear: nil stays nil (C-88).
                 }
 
                 let effectivePayload = SessionSyncQueue.PostPublishPayload(
@@ -296,14 +307,14 @@ final class PublishService: ObservableObject {
 
                 // C-62 — the session TITLE is user content and is not logged;
                 // `postID` identifies the publish. Same rule the notes already
-                // follow (present/nil, never the text).
+                // follow (present/empty/nil, never the text).
                 NSLog("[PublishService][8F] enqueue payload keys • postID=%@ dur=%@ act=%@ mood=%@ effort=%@ notes=%@ notesPrivate=%@",
                       effectivePayload.id.uuidString,
                       effectivePayload.durationSeconds != nil ? String(effectivePayload.durationSeconds!) : "nil",
                       effectivePayload.activityType ?? "nil",
                       effectivePayload.mood != nil ? String(effectivePayload.mood!) : "nil",
                       effectivePayload.effort != nil ? String(effectivePayload.effort!) : "nil",
-                      effectivePayload.notes != nil ? "present" : "nil",
+                      effectivePayload.notes.map { $0.isEmpty ? "empty" : "present" } ?? "nil",
                       effectivePayload.areNotesPrivate ? "true" : "false")
 
                 SessionSyncQueue.shared.enqueue(effectivePayload)

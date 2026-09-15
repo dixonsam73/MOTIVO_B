@@ -136,6 +136,12 @@ enum LocalFactoryReset {
             BackendFeedStore.shared.resetForSignOut()
             FollowStore.shared.resetForSignOut()
         }
+
+        // C-91. Re-arm the publish queue LAST, once everything it could reach has
+        // been wiped. It was stopped at the start of this reset and used to stay
+        // stopped for the life of the process, so a member who set Études up
+        // again without relaunching could queue publishes that never flushed.
+        SessionSyncQueue.shared.resumeAfterFactoryReset()
     }
 
     @discardableResult

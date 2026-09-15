@@ -30,6 +30,29 @@ public final class SessionSyncQueue: ObservableObject {
 
     private var isFactoryResetting: Bool = false
 
+    /// C-87 / C-91. ACKNOWLEDGEMENT IS OWNED BY THE INTENT THAT WAS SENT.
+    ///
+    /// `flushNow()` snapshots `items`, awaits the network, and used to dequeue
+    /// BY POST ID on success -- so an older publish's acknowledgement removed
+    /// the newer unshare that C-61's last-intent replacement had put in its
+    /// place, and two overlapping flushes sent the same item twice and could
+    /// complete out of the member's order.
+    ///
+    /// Three pieces, all in-memory and main-actor, none persisted:
+    ///   - `revisions` -- every enqueue gives its post a new revision; a
+    ///     success dequeues only if the item is STILL the revision it sent.
+    ///   - single flight -- one flush runs at a time; a caller that arrives
+    ///     mid-flush waits for it and asks for another pass (`flushAgain`), so
+    ///     a newer intent is sent after the older one has finished.
+    ///   - `generation` -- a factory reset starts a new generation, so a flush
+    ///     from before the reset can neither acknowledge nor continue.
+    private var revisions: [UUID: Int] = [:]
+    private var nextRevision = 0
+    private var generation = 0
+    private var activeFlush: Task<Void, Never>?
+    private var activeFlushID: UUID?
+    private var flushAgain = false
+
     /// C-61 / P4-U2a-2. WHAT THIS QUEUE ITEM ASKS FOR.
     ///
     /// The queue used to mean exactly one thing -- "publish this" -- so an
@@ -185,6 +208,7 @@ public final class SessionSyncQueue: ObservableObject {
     private init() {
         self.fileURL = SessionSyncQueue.makeFileURL()
         self.items = (try? Self.load(from: fileURL)) ?? []
+        for item in items { noteNewIntent(item.id) }
     }
 
     // MARK: - Public API
@@ -222,6 +246,7 @@ public final class SessionSyncQueue: ObservableObject {
             // original visibility merge still apply.
             if payload.op != existing.op {
                 items[index] = payload
+                noteNewIntent(payload.id)
                 persist()
                 BackendLogger.notice("Queue intent replaced • postID=\(payload.id.uuidString) • \(existing.op.rawValue)→\(payload.op.rawValue)")
                 return
@@ -255,10 +280,12 @@ public final class SessionSyncQueue: ObservableObject {
                 authorisedOmissions: payload.authorisedOmissions ?? existing.authorisedOmissions
             )
             items[index] = merged
+            noteNewIntent(payload.id)
             persist()
             BackendLogger.notice("Queue update • postID=\(payload.id.uuidString) • total=\(items.count)")
         } else {
             items.append(payload)
+            noteNewIntent(payload.id)
             persist()
             BackendLogger.notice("Queue enqueue • postID=\(payload.id.uuidString) • total=\(items.count)")
         }
@@ -272,30 +299,73 @@ public final class SessionSyncQueue: ObservableObject {
 
     public func dequeue(postID: UUID) {
         items.removeAll { $0.id == postID }
+        revisions.removeValue(forKey: postID)
         persist()
         BackendLogger.notice("Queue dequeue • postID=\(postID.uuidString) • total=\(items.count)")
     }
 
     public func clear() {
         items.removeAll()
+        revisions.removeAll()
         persist()
         BackendLogger.notice("Queue cleared")
     }
 
     /// Flush now. In Backend Preview: prints simulated upload logs and drains on success.
     /// In Local Simulation: logs and keeps items to reflect "waiting to publish".
+    ///
+    /// C-87. SINGLE FLIGHT. A call that arrives while a flush is running does
+    /// not start a second one: it asks the running flush for another pass and
+    /// waits for it, so an operation already in flight is never sent twice and
+    /// a newer intent is sent only after the older operation has finished.
     public func flushNow() async {
         if isFactoryResetting {
             NSLog("[SessionSyncQueue] flushNow ignored (factory reset in progress)")
             BackendLogger.notice("Flush ignored (factory reset in progress)")
             return
         }
+        if let running = activeFlush {
+            flushAgain = true
+            BackendLogger.notice("Flush joined the flush in progress")
+            await running.value
+            return
+        }
+        let flushGeneration = generation
+        let flushID = UUID()
+        // The handle is released INSIDE the task, synchronously after its last
+        // pass, so a caller arriving after that point starts a new flush rather
+        // than waiting on one that has already decided to stop.
+        activeFlush = Task { @MainActor in
+            repeat {
+                self.flushAgain = false
+                await self.flushOnce(generation: flushGeneration)
+            } while self.flushAgain && flushGeneration == self.generation && !self.isFactoryResetting
+            if self.activeFlushID == flushID {
+                self.activeFlush = nil
+                self.activeFlushID = nil
+            }
+        }
+        activeFlushID = flushID
+        await activeFlush?.value
+    }
+
+    private func flushOnce(generation flushGeneration: Int) async {
         let mode = BackendEnvironment.shared.mode
         NSLog("[SessionSyncQueue] flushNow requested • mode=%@ • queued=%d", String(describing: mode), items.count)
         BackendLogger.notice("Flush requested • mode=\(String(describing: mode)) • queued=\(items.count)")
 
         if mode == .backendPreview || mode == .backendConnected {
-            for payload in items {
+            let snapshot = items.map { (payload: $0, revision: revisions[$0.id] ?? 0) }
+            for (payload, revision) in snapshot {
+                // C-91. A reset since this flush began ends it here: nothing from
+                // before the reset is sent, and nothing is acknowledged.
+                guard flushGeneration == generation, !isFactoryResetting else {
+                    NSLog("[SessionSyncQueue] flush stopped (superseded by factory reset)")
+                    BackendLogger.notice("Flush stopped (superseded by factory reset)")
+                    return
+                }
+                // C-87. Superseded before it was sent: the next pass sends the newer intent.
+                guard revisions[payload.id] == revision else { continue }
                 // C-61 / P4-U2a-2. An .unshare converges to REMOVAL and is
                 // dequeued only once the row is confirmed absent; anything else
                 // stays queued for the next launch/foreground flush. The
@@ -306,7 +376,7 @@ public final class SessionSyncQueue: ObservableObject {
                     case .success:
                         NSLog("[SessionSyncQueue] unshare converged • postID=%@", payload.id.uuidString)
                         BackendLogger.notice("Unshare converged • postID=\(payload.id.uuidString)")
-                        self.dequeue(postID: payload.id)
+                        self.acknowledge(payload.id, revision: revision, generation: flushGeneration)
                     case .failure(let error):
                         // DELIBERATELY NO RETRY CAP AND NO BACKOFF. Abandoning
                         // an owed privacy withdrawal after N attempts is the
@@ -322,7 +392,7 @@ public final class SessionSyncQueue: ObservableObject {
                 case .success:
                     NSLog("[SessionSyncQueue] upload success • postID=%@", payload.id.uuidString)
                     BackendLogger.notice("Preview upload success • postID=\(payload.id.uuidString)")
-                    self.dequeue(postID: payload.id)
+                    self.acknowledge(payload.id, revision: revision, generation: flushGeneration)
                 case .failure(let error):
                     NSLog("[SessionSyncQueue] upload failed • postID=%@ • error=%@", payload.id.uuidString, error.localizedDescription)
                     BackendLogger.notice("Preview upload failed • postID=\(payload.id.uuidString) • error=\(error.localizedDescription)")
@@ -350,7 +420,7 @@ public final class SessionSyncQueue: ObservableObject {
                     if isHTTP409Duplicate {
                         NSLog("[SessionSyncQueue] duplicate postID %@ — treating as success", payload.id.uuidString)
                         BackendLogger.notice("Duplicate post • treating as success • postID=\(payload.id.uuidString)")
-                        self.dequeue(postID: payload.id)
+                        self.acknowledge(payload.id, revision: revision, generation: flushGeneration)
                     } else {
                         // Preserve semantics: failures remain queued; no retries/timers added here.
                     }
@@ -365,6 +435,25 @@ public final class SessionSyncQueue: ObservableObject {
     }
 
 
+    /// C-87. Every change to a post's queued intent gets a new revision, and a
+    /// flush in progress is asked for another pass so that intent is sent.
+    private func noteNewIntent(_ postID: UUID) {
+        nextRevision += 1
+        revisions[postID] = nextRevision
+        if activeFlush != nil { flushAgain = true }
+    }
+
+    /// C-87 / C-91. Dequeue ONLY the intent that was actually sent, and only
+    /// within the generation that sent it. A newer intent, or a reset, withholds
+    /// the acknowledgement and the item stays queued.
+    private func acknowledge(_ postID: UUID, revision: Int, generation flushGeneration: Int) {
+        guard flushGeneration == generation, revisions[postID] == revision else {
+            BackendLogger.notice("Acknowledgement withheld • postID=\(postID.uuidString) • superseded by a newer intent or a reset")
+            return
+        }
+        dequeue(postID: postID)
+    }
+
     // MARK: - Persistence
 
     
@@ -373,10 +462,27 @@ public final class SessionSyncQueue: ObservableObject {
 /// Prevents any further flush attempts and clears queued items in-memory (best-effort).
 func stopForFactoryReset() {
     isFactoryResetting = true
+    // C-91. A new generation: a flush already running stops at its next check
+    // and can acknowledge nothing. It is detached so a flush after re-arming
+    // never waits on it.
+    generation += 1
+    activeFlush = nil
+    activeFlushID = nil
+    flushAgain = false
     items.removeAll()
+    revisions.removeAll()
     persist()
     NSLog("[SessionSyncQueue] stopForFactoryReset applied (items cleared)")
     BackendLogger.notice("stopForFactoryReset applied (items cleared)")
+}
+
+/// C-91. RE-ARMS the queue once the reset has finished. It used to stay disabled
+/// for the rest of the process, so a member who reset and set Études up again
+/// without relaunching could queue publishes that never flushed.
+func resumeAfterFactoryReset() {
+    isFactoryResetting = false
+    NSLog("[SessionSyncQueue] resumeAfterFactoryReset applied (queue re-armed)")
+    BackendLogger.notice("resumeAfterFactoryReset applied (queue re-armed)")
 }
 
 /// Deletes the on-disk queue file (best-effort). Safe to call multiple times.
