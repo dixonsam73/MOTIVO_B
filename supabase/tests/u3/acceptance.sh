@@ -239,7 +239,11 @@ is A16 "$(psq "select count(*) from public.membership where pending_cleanup_at i
 # BEFORE INSERT OR UPDATE row triggers maintaining the denormalised visibility
 # timestamp, and one AFTER trigger on `membership` propagating it. The assertion
 # is not weakened: it still pins an exact count, so a sixth would fail it.
-is A16b "$(psq "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','storage') and not t.tgisinternal;")" "10" "trigger count: U3's 5 plus U6b's 5"
+# RE-POINTED FOR B-42/R2, 2026-09-14: count 10 -> the EXACT ORDERED SET of 12 names.
+# The count went stale when P4-U5 (tg_directory_avatar_version) and CP-1
+# (tg_directory_requires_band) each added a trigger. A named set is STRONGER: it
+# still fails on any added trigger, and also on a swapped or renamed one.
+is A16b "$(psq "select string_agg(n.nspname||'.'||c.relname||'.'||t.tgname, ',' order by n.nspname||'.'||c.relname||'.'||t.tgname) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','storage') and not t.tgisinternal;")" "public.account_directory.tg_directory_avatar_version,public.account_directory.tg_directory_entitled_until,public.account_directory.tg_directory_requires_band,public.connected_attachments.connected_attachments_recipient_update_guard,public.follows.tg_follows_entitled_until,public.membership.tg_membership_propagate,public.post_shares.tg_shares_entitled_until,public.posts.tg_posts_entitled_until,storage.buckets.enforce_bucket_name_length_trigger,storage.buckets.protect_buckets_delete,storage.objects.protect_objects_delete,storage.objects.update_objects_updated_at" "exact trigger set: U3 5 + U6b 5 + P4-U5 avatar_version + CP-1 requires_band"
 # A14 — RETIRED BY U6b-4: there is no snapshot table to be empty. A14b survives
 # unchanged: cutover_at is RETAINED as the historical record of a declared
 # boundary, and is still unset on a fresh local instance.

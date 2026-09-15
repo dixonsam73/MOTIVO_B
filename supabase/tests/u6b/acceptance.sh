@@ -55,6 +55,13 @@ values ('$A_LAP','Production','u6b-alap','p',2, now()-interval '3 days', false, 
 insert into public.follows (follower_user_id,followed_user_id,status,created_at,updated_at)
 select v,a,'approved',now(),now() from unnest(array['$V_ENT'::uuid,'$V_LAP'::uuid,'$V_GRC'::uuid,'$V_RTY'::uuid,'$V_SBX'::uuid,'$V_NON'::uuid]) v,
                                        unnest(array['$A_OK'::uuid,'$A_LAP'::uuid]) a;
+-- B-42 / R2, 2026-09-14: CP-1's tg_account_directory_requires_band refuses a directory
+-- row without a declared band. SETUP, NOT SUBJECT -- exactly what
+-- account_privacy_upsert_v1 writes for an adult, reproducing the pre-CP-1 world
+-- this suite was written against (discoverable, follow requests open).
+insert into public.account_privacy (user_id,age_band,lookup_enabled,lookup_set_under_band,follow_requests_enabled,follow_requests_set_under_band) values
+ ('$A_OK','band_18_plus',true,'band_18_plus',true,'band_18_plus'),
+ ('$A_LAP','band_18_plus',true,'band_18_plus',true,'band_18_plus') on conflict do nothing;
 insert into public.account_directory (user_id,account_id,display_name) values
  ('$A_OK','aok','A OK'), ('$A_LAP','alap','A Lapsed') on conflict do nothing;
 insert into public.post_comments (id,post_id,owner_user_id,author_user_id,recipient_user_id,body,created_at)

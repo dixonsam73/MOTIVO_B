@@ -39,24 +39,14 @@ t=re.sub(r"^\s*//.*$","",t,flags=re.M)
 t=re.sub(r"//.*$","",t,flags=re.M)
 print(len(re.findall(sys.argv[2],t)))' "$1" "$2"; }
 
-# Name of the function enclosing the Nth match of a pattern, comments stripped.
-enclosing() { python3 -c '
-import re,sys
-t=open(sys.argv[1]).read()
-t=re.sub(r"/\*.*?\*/","",t,flags=re.S)
-t=re.sub(r"^\s*//.*$","",t,flags=re.M)
-t=re.sub(r"//.*$","",t,flags=re.M)
-lines=t.split("\n")
-want=sys.argv[2]; nth=int(sys.argv[3]); seen=0
-for i,l in enumerate(lines):
-    if re.search(want,l):
-        seen+=1
-        if seen==nth:
-            for j in range(i,-1,-1):
-                m=re.match(r"\s*(?:@\w+\s+)?(?:public |private |internal |fileprivate )?func (\w+)",lines[j])
-                if m: print(m.group(1)); sys.exit()
-            print("<none>"); sys.exit()
-print("<not-found>")' "$1" "$2" "$3"; }
+# Name of the OUTERMOST function enclosing the Nth match of a pattern.
+# C-101, 2026-09-14: the detector now lives in u2c_enclosing.py -- comments and
+# string literals masked, scopes tracked by brace depth. The previous helper
+# scanned backwards to the nearest `func` line and ignored nesting, so C-65's
+# `discardTemporaries`, nested inside uploadPost, hid both call sites below.
+# Its self-test, including a negative control for each call site moved outside
+# uploadPost, is u2c-detector-selftest.sh.
+enclosing() { python3 supabase/tests/p4/u2c_enclosing.py "$1" "$2" "$3"; }
 
 BS=MOTIVO/BackendShim.swift
 SSQ=MOTIVO/SessionSyncQueue.swift

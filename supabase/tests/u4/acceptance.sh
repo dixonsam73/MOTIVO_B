@@ -270,7 +270,9 @@ is A57b3 "$(psq "select public.enforcement_gate('probe.a57b')::text;")" "true" "
 # RE-POINTED FOR U6b, 2026-09-01: 1 -> 6. U6b adds five triggers in `public`
 # maintaining the denormalised visibility timestamp. Still an exact count, so a
 # seventh fails it.
-is A57c "$(psq "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and not t.tgisinternal;")" "6" "trigger count: U4's 1 plus U6b's 5"
+# RE-POINTED FOR B-42/R2, 2026-09-14: count 6 -> the EXACT ORDERED SET of 8 public names,
+# for the same reason as u3 A16b. Stronger: it still fails on any added trigger.
+is A57c "$(psq "select string_agg(n.nspname||'.'||c.relname||'.'||t.tgname, ',' order by n.nspname||'.'||c.relname||'.'||t.tgname) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public') and not t.tgisinternal;")" "public.account_directory.tg_directory_avatar_version,public.account_directory.tg_directory_entitled_until,public.account_directory.tg_directory_requires_band,public.connected_attachments.connected_attachments_recipient_update_guard,public.follows.tg_follows_entitled_until,public.membership.tg_membership_propagate,public.post_shares.tg_shares_entitled_until,public.posts.tg_posts_entitled_until" "exact public trigger set: U4 1 + U6b 5 + P4-U5 avatar_version + CP-1 requires_band"
 is A57d "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'membership%' and pg_get_functiondef(p.oid) ~* 'delete +from +public\.(posts|post_shares|post_comments|follows|account_directory|connected_attachments|post_comment_views)';")" "0" "no U4 function deletes Domain 3 content"
 is A57e "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'membership%' and pg_get_functiondef(p.oid) ~* 'storage\.objects';")" "0" "no U4 function touches storage"
 is A57f "$(psq "select count(*) from pg_extension where extname='pg_cron';")" "0" "no scheduler installed"

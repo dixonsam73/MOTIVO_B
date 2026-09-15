@@ -46,6 +46,17 @@ insert into public.membership (user_id,environment,original_transaction_id,produ
  ('$A_LAP','Production','u7-alap','p',2, now()-interval '3 days', false, now(),'purchase',now()),
  ('$V_ENT','Production','u7-ent','p',1, now()+interval '30 days', false, now(),'purchase',now())
 on conflict do nothing;
+-- B-42 / R2, 2026-09-14: CP-1's tg_account_directory_requires_band refuses a directory
+-- row without a declared band. SETUP, NOT SUBJECT -- exactly what
+-- account_privacy_upsert_v1 writes for an adult, reproducing the pre-CP-1 world
+-- this suite was written against (discoverable, follow requests open).
+insert into public.account_privacy (user_id,age_band,lookup_enabled,lookup_set_under_band,follow_requests_enabled,follow_requests_set_under_band) values
+ ('$A_FOL','band_18_plus',true,'band_18_plus',true,'band_18_plus'),
+ ('$A_STR','band_18_plus',true,'band_18_plus',true,'band_18_plus'),
+ ('$A_REQ','band_18_plus',true,'band_18_plus',true,'band_18_plus'),
+ ('$A_REV','band_18_plus',true,'band_18_plus',true,'band_18_plus'),
+ ('$A_LAP','band_18_plus',true,'band_18_plus',true,'band_18_plus')
+on conflict do nothing;
 insert into public.account_directory (user_id,account_id,display_name) values
  ('$A_FOL','u7fol','Followed Author'), ('$A_STR','u7str','A Stranger'),
  ('$A_REQ','u7req','Requested Only'),  ('$A_REV','u7rev','Reverse Follower'),
