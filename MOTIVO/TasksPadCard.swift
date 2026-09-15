@@ -15,7 +15,7 @@ struct TasksPadCard: View {
     let onToggleLineType: (UUID) -> Void
     let onDeleteLine: (UUID) -> Void
     let onClearAll: () -> Void
-    let onAddEmptyLine: () -> Void
+    let onAddEmptyLine: (TaskLineType) -> Void
     let onHandleReturn: (UUID) -> Void
     let onPersistSnapshot: () -> Void
     let onMarkTaskSetDirty: (Bool) -> Void
@@ -26,8 +26,7 @@ struct TasksPadCard: View {
     let onImportTasks: () -> Void
 
     @State private var draggedTaskID: UUID? = nil
-    @State private var suppressAutoClearForLineID: UUID? = nil
-    @State private var ignoreNextTapForLineID: UUID? = nil
+    @State private var actionsLineID: UUID? = nil
 
     private let dragHandleWidth: CGFloat = 20
     private let deleteIconWidth: CGFloat = 20
@@ -92,14 +91,11 @@ struct TasksPadCard: View {
             }
 
             HStack(alignment: .center, spacing: 12) {
-                Button(action: { onAddEmptyLine() }) {
-                    HStack(spacing: 4) {
-                        Text("+")
-                        Text("Add line")
-                    }
-                    .foregroundStyle(tasksAccent.opacity(0.95))
-                }
-                .buttonStyle(.plain)
+                TaskLineAddButton(
+                    accent: tasksAccent,
+                    onAddTask: { onAddEmptyLine(.task) },
+                    onAddContext: { onAddEmptyLine(.context) }
+                )
 
                 Spacer(minLength: 8)
 
@@ -139,8 +135,7 @@ struct TasksPadCard: View {
             guard newIDs.contains(focusedID) == false else { return }
 
             focusedTaskID.wrappedValue = nil
-            ignoreNextTapForLineID = nil
-            suppressAutoClearForLineID = nil
+            actionsLineID = nil
         }
     }
 
@@ -174,15 +169,23 @@ struct TasksPadCard: View {
                     }
                     .accessibilityLabel("Reorder task")
 
-                Button(role: .destructive) {
-                    onDeleteLine(line.wrappedValue.id)
-                } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
-                        .frame(width: deleteIconWidth, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                TaskLineActionsButton(
+                    isPresented: Binding(
+                        get: { actionsLineID == line.wrappedValue.id },
+                        set: { actionsLineID = $0 ? line.wrappedValue.id : nil }
+                    ),
+                    text: line.wrappedValue.text,
+                    isContext: line.wrappedValue.type == .context,
+                    onOpen: { focusedTaskID.wrappedValue = nil },
+                    onConvert: {
+                        focusedTaskID.wrappedValue = nil
+                        onToggleLineType(line.wrappedValue.id)
+                    },
+                    onDelete: {
+                        focusedTaskID.wrappedValue = nil
+                        onDeleteLine(line.wrappedValue.id)
+                    }
+                )
             }
             .frame(width: rightControlZoneWidth, alignment: .trailing)
         }
@@ -192,8 +195,8 @@ struct TasksPadCard: View {
 
     @ViewBuilder
     private func taskTextArea(_ line: Binding<TaskLine>) -> some View {
-        TextField(
-            line.wrappedValue.type == .context ? "Context" : "Task",
+        TaskLineTextField(
+            title: line.wrappedValue.type == .context ? "Heading or note" : "Task",
             text: Binding(
                 get: { line.wrappedValue.text },
                 set: { newValue in
@@ -210,50 +213,28 @@ struct TasksPadCard: View {
                     }
                 }
             ),
-            axis: .vertical
-        )
-        .textFieldStyle(.plain)
-        .disableAutocorrection(true)
-        .focused(focusedTaskID, equals: line.wrappedValue.id)
-        .onTapGesture {
-            if ignoreNextTapForLineID == line.wrappedValue.id {
-                ignoreNextTapForLineID = nil
+            id: line.wrappedValue.id,
+            focusedLineID: focusedTaskID,
+            axis: .vertical,
+            onSubmit: { onHandleReturn(line.wrappedValue.id) },
+            onShowActions: {
                 focusedTaskID.wrappedValue = nil
-                return
+                actionsLineID = line.wrappedValue.id
             }
-            focusedTaskID.wrappedValue = line.wrappedValue.id
-        }
-        .onChange(of: focusedTaskID.wrappedValue) { _, newFocus in
-            if newFocus == line.wrappedValue.id {
-                let shouldSuppressAutoClear = (suppressAutoClearForLineID == line.wrappedValue.id)
-
-                if !shouldSuppressAutoClear,
-                   let auto = autoTaskTexts[line.wrappedValue.id],
-                   line.wrappedValue.text == auto {
-                    line.wrappedValue.text = ""
-                }
-
-                suppressAutoClearForLineID = nil
-                onPersistSnapshot()
-            }
-        }
+        )
         .font(line.wrappedValue.type == .context ? Theme.Text.body.weight(.medium) : Theme.Text.body)
         .padding(.leading, line.wrappedValue.type == .context ? contextTextLeadingInset : 0)
         .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.35)
-                .onEnded { _ in
-                    suppressAutoClearForLineID = line.wrappedValue.id
-                    ignoreNextTapForLineID = line.wrappedValue.id
-                    focusedTaskID.wrappedValue = nil
-
-                    let generator = UIImpactFeedbackGenerator(style: .light)
-                    generator.prepare()
-                    onToggleLineType(line.wrappedValue.id)
-                    generator.impactOccurred(intensity: 0.7)
-                }
-        )
+        .accessibilityLabel(line.wrappedValue.type == .context ? "Heading or note" : "Task")
+        .accessibilityAction(named: Text(line.wrappedValue.type == .context ? "Make task" : "Make heading or note")) {
+            focusedTaskID.wrappedValue = nil
+            onToggleLineType(line.wrappedValue.id)
+        }
+        .accessibilityAction(named: Text("Delete line")) {
+            focusedTaskID.wrappedValue = nil
+            onDeleteLine(line.wrappedValue.id)
+        }
     }
 
     private var collapsedHeader: some View {

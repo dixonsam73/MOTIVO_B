@@ -77,6 +77,7 @@ struct TasksManagerView: View {
     @State private var editingTaskSetID: UUID? = nil
     @State private var newEditorItemText: String = ""
     @FocusState private var focusedEditorLineID: UUID?
+    @State private var editorActionsLineID: UUID?
 
     private let managerDeleteIconWidth: CGFloat = 20
     private let managerDragDeleteSpacing: CGFloat = 16
@@ -427,9 +428,9 @@ struct TasksManagerView: View {
         showTaskSetEditor = true
     }
 
-    private func addEmptyEditorLine(to setID: UUID) {
+    private func addEmptyEditorLine(to setID: UUID, type: TaskLineType) {
         guard let index = savedTaskSets.firstIndex(where: { $0.id == setID }) else { return }
-        let newLine = TaskTemplateLine(text: "", type: .task)
+        let newLine = TaskTemplateLine(text: "", type: type)
         savedTaskSets[index].items.append(newLine)
         persistEditedTaskSet(setID)
 
@@ -538,25 +539,30 @@ struct TasksManagerView: View {
     @ViewBuilder
     private func editorTaskRow(setID: UUID, line: TaskTemplateLine) -> some View {
         HStack(spacing: 6) {
-            TextField(
-                line.type == .context ? "Context" : "Task",
-                text: editorLineTextBinding(setID: setID, lineID: line.id)
+            TaskLineTextField(
+                title: line.type == .context ? "Heading or note" : "Task",
+                text: editorLineTextBinding(setID: setID, lineID: line.id),
+                id: line.id,
+                focusedLineID: $focusedEditorLineID,
+                onSubmit: { focusedEditorLineID = nil },
+                onShowActions: {
+                    focusedEditorLineID = nil
+                    editorActionsLineID = line.id
+                }
             )
-            .textFieldStyle(.plain)
             .font(line.type == .context ? Theme.Text.body.weight(.medium) : Theme.Text.body)
-            .disableAutocorrection(true)
-            .textInputAutocapitalization(.sentences)
-            .focused($focusedEditorLineID, equals: line.id)
             .padding(.leading, line.type == .context ? managerContextTextLeadingInset : 0)
             .padding(.vertical, 12)
             .contentShape(Rectangle())
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.35)
-                    .onEnded { _ in
-                        focusedEditorLineID = nil
-                        toggleEditorLineType(setID: setID, lineID: line.id)
-                    }
-            )
+            .accessibilityLabel(line.type == .context ? "Heading or note" : "Task")
+            .accessibilityAction(named: Text(line.type == .context ? "Make task" : "Make heading or note")) {
+                focusedEditorLineID = nil
+                toggleEditorLineType(setID: setID, lineID: line.id)
+            }
+            .accessibilityAction(named: Text("Delete line")) {
+                focusedEditorLineID = nil
+                deleteEditorLine(setID: setID, lineID: line.id)
+            }
 
             Spacer(minLength: 8)
 
@@ -567,15 +573,23 @@ struct TasksManagerView: View {
                     .contentShape(Rectangle())
                     .accessibilityLabel("Reorder task")
 
-                Button(role: .destructive) {
-                    deleteEditorLine(setID: setID, lineID: line.id)
-                } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
-                        .frame(width: managerDeleteIconWidth, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                TaskLineActionsButton(
+                    isPresented: Binding(
+                        get: { editorActionsLineID == line.id },
+                        set: { editorActionsLineID = $0 ? line.id : nil }
+                    ),
+                    text: line.text,
+                    isContext: line.type == .context,
+                    onOpen: { focusedEditorLineID = nil },
+                    onConvert: {
+                        focusedEditorLineID = nil
+                        toggleEditorLineType(setID: setID, lineID: line.id)
+                    },
+                    onDelete: {
+                        focusedEditorLineID = nil
+                        deleteEditorLine(setID: setID, lineID: line.id)
+                    }
+                )
             }
             .frame(width: managerDeleteIconWidth + managerDragDeleteSpacing, alignment: .trailing)
         }
@@ -586,41 +600,34 @@ struct TasksManagerView: View {
     @ViewBuilder
     private var taskSetEditorView: some View {
         if let set = editingTaskSet {
-            Form {
-                Section(header: Text("Task Set").sectionHeader()) {
-                    TextField("Task set name", text: taskSetNameBinding(for: set.id))
-                        .font(Theme.Text.body)
-                        .textInputAutocapitalization(.words)
-                        .submitLabel(.done)
-                }
-
-                Section(header: Text("Tasks").sectionHeader()) {
-                    ForEach(set.items) { line in
-                        editorTaskRow(setID: set.id, line: line)
-                    }
-                    .onMove { source, destination in
-                        focusedEditorLineID = nil
-                        moveEditorLines(setID: set.id, from: source, to: destination)
+            VStack(spacing: 0) {
+                Form {
+                    Section(header: Text("Task Set").sectionHeader()) {
+                        TextField("Task set name", text: taskSetNameBinding(for: set.id))
+                            .font(Theme.Text.body)
+                            .textInputAutocapitalization(.words)
+                            .submitLabel(.done)
                     }
 
-                    Button {
-                        addEmptyEditorLine(to: set.id)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("+")
-                            Text("Add line")
+                    Section(header: Text("Tasks").sectionHeader()) {
+                        ForEach(set.items) { line in
+                            editorTaskRow(setID: set.id, line: line)
                         }
+                        .onMove { source, destination in
+                            focusedEditorLineID = nil
+                            moveEditorLines(setID: set.id, from: source, to: destination)
+                        }
+
+                        TaskLineAddButton(
+                            accent: Theme.Colors.accent,
+                            onAddTask: { addEmptyEditorLine(to: set.id, type: .task) },
+                            onAddContext: { addEmptyEditorLine(to: set.id, type: .context) }
+                        )
                         .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.accent.opacity(0.95))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                        .padding(.vertical, 12)
                     }
-                    .buttonStyle(.plain)
-                    .padding(.vertical, 12)
                 }
-            }
-            .navigationTitle("")
-            .safeAreaInset(edge: .bottom) {
                 Button {
                     deleteTaskSet(set.id)
                     showTaskSetEditor = false
@@ -642,9 +649,10 @@ struct TasksManagerView: View {
                         .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
                 )
                 .padding(.horizontal, 32)
+                .padding(.top, 12)
                 .padding(.bottom, 12)
             }
-         
+            .navigationTitle("")
             .scrollDismissesKeyboard(.interactively)
             .appBackground()
         } else {

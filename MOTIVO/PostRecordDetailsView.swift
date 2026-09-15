@@ -1229,9 +1229,17 @@ var body: some View {
                                 .font(.footnote)
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
-                        Toggle("Include tasks in notes", isOn: $includeTasksInNotes)
-                            .font(Theme.Text.body)
-                            .tint(Theme.Colors.accent)
+                        Toggle(isOn: $includeTasksInNotes) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Include completed tasks")
+                                    .font(Theme.Text.body)
+                                Text("Headings and notes are included too.")
+                                    .font(Theme.Text.meta)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .tint(Theme.Colors.accent)
                         TextEditor(text: $notes)
                             .focused($isNotesFocused)
                             .frame(minHeight: 120)

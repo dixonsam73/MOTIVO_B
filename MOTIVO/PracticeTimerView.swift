@@ -1130,31 +1130,23 @@ private func loadPracticeDefaultsIfNeeded() {
     private func handleTaskReturn(for id: UUID) {
         guard let idx = taskLines.firstIndex(where: { $0.id == id }) else { return }
 
-        // Mirror the old onSubmit behaviour: restore auto text if left empty
         let trimmed = taskLines[idx].text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty, let auto = autoTaskTexts[id] {
-            taskLines[idx].text = auto
-        } else {
+        if taskLines[idx].text != trimmed {
             taskLines[idx].text = trimmed
+            markLinkedTaskSetDirty()
         }
-
-        // Create a new empty line directly after the current one
-        let newLine = TaskLine(text: "", isDone: false, type: .task)
-        let insertIndex = taskLines.index(after: idx)
-        taskLines.insert(newLine, at: insertIndex)
-        markLinkedTaskSetDirty()
-
-        // Persist once after the updates
         persistTasksSnapshot()
-
-        // Move focus to the new line so the user can continue typing
-        focusedTaskID = newLine.id
+        focusedTaskID = nil
     }
 
-    private func addEmptyTaskLine() {
-        taskLines.append(TaskLine(text: "", isDone: false, type: .task))
+    private func addEmptyTaskLine(type: TaskLineType) {
+        let line = TaskLine(text: "", isDone: false, type: type)
+        taskLines.append(line)
         markLinkedTaskSetDirty()
         persistTasksSnapshot()
+        DispatchQueue.main.async {
+            focusedTaskID = line.id
+        }
     }
 
     func applyTaskLinesSafely(_ newTaskLines: [TaskLine], appending: Bool, completion: (() -> Void)? = nil) {
@@ -1674,18 +1666,18 @@ private func loadPracticeDefaultsIfNeeded() {
                         alignment: .top
                     )
                 }
+                .background {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if showTasksPad { focusedTaskID = nil }
+                        }
+                }
             }
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline) // like Profile (centered, less shouty)
         .appBackground()
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                if showTasksPad, focusedTaskID != nil {
-                    focusedTaskID = nil
-                }
-            }
-        )
         .confirmationDialog("Imported tasks", isPresented: $showTaskImportReplaceAppendDialog, titleVisibility: .visible) {
             Button("Replace current tasks") {
                 applyPendingImportedTasks(appending: false)
@@ -3126,7 +3118,7 @@ private func loadPracticeDefaultsIfNeeded() {
                     onToggleLineType: { id in toggleTaskLineType(id) },
                     onDeleteLine: { id in deleteLine(id) },
                     onClearAll: { clearAllTasks() },
-                    onAddEmptyLine: { addEmptyTaskLine() },
+                    onAddEmptyLine: { type in addEmptyTaskLine(type: type) },
                     onHandleReturn: { id in handleTaskReturn(for: id) },
                     onPersistSnapshot: { persistTasksSnapshot() },
                     onMarkTaskSetDirty: { resetLink in
