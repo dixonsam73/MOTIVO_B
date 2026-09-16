@@ -295,7 +295,14 @@ struct RemotePostRowTwin: View {
                             DirectoryAvatarCircle(
                                 ownerID: owner,
                                 displayName: (resolvedDirectoryAccount?.displayName ?? (viewerIsOwner ? "You" : "User")),
-                                directoryAvatarKey: (viewerIsOwner ? auth.backendAvatarKey : resolvedDirectoryAccount?.avatarKey)
+                                directoryAvatarKey: (viewerIsOwner ? auth.backendAvatarKey : resolvedDirectoryAccount?.avatarKey),
+                                // A: this argument was MISSING, so the version was always nil here and
+                                // the component's `.task(id:)` keyed on "<key>|" forever. `avatar_key`
+                                // does not change on a replacement — that is C-34's whole premise — so
+                                // a same-key replacement never re-ran the pipeline at this site.
+                                // Owner is nil to match `directoryAvatarKey` above: the owner's avatar
+                                // resolves from the local file first and needs no version.
+                                directoryAvatarVersion: (viewerIsOwner ? nil : resolvedDirectoryAccount?.avatarVersion)
                             )
                             .frame(width: 32, height: 32)
                             .clipShape(Circle())
@@ -546,9 +553,19 @@ private struct DirectoryAvatarCircle: View {
     let ownerID: String
     let displayName: String
     let directoryAvatarKey: String?
-    /// C-34: `account_directory.avatar_version`. Defaulted so call sites that pass
-    /// no avatar (or the owner's own key) need no change.
-    var directoryAvatarVersion: String? = nil
+    /// C-34: `account_directory.avatar_version`.
+    ///
+    /// A: REQUIRED, deliberately — and it is `let` for that reason, not `var`.
+    ///
+    /// It was `var … = nil` so that call sites "need no change", and the one
+    /// call site this component has then omitted it, silently, for as long as
+    /// the version signal has existed. **Dropping the `= nil` alone would not
+    /// have fixed that:** the memberwise initialiser gives an Optional `var` an
+    /// implicit nil default, so the argument would still be omittable. A `let`
+    /// with no initial value is what makes omission a COMPILE ERROR — verified
+    /// with a standalone compiler probe, not assumed. Pass nil explicitly for
+    /// the owner, whose avatar resolves from the local file first.
+    let directoryAvatarVersion: String?
 
     @State private var remoteAvatar: UIImage? = nil
 
