@@ -34,7 +34,7 @@ final class AgeBandRecoveryCoordinator: ObservableObject {
 
     /// Long enough that a device Apple cannot serve never becomes a prompt loop;
     /// short enough that an ordinary relaunch recovers. In memory only.
-    static let cooldown: TimeInterval = 60
+    nonisolated static let cooldown: TimeInterval = 60
 
     private var inFlight = false
     private var lastAttemptAt: Date?
