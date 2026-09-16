@@ -17,15 +17,37 @@
 #
 # Exit: 0 all six pass, 1 a check failed, 3 inconclusive (setup error / missing check /
 # state changed).
+#
+# ENFORCED MODE (scope 014), OPT-IN, DISPOSABLE STACK ONLY:
+#   B40_ENFORCED=1 B40_TARGET_PROJECT=motivo-scope014-disposable ./supabase/tests/p5/b40-teen-follow-requests.sh before|after
+# Refuses unless this checkout's config.toml is that project and the database resolved by
+# supabase/tests/u4/lib.sh (localhost, one supabase_db_* on the port) is exactly its
+# container. Inside the same rolled-back transaction it gives T, A and R live Sandbox
+# memberships and turns enforcement on, then ASSERTS enforcement is active and all three
+# are entitled (and R is entitled on the RLS path) before the unchanged checks 1-6, so an
+# entitlement refusal cannot masquerade as the teen rule. Needs scope 011 in the schema.
+# Without B40_ENFORCED the behaviour below is exactly as accepted in review 008.
 
 set -uo pipefail
 cd "$(dirname "$0")/../../.."
 MODE="${1:-}"
 [ "$MODE" = before ] || [ "$MODE" = after ] || { echo "usage: $0 before|after"; exit 2; }
 MIG=supabase/migrations/20260915150000_b40_teen_follow_requests_closed.sql
+[ "$MODE" = before ] || [ -f "$MIG" ] || { echo "after mode: migration file $MIG not found; inconclusive"; exit 3; }
 
-DB=$(docker ps --format '{{.Names}}' | grep '^supabase_db_' | head -1)
-[ "$DB" = "supabase_db_rlwtqxumfobakvdueugm" ] || { echo "not the existing local stack ('$DB'); refusing"; exit 3; }
+ENFORCED="${B40_ENFORCED:-0}"
+if [ "$ENFORCED" = 1 ]; then
+  [ "${B40_TARGET_PROJECT:-}" = "motivo-scope014-disposable" ] || { echo "B40_ENFORCED=1 requires B40_TARGET_PROJECT=motivo-scope014-disposable; refusing"; exit 3; }
+  grep -q "^project_id = \"$B40_TARGET_PROJECT\"" supabase/config.toml || { echo "this checkout is not the $B40_TARGET_PROJECT copy; refusing"; exit 3; }
+  DB=$( (source supabase/tests/u4/lib.sh >/dev/null 2>&1 && printf '%s' "$DB") || true )
+  [ -n "$DB" ] || { echo "u4/lib.sh could not resolve a single localhost supabase_db_* container; refusing"; exit 3; }
+  [ "$DB" = "supabase_db_$B40_TARGET_PROJECT" ] || { echo "resolved '$DB', not supabase_db_$B40_TARGET_PROJECT; refusing"; exit 3; }
+else
+  [ "${B40_ENFORCED:-0}" = 0 ] || { echo "B40_ENFORCED must be 1 or unset; refusing"; exit 3; }
+  [ -z "${B40_TARGET_PROJECT:-}" ] || { echo "B40_TARGET_PROJECT is only valid with B40_ENFORCED=1; refusing"; exit 3; }
+  DB=$(docker ps --format '{{.Names}}' | grep '^supabase_db_' | head -1)
+  [ "$DB" = "supabase_db_rlwtqxumfobakvdueugm" ] || { echo "not the existing local stack ('$DB'); refusing"; exit 3; }
+fi
 psq() { docker exec -i "$DB" psql -U postgres -d postgres -At -q -v ON_ERROR_STOP=1 "$@"; }
 
 FINGERPRINT="select md5(string_agg(p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' || pg_get_functiondef(p.oid) || coalesce(array_to_string(p.proacl, ','), ''), '|' order by p.proname))
@@ -41,10 +63,29 @@ echo; echo "B-40 — teen inbound follow requests ($MODE)"
 echo "target: container $DB, database $(psq -c 'select current_database()')"
 STATE_BEFORE=$(psq -c "$FINGERPRINT")
 echo "state before: $STATE_BEFORE"
-case "$STATE_BEFORE" in *"enforcing=true"*) echo "enforcement is active locally; requester entitlement fixtures would be needed — not arranged by this script; stopping"; exit 3;; esac
+[ "$ENFORCED" = 1 ] || case "$STATE_BEFORE" in *"enforcing=true"*) echo "enforcement is active locally; requester entitlement fixtures would be needed — not arranged by this script; stopping"; exit 3;; esac
+echo "enforced mode: $([ "$ENFORCED" = 1 ] && echo "yes (target $DB)" || echo no)"
 
 T=$(uuidgen | tr 'A-Z' 'a-z'); A=$(uuidgen | tr 'A-Z' 'a-z'); R=$(uuidgen | tr 'A-Z' 'a-z')
 as() { printf "set local role authenticated;\nselect set_config('request.jwt.claims', '{\"sub\":\"%s\",\"role\":\"authenticated\"}', true) is not null as claims;\n" "$1"; }
+
+ENF_SQL=""
+if [ "$ENFORCED" = 1 ]; then
+  ENF_SQL="-- ENFORCED MODE: live Sandbox memberships for T, A, R; enforcement on; asserted below.
+insert into public.membership (user_id, environment, original_transaction_id, product_id, apple_status, renewal_date,
+                               is_in_billing_retry, grace_period_expires_date, renewal_info_signed_date, binding_method, bound_at) values
+ ('$T','Sandbox','b40-t-$T','p',1, now()+interval '30 days', false, null, now(), 'purchase', now()),
+ ('$A','Sandbox','b40-a-$A','p',1, now()+interval '30 days', false, null, now(), 'purchase', now()),
+ ('$R','Sandbox','b40-r-$R','p',1, now()+interval '30 days', false, null, now(), 'purchase', now());
+update public.membership_control set enforcement_enabled = true where id;
+select 'ASSERT|enforcing|' || public.enforcement_active();
+select 'ASSERT|T entitled|' || public.connected_member('$T');
+select 'ASSERT|A entitled|' || public.connected_member('$A');
+select 'ASSERT|R entitled|' || public.connected_member('$R');
+$(as "$R")
+select 'ASSERT|R entitled on RLS path|' || public.connected_member_self();
+reset role;"
+fi
 
 {
   echo "begin;"
@@ -54,6 +95,7 @@ insert into auth.users (id, instance_id, aud, role, email, created_at, updated_a
  ('$T','00000000-0000-0000-0000-000000000000','authenticated','authenticated','b40-t-$T@local.invalid',now(),now()),
  ('$A','00000000-0000-0000-0000-000000000000','authenticated','authenticated','b40-a-$A@local.invalid',now(),now()),
  ('$R','00000000-0000-0000-0000-000000000000','authenticated','authenticated','b40-r-$R@local.invalid',now(),now());
+$ENF_SQL
 
 -- SETUP through the real client paths. Teen T reaches the A4 state via the writer.
 $(as "$T")
@@ -128,7 +170,7 @@ SQL
 
 OUT=$(docker exec -i "$DB" psql -U postgres -d postgres -At -q -v ON_ERROR_STOP=1 < /tmp/b40-$$.sql 2>&1); PSQL_EXIT=$?
 rm -f /tmp/b40-$$.sql
-echo "$OUT" | sed -E 's/^.*NOTICE:  //' | grep -E '^(SETUP|CHECK|NOTE)\|' | sed 's/^/  /'
+echo "$OUT" | sed -E 's/^.*NOTICE:  //' | grep -E '^(ASSERT|SETUP|CHECK|NOTE)\|' | sed 's/^/  /'
 
 STATE_AFTER=$(psq -c "$FINGERPRINT")
 echo "state after:  $STATE_AFTER"
@@ -139,6 +181,10 @@ if [ $PSQL_EXIT -ne 0 ]; then
 fi
 echo "$OUT" | grep -q 'CHECK|[0-9a-z]*|SETUP-ERROR' && { echo "INCONCLUSIVE: a refusal was not an RLS rejection"; INCONCLUSIVE=1; }
 [ "$STATE_BEFORE" = "$STATE_AFTER" ] || { echo "INCONCLUSIVE: definitions, grants or row counts changed"; INCONCLUSIVE=1; }
+if [ "$ENFORCED" = 1 ]; then
+  ASSERTS_TRUE=$(echo "$OUT" | grep -cE '^ASSERT\|[^|]+\|true$')
+  [ "$ASSERTS_TRUE" = 5 ] || { echo "INCONCLUSIVE: enforced-mode preconditions not all true ($ASSERTS_TRUE of 5)"; INCONCLUSIVE=1; }
+fi
 
 check() { # id, component ids...
   local id=$1; shift; local all=PASS
@@ -152,6 +198,6 @@ check() { # id, component ids...
 }
 echo "results:"
 check 1 1; check 2 2; check 3 3; check 4 4; check 5 5a 5b 5c; check 6 6
-echo "summary: $PASSED passed, $FAILED failed of 6 ($MODE); state unchanged: $([ "$STATE_BEFORE" = "$STATE_AFTER" ] && echo yes || echo no)"
+echo "summary: $PASSED passed, $FAILED failed of 6 ($MODE$([ "$ENFORCED" = 1 ] && echo ", enforced")); state unchanged: $([ "$STATE_BEFORE" = "$STATE_AFTER" ] && echo yes || echo no)"
 [ $INCONCLUSIVE -eq 1 ] && exit 3
 [ $FAILED -eq 0 ] && exit 0 || exit 1
