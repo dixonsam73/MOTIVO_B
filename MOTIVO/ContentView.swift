@@ -551,6 +551,13 @@ fileprivate struct SessionsRootView: View {
     @AppStorage("feedSavedOnly_v1") private var savedOnly: Bool = false
     @State private var debouncedQuery: String = ""
     @State private var pushSessionID: UUID? = nil
+    /// F: which surface the pending `pushSessionID` was tapped from.
+    ///
+    /// Set by the TAP SITE beside `pushSessionID`, and reset to `.journal`
+    /// whenever that id is cleared — so a Journal tap following a Feed tap can
+    /// never inherit a stale Feed origin. `.journal` is the default because it
+    /// is the behaviour every existing entry point already has.
+    @State private var pushSessionOrigin: SessionDetailOrigin = .journal
     @State private var pushRemotePostID: UUID? = nil
     @State private var isFeedNavFrozen: Bool = false
     @State private var frozenFeedItems: [FeedRowItem] = []
@@ -1178,6 +1185,11 @@ fileprivate struct SessionsRootView: View {
                                                                 feedNavFreezeTask?.cancel()
                                                                 isFeedNavFrozen = true
                                                                 frozenFeedItems = renderFeedItems
+                                                                // F: Journal. Set explicitly rather than
+                                                                // relying on a previous dismissal to have
+                                                                // reset it — a Feed tap that resolved a nil
+                                                                // id never presents, so never resets.
+                                                                pushSessionOrigin = .journal
                                                                 pushSessionID = (session.value(forKey: "id") as? UUID)
                                                             }
                                                             .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
@@ -1188,6 +1200,9 @@ fileprivate struct SessionsRootView: View {
                                                                 feedNavFreezeTask?.cancel()
                                                                 isFeedNavFrozen = true
                                                                 frozenFeedItems = renderFeedItems
+                                                                // F: Journal. Set explicitly — see the
+                                                                // sibling site above.
+                                                                pushSessionOrigin = .journal
                                                                 pushSessionID = (session.value(forKey: "id") as? UUID)
                                                             }
                                                             .modifier(
@@ -1291,6 +1306,9 @@ fileprivate struct SessionsRootView: View {
                                                         feedNavFreezeTask?.cancel()
                                                         isFeedNavFrozen = true
                                                         frozenFeedItems = renderFeedItems
+                                                        // F: Journal. Set explicitly — see the sibling
+                                                        // sites above.
+                                                        pushSessionOrigin = .journal
                                                         pushSessionID = (session.value(forKey: "id") as? UUID)
                                                     }
                                                     .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : 4)
@@ -1392,6 +1410,11 @@ fileprivate struct SessionsRootView: View {
                                                     feedNavFreezeTask?.cancel()
                                                     isFeedNavFrozen = true
                                                     frozenFeedItems = renderFeedItems
+                                                    // F: the ONLY tap site that opens the local detail
+                                                    // from the Connected Feed. The three Journal sites
+                                                    // assign `.journal` explicitly, so this value never
+                                                    // depends on a previous dismissal having reset it.
+                                                    pushSessionOrigin = .connectedFeed
                                                     pushSessionID = (session.value(forKey: "id") as? UUID)
                                                 }
                                                 .overlay {
@@ -1653,12 +1676,15 @@ fileprivate struct SessionsRootView: View {
     set: { isPresented in
         if !isPresented {
             pushSessionID = nil
+            // F: clear the origin with the id it belongs to, so the next tap
+            // cannot inherit this one's surface.
+            pushSessionOrigin = .journal
         }
     }
 )) {
     if let id = pushSessionID,
        let session = sessions.first(where: { ($0.value(forKey: "id") as? UUID) == id }) {
-        SessionDetailView(session: session)
+        SessionDetailView(session: session, origin: pushSessionOrigin)
     } else {
         EmptyView()
     }

@@ -147,6 +147,22 @@ private func persistedVideoTitle(for attachmentID: UUID, auth: AuthManager) -> S
     return trimmed.isEmpty ? nil : trimmed
 }
 
+/// F: the surface a `SessionDetailView` was opened from.
+///
+/// Supplied by the TAP SITE, never inferred inside the view — so a new entry
+/// point cannot acquire the Feed's identity row by accident, and the Journal
+/// cannot lose its header-free layout by a change somewhere else.
+enum SessionDetailOrigin: Equatable {
+    /// Solo and Connected Journal, and every other non-Feed entry. Header-free
+    /// (C-71): the Journal is the member's own local sessions, so showing them
+    /// their own name and avatar back is redundant.
+    case journal
+
+    /// The Connected Feed. Shows the identity row, matching what
+    /// `BackendSessionDetailView` already does for posts that route to it.
+    case connectedFeed
+}
+
 struct SessionDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
@@ -157,8 +173,29 @@ struct SessionDetailView: View {
 
     @ObservedObject private var commentsStore = CommentsStore.shared
     @ObservedObject private var commentPresence = CommentPresenceStore.shared
+    /// F: OBSERVED, not just referenced. The identity row reads the directory
+    /// cache, which the Feed hydrates asynchronously — reading
+    /// `BackendFeedStore.shared` directly would leave the header showing
+    /// whatever was resolved at first render and never update when the name
+    /// arrives or changes. `ContentViewRemotePostRowTwin` observes it the same
+    /// way for the same reason.
+    @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
 
     let session: Session
+
+    /// F: WHERE this detail screen was opened from, supplied by the tap site.
+    ///
+    /// The identity row is a property of the SURFACE, not of ownership (C-71):
+    /// Solo and Connected **Journal** details are header-free, the Connected
+    /// **Feed** detail shows it — including for the member's own post, which is
+    /// what `BackendSessionDetailView` already does for the posts that route to
+    /// it. A local row and a remote row opened from the same Feed must not look
+    /// like two different products.
+    ///
+    /// **Defaulted to `.journal` deliberately**, so a call site that does not
+    /// pass an origin keeps today's behaviour and no surface can acquire the
+    /// header by accident.
+    var origin: SessionDetailOrigin = .journal
 
     @State private var showEdit = false
     @State private var shouldDismissAfterEditSave = false
@@ -202,6 +239,140 @@ struct SessionDetailView: View {
         guard let viewer = effectiveViewerUserID,
               let owner = session.ownerUserID?.lowercased() else { return false }
         return viewer == owner
+    }
+
+    // MARK: - F: Connected Feed identity row
+
+    /// F: the owner's directory row, looked up by the CANONICAL BACKEND id.
+    ///
+    /// **`session.ownerUserID` is a LOCAL Apple id** — `adoptOwnerlessLocalSessions
+    /// IfNeeded` stamps it from `credential.user` — while `directoryAccountsByUserID`
+    /// is keyed by the BACKEND uuid. Looking the owner up by the session's own
+    /// value would therefore always miss. `ContentViewSessionRow` already resolves
+    /// it this way; this mirrors it rather than inventing a second rule.
+    ///
+    /// This is a LOOKUP in an already-resolved cache, never a fetch: the Feed
+    /// populates it (`BackendShim` resolves feed authors), and a detail screen
+    /// must not issue directory traffic of its own.
+    private func directoryAccountForFeedHeader() -> DirectoryAccount? {
+        let key: String
+        if viewerIsOwner {
+            key = (auth.backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            key = (session.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard !key.isEmpty else { return nil }
+        return backendFeedStore.directoryAccountsByUserID[key]
+            ?? backendFeedStore.directoryAccountsByUserID[key.lowercased()]
+    }
+
+    /// F: whether the Connected Feed identity row is shown. PURE, and it is the
+    /// expression the body actually evaluates — so a test of this is a test of
+    /// the rendering rule, not a restatement of it.
+    ///
+    /// Both terms are load-bearing. `origin` alone would strand an identity row
+    /// on a Solo surface if Connected ended while the screen was open;
+    /// `canViewFeed` alone would put one on every Journal detail.
+    static func showsFeedIdentityHeader(origin: SessionDetailOrigin,
+                                        canViewFeed: Bool) -> Bool {
+        origin == .connectedFeed && canViewFeed
+    }
+
+    /// The local Core Data profile name, which is what the Feed CARD shows for
+    /// the owner. Owner-only by construction: it is this device's profile, so a
+    /// non-owner row must never reach it.
+    private func localProfileNameForOwner() -> String? {
+        guard viewerIsOwner else { return nil }
+        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+        req.fetchLimit = 1
+        guard let p = try? viewContext.fetch(req).first,
+              let raw = p.name else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// N's precedence, SHARED rather than duplicated, so the Feed's two detail
+    /// screens cannot drift apart: published directory name first, then the
+    /// local fallback, then "You" — and "User" for anyone else.
+    private var feedHeaderDisplayName: String {
+        BackendSessionDetailView.resolvedDisplayName(
+            viewerIsOwner: viewerIsOwner,
+            directoryName: directoryAccountForFeedHeader()?.displayName,
+            authName: localProfileNameForOwner() ?? auth.displayName)
+    }
+
+    /// Owner: the local Études location first (what the card presents), then the
+    /// published one. Non-owner: the directory only — a stranger's row must never
+    /// show this device's location.
+    private var feedHeaderLocation: String {
+        if viewerIsOwner {
+            let local = ProfileStore.presentedLocation(for: auth.backendUserID)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !local.isEmpty { return local }
+        }
+        return (directoryAccountForFeedHeader()?.location ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @ViewBuilder
+    private func feedIdentityHeader() -> some View {
+        let account = directoryAccountForFeedHeader()
+        let name = feedHeaderDisplayName
+        let avatarKey = (account?.avatarKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        HStack(alignment: .center, spacing: 8) {
+            Group {
+                // Owner: the local file, exactly as the Feed card resolves it.
+                // Non-owner: the shared image cache only — NEVER this device's
+                // local avatar, which belongs to the viewer and not to them.
+                if viewerIsOwner, let img = ProfileStore.avatarImage(for: session.ownerUserID) {
+                    Image(uiImage: img).resizable().scaledToFill()
+                } else if !avatarKey.isEmpty,
+                          let cached = RemoteAvatarImageCache.get("avatars|\(avatarKey)") {
+                    Image(uiImage: cached).resizable().scaledToFill()
+                } else {
+                    ZStack {
+                        Circle().fill(Color.gray.opacity(0.2))
+                        Text(feedHeaderInitials(from: name))
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                }
+            }
+            .frame(width: 32, height: 32)
+            .clipShape(Circle())
+
+            HStack(spacing: 6) {
+                Text(name)
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityIdentifier("detail.displayName")
+
+                let loc = feedHeaderLocation
+                if !loc.isEmpty {
+                    Text("•").foregroundStyle(Theme.Colors.secondaryText)
+                    Text(loc)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .accessibilityIdentifier("detail.location")
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// F: initials for the placeholder. Same shape as the Feed's, kept local so
+    /// this row does not depend on a private helper in another view.
+    private func feedHeaderInitials(from name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "?" }
+        let words = trimmed.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        if words.isEmpty { return "?" }
+        if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+        let first = words.first?.first.map { String($0).uppercased() } ?? ""
+        let last = words.last?.first.map { String($0).uppercased() } ?? ""
+        let combo = first + last
+        return combo.isEmpty ? "U" : combo
     }
 
     private var canOpenComments: Bool {
@@ -760,13 +931,25 @@ return AttachmentViewerView(
     @ViewBuilder
     private func mainContentBody() -> some View {
         VStack(alignment: .leading, spacing: session.isThought ? Theme.Spacing.m : Theme.Spacing.l) {
-            // C-71: the identity row is gone. The Journal is the member's OWN
-            // local sessions in both Solo and Connected, so showing them their
-            // own avatar, name and location back was redundant. Attribution
-            // lives on the Feed, which is a different surface entirely —
-            // `BackendSessionDetailView` keeps its identity row for EVERY post
-            // including the member's own, because the distinction is context,
-            // not ownership.
+            // C-71: the identity row is gone FROM THE JOURNAL. The Journal is the
+            // member's OWN local sessions in both Solo and Connected, so showing
+            // them their own avatar, name and location back was redundant.
+            // Attribution lives on the Feed, which is a different surface
+            // entirely — `BackendSessionDetailView` keeps its identity row for
+            // EVERY post including the member's own, because the distinction is
+            // context, not ownership.
+            //
+            // F: that is exactly why this row is keyed on `origin` and NOT on
+            // ownership. A local row and a remote row opened from the same Feed
+            // must not look like two different products. `canViewFeed` is read
+            // live, so if Connected ends while this screen is open the row goes
+            // with it rather than stranding an identity on a Solo surface.
+            if Self.showsFeedIdentityHeader(origin: origin,
+                                            canViewFeed: appModeManager.canViewFeed) {
+                feedIdentityHeader()
+                    .padding(.bottom, session.isThought ? 8 : 4)
+            }
+
             if session.isThought {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(thoughtDateTimeLine)
