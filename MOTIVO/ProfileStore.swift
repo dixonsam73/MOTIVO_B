@@ -190,6 +190,19 @@ struct ProfileStore {
         UserDefaults.standard.set(trimmed, forKey: locationKey(for: uid))
     }
 
+    /// C-27 — at sign-out the local Études profile keeps the location the signed-in
+    /// profile PRESENTED, which is what `ProfileView` preserves when it is mounted.
+    ///
+    /// Reads through `presentedLocation`, so an identity whose scoped key was never
+    /// written leaves the local value alone, and an explicit "" (a deliberate clear)
+    /// carries like any other value. Deletes nothing: the scoped key survives, so
+    /// signing back in still restores it.
+    static func carryPresentedLocationToLocal(from backendUserID: String?) {
+        let uid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !uid.isEmpty else { return }
+        setLocation(presentedLocation(for: uid), for: nil)
+    }
+
     // MARK: - Paths
     private static func baseProfilesDir() -> URL? {
         let fm = FileManager.default

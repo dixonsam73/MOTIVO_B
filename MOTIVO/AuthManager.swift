@@ -1284,6 +1284,11 @@ final class AuthManager: NSObject, ObservableObject {
         #if DEBUG
         NSLog("[Auth] clearConnectedIdentity reason=%@", reason)
         #endif
+        // C-27: leaving Connected is not leaving Études, so the local profile keeps the
+        // location this identity presented. View-independent; `ProfileView` does the same
+        // when mounted, and still runs afterwards. Never during a factory reset.
+        if !LocalFactoryReset.isInProgress { ProfileStore.carryPresentedLocationToLocal(from: backendUserID) }
+
         directoryHydrationTask?.cancel()
         directoryHydrationTask = nil
         directoryHydrationInFlightUserID = nil
@@ -1333,6 +1338,11 @@ final class AuthManager: NSObject, ObservableObject {
     // Local sign-out
     func signOut() {
         // Cancel any in-flight hydration so it can't write into stores after sign-out/reset.
+        // C-27: leaving Connected is not leaving Études, so the local profile keeps the
+        // location this identity presented. View-independent; `ProfileView` does the same
+        // when mounted, and still runs afterwards. Never during a factory reset.
+        if !LocalFactoryReset.isInProgress { ProfileStore.carryPresentedLocationToLocal(from: backendUserID) }
+
         directoryHydrationTask?.cancel()
         directoryHydrationTask = nil
         directoryHydrationInFlightUserID = nil
