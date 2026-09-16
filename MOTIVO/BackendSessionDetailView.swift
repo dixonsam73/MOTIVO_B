@@ -535,27 +535,38 @@ struct BackendSessionDetailView: View {
 
         return ""
     }
+    /// N: the name the Connected Feed detail shows, as a PURE function so the
+    /// precedence is testable — the property below is private on a SwiftUI view
+    /// and has no other seam.
+    ///
+    /// **The owner's published Études identity wins.** `directoryName` is
+    /// `account_directory.display_name`: the name the member chose and the name
+    /// every other member already sees on this same screen. `authName` is
+    /// `auth.displayName`, which Apple supplies only at the FIRST authorization
+    /// and which `ProfileView` cannot reach — so it may predate the published
+    /// name indefinitely and must not outrank it. It is kept as a fallback, not
+    /// removed, so an owner whose directory row has not resolved yet still sees
+    /// a name instead of "You".
+    ///
+    /// The non-owner path is unchanged: directory, else "User".
+    static func resolvedDisplayName(viewerIsOwner: Bool,
+                                    directoryName: String?,
+                                    authName: String?) -> String {
+        let directory = (directoryName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !directory.isEmpty { return directory }
+
+        guard viewerIsOwner else { return "User" }
+
+        let auth = (authName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !auth.isEmpty { return auth }
+
+        return "You"
+    }
+
     private var displayName: String {
-        if viewerIsOwner {
-            let authName = (auth.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !authName.isEmpty {
-                return authName
-            }
-            if let account = directoryAccount {
-                let accountName = account.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !accountName.isEmpty {
-                    return accountName
-                }
-            }
-            return "You"
-        }
-        if let account = directoryAccount {
-            let name = account.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !name.isEmpty {
-                return name
-            }
-        }
-        return "User"
+        Self.resolvedDisplayName(viewerIsOwner: viewerIsOwner,
+                                 directoryName: directoryAccount?.displayName,
+                                 authName: auth.displayName)
     }
 
     // MARK: - Attachments (parity layout with SessionDetailView)
