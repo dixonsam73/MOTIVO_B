@@ -66,6 +66,12 @@
     "table_name": "connected_attachments"
   },
   {
+    "conname": "connected_attachments_list_metadata",
+    "contype": "c",
+    "definition": "CHECK (((mime_type <> 'application/vnd.etudes.list+json'::text) OR (((byte_count >= 1) AND (byte_count <= 131072)) AND (page_count = 0) AND (storage_path ~~ '%.etudeslist'::text))))",
+    "table_name": "connected_attachments"
+  },
+  {
     "conname": "connected_attachments_nonnegative_page_count",
     "contype": "c",
     "definition": "CHECK ((page_count >= 0))",
@@ -98,7 +104,7 @@
   {
     "conname": "connected_attachments_supported_mime_types",
     "contype": "c",
-    "definition": "CHECK ((mime_type = ANY (ARRAY['application/pdf'::text, 'image/jpeg'::text, 'image/png'::text, 'image/heic'::text, 'image/heif'::text, 'audio/mpeg'::text, 'audio/mp4'::text, 'audio/x-m4a'::text, 'audio/wav'::text, 'audio/aac'::text, 'video/mp4'::text, 'video/quicktime'::text])))",
+    "definition": "CHECK ((mime_type = ANY (ARRAY['application/pdf'::text, 'image/jpeg'::text, 'image/png'::text, 'image/heic'::text, 'image/heif'::text, 'audio/mpeg'::text, 'audio/mp4'::text, 'audio/x-m4a'::text, 'audio/wav'::text, 'audio/aac'::text, 'video/mp4'::text, 'video/quicktime'::text, 'application/vnd.etudes.list+json'::text])))",
     "table_name": "connected_attachments"
   },
   {

@@ -13,7 +13,8 @@
       "audio/x-m4a",
       "audio/mpeg",
       "audio/wav",
-      "audio/aac"
+      "audio/aac",
+      "application/vnd.etudes.list+json"
     ],
     "file_size_limit": 157286400,
     "id": "attachments",

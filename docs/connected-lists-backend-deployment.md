@@ -17,3 +17,13 @@ No app changes, unrelated legal/invitation records or `AGENTS.md` are included i
 ## Status at this pre-apply commit
 
 Reviewed and ready; not yet applied. A following deployment record must distinguish applied/structurally verified from device end-to-end acceptance. Samuel's next check is a real Person send, receive and Save to Lists, then the remaining feature QA.
+
+## Applied and structurally verified
+
+The reviewed source was committed as `1f36ef1` and the apply was submitted once. The response contained exactly `[{"verification":"Lists MIME enabled"}]`. The immediate full production recapture succeeded. Codex compared all ten surfaces with the fresh pre-apply capture: only `constraints.json` (one MIME extension, one metadata check addition) and `storage_buckets.json` (attachments allowlist 13 → 14) changed, exactly as predicted. All eight other surfaces are unchanged.
+
+Applied UTC: 2026-09-17T08:24:17.642957+00:00
+
+No rollback was executed, no device was operated, and nothing was pushed. Real-device send/receive/adopt acceptance remains pending. The client UI fix and other app changes remain uncommitted; only the separately approved backend work is being committed.
+
+Both deployed constraints were independently re-read and confirmed `convalidated = true`. Claude accepted the closing structural verification; see `connected-lists-backend-closeout.md`. This commit records the refreshed production snapshot and acceptance. Device end-to-end QA remains pending.
