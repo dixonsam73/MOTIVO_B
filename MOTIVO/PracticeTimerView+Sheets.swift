@@ -507,7 +507,7 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
     @ViewBuilder
     var taskImportScanSheet: some View {
         TaskImportScanSheet(
-            title: "Scan tasks",
+            title: "Scan list",
             onCancel: {
                 showTaskImportScanSheet = false
             },
@@ -700,42 +700,9 @@ private struct PTVActivityCardPickerSheet: View {
     }
 }
 
-private struct SavedTaskSetPickerLine: Codable, Identifiable, Equatable {
-    let id: UUID
-    var text: String
-    var type: TaskLineType
-
-    init(id: UUID = UUID(), text: String, type: TaskLineType = .task) {
-        self.id = id
-        self.text = text
-        self.type = type
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case text
-        case type
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        text = try container.decode(String.self, forKey: .text)
-        type = try container.decodeIfPresent(TaskLineType.self, forKey: .type) ?? .task
-    }
-}
-
-private struct SavedTaskSetPickerRecord: Codable, Identifiable, Equatable {
-    let id: UUID
-    var name: String
-    var items: [SavedTaskSetPickerLine]
-}
-
-private struct LegacySavedTaskSetPickerRecord: Codable {
-    let id: UUID
-    var name: String
-    var items: [String]
-}
+private typealias SavedTaskSetPickerLine = SavedListLine
+private typealias SavedTaskSetPickerRecord = SavedList
+private typealias LegacySavedTaskSetPickerRecord = LegacySavedList
 
 private enum TaskImportSourceOption: String, Identifiable, CaseIterable {
     case loadSavedSet
@@ -756,9 +723,9 @@ private struct TaskImportSourceSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Import tasks")
+                    Text("Import list")
                         .sectionHeader()
-                    Text("Bring tasks into this session from paper, text, or a saved task list.")
+                    Text("Bring a list into this session from paper, text, or a saved list.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -766,7 +733,7 @@ private struct TaskImportSourceSheet: View {
 
                     VStack(spacing: 12) {
                         importOptionButton(
-                            title: "Scan task list",
+                            title: "Scan list",
                             subtitle: "Scan a handwritten or printed list",
                             systemImage: "camera"
                         ) {
@@ -775,15 +742,15 @@ private struct TaskImportSourceSheet: View {
 
                         importOptionButton(
                             title: "Paste or type",
-                            subtitle: "Enter tasks manually",
+                            subtitle: "Enter items manually",
                             systemImage: "keyboard"
                         ) {
                             activeOption = .pasteOrType
                         }
 
                         importOptionButton(
-                            title: "Load saved set",
-                            subtitle: "Reuse an existing task list",
+                            title: "Load saved list",
+                            subtitle: "Reuse an existing list",
                             systemImage: "list.bullet",
                             isEnabled: savedTaskSets.isEmpty == false
                         ) {
@@ -820,7 +787,7 @@ private struct TaskImportSourceSheet: View {
                     )
                 case .pasteOrType:
                     TaskImportEditorSheet(
-                        title: "Import tasks",
+                        title: "Import list",
                         initialRawText: "",
                         onCancel: {
                             activeOption = nil
@@ -832,7 +799,7 @@ private struct TaskImportSourceSheet: View {
                     )
                 case .scan:
                     TaskImportScanSheet(
-                        title: "Scan tasks",
+                        title: "Scan list",
                         onCancel: {
                             activeOption = nil
                         },
@@ -908,8 +875,7 @@ private struct TaskImportSourceSheet: View {
         let globalTaskSetsKey = "practiceTasks_saved_sets_v2::" + ownerScope
 
         var merged: [SavedTaskSetPickerRecord] = []
-        var seenIDs = Set<UUID>()
-        var seenContentSignatures = Set<String>()
+        var mergeIdentity = SavedListMergeIdentity()
 
         func normalizedLines(from lines: [SavedTaskSetPickerLine]) -> [SavedTaskSetPickerLine] {
             lines
@@ -925,21 +891,16 @@ private struct TaskImportSourceSheet: View {
 
         func merge(_ sets: [SavedTaskSetPickerRecord]) {
             for set in sets {
-                let trimmedName = set.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                let normalizedItems = normalizedLines(from: set.items)
+                let trimmedName = set.sourceSendID == nil ? set.name.trimmingCharacters(in: .whitespacesAndNewlines) : set.name
+                let normalizedItems = set.sourceSendID == nil ? normalizedLines(from: set.items) : set.items
                 guard !normalizedItems.isEmpty else { continue }
 
-                let fallbackName = normalizedItems.first?.text ?? "Saved task set"
+                let fallbackName = normalizedItems.first?.text ?? "Saved list"
                 let finalName = trimmedName.isEmpty ? fallbackName : trimmedName
                 let contentSignature = finalName.lowercased() + "||" + normalizedItems.map { $0.type.rawValue + ":" + $0.text.lowercased() }.joined(separator: "\u{241E}")
 
-                if seenIDs.contains(set.id) || seenContentSignatures.contains(contentSignature) {
-                    continue
-                }
-
-                seenIDs.insert(set.id)
-                seenContentSignatures.insert(contentSignature)
-                merged.append(SavedTaskSetPickerRecord(id: set.id, name: finalName, items: normalizedItems))
+                guard mergeIdentity.include(set, contentSignature: contentSignature) else { continue }
+                merged.append(SavedTaskSetPickerRecord(id: set.id, name: finalName, items: normalizedItems, sourceSendID: set.sourceSendID))
             }
         }
 
@@ -960,7 +921,8 @@ private struct TaskImportSourceSheet: View {
         }
 
         for (key, value) in defaults.dictionaryRepresentation() {
-            guard key.hasSuffix("::saved_sets_v1") else { continue }
+            guard key.hasPrefix("practiceTasks_v1::" + ownerScope + "::"),
+                  key.hasSuffix("::saved_sets_v1") else { continue }
 
             let data: Data?
             if let directData = defaults.data(forKey: key) {
@@ -1006,16 +968,16 @@ private struct TaskImportSavedSetPickerSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Saved task sets")
+                    Text("Saved lists")
                         .sectionHeader()
 
                     if savedTaskSets.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("No saved task sets yet.")
+                            Text("No saved lists yet.")
                                 .font(Theme.Text.body.weight(.semibold))
                                 .foregroundStyle(.primary)
 
-                            Text("Save a task set in Tasks Manager to load it here.")
+                            Text("Save a list in Lists to load it here.")
                                 .font(Theme.Text.meta)
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
@@ -1034,7 +996,7 @@ private struct TaskImportSavedSetPickerSheet: View {
                                                 .font(Theme.Text.body.weight(.semibold))
                                                 .foregroundStyle(.primary)
 
-                                            Text("\(taskSet.items.count) \(taskSet.items.count == 1 ? "task" : "tasks")")
+                                            Text("\(taskSet.items.count) \(taskSet.items.count == 1 ? "item" : "items")")
                                                 .font(Theme.Text.meta)
                                                 .foregroundStyle(Theme.Colors.secondaryText)
                                         }
@@ -1063,7 +1025,7 @@ private struct TaskImportSavedSetPickerSheet: View {
                 .padding(.bottom, 24)
             }
             .appBackground()
-            .navigationTitle("Load saved set")
+            .navigationTitle("Load saved list")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -1133,7 +1095,7 @@ private struct TaskImportEditorSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .center, spacing: 12) {
-                        Text("Add tasks")
+                        Text("Add items")
                             .sectionHeader()
 
                         Spacer()
@@ -1229,7 +1191,7 @@ private struct TaskImportEditorSheet: View {
     @ViewBuilder
     private func importedTaskRow(_ line: Binding<EditableImportedTaskLine>) -> some View {
         HStack(spacing: 6) {
-            TextField("Task", text: line.text)
+            TextField("Item", text: line.text)
                 .textFieldStyle(.plain)
                 .font(Theme.Text.body)
                 .disableAutocorrection(true)
@@ -1247,7 +1209,7 @@ private struct TaskImportEditorSheet: View {
                         draggedLineID = line.wrappedValue.id
                         return NSItemProvider(object: NSString(string: line.wrappedValue.id.uuidString))
                     }
-                    .accessibilityLabel("Reorder task")
+                    .accessibilityLabel("Reorder item")
 
                 Button(role: .destructive) {
                     draftLines.removeAll { $0.id == line.wrappedValue.id }

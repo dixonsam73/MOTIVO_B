@@ -50,6 +50,8 @@ struct TasksManagerView: View {
     let activityRef: String
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appModeManager: AppModeManager
+    @State private var listShareRequest: ConnectedListShareRequest?
     @Environment(\.managedObjectContext) private var viewContext
 
     @State private var selectedActivityRef: String = "core:0"
@@ -96,47 +98,9 @@ struct TasksManagerView: View {
     @State private var showManagerInstrumentPickerSheet: Bool = false
     @State private var showManagerActivityPickerSheet: Bool = false
 
-    fileprivate enum TaskLineType: String, Codable {
-        case task
-        case context
-    }
-
-    fileprivate struct TaskTemplateLine: Codable, Identifiable, Equatable {
-        let id: UUID
-        var text: String
-        var type: TaskLineType
-
-        init(id: UUID = UUID(), text: String, type: TaskLineType = .task) {
-            self.id = id
-            self.text = text
-            self.type = type
-        }
-
-        private enum CodingKeys: String, CodingKey {
-            case id
-            case text
-            case type
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-            text = try container.decode(String.self, forKey: .text)
-            type = try container.decodeIfPresent(TaskLineType.self, forKey: .type) ?? .task
-        }
-    }
-
-    fileprivate struct SavedTaskSet: Codable, Identifiable, Equatable {
-        let id: UUID
-        var name: String
-        var items: [TaskTemplateLine]
-    }
-
-    fileprivate struct LegacySavedTaskSet: Codable {
-        let id: UUID
-        var name: String
-        var items: [String]
-    }
+    fileprivate typealias TaskTemplateLine = SavedListLine
+    fileprivate typealias SavedTaskSet = SavedList
+    fileprivate typealias LegacySavedTaskSet = LegacySavedList
 
     fileprivate struct EditableImportedTaskLine: Identifiable, Equatable {
         let id: UUID = UUID()
@@ -345,7 +309,7 @@ struct TasksManagerView: View {
     @ViewBuilder
     private func managerTaskTextArea(for line: TaskTemplateLine) -> some View {
         TextField(
-            line.type == .context ? "Context" : "Task",
+            line.type == .context ? "Context" : "Item",
             text: managerLineTextBinding(for: line.id)
         )
         .textFieldStyle(.plain)
@@ -540,7 +504,7 @@ struct TasksManagerView: View {
     private func editorTaskRow(setID: UUID, line: TaskTemplateLine) -> some View {
         HStack(spacing: 6) {
             TaskLineTextField(
-                title: line.type == .context ? "Heading or note" : "Task",
+                title: line.type == .context ? "Heading or note" : "Item",
                 text: editorLineTextBinding(setID: setID, lineID: line.id),
                 id: line.id,
                 focusedLineID: $focusedEditorLineID,
@@ -554,8 +518,8 @@ struct TasksManagerView: View {
             .padding(.leading, line.type == .context ? managerContextTextLeadingInset : 0)
             .padding(.vertical, 12)
             .contentShape(Rectangle())
-            .accessibilityLabel(line.type == .context ? "Heading or note" : "Task")
-            .accessibilityAction(named: Text(line.type == .context ? "Make task" : "Make heading or note")) {
+            .accessibilityLabel(line.type == .context ? "Heading or note" : "Item")
+            .accessibilityAction(named: Text(line.type == .context ? "Make item" : "Make heading or note")) {
                 focusedEditorLineID = nil
                 toggleEditorLineType(setID: setID, lineID: line.id)
             }
@@ -571,7 +535,7 @@ struct TasksManagerView: View {
                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
                     .frame(width: managerDeleteIconWidth, height: 28)
                     .contentShape(Rectangle())
-                    .accessibilityLabel("Reorder task")
+                    .accessibilityLabel("Reorder item")
 
                 TaskLineActionsButton(
                     isPresented: Binding(
@@ -602,14 +566,14 @@ struct TasksManagerView: View {
         if let set = editingTaskSet {
             VStack(spacing: 0) {
                 Form {
-                    Section(header: Text("Task Set").sectionHeader()) {
-                        TextField("Task set name", text: taskSetNameBinding(for: set.id))
+                    Section(header: Text("List").sectionHeader()) {
+                        TextField("List name", text: taskSetNameBinding(for: set.id))
                             .font(Theme.Text.body)
                             .textInputAutocapitalization(.words)
                             .submitLabel(.done)
                     }
 
-                    Section(header: Text("Tasks").sectionHeader()) {
+                    Section(header: Text("Items").sectionHeader()) {
                         ForEach(set.items) { line in
                             editorTaskRow(setID: set.id, line: line)
                         }
@@ -633,7 +597,7 @@ struct TasksManagerView: View {
                     showTaskSetEditor = false
                     editingTaskSetID = nil
                 } label: {
-                    Label("Delete Task Set", systemImage: "trash")
+                    Label("Delete List", systemImage: "trash")
                         .font(Theme.Text.body)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
@@ -653,6 +617,25 @@ struct TasksManagerView: View {
                 .padding(.bottom, 12)
             }
             .navigationTitle("")
+            .toolbar {
+                if appModeManager.canShareAttachmentsWithConnected {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            focusedEditorLineID = nil
+                            listShareRequest = ConnectedListShareRequest(payload: ConnectedListPayload(list: set))
+                        } label: {
+                            Label("Send", systemImage: "paperplane")
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                        .disabled(set.items.isEmpty)
+                        .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+            }
+            .sheet(item: $listShareRequest) { request in
+                ListAttachmentShareFlow(request: request,
+                    connectedEnabled: appModeManager.canShareAttachmentsWithConnected)
+            }
             .scrollDismissesKeyboard(.interactively)
             .appBackground()
         } else {
@@ -797,15 +780,15 @@ struct TasksManagerView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(header: Text("Default Task Set When:").sectionHeader()) {
+                Section(header: Text("Default List When:").sectionHeader()) {
                     selectorSectionContent
                 }
 
                 if hasSavedTaskSets {
                     Section(header:
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Task Sets").sectionHeader()
-                                Text("Tap a task set to make it the default.")
+                                Text("Lists").sectionHeader()
+                                Text("Tap a list to make it the default.")
                                     .font(Theme.Text.meta)
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
@@ -880,7 +863,7 @@ struct TasksManagerView: View {
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save task set") {
+                    Button("Save list") {
                         saveImportedTaskSetFromDraft()
                     }
                     .foregroundStyle(Theme.Colors.accent)
@@ -893,7 +876,7 @@ struct TasksManagerView: View {
 
     private var importPasteHeader: some View {
         HStack(alignment: .center, spacing: 12) {
-            Text("Add tasks")
+            Text("Add items")
                 .sectionHeader()
 
             Spacer()
@@ -954,9 +937,9 @@ struct TasksManagerView: View {
 
     private var importTaskSetNameSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Task set name")
+            Text("List name")
                 .sectionHeader()
-            TextField("Task set name", text: $importDraftTaskSetName)
+            TextField("List name", text: $importDraftTaskSetName)
                 .font(Theme.Text.body)
                 .textInputAutocapitalization(.words)
                 .padding(.horizontal, 14)
@@ -1129,22 +1112,16 @@ struct TasksManagerView: View {
     private func loadSavedTaskSets() -> [SavedTaskSet] {
         let defaults = UserDefaults.standard
         var merged: [SavedTaskSet] = []
-        var seenIDs = Set<UUID>()
-        var seenContentSignatures = Set<String>()
+        var mergeIdentity = SavedListMergeIdentity()
 
         func merge(_ sets: [SavedTaskSet]) {
             for set in sets {
-                let trimmedName = set.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                let normalizedItems = normalizedTaskTemplateLines(from: set.items)
+                let trimmedName = set.sourceSendID == nil ? set.name.trimmingCharacters(in: .whitespacesAndNewlines) : set.name
+                let normalizedItems = set.sourceSendID == nil ? normalizedTaskTemplateLines(from: set.items) : set.items
                 let contentSignature = trimmedName.lowercased() + "||" + normalizedItems.map { $0.type.rawValue + ":" + $0.text.lowercased() }.joined(separator: "\u{241E}")
 
-                if seenIDs.contains(set.id) || seenContentSignatures.contains(contentSignature) {
-                    continue
-                }
-
-                seenIDs.insert(set.id)
-                seenContentSignatures.insert(contentSignature)
-                merged.append(SavedTaskSet(id: set.id, name: trimmedName.isEmpty ? defaultImportedTaskSetName(from: textItems(from: normalizedItems)) : trimmedName, items: normalizedItems))
+                guard mergeIdentity.include(set, contentSignature: contentSignature) else { continue }
+                merged.append(SavedTaskSet(id: set.id, name: trimmedName.isEmpty ? defaultImportedTaskSetName(from: textItems(from: normalizedItems)) : trimmedName, items: normalizedItems, sourceSendID: set.sourceSendID))
             }
         }
 
@@ -1294,7 +1271,7 @@ struct TasksManagerView: View {
     @ViewBuilder
     private func importedTaskDraftRow(_ line: Binding<EditableImportedTaskLine>) -> some View {
         HStack(spacing: 6) {
-            TextField("Task", text: line.text)
+            TextField("Item", text: line.text)
                 .textFieldStyle(.plain)
                 .font(Theme.Text.body)
                 .disableAutocorrection(true)
@@ -1315,7 +1292,7 @@ struct TasksManagerView: View {
                         draggedImportLineID = line.wrappedValue.id
                         return NSItemProvider(object: NSString(string: line.wrappedValue.id.uuidString))
                     }
-                    .accessibilityLabel("Reorder task")
+                    .accessibilityLabel("Reorder item")
 
                 Button(role: .destructive) {
                     importDraftLines.removeAll { $0.id == line.wrappedValue.id }
@@ -1465,10 +1442,10 @@ private struct TasksManagerImportLauncherSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Import tasks")
+                    Text("Import list")
                         .sectionHeader()
 
-                    Text("Bring tasks into this list from paper or text.")
+                    Text("Bring items into this list from paper or text.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1476,7 +1453,7 @@ private struct TasksManagerImportLauncherSheet: View {
 
                     VStack(spacing: 12) {
                         importOptionButton(
-                            title: "Scan task list",
+                            title: "Scan list",
                             subtitle: "Import from paper or notes",
                             systemImage: "camera",
                             action: onScan
@@ -1484,7 +1461,7 @@ private struct TasksManagerImportLauncherSheet: View {
 
                         importOptionButton(
                             title: "Paste or type",
-                            subtitle: "Enter tasks manually",
+                            subtitle: "Enter items manually",
                             systemImage: "keyboard",
                             action: onPasteOrType
                         )

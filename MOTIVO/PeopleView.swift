@@ -84,6 +84,7 @@ struct PeopleView: View {
     @StateObject private var receivedAttachmentStore = ReceivedConnectedAttachmentStore.shared
     @State private var shareOwnerDirectory: [String: DirectoryAccount] = [:]
     @State private var attachmentSenderDirectory: [String: DirectoryAccount] = [:]
+    @State private var attachmentDeleteError: String?
     @State private var responseAuthorDirectory: [String: DirectoryAccount] = [:]
 
     @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
@@ -144,6 +145,14 @@ struct PeopleView: View {
                         .font(.system(size: 16, weight: .semibold))
                 }
             }
+        }
+        .alert("Couldn’t Delete Item", isPresented: Binding(
+            get: { attachmentDeleteError != nil },
+            set: { if !$0 { attachmentDeleteError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(attachmentDeleteError ?? "Please try again.")
         }
         .task {
             // In Backend Preview, this keeps requests/following fresh when opening People.
@@ -257,7 +266,7 @@ struct PeopleView: View {
                 let senderID = attachment.senderUserID.lowercased()
                 let acct = attachmentSenderDirectory[senderID]
 
-                SwipeRevealRow {
+                SwipeRevealRow(deleteAccessibilityLabel: attachment.isList ? "Delete received list" : "Delete attachment") {
                     PeopleUserRow(
                         userID: senderID,
                         overrideDisplayName: acct?.displayName ?? "Connected musician",
@@ -279,7 +288,9 @@ struct PeopleView: View {
                         }
                     }
                 } onDelete: {
-                    await receivedAttachmentStore.delete(attachment)
+                    if !(await receivedAttachmentStore.delete(attachment)) {
+                        attachmentDeleteError = receivedAttachmentStore.errorMessage
+                    }
                 }
             }
 
@@ -319,6 +330,7 @@ struct PeopleView: View {
     private func attachmentTypeGlyph(for attachment: ConnectedAttachment) -> String {
         let mimeType = attachment.mimeType.lowercased()
 
+        if attachment.isList { return "checklist" }
         if mimeType == "application/pdf" { return "doc.richtext" }
         if mimeType.hasPrefix("image/") { return "photo" }
         if mimeType.hasPrefix("audio/") { return "waveform" }
@@ -646,17 +658,20 @@ private struct SwipeRevealRow<Content: View>: View {
     private let revealWidth: CGFloat = 80
     private let content: Content
     private let onDelete: () async -> Void
+    private let deleteAccessibilityLabel: String
 
     @State private var settledOffset: CGFloat = 0
     @GestureState private var dragOffset: CGFloat = 0
     @State private var isDeleting: Bool = false
 
     init(
+        deleteAccessibilityLabel: String = "Delete attachment",
         @ViewBuilder content: () -> Content,
         onDelete: @escaping () async -> Void
     ) {
         self.content = content()
         self.onDelete = onDelete
+        self.deleteAccessibilityLabel = deleteAccessibilityLabel
     }
 
     private var effectiveOffset: CGFloat {
@@ -696,7 +711,7 @@ private struct SwipeRevealRow<Content: View>: View {
                 .buttonStyle(.plain)
                 .disabled(isDeleting)
                 .offset(x: revealWidth + effectiveOffset)
-                .accessibilityLabel("Delete attachment")
+                .accessibilityLabel(deleteAccessibilityLabel)
             }
             .contentShape(Rectangle())
             .clipped()

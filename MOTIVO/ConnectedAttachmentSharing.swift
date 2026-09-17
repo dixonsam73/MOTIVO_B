@@ -154,6 +154,7 @@ public enum ConnectedAttachmentError: LocalizedError {
     case invalidAttachment
     case fileTooLarge
     case downloadUnavailable
+    case updateUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -162,6 +163,7 @@ public enum ConnectedAttachmentError: LocalizedError {
         case .invalidAttachment: return "The attachment could not be prepared."
         case .fileTooLarge: return "This attachment is too large to share."
         case .downloadUnavailable: return "The attachment could not be downloaded."
+        case .updateUnavailable: return "This received item could not be updated. Refresh and try again."
         }
     }
 }
@@ -312,13 +314,14 @@ public final class HTTPBackendConnectedAttachmentService: BackendConnectedAttach
     }
 
     public func softDelete(id: UUID) async -> Result<Void, Error> {
-        await patch(id: id, values: ["deleted_at": ISO8601DateFormatter().string(from: Date())])
+        await patch(id: id, values: ["deleted_at": ISO8601DateFormatter().string(from: Date())], confirmUpdatedRow: true)
     }
 
     private func patch(
         id: UUID,
         values: [String: Any],
-        additionalQueryItems: [URLQueryItem] = []
+        additionalQueryItems: [URLQueryItem] = [],
+        confirmUpdatedRow: Bool = false
     ) async -> Result<Void, Error> {
         do {
             let data = try JSONSerialization.data(withJSONObject: values)
@@ -329,14 +332,29 @@ public final class HTTPBackendConnectedAttachmentService: BackendConnectedAttach
                     URLQueryItem(name: "id", value: "eq.\(id.uuidString.lowercased())")
                 ] + additionalQueryItems,
                 jsonBody: data,
-                headers: ["Prefer": "return=minimal"]
+                headers: ["Prefer": confirmUpdatedRow ? "return=representation" : "return=minimal"]
             )
+            if confirmUpdatedRow {
+                // An RLS-filtered PATCH can succeed with zero rows. Do not dismiss
+                // the inbox item unless the server confirms this recipient's update.
+                let response = try result.get()
+                guard Self.confirmsUpdatedDelivery(response, id: id) else {
+                    return .failure(ConnectedAttachmentError.updateUnavailable)
+                }
+            }
             return result.map { _ in () }
         } catch { return .failure(error) }
     }
 
     public func download(_ attachment: ConnectedAttachment) async -> Result<Data, Error> {
         await NetworkManager.shared.downloadAuthenticatedStorageObject(bucket: attachment.storageBucket, path: attachment.storagePath)
+    }
+
+    static func confirmsUpdatedDelivery(_ data: Data, id: UUID) -> Bool {
+        struct UpdatedRow: Decodable { let id: UUID }
+        guard let rows = try? JSONDecoder().decode([UpdatedRow].self, from: data),
+              rows.count == 1 else { return false }
+        return rows.first?.id == id
     }
 
     static func safePathExtension(for payload: ConnectedAttachmentUploadPayload) -> String {
@@ -408,11 +426,15 @@ public final class ReceivedConnectedAttachmentStore: ObservableObject {
     }
 
     public func localURL(for item: ConnectedAttachment) async throws -> URL {
+        if item.isList, !(1...Int64(ConnectedListPayload.maxBytes)).contains(item.byteCount) {
+            throw ConnectedListError.tooLarge
+        }
         let destination = try localDestination(for: item)
         if fileManager.fileExists(atPath: destination.path) { return destination }
 
         switch await BackendEnvironment.shared.connectedAttachments.download(item) {
         case .success(let data):
+            if item.isList { _ = try ConnectedListPayload.decode(data) }
             try data.write(to: destination, options: .atomic)
             // A received attachment is a local cache of a backend-authoritative object,
             // not recipient-owned permanent data — durability comes from adopting it
@@ -437,11 +459,16 @@ public final class ReceivedConnectedAttachmentStore: ObservableObject {
         }
     }
 
-    public func delete(_ item: ConnectedAttachment) async {
+    @discardableResult
+    public func delete(_ item: ConnectedAttachment) async -> Bool {
         if case .success = await BackendEnvironment.shared.connectedAttachments.softDelete(id: item.id) {
             if let url = try? await localURLIfPresent(for: item) { try? fileManager.removeItem(at: url) }
             items.removeAll { $0.id == item.id }
+            errorMessage = nil
+            return true
         }
+        errorMessage = "Couldn’t delete this received item. Please try again."
+        return false
     }
 
     /// C-28 — Local Factory Reset coverage for the Connected inbox.

@@ -68,13 +68,13 @@ struct AboutEtudesView: View {
 
     private var tasksSection: some View {
         aboutSection("Shape your practice") {
-            Text("Create reusable task lists for the things you want to work on. Bring them into a session, tick off tasks as you go, and return to them next time. You can also import a list by pasting text or scanning handwritten notes.")
+            Text("Create reusable lists for practice, weekly assignments or setlists. Bring them into a session, tick off items as you go, and return to them next time. You can also import a list by pasting text or scanning handwritten notes.")
                 .aboutBody()
 
             AboutScreenshot(
                 "AboutTasks",
                 crop: CGRect(x: 32, y: 1310, width: 878, height: 552),
-                description: "Example task list, with warm-up and scale patterns completed and work on Bach’s Cello Suite II still to do."
+                description: "Example list, with warm-up and scale patterns completed and work on Bach’s Cello Suite II still to do."
             )
 
             Text("The built-in tuner, metronome and drone are there when you need them.")
@@ -126,7 +126,7 @@ struct AboutEtudesView: View {
 
     private var connectedSection: some View {
         aboutSection("Explore Connected") {
-            Text("Your Journal, Tasks and score library work offline without a Connected account.")
+            Text("Your Journal, Lists and score library work offline without a Connected account.")
                 .aboutBody()
 
             Text("Études Connected adds sharing with other musicians. In Connected, sessions share with your followers by default; you can change this in Profile.")

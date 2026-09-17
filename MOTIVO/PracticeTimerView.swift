@@ -203,11 +203,6 @@ private enum PracticeTimerAmbientThreadUI {
 }
 
 
-enum TaskLineType: String, Codable {
-    case task
-    case context
-}
-
 struct TaskLine: Identifiable, Codable {
     var id: UUID = UUID()
     var text: String
@@ -606,42 +601,9 @@ private struct SerializedTaskTemplateLine: Codable {
 }
 
 
-private struct SavedTaskSetPadLine: Codable, Identifiable, Equatable {
-    let id: UUID
-    var text: String
-    var type: TaskLineType
-
-    init(id: UUID = UUID(), text: String, type: TaskLineType = .task) {
-        self.id = id
-        self.text = text
-        self.type = type
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case text
-        case type
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        text = try container.decode(String.self, forKey: .text)
-        type = try container.decodeIfPresent(TaskLineType.self, forKey: .type) ?? .task
-    }
-}
-
-private struct SavedTaskSetPadRecord: Codable, Identifiable, Equatable {
-    let id: UUID
-    var name: String
-    var items: [SavedTaskSetPadLine]
-}
-
-private struct LegacySavedTaskSetPadRecord: Codable {
-    let id: UUID
-    var name: String
-    var items: [String]
-}
+private typealias SavedTaskSetPadLine = SavedListLine
+private typealias SavedTaskSetPadRecord = SavedList
+private typealias LegacySavedTaskSetPadRecord = LegacySavedList
 
 private func loadPracticeDefaultsIfNeeded() {
     let ownerScope: String = PersistenceController.shared.currentUserID ?? "device"
@@ -944,11 +906,13 @@ private func loadPracticeDefaultsIfNeeded() {
 
         func merge(_ sets: [SavedTaskSetPadRecord]) {
             for set in sets {
-                let trimmedName = set.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                let normalizedItems = normalize(set.items)
+                let trimmedName = set.sourceSendID == nil ? set.name.trimmingCharacters(in: .whitespacesAndNewlines) : set.name
+                let normalizedItems = set.sourceSendID == nil ? normalize(set.items) : set.items
                 guard !normalizedItems.isEmpty else { continue }
 
                 if let existingIndex = merged.firstIndex(where: { $0.id == set.id }) {
+                    // v2 is authoritative for adopted copies; a context must never overwrite them.
+                    guard merged[existingIndex].sourceSendID == nil else { continue }
                     merged[existingIndex].name = trimmedName.isEmpty ? merged[existingIndex].name : trimmedName
                     merged[existingIndex].items = normalizedItems
                 } else {
@@ -956,7 +920,8 @@ private func loadPracticeDefaultsIfNeeded() {
                         SavedTaskSetPadRecord(
                             id: set.id,
                             name: trimmedName.isEmpty ? defaultSavedTaskSetName(from: normalizedItems.map(\.text)) : trimmedName,
-                            items: normalizedItems
+                            items: normalizedItems,
+                            sourceSendID: set.sourceSendID
                         )
                     )
                 }
@@ -1002,7 +967,9 @@ private func loadPracticeDefaultsIfNeeded() {
         if let data = try? JSONEncoder().encode(sets) {
             let defaults = UserDefaults.standard
             defaults.set(data, forKey: globalTaskSetsKey)
-            defaults.set(data, forKey: currentContextTaskSetsKey)
+            if let legacyData = try? JSONEncoder().encode(SavedListLibrary.legacyMirror(sets)) {
+                defaults.set(legacyData, forKey: currentContextTaskSetsKey)
+            }
         }
     }
 
@@ -1678,18 +1645,18 @@ private func loadPracticeDefaultsIfNeeded() {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline) // like Profile (centered, less shouty)
         .appBackground()
-        .confirmationDialog("Imported tasks", isPresented: $showTaskImportReplaceAppendDialog, titleVisibility: .visible) {
-            Button("Replace current tasks") {
+        .confirmationDialog("Imported list", isPresented: $showTaskImportReplaceAppendDialog, titleVisibility: .visible) {
+            Button("Replace current list") {
                 applyPendingImportedTasks(appending: false)
             }
-            Button("Append to current tasks") {
+            Button("Append to current list") {
                 applyPendingImportedTasks(appending: true)
             }
             Button("Cancel", role: .cancel) {
                 pendingImportedTaskLines.removeAll()
             }
         } message: {
-            Text("Choose how to apply the imported task list to this session.")
+            Text("Choose how to apply the imported list to this session.")
         }
         .sheet(isPresented: $showTaskImportPasteSheet, onDismiss: {
             guard !stagedImportedTaskLinesAfterPasteDismiss.isEmpty else { return }
@@ -1711,7 +1678,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 draftSavedTaskSetName = ""
             }
         } message: {
-            Text("Save the current list as a reusable task set.")
+            Text("Save the current list as a reusable list.")
         }
         // Single, unified prefetch path to avoid duplicate first-paint work
         .task {
@@ -2988,7 +2955,7 @@ private func loadPracticeDefaultsIfNeeded() {
                             .fill(showTasksPad ? tasksAccent.opacity(0.26) : Color.clear)
                     )
                     .clipShape(Capsule(style: .continuous))
-                    .accessibilityLabel(showTasksPad ? "Hide tasks" : "Show tasks")
+                    .accessibilityLabel(showTasksPad ? "Hide list" : "Show list")
                 }
 
                 if showScoresButton {

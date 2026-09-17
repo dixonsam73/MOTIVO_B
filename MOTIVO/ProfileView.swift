@@ -720,7 +720,7 @@ private var sessionSetupSection: some View {
                  }
 
                  Button { showTasksManager = true } label: {
-                     navigationRow(title: "Tasks")
+                     navigationRow(title: "Lists")
                  }
                  .buttonStyle(.plain)
                  .contentShape(Rectangle())
@@ -754,7 +754,7 @@ private var sessionSetupSection: some View {
                  }
 
                  Toggle(isOn: $showTasksPad) {
-                     Text("Show Tasks Pad")
+                     Text("Show Lists Pad")
                  }
                  .tint(Theme.Colors.accent)
                  .padding(.vertical, Theme.Spacing.s)

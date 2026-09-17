@@ -78,15 +78,26 @@ struct SessionAttachmentShareFlow: View {
     }
 }
 
+struct ListAttachmentShareFlow: View {
+    let request: ConnectedListShareRequest
+    let connectedEnabled: Bool
+
+    var body: some View {
+        ConnectedAttachmentShareFlow(request: .list(request), connectedEnabled: connectedEnabled, onIOSShare: { _ in })
+    }
+}
+
 private struct ConnectedAttachmentShareFlow: View {
     enum Request {
         case score(ConnectedScoreShareRequest)
         case sessionAttachment(ConnectedSessionAttachmentShareRequest)
+        case list(ConnectedListShareRequest)
 
-        var url: URL {
+        var url: URL? {
             switch self {
             case .score(let request): return request.url
             case .sessionAttachment(let request): return request.url
+            case .list: return nil
             }
         }
 
@@ -94,6 +105,7 @@ private struct ConnectedAttachmentShareFlow: View {
             switch self {
             case .score(let request): return request.title
             case .sessionAttachment(let request): return request.title
+            case .list(let request): return request.payload.name
             }
         }
 
@@ -131,10 +143,11 @@ private struct ConnectedAttachmentShareFlow: View {
 
     private var pageCount: Int {
         switch request {
-        case .score:
-            return max(PDFDocument(url: request.url)?.pageCount ?? 1, 1)
+        case .score(let score):
+            return max(PDFDocument(url: score.url)?.pageCount ?? 1, 1)
         case .sessionAttachment(let item):
             return item.pageCount
+        case .list: return 0
         }
     }
 
@@ -161,9 +174,11 @@ private struct ConnectedAttachmentShareFlow: View {
                             route = .destination
                         }
                     }
+                    .disabled(isSending)
                 }
             }
         }
+        .interactiveDismissDisabled(isSending)
         .sheet(isPresented: $showPageSelection, onDismiss: {
             if let selectedPages, !selectedPages.isEmpty { continueAfterScope() }
         }) {
@@ -213,16 +228,15 @@ private struct ConnectedAttachmentShareFlow: View {
                     .connectedShareCard()
                 }
 
-                VStack(spacing: 0) {
-                    destinationRow(
-                        title: "Outside Études",
-                        systemImage: "square.and.arrow.up"
-                    ) {
-                        onIOSShare(request.url)
-                        dismiss()
+                if let url = request.url {
+                    VStack(spacing: 0) {
+                        destinationRow(title: "Outside Études", systemImage: "square.and.arrow.up") {
+                            onIOSShare(url)
+                            dismiss()
+                        }
                     }
+                    .connectedShareCard()
                 }
-                .connectedShareCard()
             }
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
@@ -416,7 +430,7 @@ private struct ConnectedAttachmentShareFlow: View {
                             ensemble: ensemble,
                             recipients: recipients
                         )
-                        .disabled(isSending || recipients.isEmpty)
+                        .disabled(isSending || isLoadingRecipients || recipients.isEmpty)
 
                         if index < ensembleStore.ensembles.count - 1 {
                             Divider()
@@ -470,11 +484,12 @@ private struct ConnectedAttachmentShareFlow: View {
     }
 
     private func loadRecipients() async {
+        isLoadingRecipients = true
+        directory = [:]
+        defer { isLoadingRecipients = false }
         await followStore.refreshFromBackendIfPossible()
         let ids = Array(Set(followStore.followers.union(ensembleStore.ensembles.flatMap { $0.memberUserIDs }))).sorted()
         guard !ids.isEmpty else { return }
-        isLoadingRecipients = true
-        defer { isLoadingRecipients = false }
         if case .success(let map) = await AccountDirectoryService.shared.resolveAccounts(userIDs: ids) {
             directory = map
         }
@@ -509,6 +524,9 @@ private struct ConnectedAttachmentShareFlow: View {
                 mimeType: item.mimeType,
                 pageCount: item.pageCount
             )
+        case .list:
+            throw ConnectedAttachmentError.invalidAttachment
+
         }
     }
 
@@ -573,6 +591,7 @@ private struct ConnectedAttachmentShareFlow: View {
     }
 
     private func send(to recipients: [String]) async {
+        guard !isSending else { return }
         guard !recipients.isEmpty else {
             errorMessage = "There are no valid Connected recipients."
             return
@@ -580,6 +599,19 @@ private struct ConnectedAttachmentShareFlow: View {
         isSending = true
         defer { isSending = false }
         do {
+            if case .list(let list) = request {
+                guard connectedEnabled, BackendEnvironment.shared.isConnected,
+                      BackendConfig.isConfigured, NetworkManager.shared.baseURL != nil else {
+                    errorMessage = "Connect to Études Connected to send this list."
+                    return
+                }
+                let service = BackendEnvironment.shared.connectedAttachments
+                let reference = try await ConnectedListUpload.upload(list.payload, using: service)
+                // Each explicit send is an independent snapshot, as for existing attachments.
+                try await service.deliver(reference, to: recipients).get()
+                dismiss()
+                return
+            }
             let payload = try preparedPayload()
             switch await BackendEnvironment.shared.connectedAttachments.upload(payload) {
             case .failure(let error): throw error
@@ -632,6 +664,10 @@ struct ReceivedConnectedAttachmentDetailView: View {
         ReceivedConnectedAttachmentStore.shared
 
     @State private var localURL: URL?
+    @State private var listPayload: ConnectedListPayload?
+    @State private var listOwnerScope: String?
+    @State private var listLoadFailed = false
+    @State private var isDeleting = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
     @State private var showDeleteConfirmation = false
@@ -640,7 +676,18 @@ struct ReceivedConnectedAttachmentDetailView: View {
 
     var body: some View {
         Group {
-            if let localURL {
+            if attachment.isList {
+                if let listPayload {
+                    ReceivedListPreview(payload: listPayload)
+                } else if listLoadFailed {
+                    VStack(spacing: Theme.Spacing.m) {
+                        Text("This list could not be opened.").font(Theme.Text.body)
+                        Button("Try Again") { Task { await loadAttachment() } }
+                    }
+                } else {
+                    ProgressView("Downloading…")
+                }
+            } else if let localURL {
                 AttachmentViewerView(
                     imageURLs: attachmentKind == .image ? [localURL] : [],
                     startIndex: 0,
@@ -658,7 +705,7 @@ struct ReceivedConnectedAttachmentDetailView: View {
                 ProgressView("Downloading…")
             }
         }
-        .navigationTitle(attachment.attachmentName ?? attachment.filename)
+        .navigationTitle(listPayload?.name ?? attachment.attachmentName ?? attachment.filename)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -668,6 +715,7 @@ struct ReceivedConnectedAttachmentDetailView: View {
                             await performAdoptionAction(adoptionAction)
                         }
                     }
+                    .disabled(isDeleting || (attachment.isList && listPayload == nil))
                 }
 
                 Button(role: .destructive) {
@@ -675,6 +723,8 @@ struct ReceivedConnectedAttachmentDetailView: View {
                 } label: {
                     Image(systemName: "trash")
                 }
+                .disabled(isDeleting)
+                .accessibilityLabel(attachment.isList ? "Delete received list" : "Delete attachment")
             }
         }
         .task {
@@ -682,13 +732,7 @@ struct ReceivedConnectedAttachmentDetailView: View {
                 await store.markViewed(attachment)
             }
 
-            do {
-                localURL = try await store.localURL(
-                    for: attachment
-                )
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+            await loadAttachment()
         }
         .sheet(isPresented: $showFileExporter) {
             if let fileExportURL {
@@ -696,19 +740,28 @@ struct ReceivedConnectedAttachmentDetailView: View {
             }
         }
         .confirmationDialog(
-            "Delete this shared attachment?",
+            attachment.isList ? "Delete this received list?" : "Delete this shared attachment?",
             isPresented: $showDeleteConfirmation,
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
                 Task {
-                    await store.delete(attachment)
-                    dismiss()
+                    isDeleting = true
+                    defer { isDeleting = false }
+                    if await store.delete(attachment) {
+                        dismiss()
+                    } else {
+                        errorMessage = store.errorMessage
+                    }
                 }
+            }
+        } message: {
+            if attachment.isList {
+                Text("This removes the received delivery only. The sender’s original and any copy you saved to Lists are kept.")
             }
         }
         .alert(
-            "Couldn’t Open Attachment",
+            attachment.isList ? "Couldn’t Complete List Action" : "Couldn’t Open Attachment",
             isPresented: Binding(
                 get: { errorMessage != nil },
                 set: {
@@ -743,17 +796,20 @@ struct ReceivedConnectedAttachmentDetailView: View {
         case scores
         case photos
         case files
+        case lists
 
         var title: String {
             switch self {
             case .scores: return "Add to Scores"
             case .photos: return "Save to Photos"
             case .files: return "Save to Files"
+            case .lists: return "Save to Lists"
             }
         }
     }
 
     private var adoptionAction: AdoptionAction? {
+        if attachment.isList { return .lists }
         switch attachmentKind {
         case .pdf: return .scores
         case .image, .video: return .photos
@@ -786,6 +842,46 @@ struct ReceivedConnectedAttachmentDetailView: View {
             await saveToPhotos()
         case .files:
             await saveToFiles()
+        case .lists:
+            saveToLists()
+        }
+    }
+
+    private var currentListOwnerScope: String {
+        if let id = PersistenceController.shared.currentUserID,
+           !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return id }
+        return "device"
+    }
+
+    private func loadAttachment() async {
+        listLoadFailed = false
+        let owner = currentListOwnerScope
+        do {
+            let url = try await store.localURL(for: attachment)
+            if attachment.isList {
+                guard currentListOwnerScope == owner else { throw ConnectedAttachmentError.missingUserID }
+                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                guard size <= ConnectedListPayload.maxBytes else { throw ConnectedListError.tooLarge }
+                listPayload = try ConnectedListPayload.decode(Data(contentsOf: url))
+                listOwnerScope = owner
+            }
+            localURL = url
+        } catch {
+            listLoadFailed = true
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveToLists() {
+        do {
+            guard let listPayload, let listOwnerScope, listOwnerScope == currentListOwnerScope else {
+                throw ConnectedListError.invalidList
+            }
+            _ = try SavedListLibrary.adopt(listPayload, sourceSendID: attachment.id, ownerScope: listOwnerScope)
+            // Adoption is local and private. No saved-to-Scores marker or sender progress.
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -896,5 +992,37 @@ private enum ConnectedAttachmentAdoptionError: LocalizedError {
         case .photoSaveFailed:
             return "The attachment couldn’t be saved to Photos."
         }
+    }
+}
+
+
+private struct ReceivedListPreview: View {
+    let payload: ConnectedListPayload
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(payload.items.enumerated()), id: \.offset) { index, line in
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
+                        if line.type == .item {
+                            Image(systemName: "circle")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .accessibilityHidden(true)
+                        }
+                        Text(line.text.isEmpty ? " " : line.text)
+                            .font(line.type == .header ? Theme.Text.body.weight(.medium) : Theme.Text.body)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityAddTraits(line.type == .header ? .isHeader : [])
+                    }
+                    .padding(Theme.Spacing.m)
+                    if index < payload.items.count - 1 { Divider().padding(.horizontal, Theme.Spacing.m) }
+                }
+            }
+            .connectedShareCard()
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.m)
+            .padding(.bottom, Theme.Spacing.xxl)
+        }
+        .appBackground()
     }
 }

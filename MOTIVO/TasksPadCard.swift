@@ -84,7 +84,7 @@ struct TasksPadCard: View {
                             .fixedSize(horizontal: true, vertical: false)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Clear task set")
+                    .accessibilityLabel("Clear list")
                     .frame(width: rightControlZoneWidth + 96, alignment: .trailing)
                 }
                 .padding(.top, 0)
@@ -118,12 +118,12 @@ struct TasksPadCard: View {
                 }) {
                     HStack(spacing: 4) {
                         Text("+")
-                        Text("Import task set")
+                        Text("Import list")
                     }
                     .foregroundStyle(tasksAccent.opacity(0.95))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Import task set")
+                .accessibilityLabel("Import list")
                 .frame(width: rightControlZoneWidth + 96, alignment: .trailing)
             }
         }
@@ -167,7 +167,7 @@ struct TasksPadCard: View {
                         draggedTaskID = line.wrappedValue.id
                         return NSItemProvider(object: line.wrappedValue.id.uuidString as NSString)
                     }
-                    .accessibilityLabel("Reorder task")
+                    .accessibilityLabel("Reorder item")
 
                 TaskLineActionsButton(
                     isPresented: Binding(
@@ -196,7 +196,7 @@ struct TasksPadCard: View {
     @ViewBuilder
     private func taskTextArea(_ line: Binding<TaskLine>) -> some View {
         TaskLineTextField(
-            title: line.wrappedValue.type == .context ? "Heading or note" : "Task",
+            title: line.wrappedValue.type == .context ? "Heading or note" : "Item",
             text: Binding(
                 get: { line.wrappedValue.text },
                 set: { newValue in
@@ -226,8 +226,8 @@ struct TasksPadCard: View {
         .padding(.leading, line.wrappedValue.type == .context ? contextTextLeadingInset : 0)
         .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .accessibilityLabel(line.wrappedValue.type == .context ? "Heading or note" : "Task")
-        .accessibilityAction(named: Text(line.wrappedValue.type == .context ? "Make task" : "Make heading or note")) {
+        .accessibilityLabel(line.wrappedValue.type == .context ? "Heading or note" : "Item")
+        .accessibilityAction(named: Text(line.wrappedValue.type == .context ? "Make item" : "Make heading or note")) {
             focusedTaskID.wrappedValue = nil
             onToggleLineType(line.wrappedValue.id)
         }
@@ -243,7 +243,7 @@ struct TasksPadCard: View {
             onExpand()
         }) {
             HStack(spacing: 8) {
-                Text("Tasks")
+                Text("Lists")
                     .sectionHeader()
 
                 Spacer()
@@ -256,7 +256,7 @@ struct TasksPadCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Show tasks")
+        .accessibilityLabel("Show list")
         .padding(.vertical, 8)
     }
 }

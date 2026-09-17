@@ -23,15 +23,15 @@ struct TaskLineAddButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Add line")
-        .accessibilityHint("Choose a task or a heading or note")
+        .accessibilityHint("Choose an item or a heading or note")
         .popover(isPresented: $isPresented) {
             VStack(spacing: 0) {
-                TaskLineMenuItem(title: "Task", subtitle: "An item to tick off", symbol: "checkmark.circle") {
+                TaskLineMenuItem(title: "Item", subtitle: "An item to tick off", symbol: "checkmark.circle") {
                     pendingContext = false
                     isPresented = false
                 }
                 Divider()
-                TaskLineMenuItem(title: "Heading or note", subtitle: "Organise tasks or add instructions", symbol: "text.alignleft") {
+                TaskLineMenuItem(title: "Heading or note", subtitle: "Organise items or add instructions", symbol: "text.alignleft") {
                     pendingContext = true
                     isPresented = false
                 }
@@ -63,7 +63,7 @@ struct TaskLineActionsButton: View {
     @State private var pendingDeletion: Bool?
 
     private var conversionTitle: String {
-        isContext ? "Make task" : "Make heading or note"
+        isContext ? "Make item" : "Make heading or note"
     }
 
     var body: some View {
@@ -78,7 +78,7 @@ struct TaskLineActionsButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Actions for \(text.isEmpty ? "empty line" : text)")
-        .accessibilityValue(isContext ? "Heading or note" : "Task")
+        .accessibilityValue(isContext ? "Heading or note" : "Item")
         .accessibilityAction(named: Text(conversionTitle), onConvert)
         .accessibilityAction(named: Text("Delete line"), onDelete)
         .popover(isPresented: $isPresented) {
