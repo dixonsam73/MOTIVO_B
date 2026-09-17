@@ -139,8 +139,15 @@ pre-existing orphan PDFs were observed and deliberately **not** repaired.
 
 **Device QA status at this date:** QA1–QA6 user-reported green — QA6 covering
 staging survival across Control Centre and another app, timer correctness and
-save. **QA7 (USB / audio / video) and QA8 (drone) are PENDING.** No device
-coverage beyond this is inferred.
+save. ~~**QA7 (USB / audio / video) and QA8 (drone) are PENDING.**~~ **UPDATED
+2026-09-17: QA7 AND QA8 ARE ACCEPTED on Samuel's report**, on a Teenage
+Engineering CM-15 USB-C class-compliant microphone — six checks, all green,
+including a mid-take unplug continuing seamlessly on the phone microphone and a
+reconnect switching back to USB within the same take, and the drone restarting
+at the correct pitch automatically after an unplug. Record:
+`docs/usb-audio-drone-device-qa-2026-09-17.md`. **No device coverage beyond
+QA1–QA8 is inferred, and nothing about Phase 5, the legal review or any other
+residual QA is closed by this.**
 
 ~~**Condition 6's remainder is unrelated and cheap:** entering the App Store
 privacy labels is an **account-holder action in App Store Connect**, which no
