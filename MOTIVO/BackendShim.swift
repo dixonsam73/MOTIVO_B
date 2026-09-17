@@ -977,15 +977,36 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         // no row, no object, and the queue keeps the item because `.failure`
         // already means "stays queued, retry on the next foreground".
         var preparedUploads: [(item: LocalAttachmentUpload, prepared: PreparedAttachmentUpload)] = []
-        if let sessionID = payload.sessionID {
-            func discardTemporaries() {
-                for done in preparedUploads {
-                    if let tmp = done.prepared.temporaryFileURL {
-                        try? FileManager.default.removeItem(at: tmp)
-                    }
+
+        // C-76 — EVERY exit from here on discards this invocation's temporaries.
+        //
+        // This used to be declared inside the `if let sessionID` block and called
+        // only from the two PREPARATION failures, so preparation could succeed and
+        // the attempt then fail at the JSON encode, at the `posts` INSERT (the
+        // retry loop's own failure), at the metadata PATCH, or partway through the
+        // uploads — and every one of those returned with prepared temporaries
+        // still on disk. Each attempt writes a FRESH name
+        // (`EtudesConnectedAudio-<id>-<uuid>`, `EtudesPDFRemoteThumbnail-<id>-<uuid>`),
+        // so repeated failures ACCUMULATED rather than overwrote.
+        //
+        // `temporaryFileURL` is non-nil only where THIS call created the file in
+        // `temporaryDirectory` — the audio derivative and the PDF thumbnail. Every
+        // other attachment carries `nil` and its `fileURL` is the member's ORIGINAL,
+        // which is why this can never reach user media. Nothing sweeps `tmp` and no
+        // pre-existing residue is touched: only what this invocation made.
+        //
+        // The upload loop still deletes each temporary as soon as it has been sent;
+        // this is the backstop, and is a no-op when that already happened.
+        func discardTemporaries() {
+            for done in preparedUploads {
+                if let tmp = done.prepared.temporaryFileURL {
+                    try? FileManager.default.removeItem(at: tmp)
                 }
             }
+        }
+        defer { discardTemporaries() }
 
+        if let sessionID = payload.sessionID {
             for item in loadIncludedAttachments(for: sessionID) {
                 // UNIT 1 — durable consent. The member was told before this was
                 // queued and chose "Share Without It", so omitting it here is
@@ -1003,14 +1024,12 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
                         let derived = try await makeConnectedAudioDerivative(for: item)
                         preparedUploads.append((item, derived))
                     } catch {
-                        discardTemporaries()
                         return .failure(error)
                     }
                     continue
                 }
 
                 guard let prepared = prepareAttachmentForRemoteUpload(item) else {
-                    discardTemporaries()
                     return .failure(AttachmentPreparationError.cannotPrepareAttachment(id: item.id, kind: item.kind))
                 }
                 preparedUploads.append((item, prepared))
