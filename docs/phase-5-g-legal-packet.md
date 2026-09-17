@@ -105,6 +105,53 @@ uniform protection does not satisfy.
 
 ---
 
+## 0c. A PROPOSED CHANGE TO THE 13-17 CONTACT RULE — NOT IMPLEMENTED. 2026-09-17
+
+**THIS SECTION IS PROPOSED BEHAVIOUR AND IS NOT BUILT. The deployed teen
+inbound-request prohibition described below remains the CURRENT rule.** Counsel is
+asked to assess both, and the difference between them is deliberate.
+
+**This says nothing about the rest of the packet.** Other sections deliberately
+mix current behaviour with scoped future re-checks, dated production counts and
+**proposed** DPIA wording, each labelled where it appears. **Do not read this
+section as implying everything else is current.**
+
+**CURRENT, AND DEPLOYED:** a 13-17 member's **inbound follow requests are off and
+cannot be enabled**. Since **2026-09-16** this is enforced **server-side** as well
+as by the absence of any control: the effective rule is
+`follow_requests_enabled AND age_band <> 'band_13_17'`, evaluated at read time
+(finding **B-40**). Before that date the prohibition was policy plus the absence
+of a caller, and the deployed API would have accepted a direct call. **This
+protection remains in force and is not being withdrawn.**
+
+**PROPOSED, AND NOT BUILT:** the blanket prohibition is considered too
+restrictive, because it blocks the relationships a teen most plausibly wants — a
+**teacher** and **classmates** — and not only strangers. The proposed replacement:
+
+1. **Under-18 discovery remains OFF by default** — discoverability is not what changes.
+2. **A person the teen ALREADY FOLLOWS may request to follow the teen back.**
+3. **Private connection invitations**, shared by the teen via the **iOS share
+   sheet / Messages**, let known classmates connect **without public discovery and
+   without Études reading contacts**.
+4. **Every follow direction still requires explicit approval by the person being
+   followed**, who may **decline even a teacher or friend** and may **revoke later**.
+5. **Private sessions remain private** — this changes initiation, not content visibility.
+6. **All other unsolicited inbound requests remain blocked.**
+7. **An invitation must NEVER automatically grant access** — it creates only the
+   opportunity to request.
+
+**UNRESOLVED DESIGN QUESTIONS, stated as open rather than answered:** invitation
+**forwarding** and **recipient identity confirmation** (an invitation may be
+passed to someone the teen did not intend), **expiry and reuse**, and **abuse
+controls**. **Shared ensembles are NOT in scope.**
+
+**Unchanged by the proposal, and still true:** Études has **no content
+moderation, no reporting or flagging surface and no guardian channel** — verified
+by source sweep on 2026-09-17. That absence is the stated reason behind the
+current rule, so it is the reasoning the proposal must answer.
+
+---
+
 ## A — OBLIGATIONS THAT FALL ON ÉTUDES DIRECTLY, WHATEVER APPLE DOES
 
 **The split below is by MEDIATION, not geography.** These are duties on SD Songs
@@ -169,11 +216,26 @@ and must not be recorded as though it were one.**
 
 1. **Lawful basis** for processing the stored age band.
 2. **Adequacy of the DPIA's residual-assurance description** (§C2 wording below).
-3. **Adequacy of the 13-17 defaults and interaction restrictions** — discovery
-   off, inbound follow requests off and **not enableable**, sharing defaults off.
-   Recorded reason for the inbound restriction: Études has **no moderation, no
-   reporting surface and no guardian channel**, so inbound contact from a stranger
-   to a minor would have no mitigating control behind it.
+3. **Adequacy of the 13-17 defaults and interaction restrictions.** **This
+   subquestion now has TWO parts — current and proposed — and both are asked.**
+
+   **(a) CURRENT, deployed:** discovery off by default (the member may enable it),
+   inbound follow requests off and **not enableable**, server-enforced since
+   2026-09-16 (B-40), sharing defaults off. Recorded reason for the inbound
+   restriction: Études has **no moderation, no reporting surface and no guardian
+   channel**, so inbound contact from a stranger to a minor would have no
+   mitigating control behind it. **Is this adequate?**
+
+   **(b) PROPOSED, not implemented — set out in §0c.** A narrow relaxation:
+   inbound initiation becomes possible **only** from someone the teen already
+   follows, or whom the teen personally invited by private link; discovery stays
+   off; every direction still needs the followed person's explicit, revocable
+   approval; all other unsolicited requests stay blocked; an invitation never
+   itself grants access. **Would this remain adequate given the same absence of
+   moderation, reporting and guardian channel — and if not, what specific
+   mitigation would be required?** Invitation forwarding and recipient-identity
+   confirmation, expiry/reuse and abuse controls are **open design questions**, so
+   please identify which of them bear on the answer.
 4. **Whether deliberate non-storage of Apple's assurance provenance is
    acceptable.** Note this cuts against data minimisation to reverse: storing it
    would mean holding *more* about minors.
@@ -222,6 +284,14 @@ as consent, notification, acknowledgement or record-keeping, which greater
 substantive protection would **not** automatically discharge.
 
 **Q3a is one such procedural question**; if there are others, name them.
+
+**ADDED 2026-09-17 — a dependency, with no assumed answer.** Études' internal
+decision not to consult Apple's `activeParentalControls.communicationLimits` was
+recorded as resting on the current teen inbound-contact prohibition already
+supplying the protection. **The proposed change in §0c would narrow that
+premise.** **This packet takes NO position on whether that signal therefore
+becomes necessary, or remains unnecessary**, and it is not consumed today.
+**If the proposal is adopted, does anything in your answer to Q3 change?**
 
 ---
 

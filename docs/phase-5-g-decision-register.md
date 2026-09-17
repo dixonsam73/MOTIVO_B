@@ -50,14 +50,22 @@ and is not.
 LEGAL confirmation, and one carries a deliberately UNDECIDED sub-part.** Nothing
 below is implemented; no production mutation has been made.
 
-| Q | AH decision | still needs LEGAL | still undecided |
-|---|---|---|---|
-| **Q1** reclassification | **MINIMAL (revised 2026-09-09). Retain the established band; re-derive ONLY on deliberate member action. CONTINUOUS rejected and reverted** | no | — |
-| **Q2** teen inbound requests | **A — teens cannot enable inbound follow requests. Deliberate policy.** | no | — |
-| **Q3** `communicationLimits` | **A — do not consult, consequent on Q2** | no | — |
-| **Q4** declined / unavailable | **A — fail-closed, persist nothing, retryable** | **yes — final wording + jurisdictional adequacy** | — |
-| **Q5** device-bound age source | **A — minimisation kept. Amendment withdrawn with Q1's revision** | **yes — DPIA adequacy** | — |
-| **Q6** legacy directory row | **A authorised, unexecuted. B REJECTED (§B). RELEASE-GATING** | no | — |
+**AMENDED 2026-09-17.** The "still needs LEGAL" column below records the position
+**as each question was decided**, and those historical entries are unchanged.
+**Q2 and Q3 have since acquired a legal dependency that their original `no` does
+not describe:** Q2's decision is in force and deployed, and a **replacement
+direction now awaits legal review** (§A2′); Q3's decision stands, but its
+reasoning rested on Q2, so it is **reopened as a dependency with no assumed
+answer** (§A3′). **Read those two rows together with the amendment column.**
+
+| Q | AH decision | still needs LEGAL *(as decided)* | still undecided | **2026-09-17 amendment** |
+|---|---|---|---|---|
+| **Q1** reclassification | **MINIMAL (revised 2026-09-09). Retain the established band; re-derive ONLY on deliberate member action. CONTINUOUS rejected and reverted** | no | — | — |
+| **Q2** teen inbound requests | **A — teens cannot enable inbound follow requests. Deliberate policy.** In force and deployed (B-40) | no | — | **REPLACEMENT AWAITS LEGAL REVIEW.** The decision stands and stays deployed; a narrower interaction model is **agreed as direction, not approved and not built** (§A2′) |
+| **Q3** `communicationLimits` | **A — do not consult, consequent on Q2** | no | — | **DEPENDENCY REOPENED — AWAITS REVIEW.** A3 stands and nothing changes today, but its premise was Q2. **No answer assumed either way** (§A3′) |
+| **Q4** declined / unavailable | **A — fail-closed, persist nothing, retryable** | **yes — final wording + jurisdictional adequacy** | — | — |
+| **Q5** device-bound age source | **A — minimisation kept. Amendment withdrawn with Q1's revision** | **yes — DPIA adequacy** | — | — |
+| **Q6** legacy directory row | **A authorised, unexecuted. B REJECTED (§B). RELEASE-GATING** | no | — | — |
 
 ### A1 — Q1 AS DECIDED. **REVISED 2026-09-09: MINIMAL**
 
@@ -98,12 +106,77 @@ absence of UI.** `AccountPrivacyService.setFollowRequestsEnabled`
 decision**. That reason must be recorded at both sites so a later reader does not
 "finish" the wiring.
 
+### A2′ — PROSPECTIVE SUPERSESSION OF A2. AGREED PRODUCT DIRECTION, PENDING LEGAL REVIEW. 2026-09-17
+
+**A2 REMAINS THE DECISION OF RECORD AND REMAINS DEPLOYED.** B-40 closed the gap
+between A2 and the API on 2026-09-16 and **stays in force**. **Nothing below is
+implemented, approved for implementation, or a statement that B-40 is rolled
+back.** The replacement must be designed, legally reviewed and ready before any
+code or production change is contemplated.
+
+**Samuel agrees the blanket prohibition is too restrictive in practice**: it also
+blocks the relationships a teen most plausibly wants — a **teacher** and
+**classmates** — and not only strangers.
+
+**The proposed replacement interaction model, as agreed for assessment:**
+
+1. **Under-18 discovery remains OFF by default.** Public discoverability is not
+   what changes.
+2. **A person the teen ALREADY FOLLOWS may request to follow the teen back.** The
+   teen's own outbound act is what opens that narrow return path.
+3. **Private connection invitations**, shared by the teen through the **iOS share
+   sheet / Messages**, let known classmates connect **without public discovery and
+   without Études reading contacts**.
+4. **Every follow direction still requires explicit approval by the person being
+   followed**, who may **decline even a teacher or a friend**, and may **revoke
+   later**.
+5. **Private sessions remain private.** This changes relationship initiation, not
+   content visibility.
+6. **All other unsolicited inbound requests remain blocked.**
+7. **AN INVITATION MUST NEVER AUTOMATICALLY GRANT ACCESS.** It may only create the
+   opportunity to request; approval remains a separate, explicit act.
+
+**DISAMBIGUATION, ADDED 2026-09-17.** Separately from this teen proposal, Samuel has agreed
+that **invitations are a STANDALONE feature for ALL Connected members, adults included**,
+with agreed entry points in **People** and **Profile → Account**. **That general feature and
+this teen exception are different questions that share a mechanism**, and neither decides the
+other: the general feature is authorised for **SCOPING ONLY** in a new Codex window, is
+**not** recorded as legally cleared or as categorically free of legal dependencies, and the
+scope must itself separate independently feasible work from legal dependencies. **This teen
+proposal remains PENDING LEGAL REVIEW and B-40 remains in force.** See
+`docs/connected-invitations-direction.md`.
+
+**OPEN DESIGN QUESTIONS — NOT implemented facts, and not to be read as settled:**
+link **forwarding** and **recipient identity confirmation** (an invitation can be
+passed on to someone the teen did not intend), invitation **expiry and reuse**,
+and **abuse controls**. **Shared ensembles are explicitly NOT in this scope.**
+
+**Consequence for Q3 — see §A3′.**
+
 ### A3 — Q3 AS DECIDED
 
 **Do not consult `activeParentalControls.communicationLimits`** for the current
 feature set. The teen inbound-contact rule (A2) already supplies the relevant
 protection, so the additional Apple signal **changes no behaviour** and adds
 complexity and data surface for nothing. **Reopen only if Q2 is ever revisited.**
+
+### A3′ — Q3 IS REOPENED AS A DEPENDENCY, WITH NO ASSUMED ANSWER. 2026-09-17
+
+**A3's own reopen condition has been met:** it holds *"reopen only if Q2 is ever
+revisited"*, and §A2′ revisits Q2. **A3 remains the decision of record and nothing
+about `communicationLimits` changes today.**
+
+**A3's stated reasoning is what the reopening touches.** A3 rests on A2 already
+supplying the protection, so the Apple signal changes no behaviour. **If A2′ is
+adopted, that premise is narrowed** — some inbound initiation would become
+possible where none is today.
+
+**THIS DOCUMENT TAKES NO POSITION ON WHETHER `communicationLimits` IS THEREFORE
+NEWLY REQUIRED, OR STILL NOT REQUIRED.** Both readings are open: the proposed
+model keeps explicit per-direction approval by the person being followed, which
+may well remain sufficient on its own. **Do not record either answer as settled,
+and do not implement the signal on the strength of this note.** It is a question
+for the legal review and for the replacement's design.
 
 ### A4 — Q4 AS DECIDED, LEGAL OUTSTANDING
 
@@ -303,6 +376,16 @@ themselves** — what is closed is initiation *by another member*.
 **NO FOLLOW-REQUEST CONTROL IS TO BE ADDED.** The never-called writer is dead code
 **by decision, not by omission**; the reason must be recorded at both sites so a
 later reader does not "finish" the wiring. See §D2.
+
+**PROPOSED OPTION D — ADDED 2026-09-17, PENDING LEGAL REVIEW. NOT DECIDED, NOT
+IMPLEMENTED.** Decision A above stands and is deployed (B-40).
+
+| option | consequence |
+|---|---|
+| **D — narrow, teen-initiated reciprocity plus private invitations** | Neither a blanket block nor a general opt-in. Inbound initiation becomes possible **only** where the teen has already followed that person, or has personally sent them a private invitation. Discovery stays off; every direction still needs the followed person's explicit approval, revocable later; all other unsolicited requests stay blocked. **Motivation: option A also blocks teachers and classmates, not only strangers.** **Cost: a genuinely new surface** — invitation links, their forwarding and recipient-identity confirmation, expiry and reuse, and abuse controls, none of which exist. **The A2 reasoning it must answer is that Études still has no moderation, no reporting surface and no guardian channel** |
+
+**The full model is set out in §A2′**, which is the authoritative statement of the
+proposed direction. **Shared ensembles are not in scope.**
 
 ---
 

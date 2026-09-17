@@ -2601,6 +2601,34 @@ TRUE ON 2026-09-06 AND IS NOW FALSE; corrected 2026-09-08.** **P5-A, P5-C (CP-0)
 P5-D (CP-1 apply), P5-E (CP-2) and P5-F (CP-3) are COMPLETE.** **THE NEXT UNIT IS
 P5-G (CP-4) — DPIA and legal confirmations.**
 
+**THE 13-17 INBOUND-CONTACT RULE IS UNDER PROPOSED REVISION — DOCUMENTATION ONLY,
+2026-09-17.** Samuel has agreed that the blanket teen inbound-follow prohibition is
+**too restrictive**, because it blocks a teen's **teacher and classmates** as well as
+strangers, and a replacement is **PENDING LEGAL REVIEW**: discovery stays off by
+default; someone the teen **already follows** may request to follow back; **private
+invitations** shared through the iOS share sheet let known classmates connect without
+public discovery and **without Études reading contacts**; every direction still needs
+the followed person's **explicit, revocable approval**; **an invitation never itself
+grants access**; all other unsolicited requests stay blocked. **NOTHING IS BUILT,
+APPROVED FOR IMPLEMENTATION OR ROLLED BACK — B-40's deployed protection REMAINS IN
+FORCE until a replacement is designed, reviewed and ready.** Invitation forwarding and
+recipient-identity confirmation, expiry/reuse and abuse controls are **open design
+questions**; **shared ensembles are out of scope**. **Q3 (`communicationLimits`) is
+reopened as a DEPENDENCY with NO assumed answer**, since A3's reasoning rested on A2.
+Records: `docs/phase-5-g-decision-register.md` §A2′/§A3′,
+`docs/phase-5-g-legal-packet.md` §0c, `docs/phase-5-g-legal-questions-2026-09-17.md`.
+
+**SEPARATELY, AND NOT THE SAME QUESTION: INVITATIONS ARE A STANDALONE FEATURE FOR
+ALL CONNECTED MEMBERS, ADULTS INCLUDED — agreed 2026-09-17.** Entry points: **People**
+(primary, near search) and **Profile → Account** (secondary), one shared flow and share
+sheet; joining/purchase and per-direction approval stay separate; no contact access, no
+automatic grants, **shared ensembles excluded**. **SCOPING IS AUTHORISED IN A NEW CODEX
+WINDOW BEFORE ANY IMPLEMENTATION; nothing is approved, and this is NOT recorded as legally
+cleared or as categorically free of legal dependencies — the scope must itself separate
+independently feasible work from legal dependencies.** The teen exception above is a
+DIFFERENT question sharing the same mechanism; neither decides the other, and B-40 stays in
+force. See `docs/connected-invitations-direction.md`.
+
 **CP-3 / P5-F CLOSED 2026-09-08 CARRYING TWO LIMITATIONS, and their wording is
 load-bearing** — `docs/cp3-disposition.md` is the closure record and
 `docs/phase-5-scope.md` §4 the authoritative summary.
