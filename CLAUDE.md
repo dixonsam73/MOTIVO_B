@@ -2773,8 +2773,10 @@ is also the column default. Production carries the IDENTICAL
 correct** — this closes the cause `SharedOnlyUploadTests` had left
 unestablished. **Read §4 before trusting any attachment fixture.**
 `docs/phase-4-u5-client-acceptance.md` — **C-34 CLIENT HALF COMPLETE
-2026-09-05.** A directory avatar replaced under the SAME key now propagates: the
-pipeline drops its caches when the observed `avatar_version` changes. **The
+2026-09-05.** **SCOPE CORRECTED 2026-09-16 — the next sentence covers FIVE NAMED
+SITES, not the app.** A directory avatar replaced under the SAME key now
+propagates **at the five audited directory sites**: the pipeline drops its caches
+when the observed `avatar_version` changes. **The
 cache key is deliberately NOT versioned** — `"avatars|<key>"` is built in ten
 places and THREE are owner-side invalidation helpers with identical bodies, so
 a versioned key would have left the owner's own explicit invalidation dropping
@@ -2783,8 +2785,31 @@ during implementation and was NOT in the prediction:** three of the five
 directory sites pre-checked the image cache *before* the pipeline that performs
 invalidation, so the unit would have been inert at three of five sites while
 every unit test passed. Removed. **Four owner-side sites are deliberately
-untouched** — `version:` is optional so they compile unchanged. **Not
-device-verified**, and TTL stays Phase 5.
+untouched** — `version:` is optional so they compile unchanged. ~~**Not
+device-verified**~~, and TTL stays Phase 5. **DEVICE-VERIFIED 2026-09-16 FOR THE
+FEED ROW ONLY, AND ONLY AFTER A SIXTH SITE WAS FIXED.** The unqualified reading
+of this entry — "a replaced avatar now propagates" — **was false at the feed row
+for eleven days**, and the acceptance document was NOT wrong: it claimed five
+sites and verified five sites. **The feed row uses a SIXTH, file-private
+`DirectoryAvatarCircle`** (`MOTIVO/ContentViewRemotePostRowTwin.swift:552`) whose
+**single** call site passed no version, so its `.task(id:)` keyed on `"<key>|"`
+forever. **What is established is exactly that: the version signal was provably
+not propagated at that call site**, so the task identity never changed and the
+version-based invalidation this entry describes could not fire there.
+**NOT established: that no other invalidation path could ever refresh that
+avatar.** The exclusivity claim — *only a relaunch's empty cache ever showed a new
+avatar* — was asserted in an earlier revision of this entry and is **withdrawn**;
+the behaviour of the remaining paths was never measured. Fixed at
+`b407c98`; the parameter is now a `let`, so omission is a compile error —
+**dropping `= nil` from an Optional `var` would NOT have achieved that**, because
+the memberwise initialiser supplies an implicit nil default (proven with a
+standalone compiler probe). Device-verified on the demanding form: avatar
+replaced on Device B, feed refreshed on Device A, **updated avatar appeared
+immediately with NO RELAUNCH** (user-reported). **EVERY OTHER AVATAR SURFACE IS
+UNTESTED AND UNCLAIMED** — the owner's own avatar, `ProfilePeekView`,
+People/Followers/Following rows, the toolbar and `BackendSessionDetailView`'s
+identity row. **The lesson generalises: reading a consuming expression is not the
+same as checking what is passed into it.**
 `docs/phase-4-ca-residue-cleanup-acceptance.md` — **THE SIX LIVE
 `connected_attachments` ROWS ARE CLEARED, 2026-09-04.** B-22's deliberately
 retained residue (29 both-parties-deleted + 1 live-sender), **identified by the
