@@ -24,6 +24,12 @@ The reviewed source was committed as `1f36ef1` and the apply was submitted once.
 
 Applied UTC: 2026-09-17T08:24:17.642957+00:00
 
-No rollback was executed, no device was operated, and nothing was pushed. Real-device send/receive/adopt acceptance remains pending. The client UI fix and other app changes remain uncommitted; only the separately approved backend work is being committed.
+No rollback was executed, no device was operated, and nothing was pushed. Real-device send/receive/adopt acceptance was pending at deployment; see Samuel’s subsequent confirmation below. The client UI fix and other app changes remain uncommitted; only the separately approved backend work is being committed.
 
-Both deployed constraints were independently re-read and confirmed `convalidated = true`. Claude accepted the closing structural verification; see `connected-lists-backend-closeout.md`. This commit records the refreshed production snapshot and acceptance. Device end-to-end QA remains pending.
+Both deployed constraints were independently re-read and confirmed `convalidated = true`. Claude accepted the closing structural verification; see `connected-lists-backend-closeout.md`. This commit records the refreshed production snapshot and acceptance. Core device send/receive/adopt QA is now confirmed below; other device checks are not implied.
+
+## Device QA confirmed by Samuel — 17 September 2026
+
+After deployment, Samuel confirmed a List successfully sent from Device B to Device A, was saved into A's Lists manager, and behaved like a List created on A. Repeated Save to Lists actions for the same delivery did not create duplicates. This provides real-device evidence for the core send/receive/adoption flow and same-delivery idempotency. The preceding device setup was latest Release builds on both devices in Connected mode.
+
+**The compact Send label's appearance is ACCEPTED** — Samuel installed the new build on 17 September 2026 and confirmed it visually (*“Send button looks much nicer”*). **That is acceptance of the control's appearance only, and nothing more.** This confirmation does not independently establish Ensemble delivery, deletion isolation or re-adoption after local deletion; those retain their existing local-test evidence. No push or further device action was performed to record this result.
