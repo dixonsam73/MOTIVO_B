@@ -187,6 +187,10 @@ struct AddEditSessionView: View {
     @State var durationSeconds: Int = 0
     @State var activity: SessionActivityType = .practice
 
+    /// P6-I-01 — a save that could not complete must say so. Non-nil presents
+    /// the alert; the editor keeps its staged attachments and nothing is removed.
+    @State var attachmentSaveErrorMessage: String? = nil
+
     // Activity description (short detail) + defaulting logic
     @State private var activityDetail: String = ""
     @State private var lastAutoActivityDetail: String = ""     // tracks the last generated default
@@ -272,6 +276,10 @@ struct AddEditSessionView: View {
     @State var attachedScoreIDs_AESV: [UUID] = []
     @State var scorePageSelections_AESV: [UUID: AESVScorePageSelection] = [:]
     @State var existingScoreAttachmentIDsByScoreID_AESV: [UUID: UUID] = [:]
+
+    /// P6-I-01 — score finalisations held until the save is durable.
+    /// `(attachmentID, scoreURL, selectedPages, scoreIDIfCreatedByThisAttempt)`.
+    @State var pendingScoreFinalisations_AESV: [(UUID, URL, [Int]?, UUID?)] = []
 
     // UI stability (instruments empty-state)
     @State private var instrumentsGateArmed = false
@@ -779,6 +787,7 @@ struct AddEditSessionView: View {
                    }
                },
                message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
+        .modifier(AttachmentSaveErrorAlert(message: $attachmentSaveErrorMessage))
         .alert(consentState.title,
                isPresented: Binding(get: { consentState.isPresented },
                                     set: { if !$0 { consentState.dismiss() } }),
@@ -1949,6 +1958,19 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
     func save() {
         if isThoughtMode && !canSaveThought { return }
         let shouldGeneratePracticeInsight = (session == nil && isThoughtMode == false)
+        // P6-I-01 — THE ATTEMPT BOUNDARY OPENS HERE, BEFORE THE FIRST MUTATION,
+        // so it covers the session insert or edit, every scalar write, the
+        // replacement URLs, the pending deletions of existing attachments, the
+        // score commit and the staged commit. A group opened later would register
+        // all of those OUTSIDE itself and could not undo them.
+        let undoTicket: AttemptScopedUndo.Ticket
+        do { undoTicket = try AttemptScopedUndo.open(in: viewContext) }
+        catch {
+            // Nothing has been mutated yet, so there is nothing to undo.
+            attachmentSaveErrorMessage = (error as? LocalizedError)?.errorDescription
+                ?? "This session could not be saved right now. Nothing has been changed — please try again."
+            return
+        }
         let s = session ?? Session(context: viewContext)
         if (s.value(forKey: "id") as? UUID) == nil {
             s.setValue(UUID(), forKey: "id")
@@ -2042,7 +2064,17 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
         }
 
         
-        // Apply pending deletions for existing attachments (delete from Core Data + remove local file).
+        // Apply pending deletions for existing attachments.
+        //
+        // P6-I-01 — THE CORE DATA DELETE HAPPENS NOW; THE FILE DELETE DOES NOT.
+        //
+        // This used to call `AttachmentStore.removeIfExists` here, before the
+        // save. If the save then failed, `viewContext.rollback()` restored the
+        // Attachment rows — pointing at files that had already been destroyed,
+        // so the member was left with rows whose media was permanently gone and
+        // no way to notice until they opened one. The paths are collected here
+        // and the files are removed only once the save is durable.
+        var pendingFileDeletions: [String] = []
         if !deletedExistingAttachmentIDs.isEmpty {
             do {
                 let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
@@ -2050,7 +2082,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 let matches = try viewContext.fetch(req)
                 for a in matches {
                     if let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
-                        AttachmentStore.removeIfExists(path: path)
+                        pendingFileDeletions.append(path)
                     }
                     viewContext.delete(a)
                 }
@@ -2066,11 +2098,55 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
         let __tmpCleanupSnapshot: [(UUID, AttachmentKind)] = stagedAttachments.map { ($0.id, $0.kind) }
 
         commitScoreAttachments_AESV(to: s, ctx: viewContext)
-        // C-82 — consent names staged ids; the publish must name saved ones.
-        let stagedToFinal = commitStagedAttachments(to: s, ctx: viewContext)
 
+        // P6-I-01 — the commit → save → finalise ORDER lives in
+        // `AttachmentCommitTransaction`, shared with PostRecordDetailsView and
+        // driven directly by the tests.
+        var committed: AttachmentCommitAttempt = .empty
+        let outcome = AttachmentCommitTransaction.run(.init(
+            commit: { try commitStagedAttachments(to: s, ctx: viewContext) },
+            save: { try viewContext.save() },
+            finalise: { attempt in
+                committed = attempt
+                AttemptScopedUndo.release(undoTicket)
+                finaliseStagedAttachmentCommit(attempt)
+                // The removals are durable now, so their files may go. Not before:
+                // a failed save restores the rows, and they must not point at
+                // media that has already been destroyed.
+                for path in pendingFileDeletions { AttachmentStore.removeIfExists(path: path) }
+            },
+            discardAttempt: {
+                // Attempt-local, by undo group rather than by heuristic. No
+                // `viewContext.rollback()` (which would discard unrelated pending
+                // changes) and no `isTemporaryID` guessing (which is not
+                // provenance). An EDITED session keeps its identity and its
+                // pre-attempt values; a deleted existing attachment comes back.
+                AttemptScopedUndo.undoAndRelease(undoTicket)
+                pendingScoreFinalisations_AESV.removeAll()
+            }
+        ))
+
+        switch outcome {
+        case .commitFailed(let error):
+            attachmentSaveErrorMessage = (error as? AttachmentCommitFailure)?.errorDescription
+                ?? "Your recording could not be saved to this session. Nothing has been removed — please try saving again."
+            print("Save aborted before commit (Add/Edit): \(error)")
+            return
+        case .saveFailed(let error):
+            attachmentSaveErrorMessage = "This session could not be saved. Your recordings are still here — please try again."
+            print("Save error (Add/Edit): \(error)")
+            return
+        case .committed:
+            break
+        }
+
+        let attempt = committed
+        let stagedToFinal = attempt.stagedToFinalID
         do {
-            try viewContext.save()
+            // Phase C has already run inside the transaction, BEFORE the tmp
+            // hygiene sweep below — deliberately, because finalisation reads each
+            // staged item's tmp surrogate to resolve its privacy and that sweep
+            // deletes exactly those files.
 
             // AESV tmp hygiene: best-effort delete surrogate/alias files created in tmp during this edit session.
             for (id, kind) in __tmpCleanupSnapshot {
@@ -2157,18 +2233,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { dismiss() }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { dismiss() }
             }
-        } catch {
-            // Delete any files written during this commit attempt by scanning attachments without permanent IDs
-            if let set = s.attachments as? Set<Attachment> {
-                for a in set {
-                    if a.objectID.isTemporaryID, let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
-                        AttachmentStore.removeIfExists(path: path)
-                    }
-                }
-            }
-            viewContext.rollback()
-            print("Save error (Add/Edit): \(error)")
         }
+        // P6-I-01 — THE SAVE-FAILURE BRANCH HAS MOVED into the transaction's
+        // `.saveFailed` case above. The `objectID.isTemporaryID` sweep went with
+        // it: it was never provenance, so it could both miss this attempt's
+        // files and delete somebody else's.
     }
 
     // MARK: - Pinned activity list + helpers

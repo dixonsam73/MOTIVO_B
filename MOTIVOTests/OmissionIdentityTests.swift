@@ -264,7 +264,15 @@ final class OmissionIdentityTests: XCTestCase {
     /// through the one shared helper.
     func testBothEditorsTranslateConsentThroughTheSharedHelper() {
         for e in editors {
-            XCTAssertTrue(code(e.view).contains("let stagedToFinal = commitStagedAttachments(to: s, ctx: viewContext)"),
+            // P6-I-01 re-expressed, and STRENGTHENED rather than relaxed. The
+            // commit now throws and returns an attempt, so the literal call text
+            // changed; what C-82 actually requires is that the save keeps the map
+            // ITS OWN commit produced. That is now two facts: the attempt comes
+            // from a `try` on this editor's commit, and `stagedToFinal` is taken
+            // from that attempt rather than rebuilt from staged ids.
+            XCTAssertTrue(code(e.view).contains("commit: { try commitStagedAttachments(to: s, ctx: viewContext) }"),
+                          "\(e.view): the transaction's commit step must be this editor's own commit, and must not swallow a failure")
+            XCTAssertTrue(code(e.view).contains("let stagedToFinal = attempt.stagedToFinalID"),
                           "\(e.view): the save must keep the map its commit returns")
             let payloads = constructions().filter { $0.file == e.view }
             XCTAssertEqual(payloads.count, 1, "\(e.view): exactly one payload construction")
@@ -297,18 +305,22 @@ final class OmissionIdentityTests: XCTestCase {
         for e in editors {
             let body = commitBody(e.commit)
             XCTAssertFalse(body.isEmpty, "\(e.commit): commit must return the map")
-            XCTAssertTrue(body.contains("return stagedToFinalID"), "\(e.commit): commit must return the map")
+            // P6-I-01 re-expressed: the commit now returns the attempt that CARRIES
+            // the map, so the literal `return stagedToFinalID` is gone. The
+            // requirement is unchanged and is asserted on the value instead.
+            XCTAssertTrue(body.contains("AttachmentCommitService.commit("),
+                          "\(e.commit): commit must route through the shared service")
+            XCTAssertTrue(body.contains("return attempt"), "\(e.commit): and return its attempt")
         }
+        // AESV still commits ONLY items that are not already persisted. That
+        // filter is the editor-specific rule and stays in the editor; the service
+        // commits exactly the list it is handed.
         let aesv = commitBody("AddEditSessionView+Attachments.swift")
-        XCTAssertEqual(aesv.components(separatedBy: "for att in stagedAttachments").count - 1, 1,
-                       "AESV: one staged loop")
-        guard let loop = aesv.range(of: "for att in stagedAttachments where existingAttachmentIDs.contains(att.id) == false"),
-              let write = aesv.range(of: "stagedToFinalID[att.id] = newID"),
-              let flags = aesv.range(of: "Attachment.fetchRequest()") else {
-            return XCTFail("AESV: the map must be written inside the new-attachments-only loop")
-        }
-        XCTAssertTrue(loop.upperBound <= write.lowerBound && write.upperBound <= flags.lowerBound,
-                      "AESV: the map must be written inside the new-attachments-only loop")
+        XCTAssertTrue(aesv.contains("stagedAttachments.filter { existingAttachmentIDs.contains($0.id) == false }"),
+                      "AESV: only not-yet-persisted items may be committed")
+        let service = code("AttachmentCommitService.swift")
+        XCTAssertTrue(service.contains("stagedToFinalID[att.id] = finalID"),
+                      "the staged→saved map must be built where the rows are created")
     }
 
     /// The raw consent state has exactly two uses per editor: the dialog's
@@ -341,7 +353,8 @@ final class OmissionIdentityTests: XCTestCase {
     /// The commit function's body, or "" if its signature does not return the map.
     private func commitBody(_ file: String) -> String {
         let s = code(file)
-        let sig = "func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) -> [UUID: UUID] {"
+        // P6-I-01 — the signature now throws and returns the attempt.
+        let sig = "func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) throws -> AttachmentCommitAttempt {"
         guard let start = s.range(of: sig) else { return "" }
         let end = s.range(of: "\n    func ", range: start.upperBound..<s.endIndex)?.lowerBound ?? s.endIndex
         return String(s[start.upperBound..<end])

@@ -148,6 +148,9 @@ struct AttachmentStore {
 
     /// Writes data to Documents and returns (path, rollback) where rollback removes the file if invoked.
     static func saveDataWithRollback(_ data: Data, suggestedName: String, ext: String) throws -> (path: String, rollback: () -> Void) {
+        #if DEBUG
+        if UnitTestHost.isActive, let fault = unitTestWriteFault, let error = fault(suggestedName, ext) { throw error }
+        #endif
         let dir = try ensureDocumentsDir()
         let filename = uniqueFilename(base: suggestedName, ext: ext, in: dir)
         let url = dir.appendingPathComponent(filename, isDirectory: false)
@@ -424,7 +427,36 @@ struct AttachmentStore {
         return target.path.hasPrefix(scoresRoot)
     }
 
+    #if DEBUG
+    /// P6-I-01 — TEST-ONLY. A permanent-media root used ONLY inside a hosted
+    /// unit-test run (`UnitTestHost.isActive`); ignored in every ordinary Debug
+    /// launch and absent from Release. Same shape and same restrictions as
+    /// `StagingStore.unitTestRootOverride`: process-global, so it is set and
+    /// cleared by one test class at a time and never while its writes could
+    /// still run.
+    ///
+    /// It exists so a write fault can be established against a disposable
+    /// directory. Without it, the only way to make `saveDataWithRollback` throw
+    /// would be to interfere with the real Documents directory.
+    nonisolated(unsafe) static var unitTestDocumentsRootOverride: URL?
+
+    /// P6-I-01 — TEST-ONLY write fault, same shape and restrictions as
+    /// `StagingStore.unitTestRefsHook`. Returning an error from it makes that one
+    /// `saveDataWithRollback` call throw, which is the only way to exercise
+    /// "the THIRD attachment fails" — a read-only directory fails all of them,
+    /// and `uniqueFilename` renames around a pre-placed obstacle rather than
+    /// colliding with it.
+    ///
+    /// The read-only-directory fault is still used as the control that proves
+    /// the real filesystem path throws too, so this hook is never the only
+    /// evidence that a failure is reachable.
+    nonisolated(unsafe) static var unitTestWriteFault: ((_ suggestedName: String, _ ext: String) -> Error?)?
+    #endif
+
     private static func ensureDocumentsDir() throws -> URL {
+        #if DEBUG
+        if UnitTestHost.isActive, let root = unitTestDocumentsRootOverride { return root }
+        #endif
         guard let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             throw NSError(domain: "AttachmentStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Documents directory missing"])
         }

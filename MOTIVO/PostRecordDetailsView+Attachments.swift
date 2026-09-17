@@ -723,150 +723,117 @@ isPrivate: { url in
 
     /// Returns staged → saved ids for the attachments this commit created —
     /// the thumbnail uses it, and so does the member's consent (C-82).
-    func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) -> [UUID: UUID] {
+    /// P6-I-01 — PHASE A, a thin wrapper over `AttachmentCommitService`.
+    ///
+    /// The loop itself moved so it could be driven by disposable fixtures; this
+    /// supplies this editor's naming rules and staged list. It THROWS — it used
+    /// to swallow the failure and return normally, so the caller saved an
+    /// attachment-less session and then deleted the staged originals.
+    func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) throws -> AttachmentCommitAttempt {
+        let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+        let displayNamesDict = (UserDefaults.standard.dictionary(forKey: "stagedAttachmentDisplayNames_temp") as? [String: String]) ?? [:]
         let chosenThumbID = selectedThumbnailID
-        // Ensure thumbnail implies included (staged privacy) before migration/commit
-        if let tid = chosenThumbID, let thumb = stagedAttachments.first(where: { $0.id == tid }) {
-            setPrivate(id: tid, url: surrogateURL(for: thumb), false)
-        }
 
-        // Map staged UUID → final Attachment UUID (used to persist isThumbnail correctly)
-        var stagedToFinalID: [UUID: UUID] = [:]
-        
+        // P6-I-01 — the "thumbnail implies included" write USED TO HAPPEN HERE, on
+        // the STAGED id, before the throwing commit below. It writes the privacy
+        // map, which the attempt's undo group cannot restore, so a failed save
+        // left the member's staged privacy silently changed. It now happens in
+        // `finaliseStagedAttachmentCommit`, against the FINAL id, which is the key
+        // that actually matters once the attachment exists.
 
-        // Map staged UUID → final file URL (used to persist privacy on final keys)
-        var stagedToFinalURL: [UUID: URL] = [:]
-let namesKey = "stagedAudioNames_temp"
+        let attempt = try AttachmentCommitService.commit(
+            .init(staged: stagedAttachments,
+                  chosenThumbnailID: chosenThumbID,
+                  suggestedName: { att in
+                      let custom = namesDict[att.id.uuidString] ?? ""
+                      return custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          ? att.id.uuidString : custom
+                  },
+                  displayName: { displayNamesDict[$0.id.uuidString] }),
+            to: session, ctx: ctx)
+
+        AttachmentCommitService.applyThumbnailFlags(
+            finalThumbnailID: chosenThumbID.flatMap { attempt.stagedToFinalID[$0] },
+            to: session, ctx: ctx)
+
+        // NOTHING STAGED IS CONSUMED HERE. The three `*_temp` dictionaries used to
+        // be removed on the way out, whether or not the loop had failed.
+        return attempt
+    }
+
+    /// P6-I-01 — PHASE C. Runs ONLY after the caller's `viewContext.save()` has
+    /// succeeded.
+    ///
+    /// Everything here consumes staged state — it migrates staged privacy, page
+    /// selections and titles onto the final ids, then clears the staged
+    /// metadata. None of it is reversible, which is exactly why none of it may
+    /// run before the attachments are durable.
+    func finaliseStagedAttachmentCommit(_ attempt: AttachmentCommitAttempt) {
+        let namesKey = "stagedAudioNames_temp"
         let namesDict = (UserDefaults.standard.dictionary(forKey: namesKey) as? [String: String]) ?? [:]
         let displayNamesKey = "stagedAttachmentDisplayNames_temp"
-        let displayNamesDict = (UserDefaults.standard.dictionary(forKey: displayNamesKey) as? [String: String]) ?? [:]
-
-        // Read staged video titles captured during timer flow and define persisted store key
         let stagedVideoTitlesKey = "stagedVideoTitles_temp"
-        let stagedVideoTitles: [String: String] = (UserDefaults.standard.dictionary(forKey: stagedVideoTitlesKey) as? [String: String]) ?? [:]
-        let persistedVideoTitlesKey = "persistedVideoTitles_v1"
-        let persistedAudioTitlesKey = "persistedAudioTitles_v1"
+        let stagedVideoTitles = (UserDefaults.standard.dictionary(forKey: stagedVideoTitlesKey) as? [String: String]) ?? [:]
+        let stagedByID = Dictionary(uniqueKeysWithValues: stagedAttachments.map { ($0.id, $0) })
 
-        // Track rollback closures for files written during this commit attempt
-        var rollbacks: [() -> Void] = []
-        var createdAttachments: [Attachment] = []
+        for stagedID in attempt.committedStagedIDs {
+            guard let finalID = attempt.stagedToFinalID[stagedID],
+                  let finalURL = attempt.stagedToFinalURL[stagedID] else { continue }
+            let staged = stagedByID[stagedID]
 
-        // 1) Write files using rollback-safe API and create Attachment objects
-        for att in stagedAttachments {
-            do {
-                // C-77 — THE PERSISTED EXTENSION MUST DESCRIBE THE BYTES.
-                // This site fabricated it from the kind, so an imported WAV
-                // was written as `.m4a` and AVFoundation could not open it.
-                let ext: String = AttachmentImportPolicy.fileExtension(for: att)
-                let baseName: String
-                if let custom = namesDict[att.id.uuidString], !custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    baseName = custom
-                } else {
-                    baseName = att.id.uuidString
-                }
-                let result = try AttachmentStore.saveDataWithRollback(att.data, suggestedName: baseName, ext: ext)
-                rollbacks.append(result.rollback)
+            // Privacy: staged (ID / temp URL) → final (ID / file URL).
+            let stagedURL = staged.flatMap { surrogateURL(for: $0) }
+            migratePrivacy(fromStagedID: stagedID, stagedURL: stagedURL, toNewID: finalID, newURL: finalURL)
 
-                let displayName = displayNamesDict[att.id.uuidString]
-                let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
-                let created: Attachment = try AttachmentStore.addAttachment(kind: att.kind, filePath: result.path, to: session, isThumbnail: isThumb, displayName: displayName, ctx: ctx)
-                if let finalID = (created.value(forKey: "id") as? UUID) {
-                    stagedToFinalID[att.id] = finalID
-                    PDFSelectedPagesStore.migratePages(from: att.id, stagedPages: att.selectedPages, to: finalID)
-                }
+            // Page selection. This CLEARS the staged value, which is why it waits.
+            PDFSelectedPagesStore.migratePages(from: stagedID, stagedPages: staged?.selectedPages, to: finalID)
 
-
-                // Attempt to migrate privacy from staged keys (ID/Temp URL) to final keys (ID/File URL)
-                let finalURL = URL(fileURLWithPath: result.path)
-                
-                stagedToFinalURL[att.id] = finalURL
-let stagedURL = surrogateURL(for: att)
-                migratePrivacy(fromStagedID: att.id, stagedURL: stagedURL, toNewID: (created.value(forKey: "id") as? UUID), newURL: finalURL)
-                // Persist any staged AUDIO title so publish pipeline can round-trip it (remote display_name)
-                if att.kind == .audio {
-                    let stagedKey = att.id.uuidString
-                    if let stagedTitleRaw = namesDict[stagedKey] {
-                        let trimmed = stagedTitleRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty {
-                            if let finalID = created.value(forKey: "id") as? UUID {
-                                // C-47 — the shared, id-keyed writer.
-                                AttachmentTitlePersistenceKeys.writeLocalTitle(trimmed, kind: .audio, attachmentID: finalID)
-                            } else {
-                                // Fallback (should be rare): key by saved filename stem
-                                let stem = URL(fileURLWithPath: result.path).deletingPathExtension().lastPathComponent
-                                var persisted = (UserDefaults.standard.dictionary(forKey: persistedAudioTitlesKey) as? [String: String]) ?? [:]
-                                persisted[stem] = trimmed
-                                UserDefaults.standard.set(persisted, forKey: persistedAudioTitlesKey)
-                            }
-                        }
+            // Titles, keyed by the final id (C-47's shared writer).
+            switch staged?.kind {
+            case .audio:
+                if let raw = namesDict[stagedID.uuidString] {
+                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        // C-47 — the ONE shared, id-keyed writer. The old
+                        // stem-keyed fallback is gone: it only ever ran when the
+                        // final id was missing, and the commit now guarantees one.
+                        AttachmentTitlePersistenceKeys.writeLocalTitle(trimmed, kind: .audio, attachmentID: finalID)
                     }
                 }
-                // Persist any staged video title so SessionDetailView can surface it later
-                if att.kind == .video {
-                    let stagedKey = att.id.uuidString
-                    if let stagedTitleRaw = stagedVideoTitles[stagedKey] {
-                        let trimmed = stagedTitleRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty {
-                            // Store under the final attachment UUID (preferred) if available; else fall back to file path stem
-                            if let finalID = created.value(forKey: "id") as? UUID {
-                                // C-47 — the shared, id-keyed writer.
-                                AttachmentTitlePersistenceKeys.writeLocalTitle(trimmed, kind: .video, attachmentID: finalID)
-                            } else {
-                                // Fallback: use the created file path stem as a last resort
-                                let stem = URL(fileURLWithPath: result.path).deletingPathExtension().lastPathComponent
-                                var persisted = (UserDefaults.standard.dictionary(forKey: persistedVideoTitlesKey) as? [String: String]) ?? [:]
-                                persisted[stem] = trimmed
-                                UserDefaults.standard.set(persisted, forKey: persistedVideoTitlesKey)
-                            }
-                        }
+            case .video:
+                if let raw = stagedVideoTitles[stagedID.uuidString] {
+                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        // C-47 — the ONE shared, id-keyed writer. The old
+                        // stem-keyed fallback is gone: it only ever ran when the
+                        // final id was missing, and the commit now guarantees one.
+                        AttachmentTitlePersistenceKeys.writeLocalTitle(trimmed, kind: .video, attachmentID: finalID)
                     }
                 }
-
-                createdAttachments.append(created)
-            } catch {
-                // If any write/add fails mid-loop, best-effort rollback files written so far and clear created objects from the context
-                for rb in rollbacks { rb() }
-                rollbacks.removeAll()
-                // Delete any created attachments from the context (unsaved yet)
-                for a in createdAttachments { ctx.delete(a) }
-                createdAttachments.removeAll()
-                print("Attachment commit failed: ", error)
+            default:
                 break
             }
         }
 
-        // Resolve staged thumbnail UUID to final Attachment UUID
-        let chosenFinalThumbID: UUID? = chosenThumbID.flatMap { stagedToFinalID[$0] }
-
-
-        
-
-        // Persist inclusion on FINAL keys for the chosen thumbnail attachment (ContentView relies on final URL keys)
-        if let stagedID = chosenThumbID,
-           let finalID = chosenFinalThumbID,
-           let finalURL = stagedToFinalURL[stagedID] {
+        // Inclusion on FINAL keys for the chosen thumbnail (ContentView relies on final URL keys).
+        if let stagedID = selectedThumbnailID,
+           let finalID = attempt.stagedToFinalID[stagedID],
+           let finalURL = attempt.stagedToFinalURL[stagedID] {
             setPrivate(id: finalID, url: finalURL, false)
         }
-// 2) Update thumbnail flags across ALL attachments in this session to reflect selection
-        do {
-            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
-            req.predicate = NSPredicate(format: "session == %@", session.objectID)
-            let existing = try ctx.fetch(req)
-            for a in existing {
-                let id = (a.value(forKey: "id") as? UUID)
-                let isThumb = (id != nil) && (id == chosenFinalThumbID)
-                a.setValue(isThumb, forKey: "isThumbnail")
-            }
-        } catch {
-            // If thumbnail update fails before save, it will be covered by context save error handling outside.
-            print("Failed to update thumbnail flags: ", error)
-        }
 
-        // Note: Do not save the context here; caller will attempt save and handle rollback of files on failure.
+        // P6-I-01 — the deferred score metadata, applied only now that the save is
+        // durable. The shared score-library FILE is never touched; only the
+        // privacy and page entries keyed on the new attachment id.
+        for (attachmentID, url, pages) in pendingMetadataFinalisations {
+            AttachmentPrivacy.setPrivate(id: attachmentID, url: url, false)
+            PDFSelectedPagesStore.setPages(pages, for: attachmentID)
+        }
+        pendingMetadataFinalisations.removeAll()
+
         UserDefaults.standard.removeObject(forKey: namesKey)
         UserDefaults.standard.removeObject(forKey: displayNamesKey)
         UserDefaults.standard.removeObject(forKey: stagedVideoTitlesKey)
-        return stagedToFinalID
     }
 
     func stagedIndexForAttachment(_ target: StagedAttachment) -> Int {

@@ -284,6 +284,15 @@ struct PostRecordDetailsView: View {
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCameraDeniedAlert = false
 
+    /// P6-I-01 — a save that could not complete must say so. Non-nil presents
+    /// the alert; the session stays in review and nothing staged is removed.
+    @State private var attachmentSaveErrorMessage: String? = nil
+
+    /// P6-I-01 — metadata writes held until the save is durable.
+    /// `(attachmentID, url, selectedPages)`. Undo cannot restore a `UserDefaults`
+    /// or privacy-map write, so these must not happen during an attempt.
+    @State var pendingMetadataFinalisations: [(UUID, URL?, [Int]?)] = []
+
     @State var isShowingAttachmentViewer: Bool = false
     @State var viewerStartIndex: Int = 0
 
@@ -740,6 +749,7 @@ struct PostRecordDetailsView: View {
     }
 
     private func commitUsedScoreAttachments(to session: Session, ctx: NSManagedObjectContext) {
+        pendingMetadataFinalisations.removeAll()
         let fileManager = FileManager.default
         var committedScoreIDs = Set<UUID>()
 
@@ -766,8 +776,11 @@ struct PostRecordDetailsView: View {
                 )
 
                 if let finalID = created.value(forKey: "id") as? UUID {
-                    AttachmentPrivacy.setPrivate(id: finalID, url: url, false)
-                    PDFSelectedPagesStore.setPages(selectedPagesForUsedScore(score.id), for: finalID)
+                    // P6-I-01 — DEFERRED. These write the privacy map and
+                    // `UserDefaults`, which the attempt's undo group cannot
+                    // restore, and the URL is a SHARED score-library file. They
+                    // are applied in finalise, once the save is durable.
+                    pendingMetadataFinalisations.append((finalID, url, selectedPagesForUsedScore(score.id)))
                 }
             } catch {
                 #if DEBUG
@@ -1373,6 +1386,7 @@ var body: some View {
                        Button("Open Settings") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
+            .modifier(AttachmentSaveErrorAlert(message: $attachmentSaveErrorMessage))
             .alert(consentState.title,
                    isPresented: Binding(get: { consentState.isPresented },
                                         set: { if !$0 { consentState.dismiss() } }),
@@ -1820,6 +1834,22 @@ var body: some View {
 
     @MainActor
     private func saveToCoreData(visibility: Bool) -> Bool {
+        // P6-I-01 — THE ATTEMPT BOUNDARY OPENS HERE, BEFORE THE FIRST MUTATION.
+        //
+        // It must precede `Session(context:)` below: a group opened later cannot
+        // undo what came earlier, so a failed create would otherwise leave an
+        // empty session pending on the shared context. Everything this save
+        // touches — the session insert, every scalar write, the score
+        // attachments and the staged commit — is registered inside this group,
+        // and nothing else is.
+        let undoTicket: AttemptScopedUndo.Ticket
+        do { undoTicket = try AttemptScopedUndo.open(in: viewContext) }
+        catch {
+            // Nothing has been mutated yet, so there is nothing to undo.
+            attachmentSaveErrorMessage = (error as? LocalizedError)?.errorDescription
+                ?? "This session could not be saved right now. Nothing has been changed — please try again."
+            return false
+        }
         let s = Session(context: viewContext)
         if (s.value(forKey: "id") as? UUID) == nil {
             let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1868,11 +1898,58 @@ var body: some View {
             s.setValue(uid, forKey: "ownerUserID")
         }
         commitUsedScoreAttachments(to: s, ctx: viewContext)
-        // C-82 — consent names staged ids; the publish must name saved ones.
-        let stagedToFinal = commitStagedAttachments(to: s, ctx: viewContext)
+
+        // P6-I-01 — PHASE A. A failed attachment write now reaches this caller
+        // instead of being swallowed. Nothing staged has been consumed, so
+        // returning here costs the member a second tap and nothing else.
+        // P6-I-01 — the commit → save → finalise ORDER lives in
+        // `AttachmentCommitTransaction`, which both editors share and which the
+        // tests drive directly. This site supplies the four steps and reacts to
+        // the outcome; it no longer expresses the ordering itself.
+        var committed: AttachmentCommitAttempt = .empty
+        let outcome = AttachmentCommitTransaction.run(.init(
+            commit: { try commitStagedAttachments(to: s, ctx: viewContext) },
+            save: {
+                try viewContext.save()
+                viewContext.processPendingChanges()
+            },
+            finalise: { attempt in
+                committed = attempt
+                AttemptScopedUndo.release(undoTicket)
+                // Privacy, pages and titles move onto the FINAL ids here, and
+                // the publish below reads exactly those ids.
+                finaliseStagedAttachmentCommit(attempt)
+            },
+            discardAttempt: {
+                // Attempt-local, by undo group opened at the top of this function.
+                // No `viewContext.rollback()` (which discards unrelated pending
+                // changes) and no `isTemporaryID` guessing (which is not
+                // provenance). The inserted session, its scalars and the score
+                // attachments all go back.
+                AttemptScopedUndo.undoAndRelease(undoTicket)
+                // Nothing was written, so there is nothing to apply.
+                pendingMetadataFinalisations.removeAll()
+            }
+        ))
+
+        switch outcome {
+        case .commitFailed(let error):
+            attachmentSaveErrorMessage = (error as? AttachmentCommitFailure)?.errorDescription
+                ?? "Your recording could not be saved to this session. Nothing has been removed — please try saving again."
+            print("Save aborted before commit (timer review): \(error)")
+            return false
+        case .saveFailed(let error):
+            attachmentSaveErrorMessage = "This session could not be saved. Your recordings are still here — please try again."
+            print("Error saving session (timer review): \(error)")
+            return false
+        case .committed:
+            break
+        }
+
+        let attempt = committed
+        let stagedToFinal = attempt.stagedToFinalID
         do {
-            try viewContext.save()
-            viewContext.processPendingChanges()
+
             clearDraftIsPublic()
             // v7.12A — Social Pilot (local-only)
             if appModeManager.canShareWithFollowers {
@@ -1925,8 +2002,13 @@ var body: some View {
                 }
             }
 
-            // Cleanup: remove staged items that were just committed successfully
-            let consumedIDs: [UUID] = stagedAttachments.map { $0.id }
+            // Cleanup: remove staged items THAT WERE ACTUALLY COMMITTED.
+            //
+            // This used to be `stagedAttachments.map(\.id)` — every staged id,
+            // not the committed ones — so a commit that had silently failed
+            // still deleted the member's originals. It is now the attempt's own
+            // list, which is empty when nothing was committed.
+            let consumedIDs: [UUID] = attempt.committedStagedIDs
             if !consumedIDs.isEmpty {
                 StagingStore.removeMany(ids: consumedIDs)
             }
@@ -1944,21 +2026,22 @@ var body: some View {
             notes = ""
             selectedDotIndex = nil
             return true
-        } catch {
-            // On failure, best-effort: remove any files written during this attempt by scanning attachments without permanent IDs
-          
-            if let set = s.attachments as? Set<Attachment> {
-                for a in set {
-                    if a.objectID.isTemporaryID, let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
-                        AttachmentStore.removeIfExists(path: path)
-                    }
-                }
-            }
-            viewContext.rollback()
-            purgeStagedTempFiles()
-            print("Error saving session (timer review): \(error)")
-            return false
         }
+        // P6-I-01 — THE SAVE-FAILURE BRANCH HAS MOVED into the transaction's
+        // `.saveFailed` case above, which rolls this attempt's files back and
+        // calls `discardAttempt`. Two things went with it:
+        //
+        //   * `viewContext.rollback()`, which discarded EVERY pending change on
+        //     the shared context rather than this attempt's;
+        //   * the `objectID.isTemporaryID` sweep, which was never provenance — a
+        //     pre-existing inserted object can carry a temporary id, and a newly
+        //     inserted one can obtain a permanent id — so it could both miss this
+        //     attempt's files and delete somebody else's.
+        //
+        // `discardAttempt` UNDOES the attempt's undo group, opened at the top of
+        // this function before the first mutation. That covers the inserted
+        // session, every scalar write and the score attachments, and it touches
+        // nothing else pending on the shared context.
     }
 
     private func defaultTitle(for inst: Instrument? = nil, activity: SessionActivityType) -> String {

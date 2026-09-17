@@ -145,15 +145,24 @@ final class ImportPathParityTests: XCTestCase {
     /// Every persistence site must consult the validated source format, not the
     /// kind default — that is the difference between `.wav` and an unopenable
     /// `.m4a`.
+    /// P6-I-01 re-expressed and STRENGTHENED. Both editors' commit loops were
+    /// extracted into `AttachmentCommitService`, so the decision is no longer made
+    /// in two places that must agree — it is made in ONE, which both call.
     func testBothCommitPathsUseTheSharedExtensionDecision() {
+        let service = code("AttachmentCommitService.swift")
+        XCTAssertTrue(service.contains("AttachmentImportPolicy.fileExtension(for: att)"),
+                      "the shared commit must take the persisted extension from the shared decision")
+
         for (_, ext) in paths {
             let s = code(ext)
             guard let r = s.range(of: "func commitStagedAttachments(") else {
                 return XCTFail("\(ext): commit path not found")
             }
             let body = String(s[r.lowerBound...].prefix(2500))
-            XCTAssertTrue(body.contains("AttachmentImportPolicy.fileExtension(for:"),
-                          "\(ext): the persisted extension must come from the shared decision")
+            XCTAssertTrue(body.contains("AttachmentCommitService.commit("),
+                          "\(ext): the editor must route through the shared commit")
+            XCTAssertFalse(body.contains("fileExtension(for:") && !body.contains("AttachmentCommitService"),
+                           "\(ext): it must not decide the extension for itself")
         }
     }
 }

@@ -110,8 +110,13 @@ final class LocalAttachmentTitleTests: XCTestCase {
                 if line.contains("persisted[stem] =") { stemKeyed += 1 }
             }
         }
-        XCTAssertEqual(stemKeyed, 2, "the name-based fallback must not be expanded")
-        XCTAssertEqual(direct, 2, "only the two pinned stem fallbacks may write a title store directly")
+        // P6-I-01 STRENGTHENED THIS, it did not relax it. The two stem-keyed
+        // fallbacks used to exist for the case where a committed attachment had no
+        // final id; `AttachmentCommitService` only records an attachment once it
+        // HAS one, so that case cannot arise and the fallbacks were removed.
+        // EVERY title write now goes through the shared id-keyed writer.
+        XCTAssertEqual(stemKeyed, 0, "the name-based fallback must not come back")
+        XCTAssertEqual(direct, 0, "no site may write a title store directly any more")
     }
 
     // MARK: - Behavioural: the writer

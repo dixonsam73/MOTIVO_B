@@ -197,6 +197,7 @@ extension AddEditSessionView {
     }
 
     func commitScoreAttachments_AESV(to session: Session, ctx: NSManagedObjectContext) {
+        pendingScoreFinalisations_AESV.removeAll()
         let fileManager = FileManager.default
         var committedScoreIDs = Set<UUID>()
 
@@ -205,8 +206,10 @@ extension AddEditSessionView {
 
             if let existingAttachmentID = existingScoreAttachmentIDsByScoreID_AESV[score.id] {
                 let url = ScoreLibraryStore.shared.url(for: score)
-                AttachmentPrivacy.setPrivate(id: existingAttachmentID, url: url, false)
-                PDFSelectedPagesStore.setPages(selectedPagesForScore_AESV(score.id), for: existingAttachmentID)
+                // P6-I-01 — DEFERRED. Writing privacy and pages for an already
+                // persisted score here would edit durable state during an attempt
+                // that may yet fail.
+                pendingScoreFinalisations_AESV.append((existingAttachmentID, url, selectedPagesForScore_AESV(score.id), nil))
                 continue
             }
 
@@ -229,9 +232,15 @@ extension AddEditSessionView {
                 )
 
                 if let finalID = created.value(forKey: "id") as? UUID {
-                    AttachmentPrivacy.setPrivate(id: finalID, url: url, false)
-                    PDFSelectedPagesStore.setPages(selectedPagesForScore_AESV(score.id), for: finalID)
-                    existingScoreAttachmentIDsByScoreID_AESV[score.id] = finalID
+                    // P6-I-01 — DEFERRED, and this one is a RETRY defect.
+                    //
+                    // `existingScoreAttachmentIDsByScoreID_AESV[score.id] = finalID`
+                    // used to run here. If the save then failed, the row was
+                    // undone but the map still held its final id — so the retry
+                    // took the "already attached" branch above and SKIPPED
+                    // recreating it, and the session saved without the score.
+                    // The map is now written in finalise, after the save.
+                    pendingScoreFinalisations_AESV.append((finalID, url, selectedPagesForScore_AESV(score.id), score.id))
                 }
             } catch {
                 #if DEBUG
@@ -477,103 +486,74 @@ extension AddEditSessionView {
     /// Adds only newly staged attachments (not those that originated from Core Data) and updates thumbnail flags for all.
     /// Returns staged → saved ids for the attachments this commit CREATED
     /// (C-82). Attachments saved before this edit never enter it.
-    func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) -> [UUID: UUID] {
-        var stagedToFinalID: [UUID: UUID] = [:]
-        // Persist renamed audio stems from the viewer (if any)
-        let audioNamesDict: [String: String] = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+    /// P6-I-01 — PHASE A, a thin wrapper over `AttachmentCommitService`.
+    ///
+    /// This editor commits only items NOT already persisted, and honours a
+    /// renamed audio stem for audio alone. Those two rules are the whole of its
+    /// difference from the other editor, and they stay here.
+    func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) throws -> AttachmentCommitAttempt {
+        let audioNames = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+        let displayNames = (UserDefaults.standard.dictionary(forKey: "stagedAttachmentDisplayNames_temp") as? [String: String]) ?? [:]
+        let chosenThumbID = selectedThumbnailID
+
+        let newItems = stagedAttachments.filter { existingAttachmentIDs.contains($0.id) == false }
+
+        let attempt = try AttachmentCommitService.commit(
+            .init(staged: newItems,
+                  chosenThumbnailID: chosenThumbID,
+                  suggestedName: { att in
+                      guard att.kind == .audio else { return att.id.uuidString }
+                      let raw = (audioNames[att.id.uuidString] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                      return raw.isEmpty ? att.id.uuidString : raw
+                  },
+                  displayName: { displayNames[$0.id.uuidString] }),
+            to: session, ctx: ctx)
+
+        // AESV keys the thumbnail flag on the STAGED id, because an already
+        // persisted attachment can be the chosen thumbnail here.
+        AttachmentCommitService.applyThumbnailFlags(finalThumbnailID: chosenThumbID,
+                                                    to: session, ctx: ctx)
+
+        // NOTHING STAGED IS CLEARED HERE. `stagedAttachments.removeAll()` used to
+        // run on the way out whether or not the loop had failed, and before the
+        // caller had saved anything — so a failure emptied the editor.
+        return attempt
+    }
+
+    /// P6-I-01 — PHASE C. Runs ONLY after the caller's `viewContext.save()` has
+    /// succeeded. Everything here consumes staged state and none of it is
+    /// reversible.
+    func finaliseStagedAttachmentCommit(_ attempt: AttachmentCommitAttempt) {
         let displayNamesKey = "stagedAttachmentDisplayNames_temp"
-        let displayNamesDict: [String: String] = (UserDefaults.standard.dictionary(forKey: displayNamesKey) as? [String: String]) ?? [:]
+        let stagedByID = Dictionary(uniqueKeysWithValues: stagedAttachments.map { ($0.id, $0) })
 
-        // Determine chosen thumbnail (if any)
-        let chosenThumbID = selectedThumbnailID        // NOTE: Do not force a thumbnail when user has cleared ⭐ (PRDV parity).
-        // Feed/detail can still *display* a fallback thumb without persisting isThumbnail.
-        // if chosenThumbID == nil, imageIDs.count == 1 { chosenThumbID = imageIDs.first }
-
-        // Track rollback closures for files written during this commit attempt
-        var rollbacks: [() -> Void] = []
-        var createdAttachments: [Attachment] = []
-
-        // 1) Add ONLY newly staged attachments (skip those that were preloaded from Core Data)
-        for att in stagedAttachments where existingAttachmentIDs.contains(att.id) == false {
-            do {
-                // C-77 — TRUTHFUL EXTENSION, from the ONE place that decides it.
-                // An imported WAV persists as `.wav` and an iPhone HEIC as
-                // `.heic`. Device-measured before this work: an ordinary camera
-                // photo was stored `.jpg` with HEIC bytes, and an imported WAV
-                // as `.m4a`, which AVFoundation then could not open at all.
-                let ext: String = AttachmentImportPolicy.fileExtension(for: att)
-                let suggestedName: String = {
-                    switch att.kind {
-                    case .audio:
-                        // Use renamed audio stem from UserDefaults if provided, otherwise fallback to UUID.
-                        let raw = audioNamesDict[att.id.uuidString] ?? ""
-                        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                        return trimmed.isEmpty ? att.id.uuidString : trimmed
-                    case .image, .video, .file, .pdf:
-                        // Keep existing behavior for non-audio kinds: use UUID stem
-                        return att.id.uuidString
-                    }
-                }()
-                let result = try AttachmentStore.saveDataWithRollback(att.data, suggestedName: suggestedName, ext: ext)
-                rollbacks.append(result.rollback)
-                let displayName = displayNamesDict[att.id.uuidString]
-                let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
-                let created = try AttachmentStore.addAttachment(
-                    kind: att.kind,
-                    filePath: result.path,
-                    to: session,
-                    isThumbnail: isThumb,
-                    displayName: displayName,
-                    ctx: ctx
-                )
-                createdAttachments.append(created)
-
-                // --- PATCH 8G-AESV: migrate privacy from staged → persisted ---
-                let stagedURL = surrogateURL(for: att)
-                let persistedURL = resolveStoredFileURL(at: result.path)
-                if let newID = created.value(forKey: "id") as? UUID {
-                    stagedToFinalID[att.id] = newID
-                    migratePrivacy_AESV(
-                        fromStagedID: att.id,
-                        stagedURL: stagedURL,
-                        toNewID: newID,
-                        newURL: persistedURL
-                    )
-                    PDFSelectedPagesStore.migratePages(from: att.id, stagedPages: att.selectedPages, to: newID)
-                }
-                // --- end PATCH ---
-
-            } catch {
-                // Roll back any files written so far and discard created (unsaved) attachments
-                for rb in rollbacks { rb() }
-                rollbacks.removeAll()
-                for a in createdAttachments { ctx.delete(a) }
-                createdAttachments.removeAll()
-                print("Attachment commit failed: ", error)
-                break
-            }
+        for stagedID in attempt.committedStagedIDs {
+            guard let newID = attempt.stagedToFinalID[stagedID] else { continue }
+            let staged = stagedByID[stagedID]
+            migratePrivacy_AESV(
+                fromStagedID: stagedID,
+                stagedURL: staged.flatMap { surrogateURL(for: $0) },
+                toNewID: newID,
+                newURL: attempt.stagedToFinalURL[stagedID]
+            )
+            PDFSelectedPagesStore.migratePages(from: stagedID, stagedPages: staged?.selectedPages, to: newID)
         }
 
-        // 2) Update thumbnail flags across ALL existing attachments to reflect selection
-        do {
-            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
-            req.predicate = NSPredicate(format: "session == %@", session.objectID)
-            let existing = try ctx.fetch(req)
-            for a in existing {
-                let id = (a.value(forKey: "id") as? UUID)
-                let isThumb = (id != nil) && (id == chosenThumbID)
-                a.setValue(isThumb, forKey: "isThumbnail")
-            }
-        } catch {
-            print("Failed to update thumbnail flags: ", error)
+        // P6-I-01 — the deferred score state, applied only now that the save is
+        // durable. `scoreID` is non-nil only for scores this attempt CREATED, so
+        // a retry after a failure still sees them as unattached and recreates them.
+        for (attachmentID, url, pages, scoreID) in pendingScoreFinalisations_AESV {
+            AttachmentPrivacy.setPrivate(id: attachmentID, url: url, false)
+            PDFSelectedPagesStore.setPages(pages, for: attachmentID)
+            if let scoreID { existingScoreAttachmentIDsByScoreID_AESV[scoreID] = attachmentID }
         }
+        pendingScoreFinalisations_AESV.removeAll()
+        privacyMap = AttachmentPrivacy.currentMap()
 
-        // Clear the staging area after successful commit creation (actual persistence depends on context.save())
         UserDefaults.standard.removeObject(forKey: "stagedAudioNames_temp")
         UserDefaults.standard.removeObject(forKey: displayNamesKey)
         stagedAttachments.removeAll()
         existingAttachmentIDs.removeAll()
-        return stagedToFinalID
     }
 
     // Added helpers for attachment viewer integration:
