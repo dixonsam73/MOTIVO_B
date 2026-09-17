@@ -1511,8 +1511,6 @@ private var sessionSetupSection: some View {
          guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
          let display = name.trimmingCharacters(in: .whitespacesAndNewlines)
          // Connected discovery is always enabled. Relationship privacy is handled by explicit follow approval.
-         let enabled = true
-         let followRequestsEnabled = true
          let acct = accountIDText.trimmingCharacters(in: .whitespacesAndNewlines)
          let storedAccountID = ProfileStore.accountID(for: backendID).trimmingCharacters(in: .whitespacesAndNewlines)
          // Account ID is user-scoped. During sign-out/delete/recreate transitions, accountIDText can briefly

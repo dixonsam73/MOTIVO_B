@@ -708,7 +708,7 @@ enum StagingStore {
     /// an `await` or a main-actor hop, and never taken re-entrantly: `loadRefs`/`saveRefs`
     /// do not take it. How long the main thread can wait under contention is NOT bounded
     /// or measured.
-    nonisolated(unsafe) private static let refsLock = NSLock()
+    nonisolated private static let refsLock = NSLock()
 
     nonisolated private static func withRefsLock<T>(_ body: () throws -> T) rethrows -> T {
         refsLock.lock()
