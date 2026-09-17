@@ -1,0 +1,16 @@
+{
+  "MOTIVO/SessionSyncQueue.swift": "eb0a199811bc1159332935f8f95c2df51621e02f0d94146afd969e5abf2af978",
+  "MOTIVO/SavedList.swift": "55a6066d08a8e7aa7e09cabb0e9a3e738479de6e8d22c7e162d5ec8ee9e92e22",
+  "MOTIVO/TasksManagerView.swift": "7c24ccd7820f91c0d4e945b73dd424b873939d0dc68d94a49d1603d9f8c3965d",
+  "MOTIVO/BackendShim.swift": "7e97f13ad31fc0d0ad8e2c232160f5f1920445b3b635d1b826d9a11c45e3f1c3",
+  "MOTIVO/AuthManager.swift": "bb33d7b994e65c1b37b6527ecd284c70b1b8f1a8edb4de5a90fb16339ca9bad8",
+  "MOTIVO/MOTIVOApp.swift": "c347c767f650bda5d3b5926bed14a4b7f6c02bcf33f4459f740664807f55e3fa",
+  "MOTIVO/PostRecordDetailsView+Attachments.swift": "f8707bef18609b98cc81eb84a6499a4f9c613a438b133511019205d621deac27",
+  "MOTIVO/PostRecordDetailsView.swift": "3f6cef5bcb041965b207cd029a491e8bd94e50a8ce3d9a871560b06f07820eea",
+  "MOTIVO/AddEditSessionView+Attachments.swift": "00a79a952ed24e13433433cc696eea0198ba8ea02083db05388931d2e8d5f2af",
+  "MOTIVO/AddEditSessionView.swift": "2959dc5ffd11389ee3b168459b7daf610d1e1a97bee51cb4501049beba4dea2c",
+  "MOTIVO/StagingStore.swift": "40f68dc1df30152a8f0eb765ddd431fd671acf97b0b939567367f35f331e0b58",
+  "MOTIVO/MembershipAttestationCoordinator.swift": "fdb01c1dddd2029c629e5be73d8679a7989c6a64417cfdfc786ed53f28a853ba",
+  "MOTIVO/VideoRecorderView.swift": "1b1730905bd0bdbde060e98eb760a85b3c8b0881533ef113837a73a15af6ee42",
+  "MOTIVO/DroneEngine.swift": "cdb47377bba79977cecdb365fa71a6a9023e3ad63acb21020e89d8a25cd3a769"
+}

@@ -1,0 +1,82 @@
+Total warning emissions: 155
+App warning emissions: 154
+Unique exact app diagnostics: 77
+Deprecated exact app diagnostics: 77
+
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/AddEditSessionView+Attachments.swift:640:46: warning: 'duration' was deprecated in iOS 16.0: Use load(.duration) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/AddEditSessionView.swift:696:41: warning: 'main' was deprecated in iOS 26.0: Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context.
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/AppleRevocationService.swift:271:26: warning: 'init()' was deprecated in iOS 26.0: Use init(windowScene:) instead.
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/AttachmentStore.swift:73:30: warning: 'duration' was deprecated in iOS 16.0: Use load(.duration) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/AttachmentStore.swift:76:30: warning: 'copyCGImage(at:actualTime:)' was deprecated in iOS 18.0: Use generateCGImageAsynchronouslyForTime:completionHandler: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/AttachmentViewerView.swift:2185:38: warning: 'tracks(withMediaType:)' was deprecated in iOS 16.0: Use loadTracks(withMediaType:) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/AttachmentViewerView.swift:2186:45: warning: 'naturalSize' was deprecated in iOS 16.0: Use load(.naturalSize) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/AttachmentViewerView.swift:2186:72: warning: 'preferredTransform' was deprecated in iOS 16.0: Use load(.preferredTransform) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/BackendSessionDetailView.swift:332:37: warning: '+' was deprecated in iOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")`
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/CameraCaptureView.swift:176:25: warning: 'isHighResolutionCaptureEnabled' was deprecated in iOS 16.0: Use maxPhotoDimensions instead.
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/CameraCaptureView.swift:207:23: warning: 'isVideoOrientationSupported' was deprecated in iOS 17.0: Use -isVideoRotationAngleSupported: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/CameraCaptureView.swift:208:24: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/CameraCaptureView.swift:327:23: warning: 'isVideoOrientationSupported' was deprecated in iOS 17.0: Use -isVideoRotationAngleSupported: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/CameraCaptureView.swift:328:24: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/CameraCaptureView.swift:332:46: warning: 'AVCaptureVideoOrientation' was deprecated in iOS 17.0: Use AVCaptureDeviceRotationCoordinator instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/CameraCaptureView.swift:337:14: warning: 'interfaceOrientation' was deprecated in iOS 26.0: Use effectiveGeometry.interfaceOrientation instead.
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/CommentsView.swift:440:55: warning: '+' was deprecated in iOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")`
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/CommentsView.swift:440:69: warning: '+' was deprecated in iOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")`
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/CommentsView.swift:441:36: warning: '+' was deprecated in iOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")`
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/CommentsView.swift:443:36: warning: '+' was deprecated in iOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")`
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/ContentViewJournalYearMonthRow.swift:114:29: warning: '+' was deprecated in iOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")`
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/ContentViewRemotePostRowTwin.swift:435:29: warning: '+' was deprecated in iOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")`
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/ContentViewSessionRow.swift:648:29: warning: '+' was deprecated in iOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")`
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/ContentViewThoughtRow.swift:158:21: warning: '+' was deprecated in iOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")`
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MeView.swift:2148:37: warning: 'main' was deprecated in iOS 26.0: Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context.
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MeView.swift:2372:37: warning: 'main' was deprecated in iOS 26.0: Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context.
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MeView.swift:2625:37: warning: 'main' was deprecated in iOS 26.0: Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context.
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1159:38: warning: 'duration' was deprecated in iOS 16.0: Use load(.duration) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1207:42: warning: 'exportPresets(compatibleWith:)' was deprecated in iOS 16.0
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1211:62: warning: 'exportPresets(compatibleWith:)' was deprecated in iOS 16.0
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1265:22: warning: 'exportAsynchronously(completionHandler:)' was deprecated in iOS 18.0
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1278:37: warning: 'status' was deprecated in iOS 18.0: Use states(updateInterval:) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1302:118: warning: 'error' was deprecated in iOS 18.0: Use export(to:as:) async throws instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1302:57: warning: 'status' was deprecated in iOS 18.0: Use states(updateInterval:) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1303:91: warning: 'error' was deprecated in iOS 18.0: Use export(to:as:) async throws instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1314:96: warning: 'AVMutableVideoComposition' was deprecated in iOS 26.0: Use AVVideoComposition.Configuration instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1315:37: warning: 'tracks(withMediaType:)' was deprecated in iOS 16.0: Use loadTracks(withMediaType:) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1317:37: warning: 'naturalSize' was deprecated in iOS 16.0: Use load(.naturalSize) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1318:39: warning: 'preferredTransform' was deprecated in iOS 16.0: Use load(.preferredTransform) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1332:31: warning: 'AVMutableVideoCompositionInstruction' was deprecated in iOS 26.0: Use AVVideoCompositionInstruction.Configuration instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1333:79: warning: 'duration' was deprecated in iOS 16.0: Use load(.duration) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1335:36: warning: 'AVMutableVideoCompositionLayerInstruction' was deprecated in iOS 26.0: Use AVVideoCompositionLayerInstruction.Configuration instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/MediaTrimView.swift:1339:31: warning: 'AVMutableVideoComposition' was deprecated in iOS 26.0: Use AVVideoComposition.Configuration instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/PostRecordDetailsView+Attachments.swift:1220:58: warning: 'duration' was deprecated in iOS 16.0: Use load(.duration) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/PostRecordDetailsView+Attachments.swift:343:70: warning: 'duration' was deprecated in iOS 16.0: Use load(.duration) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/PostRecordDetailsView.swift:1275:45: warning: 'main' was deprecated in iOS 26.0: Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context.
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/PostRecordDetailsView.swift:1309:14: warning: 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/PracticeTimerView.swift:4677:45: warning: 'duration' was deprecated in iOS 16.0: Use load(.duration) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/PracticeTimerView.swift:4806:30: warning: 'duration' was deprecated in iOS 16.0: Use load(.duration) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/PracticeTimerView.swift:4811:33: warning: 'copyCGImage(at:actualTime:)' was deprecated in iOS 18.0: Use generateCGImageAsynchronouslyForTime:completionHandler: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/SessionDetailView.swift:1154:70: warning: 'duration' was deprecated in iOS 16.0: Use load(.duration) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/SessionDetailView.swift:985:37: warning: '+' was deprecated in iOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")`
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:1163:76: warning: 'isVideoOrientationSupported' was deprecated in iOS 17.0: Use -isVideoRotationAngleSupported: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:1164:22: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:1165:53: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:1503:39: warning: 'duration' was deprecated in iOS 16.0: Use load(.duration) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:1594:51: warning: 'duration' was deprecated in iOS 16.0: Use load(.duration) instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:1605:45: warning: 'copyCGImage(at:actualTime:)' was deprecated in iOS 18.0: Use generateCGImageAsynchronouslyForTime:completionHandler: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:1802:23: warning: 'isVideoOrientationSupported' was deprecated in iOS 17.0: Use -isVideoRotationAngleSupported: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:1803:55: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:2095:46: warning: 'isVideoOrientationSupported' was deprecated in iOS 17.0: Use -isVideoRotationAngleSupported: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:2096:22: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:2103:42: warning: 'isVideoOrientationSupported' was deprecated in iOS 17.0: Use -isVideoRotationAngleSupported: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:2104:18: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:2113:41: warning: 'AVCaptureVideoOrientation' was deprecated in iOS 17.0: Use AVCaptureDeviceRotationCoordinator instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:2124:55: warning: 'AVCaptureVideoOrientation' was deprecated in iOS 17.0: Use AVCaptureDeviceRotationCoordinator instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:2127:21: warning: 'interfaceOrientation' was deprecated in iOS 26.0: Use effectiveGeometry.interfaceOrientation instead.
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:460:42: warning: 'AVCaptureVideoOrientation' was deprecated in iOS 17.0: Use AVCaptureDeviceRotationCoordinator instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:798:21: warning: 'isVideoOrientationSupported' was deprecated in iOS 17.0: Use -isVideoRotationAngleSupported: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:799:22: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:800:53: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:871:25: warning: 'isVideoOrientationSupported' was deprecated in iOS 17.0: Use -isVideoRotationAngleSupported: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:872:26: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:873:57: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:919:25: warning: 'isVideoOrientationSupported' was deprecated in iOS 17.0: Use -isVideoRotationAngleSupported: instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:920:26: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead
+/Users/samueldixon/Documents/Xcode projects/MOTIVO_B/MOTIVO/MOTIVO/VideoRecorderView.swift:921:57: warning: 'videoOrientation' was deprecated in iOS 17.0: Use -videoRotationAngle instead

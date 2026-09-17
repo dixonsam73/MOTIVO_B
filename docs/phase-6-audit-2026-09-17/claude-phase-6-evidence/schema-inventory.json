@@ -1,0 +1,52 @@
+[
+  {
+    "file": "supabase/schema/column_grants.json",
+    "rows": 562,
+    "sha256": "cd90002e5114e2420eaf232e344e3e26fdc42f00b2fba6e69224d7062a87d1d4"
+  },
+  {
+    "file": "supabase/schema/columns.json",
+    "rows": 144,
+    "sha256": "b702eec1074d7a909e34f4488491571f8fe325c4c98ceb16f94c6c3d70cad633"
+  },
+  {
+    "file": "supabase/schema/constraints.json",
+    "rows": 71,
+    "sha256": "03ff1e58aab01c698bcc282b6e7652e0b0adfc07149601f7af799e4c5df85207"
+  },
+  {
+    "file": "supabase/schema/function_grants.json",
+    "rows": 123,
+    "sha256": "89f46ce6263f9de39f0212a31bfd6015f2e1ffe367d8718f13928f2db4af221b"
+  },
+  {
+    "file": "supabase/schema/functions.json",
+    "rows": 41,
+    "sha256": "74875dc9b26177b3787d857f956fa73589cf01e50b3515c85f39527623a2e42d"
+  },
+  {
+    "file": "supabase/schema/policies.json",
+    "rows": 33,
+    "sha256": "9ec2a1297261ca1dbca2cd5fc547827b75538b606b49c1a4b1e0fd52d0434305"
+  },
+  {
+    "file": "supabase/schema/rls_enabled.json",
+    "rows": 15,
+    "sha256": "87508ea1b1c9bd351c98588c9d3fad3d6695d3b7600abe4c26ec31f67ab46ee6"
+  },
+  {
+    "file": "supabase/schema/storage_buckets.json",
+    "rows": 2,
+    "sha256": "194f3371bed17777a8c45722ee44b15af584f486312121bcfc9e2579a8ad1c2c"
+  },
+  {
+    "file": "supabase/schema/table_grants.json",
+    "rows": 102,
+    "sha256": "56580b8df635aab82a2edf05687c3f5eefee8c334c9555111d300a0e73c56a18"
+  },
+  {
+    "file": "supabase/schema/triggers.json",
+    "rows": 12,
+    "sha256": "e3b5c74515b85c2c5d4d54dfe50e0b0e0d149f66c598d3b87fc5ff6c07a1d388"
+  }
+]

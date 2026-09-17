@@ -1,0 +1,7 @@
+/private/tmp/etudes-phase6-audit/ProbeStaging.swift:77:13: warning: initialization of immutable value 'fm' was never used; consider replacing with assignment to '_' or removing it [#no-usage]
+ 75 |         if UnitTestHost.isActive, let root = unitTestRootOverride { return root }
+ 76 |         #endif
+ 77 |         let fm = FileManager.default
+    |             `- warning: initialization of immutable value 'fm' was never used; consider replacing with assignment to '_' or removing it [#no-usage]
+ 78 |         return URL(fileURLWithPath: "/private/tmp/etudes-phase6-audit/commit-staging", isDirectory: true)
+ 79 |     }

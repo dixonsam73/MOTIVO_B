@@ -1,0 +1,5 @@
+Attachment commit failed:  Error Domain=NSCocoaErrorDomain Code=512 "The file “commit-write-blocker” couldn’t be saved in the folder “etudes-phase6-audit”." UserInfo={NSFilePath=/private/tmp/etudes-phase6-audit/commit-write-blocker, NSURL=file:///private/tmp/etudes-phase6-audit/commit-write-blocker/, NSUnderlyingError=0xc48c0cc00 {Error Domain=NSPOSIXErrorDomain Code=21 "Is a directory"}}
+COMMIT failed attachment write returned normally; session saved; mapping count 0
+COMMIT staged original before success cleanup true
+COMMIT staged original after success cleanup false
+COMMIT saved attachment count 0

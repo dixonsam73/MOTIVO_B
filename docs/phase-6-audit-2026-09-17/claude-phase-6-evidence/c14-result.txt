@@ -1,0 +1,9 @@
+C-14 discriminator
+==========================================================================
+A1   targeted FollowStore sites passing an identifier argument       0
+A2   targeted diagnostic events still present                        8
+A3a  SHIPPING sites passing a backend user ID / handle / name / email    0
+A3b  SHIPPING sites passing ownerKey (declared exclusion)            2
+A4   DEBUG-only NSLog sites                                         52
+A5   SHIPPING NSLog call sites (total)                              62
+==========================================================================

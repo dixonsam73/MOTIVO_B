@@ -1,0 +1,2 @@
+COORDINATOR while B pending: isAttesting false outcome Optional(main.MembershipAttestationService.Outcome.result("old-A"))
+COORDINATOR service calls before B completes: ["old-A", "new-B", "third"]

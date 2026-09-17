@@ -1,0 +1,5 @@
+LIST adoption reader correctly refuses damaged library
+LIST screen loader returned: 0
+LIST original bytes preserved: false
+LIST replaced bytes: []
+LIST valid control preserved: true
