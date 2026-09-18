@@ -36,6 +36,10 @@ final class P6I02OwnershipBehaviourTests: XCTestCase {
     private let ownerB = "00000000-0000-0000-0000-0000000c8702"
 
     private func signIn(_ uid: String) {
+        // P6-I-02 Unit 2b. A sign-in changes BOTH the recorded identity and the
+        // token, and the queue now sends only as a token whose subject is the
+        // owner — so the fixture changes both, as the app does.
+        NetworkManager.shared.setBearerToken(QueueStubFixture.token(sub: uid, jti: "signin-\(uid.suffix(4))"))
         UserDefaults.standard.set(uid, forKey: "supabaseUserID_v1")
         queue.noteIdentityChanged(reason: "test:identity→\(uid.suffix(4))")
         XCTAssertEqual(SessionSyncQueue.currentOwner(), uid, "fixture: the app must read this identity")

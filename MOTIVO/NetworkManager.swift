@@ -166,14 +166,10 @@ public final class NetworkManager {
     }
 
     
-    public func request(
-        path: String,
-        method: String,
-        query: [URLQueryItem]? = nil,
-        jsonBody: Data? = nil,
-        headers: [String:String] = [:]
-    ) async -> Result<Data, Error> {
-
+    /// URL construction shared by the ambient `request` and the bound path, so the
+    /// two can never build a different URL for the same path. Extracted verbatim.
+    private func buildURLRequest(path: String, method: String, query: [URLQueryItem]?,
+                                 jsonBody: Data?) -> Result<URLRequest, Error> {
         guard let baseURL else {
             return .failure(NetworkError.notConfigured)
         }
@@ -210,6 +206,23 @@ public final class NetworkManager {
         if let jsonBody {
             baseRequest.httpBody = jsonBody
         }
+        return .success(baseRequest)
+    }
+
+    public func request(
+        path: String,
+        method: String,
+        query: [URLQueryItem]? = nil,
+        jsonBody: Data? = nil,
+        headers: [String:String] = [:]
+    ) async -> Result<Data, Error> {
+
+        let baseRequest: URLRequest
+        switch buildURLRequest(path: path, method: method, query: query, jsonBody: jsonBody) {
+        case .success(let built): baseRequest = built
+        case .failure(let error): return .failure(error)
+        }
+        let finalURL = baseRequest.url!
 
         func performOnce() async -> Result<Data, Error> {
             var request = baseRequest
@@ -869,5 +882,218 @@ enum ConnectedAccountDeletionService {
 
         let body = String(data: data, encoding: .utf8) ?? ""
         throw DeletionError.unexpectedResponse(body)
+    }
+}
+
+// MARK: - P6-I-02 Unit 2b — identity-bound transport
+
+/// What a queued operation is bound to, for its whole life.
+///
+/// The EXPECTED OWNER comes from the queued payload and is normalised and
+/// validated here, once, so no later phase can re-derive it from whoever happens
+/// to be signed in. The GATE is re-evaluated before every send, every refresh and
+/// every retry; it is how an operation learns that the identity beneath it has
+/// changed.
+public struct OperationBinding {
+    public let expectedOwner: String
+    public let isStillCurrent: @MainActor () -> Bool
+
+    /// nil unless `rawOwner` is a UUID — the only shape a backend identity has.
+    public init?(expectedOwner rawOwner: String?, isStillCurrent: @escaping @MainActor () -> Bool) {
+        guard let owner = rawOwner?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              UUID(uuidString: owner) != nil else { return nil }
+        self.expectedOwner = owner
+        self.isStillCurrent = isStillCurrent
+    }
+}
+
+/// Why a bound request was not sent, or not retried. ALWAYS a hold for the
+/// queue: never success, never "already absent", never a duplicate-409.
+public enum TransportIdentityError: Error, Equatable, CustomStringConvertible {
+    /// No token, a malformed token, or a token whose subject is not the owner.
+    case subjectMismatch
+    /// The operation's gate failed before a send, a refresh or a retry.
+    case identityChanged
+    /// A caller tried to supply its own Authorization header.
+    case authorizationHeaderOverride
+
+    public var description: String {
+        switch self {
+        case .subjectMismatch: return "TransportIdentityError.subjectMismatch"
+        case .identityChanged: return "TransportIdentityError.identityChanged"
+        case .authorizationHeaderOverride: return "TransportIdentityError.authorizationHeaderOverride"
+        }
+    }
+}
+
+/// ONE attempt's credential. Built immediately before one send and discarded
+/// after it. It is OMITTED from the queue's persistence model — the payload
+/// carries an owner, never a credential — and that is audited in source and
+/// checked by test against the queue file; not conforming to `Codable` is not
+/// itself what makes persistence impossible. Its description redacts the token,
+/// which stops THIS value being interpolated into a log, and nothing more. The
+/// token is `fileprivate`: nothing outside this file can read it.
+struct RequestCredential: CustomStringConvertible, CustomDebugStringConvertible {
+    let subject: String
+    fileprivate let accessToken: String
+    var description: String { "RequestCredential(subject: \(subject), token: <redacted>)" }
+    var debugDescription: String { description }
+}
+
+/// Registers a URLSession task so a cancellation arriving from ANY thread, at ANY
+/// moment — including before the task exists — cancels it. Cancelling a request
+/// stops waiting for it; it does not undo whatever the server already did.
+private final class InFlightRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: URLSessionTask?
+    private var cancelled = false
+
+    /// false if cancellation already arrived: the caller must not start the task.
+    func register(_ task: URLSessionTask) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if cancelled { return false }
+        self.task = task
+        return true
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let task = self.task
+        lock.unlock()
+        task?.cancel()
+    }
+}
+
+extension NetworkManager {
+
+    /// The subject of the token held RIGHT NOW, normalised, or nil.
+    @MainActor
+    fileprivate var currentSubject: String? {
+        guard let token = bearerToken, !token.isEmpty else { return nil }
+        return AuthManager.supabaseUserIDFromAccessToken(token)?.lowercased()
+    }
+
+    /// The token held now, IF its subject is `owner`. nil for no token, a
+    /// malformed token, a non-UUID subject, or somebody else's token.
+    @MainActor
+    func credential(for owner: String) -> RequestCredential? {
+        guard let token = bearerToken, !token.isEmpty,
+              let subject = AuthManager.supabaseUserIDFromAccessToken(token)?.lowercased(),
+              subject == owner else { return nil }
+        return RequestCredential(subject: subject, accessToken: token)
+    }
+
+    /// A request sent AS `binding.expectedOwner`, or not at all.
+    ///
+    /// Differs from `request(...)` in exactly these ways, and in nothing else:
+    ///  • every attempt takes a FRESH credential for the expected owner and never
+    ///    reads the ambient token again while it is built and sent;
+    ///  • the gate is checked immediately before every send, and around the
+    ///    refresh — so a stale operation can neither send, nor refresh whichever
+    ///    identity replaced its owner, nor retry under it;
+    ///  • a caller-supplied Authorization header is refused;
+    ///  • the refresh policy is otherwise UNCHANGED: 401 only, never 403, at most
+    ///    one retry.
+    @MainActor
+    func boundRequest(path: String, method: String, query: [URLQueryItem]? = nil,
+                      jsonBody: Data? = nil, headers: [String: String] = [:],
+                      binding: OperationBinding) async -> Result<Data, Error> {
+        if headers.keys.contains(where: { $0.caseInsensitiveCompare("Authorization") == .orderedSame }) {
+            return .failure(TransportIdentityError.authorizationHeaderOverride)
+        }
+        let baseRequest: URLRequest
+        switch buildURLRequest(path: path, method: method, query: query, jsonBody: jsonBody) {
+        case .success(let built): baseRequest = built
+        case .failure(let error): return .failure(error)
+        }
+
+        func attempt() async -> Result<Data, Error> {
+            // THE FINAL CHECKS AND THE DISPATCH SHARE ONE SYNCHRONOUS SEGMENT.
+            // `withTaskCancellationHandler` and `withCheckedContinuation` both run
+            // their bodies immediately on the caller's actor, so `resume()` is
+            // called on the main actor with no suspension after the cancellation
+            // check, the gate and the credential.
+            //
+            // CANCELLATION IS PRESERVED. `URLSession.data(for:)` propagated a
+            // cancelled task to the request; the continuation form does not by
+            // itself, so the task is registered and cancelled explicitly — and a
+            // task already cancelled starts nothing.
+            if Task.isCancelled { return .failure(CancellationError()) }
+            guard binding.isStillCurrent() else { return .failure(TransportIdentityError.identityChanged) }
+            guard let credential = credential(for: binding.expectedOwner) else {
+                return .failure(TransportIdentityError.subjectMismatch)
+            }
+            var request = baseRequest
+            var allHeaders: [String: String] = [:]
+            if let apiKey = authToken, !apiKey.isEmpty { allHeaders["apikey"] = apiKey }
+            if jsonBody != nil { allHeaders["Content-Type"] = "application/json" }
+            for (k, v) in headers { allHeaders[k] = v }
+            // Set LAST, so nothing merged above can override it.
+            allHeaders["Authorization"] = "Bearer \(credential.accessToken)"
+            for (k, v) in allHeaders { request.setValue(v, forHTTPHeaderField: k) }
+
+            let inFlight = InFlightRequest()
+            return await withTaskCancellationHandler {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Result<Data, Error>, Never>) in
+                let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                    if let urlError = error as? URLError, urlError.code == .cancelled {
+                        continuation.resume(returning: .failure(CancellationError()))
+                        return
+                    }
+                    if let error {
+                        continuation.resume(returning: .failure(NetworkError.transportError(String(describing: error))))
+                        return
+                    }
+                    let body = data ?? Data()
+                    if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                        continuation.resume(returning: .failure(NetworkError.httpError(status: http.statusCode,
+                                                                                         body: String(data: body, encoding: .utf8))))
+                        return
+                    }
+                    continuation.resume(returning: .success(body))
+                }
+                guard inFlight.register(task) else {
+                    continuation.resume(returning: .failure(CancellationError()))
+                    return
+                }
+                task.resume()
+                }
+            } onCancel: {
+                inFlight.cancel()
+            }
+        }
+
+        let first = await attempt()
+        guard case .failure(let error) = first,
+              let networkError = error as? NetworkError,
+              case .httpError(let status, _) = networkError,
+              status == 401 else {
+            return first
+        }
+
+        // A cancelled operation neither refreshes nor retries.
+        if Task.isCancelled { return .failure(CancellationError()) }
+
+        // BEFORE THE REFRESH: a stale operation must not refresh whichever
+        // identity replaced its owner. Checked on the gate AND on the token
+        // actually held now.
+        guard binding.isStillCurrent(), currentSubject == binding.expectedOwner else {
+            return .failure(TransportIdentityError.identityChanged)
+        }
+        guard let handler = onAuthChallenge else { return first }
+        let refreshed = await handler()
+
+        // AFTER THE REFRESH, whatever it returned: an operation whose gate or
+        // owner no longer holds is STALE, which is not the same outcome as a
+        // genuine unchanged-owner 401 — though neither retries. A→B→A during the
+        // refresh fails here on generation even though the subject is A again.
+        guard binding.isStillCurrent(), currentSubject == binding.expectedOwner else {
+            return .failure(TransportIdentityError.identityChanged)
+        }
+        guard refreshed else { return first }
+        if Task.isCancelled { return .failure(CancellationError()) }
+        // Exactly one retry. A second 401 is returned as it is: no second refresh.
+        return await attempt()
     }
 }

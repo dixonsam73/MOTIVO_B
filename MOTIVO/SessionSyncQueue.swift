@@ -636,17 +636,43 @@ public final class SessionSyncQueue: ObservableObject {
                 }
                 // C-87. Superseded before it was sent: the next pass sends the newer intent.
                 guard revisions[key(payload)] == revision else { continue }
+
+                // P6-I-02 Unit 2b. BIND THE OPERATION TO THE OWNER OF THE WORK.
+                //
+                // Every request this item makes — each phase, and any retry — is
+                // sent AS this owner or not at all. The gate is re-evaluated by the
+                // transport before every send, refresh and retry, so an identity
+                // change, a reset or a latched store stops the operation at its next
+                // request rather than letting later phases go out as someone else.
+                let expectedOwner = Self.normalisedOwner(payload.ownerUserID)
+                guard let binding = OperationBinding(expectedOwner: expectedOwner, isStillCurrent: { [weak self] in
+                    guard let self else { return false }
+                    return flushGeneration == self.generation
+                        && !self.isFactoryResetting
+                        && self.reconcileState.isOK
+                        && Self.currentOwner() == expectedOwner
+                }) else {
+                    // Not a backend identity. Held, never sent, never acknowledged.
+                    BackendLogger.notice("Flush holding • owner is not a backend identity • postID=\(payload.id.uuidString)")
+                    continue
+                }
+
                 // C-61 / P4-U2a-2. An .unshare converges to REMOVAL and is
                 // dequeued only once the row is confirmed absent; anything else
                 // stays queued for the next launch/foreground flush. The
                 // .publish path below is untouched.
                 if payload.op == .unshare {
-                    let unshare = await BackendEnvironment.shared.publish.unsharePost(payload.id)
+                    let unshare = await BackendEnvironment.shared.publish.unsharePost(payload.id, binding: binding)
                     switch unshare {
                     case .success:
                         NSLog("[SessionSyncQueue] unshare converged • postID=%@", payload.id.uuidString)
                         BackendLogger.notice("Unshare converged • postID=\(payload.id.uuidString)")
                         self.acknowledge(payload, revision: revision, generation: flushGeneration)
+                    case .failure(let error) where error is TransportIdentityError || error is CancellationError:
+                        // P6-I-02 Unit 2b. Not sent as its owner, or cancelled: HELD.
+                        // The item stays and nothing is acknowledged. Cancellation
+                        // stops waiting; it does not undo what the server did.
+                        BackendLogger.notice("Unshare held • postID=\(payload.id.uuidString) • \(String(describing: error))")
                     case .failure(let error):
                         // DELIBERATELY NO RETRY CAP AND NO BACKOFF. Abandoning
                         // an owed privacy withdrawal after N attempts is the
@@ -657,12 +683,18 @@ public final class SessionSyncQueue: ObservableObject {
                     continue
                 }
 
-                let result = await BackendEnvironment.shared.publish.uploadPost(payload)
+                let result = await BackendEnvironment.shared.publish.uploadPost(payload, binding: binding)
                 switch result {
                 case .success:
                     NSLog("[SessionSyncQueue] upload success • postID=%@", payload.id.uuidString)
                     BackendLogger.notice("Preview upload success • postID=\(payload.id.uuidString)")
                     self.acknowledge(payload, revision: revision, generation: flushGeneration)
+                case .failure(let error) where error is TransportIdentityError || error is CancellationError:
+                    // P6-I-02 Unit 2b. CHECKED BEFORE THE DUPLICATE-409 HEURISTIC
+                    // BELOW, which string-matches the error's description and treats
+                    // a match as SUCCESS. An operation that was not sent as its owner
+                    // is held; it can never be acknowledged as a duplicate.
+                    BackendLogger.notice("Publish held • postID=\(payload.id.uuidString) • \(String(describing: error))")
                 case .failure(let error):
                     NSLog("[SessionSyncQueue] upload failed • postID=%@ • error=%@", payload.id.uuidString, error.localizedDescription)
                     BackendLogger.notice("Preview upload failed • postID=\(payload.id.uuidString) • error=\(error.localizedDescription)")

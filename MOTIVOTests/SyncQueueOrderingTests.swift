@@ -61,9 +61,56 @@ final class QueueStubServer: URLProtocol {
     private static var holds = Set<String>()
     private static var failing = Set<String>()
 
+    // P6-I-02 Unit 2b — ADDITIVE. Who each request was sent AS, the exact URL it
+    // went to, one-shot forced statuses, and attachment refs a GET should report.
+    private static var auth: [(key: String, sub: String?, jti: String?)] = []
+    private static var urls: [(key: String, url: String)] = []
+    private static var forced: [String: [Int]] = [:]
+    private static var refs: [String: [String]] = [:]
+    private static var rowOwners: [String: String] = [:]
+
+    /// P6-I-02 Unit 2b. Set when the CLIENT abandons a request before its
+    /// response was produced — the observable form of cancellation.
+    private var loadingKey: String?
+    private var responded = false
+    private var abandoned = false
+
     static func reset() {
-        cond.lock(); rows = []; requestLog = []; holds = []; failing = []; cond.broadcast(); cond.unlock()
+        cond.lock(); rows = []; requestLog = []; holds = []; failing = []
+        auth = []; urls = []; forced = [:]; refs = [:]; rowOwners = [:]
+        cond.broadcast(); cond.unlock()
     }
+
+    /// Answer `key` with `status` the next time it arrives (queued, one per arrival).
+    static func respond(_ key: String, with status: Int) {
+        cond.lock(); forced[key, default: []].append(status); cond.unlock()
+    }
+    /// A row that already exists, with these storage object paths as its refs.
+    static func seedRow(_ id: UUID, objectPaths: [String]) {
+        cond.lock(); rows.insert(id.uuidString.uppercased()); refs[id.uuidString.uppercased()] = objectPaths; cond.unlock()
+    }
+    /// Every subject a request was sent as, in order.
+    static var subjects: [String?] { cond.lock(); defer { cond.unlock() }; return auth.map { $0.sub } }
+    static func subjects(for key: String) -> [String?] {
+        cond.lock(); defer { cond.unlock() }; return auth.filter { $0.key == key }.map { $0.sub }
+    }
+    static func jtis(for key: String) -> [String?] {
+        cond.lock(); defer { cond.unlock() }; return auth.filter { $0.key == key }.map { $0.jti }
+    }
+    static var allURLs: [(key: String, url: String)] { cond.lock(); defer { cond.unlock() }; return urls }
+    static func rowOwner(_ id: UUID) -> String? { cond.lock(); defer { cond.unlock() }; return rowOwners[id.uuidString.uppercased()] }
+    /// True if any request whose key starts with `prefix` arrived.
+    static func arrived(prefix: String) -> Bool {
+        cond.lock(); defer { cond.unlock() }
+        return requestLog.contains { $0.hasPrefix(prefix) && !$0.contains(" done ") && !$0.hasSuffix(" abandoned") }
+    }
+    /// Keys of requests that arrived, in order, without the "done"/"abandoned" lines.
+    static var arrivals: [String] {
+        cond.lock(); defer { cond.unlock() }
+        return requestLog.filter { !$0.hasPrefix("— ") && !$0.contains(" done ") && !$0.hasSuffix(" abandoned") }
+    }
+    /// Storage objects are keyed by their file name: "POST OBJ <name>", "DELETE OBJ <name>".
+    static func objectKey(_ op: String, _ name: String) -> String { "\(op) OBJ \(name.uppercased())" }
     static func hold(_ key: String) { cond.lock(); holds.insert(key); cond.unlock() }
     static func release(_ key: String) { cond.lock(); holds.remove(key); cond.broadcast(); cond.unlock() }
     static func releaseAll() { cond.lock(); holds.removeAll(); cond.broadcast(); cond.unlock() }
@@ -102,10 +149,21 @@ final class QueueStubServer: URLProtocol {
         let json = body.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
         let id = ((method == "POST" ? json?["id"] as? String : Self.queryID(request.url)) ?? "").uppercased()
         let isDemote = method == "PATCH" && json?.count == 1 && (json?["is_public"] as? Bool) == false
-        let key = "\(isDemote ? "DEMOTE" : method) \(id)"
+        let isObject = request.url?.path.contains("/storage/v1/object/") == true
+        // P6-I-02 Unit 2b. The attachment-refs PATCH is keyed apart from the
+        // metadata PATCH, so each publish phase can be held and observed alone.
+        let isRefs = method == "PATCH" && json?.count == 1 && json?["attachments"] != nil
+        let key = isObject
+            ? Self.objectKey(method, request.url!.lastPathComponent)
+            : "\(isDemote ? "DEMOTE" : (isRefs ? "REFS" : method)) \(id)"
+        let claims = Self.claims(request.value(forHTTPHeaderField: "Authorization"))
 
         Self.cond.lock()
+        loadingKey = key
         Self.requestLog.append(key)
+        Self.auth.append((key, claims.sub, claims.jti))
+        Self.urls.append((key, request.url?.absoluteString ?? ""))
+        if method == "POST", !isObject, let owner = json?["owner_user_id"] as? String { Self.rowOwners[id] = owner }
         Self.cond.broadcast()
         Self.cond.unlock()
 
@@ -118,20 +176,36 @@ final class QueueStubServer: URLProtocol {
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             Self.cond.lock()
             let deadline = Date().addingTimeInterval(10)
-            while Self.holds.contains(key) {
+            while Self.holds.contains(key) && !self.abandoned {
                 if !Self.cond.wait(until: deadline) { break }
             }
+            if self.abandoned {
+                Self.cond.unlock()
+                return
+            }
+            self.responded = true
             var status = 204
             var data = Data()
-            if Self.failing.contains(key) {
+            if var queued = Self.forced[key], !queued.isEmpty {
+                status = queued.removeFirst()
+                Self.forced[key] = queued
+            } else if Self.failing.contains(key) {
                 status = 500
+            } else if isObject {
+                status = 200
             } else {
                 switch method {
                 case "POST": Self.rows.insert(id); status = 201
                 case "DELETE": Self.rows.remove(id)
                 case "GET":
                     status = 200
-                    data = Data((Self.rows.contains(id) ? #"[{"attachments":[]}]"# : "[]").utf8)
+                    if Self.rows.contains(id) {
+                        let paths = (Self.refs[id] ?? []).map { #"{"bucket":"attachments","path":""# + $0 + #""}"# }
+                        let body = #"[{"attachments":["# + paths.joined(separator: ",") + "]}]"
+                        data = Data(body.utf8)
+                    } else {
+                        data = Data("[]".utf8)
+                    }
                 default: break
                 }
             }
@@ -145,7 +219,34 @@ final class QueueStubServer: URLProtocol {
         }
     }
 
-    override func stopLoading() {}
+    override func stopLoading() {
+        Self.cond.lock()
+        if !responded, let key = loadingKey, !abandoned {
+            abandoned = true
+            Self.requestLog.append("\(key) abandoned")
+            Self.cond.broadcast()
+        }
+        Self.cond.unlock()
+    }
+
+    /// True if the client abandoned `key` before any response was produced.
+    static func abandoned(_ key: String) -> Bool {
+        cond.lock(); defer { cond.unlock() }
+        return requestLog.contains("\(key) abandoned")
+    }
+
+    /// The bearer's `sub` and `jti`, read without verification — the stub only
+    /// needs to know who a request CLAIMED to be.
+    private static func claims(_ header: String?) -> (sub: String?, jti: String?) {
+        guard let header, header.hasPrefix("Bearer ") else { return (nil, nil) }
+        let parts = header.dropFirst(7).split(separator: ".")
+        guard parts.count >= 2 else { return (nil, nil) }
+        var b64 = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64 += "=" }
+        guard let data = Data(base64Encoded: b64),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return (nil, nil) }
+        return ((obj["sub"] as? String)?.lowercased(), obj["jti"] as? String)
+    }
 
     private static func queryID(_ url: URL?) -> String? {
         guard let url, let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
@@ -182,9 +283,23 @@ enum QueueStubFixture {
         BackendConfig.apiBaseURL = QueueStubServer.baseURL
         BackendConfig.apiToken = "stub-anon-key"
         NetworkManager.shared.baseURL = QueueStubServer.baseURL
-        NetworkManager.shared.setBearerToken("stub-bearer")
+        // P6-I-02 Unit 2b. A REAL TOKEN SHAPE. The queue now sends only as a
+        // token whose subject is the work's owner; the old "stub-bearer" has no
+        // subject, so every queued item would (correctly) be held. Unsigned — the
+        // stub never verifies — with a synthetic subject on disposable data.
+        NetworkManager.shared.setBearerToken(token(sub: ownerUID, jti: "fixture"))
         UserDefaults.standard.set(ownerUID, forKey: "supabaseUserID_v1")
         setBackendMode(.backendConnected)
+    }
+
+    /// An unsigned JWT carrying `sub` and `jti`. Synthetic; never a real credential.
+    static func token(sub: String, jti: String) -> String {
+        func b64(_ s: String) -> String {
+            Data(s.utf8).base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+        }
+        return b64(#"{"alg":"none","typ":"JWT"}"#) + "." + b64(#"{"sub":""# + sub + #"","jti":""# + jti + #""}"#) + ".unsigned"
     }
 
     static func disconnect() {

@@ -278,6 +278,11 @@ public protocol BackendPublishService {
     func deletePost(_ postID: UUID) async -> Result<Void, Error>
     /// C-61 / P4-U2a-2: demote to private, then delete. See the HTTP service.
     func unsharePost(_ postID: UUID) async -> Result<Void, Error>
+    /// P6-I-02 Unit 2b. The QUEUE's entry points: every request is sent as
+    /// `binding.expectedOwner`, or not at all. The unbound methods above are
+    /// unchanged and remain the direct-delete and test paths.
+    func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding) async -> Result<Void, Error>
+    func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<Void, Error>
     func updatePost(_ postID: UUID) async -> Result<Void, Error>
     func fetchFeed(scope: String) async -> Result<Void, Error>
     func fetchAllOwnerPostsForAnalytics(ownerUserID: String, pageSize: Int) async -> Result<[BackendPost], Error>
@@ -321,6 +326,15 @@ public protocol BackendFollowService {
 }
 
 public final class SimulatedPublishService: BackendPublishService {
+    /// P6-I-02 Unit 2b. Preview makes no identity-bearing request, so the bound
+    /// entry points forward to the existing simulated behaviour unchanged.
+    public func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding) async -> Result<Void, Error> {
+        await uploadPost(payload)
+    }
+    public func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<Void, Error> {
+        await unsharePost(postID)
+    }
+
     public init() {}
 
     @MainActor
@@ -891,6 +905,37 @@ public func fetchIncomingRequests() async -> Result<[String], Error> {
 }
 
 public final class HTTPBackendPublishService: BackendPublishService {
+
+    // MARK: P6-I-02 Unit 2b — one seam for every publish/unshare request
+
+    /// With no binding this is exactly the ambient `request(...)` every call site
+    /// used before — same path, same headers, same token, same refresh. With one,
+    /// it is the bound transport.
+    @MainActor
+    private func send(path: String, method: String, jsonBody: Data? = nil,
+                      headers: [String: String], binding: OperationBinding?) async -> Result<Data, Error> {
+        guard let binding else {
+            return await NetworkManager.shared.request(path: path, method: method, query: nil,
+                                                       jsonBody: jsonBody, headers: headers)
+        }
+        return await NetworkManager.shared.boundRequest(path: path, method: method,
+                                                        jsonBody: jsonBody, headers: headers, binding: binding)
+    }
+
+    /// Bound requests on `posts` are ALSO filtered to the expected owner. It
+    /// narrows what a request can touch; it changes how nothing is interpreted,
+    /// and a zero-row result is not read as proof of absence. Empty when unbound.
+    private func ownerFilter(_ binding: OperationBinding?) -> String {
+        binding.map { "&owner_user_id=eq.\($0.expectedOwner)" } ?? ""
+    }
+
+    public func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding) async -> Result<Void, Error> {
+        await uploadPostImpl(payload, binding: binding)
+    }
+
+    public func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<Void, Error> {
+        await unsharePostImpl(postID, binding: binding)
+    }
     public init() {}
 
 
@@ -954,11 +999,20 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
 
     @MainActor
     public func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload) async -> Result<Void, Error> {
+        await uploadPostImpl(payload, binding: nil)
+    }
+
+    @MainActor
+    private func uploadPostImpl(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding?) async -> Result<Void, Error> {
         guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
 
-        let owner = (AuthManager.canonicalBackendUserID() ?? "")
+        // P6-I-02 Unit 2b. BOUND: the owner is the one the work belongs to, fixed
+        // at binding creation and never re-read — it names the row's
+        // `owner_user_id`, every storage path and the title namespace below.
+        // UNBOUND: exactly as before.
+        let owner = binding?.expectedOwner ?? (AuthManager.canonicalBackendUserID() ?? "")
 
         if owner.isEmpty {
             return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing owner user id"]))
@@ -1093,13 +1147,8 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
             "Prefer": "return=minimal"
         ]
 
-        let result = await NetworkManager.shared.request(
-            path: "rest/v1/posts",
-            method: "POST",
-            query: nil,
-            jsonBody: jsonData,
-            headers: headers
-        )
+        let result = await send(path: "rest/v1/posts", method: "POST", jsonBody: jsonData,
+                                headers: headers, binding: binding)
 
         switch result {
         case .success:
@@ -1118,7 +1167,7 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
 
         
         // Keep metadata in sync on every publish attempt (including the idempotent 409 path).
-        let metaPatch = await patchPostMetadata(postID: payload.id, payload: payload)
+        let metaPatch = await patchPostMetadata(postID: payload.id, payload: payload, binding: binding)
         switch metaPatch {
         case .success:
             break
@@ -1140,7 +1189,7 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         let included = preparedUploads
         if included.isEmpty {
             // Keep backend row consistent: explicitly clear attachments.
-            let patch = await patchPostAttachments(postID: payload.id, refs: [])
+            let patch = await patchPostAttachments(postID: payload.id, refs: [], binding: binding)
             switch patch {
             case .success:
                 return .success(())
@@ -1161,7 +1210,7 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         // returns nil only on the PDF branch.
         uploadLoop: for (item, prepared) in included {
             let objectPath = storageObjectPath(owner: owner, postID: payload.id, attachmentID: item.id, ext: prepared.ext)
-            let upload = await uploadStorageObject(from: prepared.fileURL, bucket: "attachments", objectPath: objectPath, contentType: prepared.contentType)
+            let upload = await uploadStorageObject(from: prepared.fileURL, bucket: "attachments", objectPath: objectPath, contentType: prepared.contentType, binding: binding)
 
             if let temporaryFileURL = prepared.temporaryFileURL {
                 try? FileManager.default.removeItem(at: temporaryFileURL)
@@ -1204,7 +1253,7 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
             print("[BackendShim] Publish completed with \(skippedOversizedCount) oversized attachment(s) skipped (kept local-only).")
         }
 
-        let patch = await patchPostAttachments(postID: payload.id, refs: refs)
+        let patch = await patchPostAttachments(postID: payload.id, refs: refs, binding: binding)
         switch patch {
         case .success:
             if skippedOversizedCount > 0 {
@@ -1449,7 +1498,8 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         #endif
     }
 
-    private func uploadStorageObject(from localURL: URL, bucket: String, objectPath: String, contentType: String) async -> Result<Void, Error> {
+    private func uploadStorageObject(from localURL: URL, bucket: String, objectPath: String, contentType: String,
+                                     binding: OperationBinding? = nil) async -> Result<Void, Error> {
         let limit = Self.maxUploadBytes
         guard let size = localFileSizeBytes(localURL) else {
             return .failure(StorageUploadPreflightError.cannotDetermineFileSize)
@@ -1469,16 +1519,16 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         }
 
         let uploadPath = "storage/v1/object/\(bucket)/\(objectPath)"
-        let result = await NetworkManager.shared.request(
+        let result = await send(
             path: uploadPath,
             method: "POST",
-            query: nil,
             jsonBody: data,
             headers: [
                 "Content-Type": contentType,
                 // Allow safe retries (idempotent paths). If object already exists, overwrite.
                 "x-upsert": "true"
-            ]
+            ],
+            binding: binding
         )
 
         switch result {
@@ -1493,7 +1543,8 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
     /// PATCH post metadata that may change across re-publishes (e.g., visibility).
     /// This is required because uploadPost uses idempotent POST (409 on existing),
     /// and without a PATCH the existing row would keep stale values (notably is_public).
-    func patchPostMetadata(postID: UUID, payload: SessionSyncQueue.PostPublishPayload) async -> Result<Void, Error> {
+    func patchPostMetadata(postID: UUID, payload: SessionSyncQueue.PostPublishPayload,
+                           binding: OperationBinding? = nil) async -> Result<Void, Error> {
         guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
@@ -1546,16 +1597,16 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
             return .failure(error)
         }
 
-        let patchPath = "rest/v1/posts?id=eq.\(postID.uuidString)"
-        let result = await NetworkManager.shared.request(
+        let patchPath = "rest/v1/posts?id=eq.\(postID.uuidString)" + ownerFilter(binding)
+        let result = await send(
             path: patchPath,
             method: "PATCH",
-            query: nil,
             jsonBody: body,
             headers: [
                 "apikey": apiKey,
                 "Prefer": "return=minimal"
-            ]
+            ],
+            binding: binding
         )
 
         switch result {
@@ -1566,7 +1617,8 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         }
     }
 
-func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Result<Void, Error> {
+func patchPostAttachments(postID: UUID, refs: [[String: String]],
+                          binding: OperationBinding? = nil) async -> Result<Void, Error> {
         let payload: [String: Any] = [
             "attachments": refs
         ]
@@ -1578,15 +1630,15 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
             return .failure(error)
         }
 
-        let patchPath = "rest/v1/posts?id=eq.\(postID.uuidString)"
-        let result = await NetworkManager.shared.request(
+        let patchPath = "rest/v1/posts?id=eq.\(postID.uuidString)" + ownerFilter(binding)
+        let result = await send(
             path: patchPath,
             method: "PATCH",
-            query: nil,
             jsonBody: body,
             headers: [
                     "Prefer": "return=minimal"
-            ]
+            ],
+            binding: binding
         )
 
         switch result {
@@ -1626,25 +1678,27 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
         }
     }
 
+    /// THE DIRECT-DELETE PATH (`ContentView`, `DebugViewerView`). Unbound, and
+    /// P6-I-02 Unit 2b leaves it exactly as it was: ambient token, ambient refresh,
+    /// no owner filter, same requests in the same order.
     @MainActor
     public func deletePost(_ postID: UUID) async -> Result<Void, Error> {
+        await deletePostImpl(postID, binding: nil)
+    }
+
+    @MainActor
+    private func deletePostImpl(_ postID: UUID, binding: OperationBinding?) async -> Result<Void, Error> {
         guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
 
         // 1) Fetch attachments refs first so we can delete storage objects (prevents orphans).
-        let fetchPath = "rest/v1/posts?id=eq.\(postID.uuidString)&select=attachments"
+        let fetchPath = "rest/v1/posts?id=eq.\(postID.uuidString)&select=attachments" + ownerFilter(binding)
         let fetchHeaders: [String: String] = [
             "apikey": apiKey
         ]
 
-        let fetchResult = await NetworkManager.shared.request(
-            path: fetchPath,
-            method: "GET",
-            query: nil,
-            jsonBody: nil,
-            headers: fetchHeaders
-        )
+        let fetchResult = await send(path: fetchPath, method: "GET", headers: fetchHeaders, binding: binding)
 
         switch fetchResult {
         case .success(let data):
@@ -1656,7 +1710,7 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
                 // 2) Delete storage objects (fail-closed). If any delete fails, do not delete the post row.
                 for ref in refs {
                     guard !ref.bucket.isEmpty, !ref.path.isEmpty else { continue }
-                    let delResult = await deleteStorageObject(apiKey: apiKey, bucket: ref.bucket, objectPath: ref.path)
+                    let delResult = await deleteStorageObject(apiKey: apiKey, bucket: ref.bucket, objectPath: ref.path, binding: binding)
                     if case .failure(let e) = delResult {
                         return .failure(e)
                     }
@@ -1672,19 +1726,13 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
         }
 
         // 3) Delete the post row.
-        let deletePath = "rest/v1/posts?id=eq.\(postID.uuidString)"
+        let deletePath = "rest/v1/posts?id=eq.\(postID.uuidString)" + ownerFilter(binding)
         let deleteHeaders: [String: String] = [
             "apikey": apiKey,
             "Prefer": "return=minimal"
         ]
 
-        let deleteResult = await NetworkManager.shared.request(
-            path: deletePath,
-            method: "DELETE",
-            query: nil,
-            jsonBody: nil,
-            headers: deleteHeaders
-        )
+        let deleteResult = await send(path: deletePath, method: "DELETE", headers: deleteHeaders, binding: binding)
 
         switch deleteResult {
         case .success:
@@ -1741,25 +1789,27 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
     }
 
     @MainActor
-    private func deleteStorageObject(apiKey: String, bucket: String, objectPath: String) async -> Result<Void, Error> {
+    private func deleteStorageObject(apiKey: String, bucket: String, objectPath: String,
+                                     binding: OperationBinding? = nil) async -> Result<Void, Error> {
         let path = "storage/v1/object/\(bucket)/\(objectPath)"
         let headers: [String: String] = [
             "apikey": apiKey,
             "Prefer": "return=minimal"
         ]
 
-        let result = await NetworkManager.shared.request(
-            path: path,
-            method: "DELETE",
-            query: nil,
-            jsonBody: nil,
-            headers: headers
-        )
+        let result = await send(path: path, method: "DELETE", headers: headers, binding: binding)
 
         switch result {
         case .success:
             return .success(())
         case .failure(let e):
+            // P6-I-02 Unit 2b. AN IDENTITY REFUSAL, OR A CANCELLATION, IS NEVER
+            // "ALREADY GONE". It is
+            // returned before the absence rule is consulted, so a request that was
+            // never sent can never be counted as a successful deletion.
+            if e is TransportIdentityError || e is CancellationError {
+                return .failure(e)
+            }
             // C-61 / P4-U2a-2. ALREADY GONE IS SUCCESS -- see
             // SimulatedPublishService.isAlreadyAbsent for the measurement. The
             // status is 400 with the 404 in the BODY, so a rule written against
@@ -1795,11 +1845,16 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
     /// queued for the next launch/foreground flush.
     @MainActor
     public func unsharePost(_ postID: UUID) async -> Result<Void, Error> {
+        await unsharePostImpl(postID, binding: nil)
+    }
+
+    @MainActor
+    private func unsharePostImpl(_ postID: UUID, binding: OperationBinding?) async -> Result<Void, Error> {
         guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
 
-        let patchPath = "rest/v1/posts?id=eq.\(postID.uuidString)"
+        let patchPath = "rest/v1/posts?id=eq.\(postID.uuidString)" + ownerFilter(binding)
         let headers: [String: String] = [
             "apikey": apiKey,
             "Content-Type": "application/json",
@@ -1810,20 +1865,15 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
             return .failure(NSError(domain: "Backend", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not encode demotion"]))
         }
 
-        let demote = await NetworkManager.shared.request(
-            path: patchPath,
-            method: "PATCH",
-            query: nil,
-            jsonBody: jsonData,
-            headers: headers
-        )
+        let demote = await send(path: patchPath, method: "PATCH", jsonBody: jsonData,
+                                headers: headers, binding: binding)
 
         if case .failure(let e) = demote {
             NSLog("[HTTPBackendPublishService] unshare demote FAILED • %@ | error=%@", postID.uuidString, String(describing: e))
             return .failure(e)
         }
 
-        return await deletePost(postID)
+        return await deletePostImpl(postID, binding: binding)
     }
 
 

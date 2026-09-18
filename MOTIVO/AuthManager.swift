@@ -1554,7 +1554,11 @@ final class AuthManager: NSObject, ObservableObject {
     /// Best-effort: derive the Supabase user UUID from a stored Supabase access token (JWT).
     /// This avoids transient nil backendUserID during cold launch when the access token is present
     /// but the user ID defaults key is missing.
-    private static func supabaseUserIDFromAccessToken(_ accessToken: String) -> String? {
+    /// P6-I-02 Unit 2b. Widened from `private` so the bound transport can read a
+    /// token's subject without a second JWT parser. PURE, hence `nonisolated`:
+    /// it reads nothing but its argument. It does not verify the signature — it
+    /// answers which identity a token WE hold claims; the server still verifies.
+    nonisolated static func supabaseUserIDFromAccessToken(_ accessToken: String) -> String? {
         let parts = accessToken.split(separator: ".")
         guard parts.count >= 2 else { return nil }
 
