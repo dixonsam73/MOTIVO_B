@@ -66,6 +66,14 @@ public struct SessionSyncQueueEnvelope: Codable, Equatable {
     /// Backups whose bytes matched their name but decoded as no known shape.
     public var unreadableBackups: [String] = []
 
+    /// P6-I-03 / C1. This install's stream id. OPTIONAL, so a store written
+    /// before C1 decodes; the queue assigns one on first successful persist.
+    public var installStream: UUID?
+
+    /// P6-I-03 / C1. The handoff ledger: "owner|post" → the token of the latest
+    /// saved choice the queue durably took. Ids only. Optional for the same reason.
+    public var handedOff: [String: UUID]?
+
     public static let supported = 2
     public static func empty() -> Self { .init(formatVersion: supported) }
 }

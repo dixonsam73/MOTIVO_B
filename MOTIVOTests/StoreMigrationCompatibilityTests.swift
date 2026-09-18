@@ -76,10 +76,13 @@ final class StoreMigrationCompatibilityTests: XCTestCase {
 
     func testEveryShippedModelVersionMigratesToTheCurrentModel() throws {
         let versions = try shippedVersions()
-        // 10 `.mom` files: V2, V3 (7.5), V4, V4 HARDENED, V5–V9 and the
+        // 11 `.mom` files: V2, V3 (7.5), V4, V4 HARDENED, V5–V10 and the
         // original unversioned `MOTIVO`. (`MOTIVO V9.omo` is Xcode's optimised
         // copy of V9, not a version — the prediction miscounted it as one.)
-        XCTAssertEqual(versions.count, 10,
+        // P6-I-03 / C1 added V10 — V9 plus one optional Binary attribute,
+        // `Session.sharingHandoff` — reviewed deliberately: every OLDER version
+        // is still migrated into it below, and V10 itself is the current model.
+        XCTAssertEqual(versions.count, 11,
                        "the shipped version inventory changed — review this test's coverage deliberately")
         var migrated: [String] = []
 

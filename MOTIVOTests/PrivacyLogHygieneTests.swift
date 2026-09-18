@@ -33,7 +33,10 @@ final class PrivacyLogHygieneTests: XCTestCase {
         let s = code("PublishService.swift")
         guard let start = s.range(of: "enqueue payload keys") else { return nil }
         let rest = s[start.lowerBound...]
-        guard let end = rest.range(of: "SessionSyncQueue.shared.enqueue") else { return nil }
+        // P6-I-03 / C1: the log now sits in the shared payload builder, which
+        // RETURNS the payload; the enqueue moved to `publishPrepared`. The
+        // statement still ends where the payload leaves the builder.
+        guard let end = rest.range(of: "return effectivePayload.withOwner(capturedOwner)") else { return nil }
         return String(rest[..<end.lowerBound])
     }
 

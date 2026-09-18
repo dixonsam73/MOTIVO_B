@@ -60,7 +60,13 @@ final class SharingChoiceSaveGate: ObservableObject {
     /// existing guard: owner binding, identity-bound transport, single flight.
     static func recoverAndFlush() -> Bool {
         let saved = SessionSyncQueue.shared.recoverIfNeeded(reason: "try-again")
-        if saved { Task { @MainActor in await SessionSyncQueue.shared.flushNow() } }
+        if saved {
+            // P6-I-03 / C1. Now the queue holds the choice durably, the marker the
+            // editor wrote can be cleared (a ledger match), and any replay the
+            // halted store blocked can run — all before the flush.
+            SharingHandoffRecovery.run(reason: "try-again")
+            Task { @MainActor in await SessionSyncQueue.shared.flushNow() }
+        }
         return saved
     }
 

@@ -286,6 +286,10 @@ struct MOTIVOApp: App {
                 // `AgeBandRecoveryTrigger`.
                 .ageBandRecovery(coordinator: ageBandRecovery, auth: auth)
                 .onAppear {
+                    // P6-I-03 / C1. Replay any saved sharing choice the queue never
+                    // took, BEFORE anything can be dispatched. Local only — Core Data
+                    // and the queue file — so it needs no identity or network.
+                    if !UnitTestHost.isActive { SharingHandoffRecovery.run(reason: "launch") }
                     if !UnitTestHost.isActive { connectedMembershipStore.start() } // C-100
                     if !UnitTestHost.isActive { appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled) } // C-100
 
@@ -350,6 +354,10 @@ struct MOTIVOApp: App {
                     guard phase == .active else { return }
                     // Delete Account v2: avoid running liveness work during an in-progress local factory reset.
                     guard !LocalFactoryReset.isInProgress else { return }
+                    // P6-I-03 / C1. Before the network guards below, so the dispatch
+                    // barrier opens even when they return early — every flush,
+                    // including a member's immediate publish, waits on it.
+                    if !UnitTestHost.isActive { SharingHandoffRecovery.run(reason: "foreground") }
 
                     // C-45: re-check on every foreground. Apple documents no
                     // notification for the account-deleted case on native apps,
@@ -401,6 +409,9 @@ struct MOTIVOApp: App {
                         // hosted unit-test process, where tests latch the store on purpose.
                         if !UnitTestHost.isActive {
                             SessionSyncQueue.shared.recoverIfNeeded(reason: "foreground")
+                            // P6-I-03 / C1. Again after any store recovery: a replay
+                            // blocked by a halted store can complete now.
+                            SharingHandoffRecovery.run(reason: "foreground-before-flush")
                         }
                         await SessionSyncQueue.shared.flushNow()
                     }

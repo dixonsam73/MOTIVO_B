@@ -255,6 +255,52 @@ final class PublishService: ObservableObject {
         // already have changed.
         let capturedOwner = SessionSyncQueue.currentOwner()
 
+        // C-88. The enrichment reads the Session as the caller's save committed it.
+        var session: NSManagedObject? = nil
+        do {
+            let viewContext = PersistenceController.shared.container.viewContext
+            let obj = try viewContext.existingObject(with: objectID)
+            viewContext.refresh(obj, mergeChanges: true)
+            session = obj
+        } catch {
+            // If we can't resolve notes, proceed with the incoming payload unchanged.
+            // Unknown is not a clear: nil stays nil (C-88).
+        }
+        let choice = sharingChoice(from: payload, session: session,
+                                   shouldPublish: shouldPublish, capturedOwner: capturedOwner)
+        return publishPrepared(choice, objectID: objectID, shouldPublish: shouldPublish)
+    }
+
+    /// P6-I-03 / C1. THE EXACT FINAL CHOICE, PREPARED BEFORE THE EDITOR'S SAVE.
+    ///
+    /// Everything `publish` would enqueue — owner captured NOW, at the member's
+    /// action; notes and notes privacy from the Session as it is about to be
+    /// saved; the mapped consent — plus a fresh choice token. The editor writes it
+    /// into the Session's handoff marker in the SAME save as `isPublic`, then
+    /// hands this same value to `publishPrepared`. Nothing is re-read later.
+    ///
+    /// `session` is read in memory, with no refresh: before the save its pending
+    /// values ARE what the save commits, and a refresh of a new, inserted object
+    /// is not meaningful.
+    func prepareSharingChoice(
+        payload: SessionSyncQueue.PostPublishPayload,
+        session: NSManagedObject,
+        shouldPublish: Bool
+    ) -> SessionSyncQueue.PostPublishPayload {
+        var choice = sharingChoice(from: payload, session: session, shouldPublish: shouldPublish,
+                                   capturedOwner: SessionSyncQueue.currentOwner())
+        choice.choiceToken = UUID()
+        return choice
+    }
+
+    /// Queues an already-prepared choice and starts the flush. The only enqueue
+    /// behind both `publish` and the C1 editor path, so they cannot drift.
+    @discardableResult
+    func publishPrepared(
+        _ choice: SessionSyncQueue.PostPublishPayload,
+        objectID: NSManagedObjectID,
+        shouldPublish: Bool
+    ) -> SharingChoiceSaveResult {
         let uri = objectID.uriRepresentation().absoluteString
 
         var set = publishedURIs
@@ -271,13 +317,47 @@ final class PublishService: ObservableObject {
         }
 
         // P6-I-02 Unit 2d-1. THE CHOICE IS QUEUED NOW, AT THE MEMBER'S ACTION,
-        // AND ITS SAVE RESULT IS RETURNED. This used to happen inside the deferred
-        // Task below, after the editor had already closed: the result was thrown
-        // away, and a kill in that gap lost the choice before it was queued.
-        // `PublishService` is @MainActor and both callers call this after their
-        // save, so the enrichment reads the same committed values (C-88). Only
-        // the FLUSH stays asynchronous.
-        let saveResult: SharingChoiceSaveResult
+        // AND ITS SAVE RESULT IS RETURNED. Only the FLUSH stays asynchronous.
+        let saveResult = SessionSyncQueue.shared.enqueueReportingSave(choice)
+        let payload = choice
+
+        Task { @MainActor in
+            await SessionSyncQueue.shared.flushNow()
+
+            // C-60 / C-61 / P4-U2b. THE IMMEDIATE DELETE THAT USED TO SIT HERE
+            // IS GONE, AND ITS JOB IS ALREADY DONE ONE LINE ABOVE.
+            //
+            // `flushNow()` is AWAITED above, and for an `op: .unshare` item it
+            // runs `unsharePost`: demote `is_public` to false, then delete the
+            // objects and the row, dequeuing only once the row is confirmed
+            // absent. The immediate best-effort attempt has therefore already
+            // happened by the time control reaches here.
+            //
+            // What stood here was a bare `deletePost` with NO demotion -- not
+            // merely a duplicate of that attempt but a DIFFERENTLY SHAPED one,
+            // and the missing demotion is precisely the defect C-61 recorded.
+            // Two unshare semantics in parallel is the thing to avoid.
+            //
+            // Immediacy is preserved by the awaited flush; durability -- across
+            // offline, process death, cold launch and foreground -- remains the
+            // persisted queue.
+
+            if shouldPublish && (BackendEnvironment.shared.mode == .backendPreview) {
+                NSLog("[PublishService] Preview enqueue + flush for published session → %@", payload.id.uuidString)
+            }
+        }
+        return saveResult
+    }
+
+    /// The payload a sharing choice enqueues: C-88's notes enrichment and C-82's
+    /// consent for a share; the withdrawal intent for a stop. `session == nil`
+    /// means it could not be read, and the incoming values stand.
+    private func sharingChoice(
+        from payload: SessionSyncQueue.PostPublishPayload,
+        session: NSManagedObject?,
+        shouldPublish: Bool,
+        capturedOwner: String?
+    ) -> SessionSyncQueue.PostPublishPayload {
         if shouldPublish {
             // Step 12 parity: enrich payload with Core Data Session.notes + areNotesPrivate via objectID.
             // This avoids UI changes (views can keep constructing payload without notes).
@@ -289,27 +369,20 @@ final class PublishService: ObservableObject {
             var resolvedNotes: String? = payload.notes
             var resolvedAreNotesPrivate: Bool = payload.areNotesPrivate
 
-            do {
-                let viewContext = PersistenceController.shared.container.viewContext
-                let obj = try viewContext.existingObject(with: objectID)
-                viewContext.refresh(obj, mergeChanges: true)
-
-                func hasAttr(_ name: String) -> Bool { (obj.entity.attributesByName[name] != nil) }
+            if let session {
+                func hasAttr(_ name: String) -> Bool { (session.entity.attributesByName[name] != nil) }
                 // C-88. A Session that was READ has definite notes. Empty,
                 // whitespace-only or nil means the member has no notes, and is
                 // queued as "" -- an explicit clear. It used to be queued as nil,
                 // which the queue merge reads as "unspecified", so an older
                 // queued publish kept its old notes and published them.
                 if hasAttr("notes") {
-                    let saved = obj.value(forKey: "notes") as? String
+                    let saved = session.value(forKey: "notes") as? String
                     resolvedNotes = (saved ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 }
-                if hasAttr("areNotesPrivate"), let val = obj.value(forKey: "areNotesPrivate") as? Bool {
+                if hasAttr("areNotesPrivate"), let val = session.value(forKey: "areNotesPrivate") as? Bool {
                     resolvedAreNotesPrivate = val
                 }
-            } catch {
-                // If we can't resolve notes, proceed with the incoming payload unchanged.
-                // Unknown is not a clear: nil stays nil (C-88).
             }
 
             let effectivePayload = SessionSyncQueue.PostPublishPayload(
@@ -343,68 +416,37 @@ final class PublishService: ObservableObject {
                   effectivePayload.notes.map { $0.isEmpty ? "empty" : "present" } ?? "nil",
                   effectivePayload.areNotesPrivate ? "true" : "false")
 
-            saveResult = SessionSyncQueue.shared.enqueueReportingSave(effectivePayload.withOwner(capturedOwner))
-        } else {
-            // C-61 / P4-U2a-2. PERSIST THE WITHDRAWAL BEFORE TRUSTING THE
-            // NETWORK.
-            //
-            // This branch used to enqueue nothing and fire a one-shot
-            // delete whose result both call sites discarded. Measured: an
-            // offline unshare left NO durable intent, nothing retried it,
-            // and the post stayed public indefinitely -- while the same
-            // action today converges, purely because the shipping call
-            // sites still hard-code `shouldPublish: true` and therefore go
-            // through the queue.
-            //
-            // Enqueuing first gives the withdrawal that same durability:
-            // the file survives termination, and the existing
-            // launch/foreground flush (MOTIVOApp:330 → :379) retries it.
-            // The immediate flush below is only an optimisation -- THE
-            // QUEUE IS THE GUARANTEE.
-            saveResult = SessionSyncQueue.shared.enqueueReportingSave(
-                SessionSyncQueue.PostPublishPayload(
-                    id: payload.id,
-                    sessionID: payload.sessionID,
-                    sessionTimestamp: nil, title: nil, durationSeconds: nil,
-                    activityType: nil, activityDetail: nil, instrumentLabel: nil,
-                    mood: nil, effort: nil,
-                    // `isPublic: false` IS the unshare intent now -- `op` is
-                    // derived from it and cannot be passed. P4-U2c.
-                    isPublic: false,
-                    notes: nil, areNotesPrivate: false,
-                    authorisedOmissions: nil,
-                    ownerUserID: capturedOwner
-                )
-            )
+            return effectivePayload.withOwner(capturedOwner)
         }
-
-
-        Task { @MainActor in
-            await SessionSyncQueue.shared.flushNow()
-
-            // C-60 / C-61 / P4-U2b. THE IMMEDIATE DELETE THAT USED TO SIT HERE
-            // IS GONE, AND ITS JOB IS ALREADY DONE ONE LINE ABOVE.
-            //
-            // `flushNow()` is AWAITED above, and for an `op: .unshare` item it
-            // runs `unsharePost`: demote `is_public` to false, then delete the
-            // objects and the row, dequeuing only once the row is confirmed
-            // absent. The immediate best-effort attempt has therefore already
-            // happened by the time control reaches here.
-            //
-            // What stood here was a bare `deletePost` with NO demotion -- not
-            // merely a duplicate of that attempt but a DIFFERENTLY SHAPED one,
-            // and the missing demotion is precisely the defect C-61 recorded.
-            // Two unshare semantics in parallel is the thing to avoid.
-            //
-            // Immediacy is preserved by the awaited flush; durability -- across
-            // offline, process death, cold launch and foreground -- remains the
-            // persisted queue.
-
-            if shouldPublish && (BackendEnvironment.shared.mode == .backendPreview) {
-                NSLog("[PublishService] Preview enqueue + flush for published session → %@", payload.id.uuidString)
-            }
-        }
-        return saveResult
+        // C-61 / P4-U2a-2. PERSIST THE WITHDRAWAL BEFORE TRUSTING THE
+        // NETWORK.
+        //
+        // This branch used to enqueue nothing and fire a one-shot
+        // delete whose result both call sites discarded. Measured: an
+        // offline unshare left NO durable intent, nothing retried it,
+        // and the post stayed public indefinitely -- while the same
+        // action today converges, purely because the shipping call
+        // sites still hard-code `shouldPublish: true` and therefore go
+        // through the queue.
+        //
+        // Enqueuing first gives the withdrawal that same durability:
+        // the file survives termination, and the existing
+        // launch/foreground flush (MOTIVOApp:330 → :379) retries it.
+        // The immediate flush below is only an optimisation -- THE
+        // QUEUE IS THE GUARANTEE.
+        return SessionSyncQueue.PostPublishPayload(
+            id: payload.id,
+            sessionID: payload.sessionID,
+            sessionTimestamp: nil, title: nil, durationSeconds: nil,
+            activityType: nil, activityDetail: nil, instrumentLabel: nil,
+            mood: nil, effort: nil,
+            // `isPublic: false` IS the unshare intent now -- `op` is
+            // derived from it and cannot be passed. P4-U2c.
+            isPublic: false,
+            notes: nil, areNotesPrivate: false,
+            authorisedOmissions: nil,
+            ownerUserID: capturedOwner
+        )
     }
 
     func publish(objectID: NSManagedObjectID) {

@@ -1921,9 +1921,59 @@ var body: some View {
         // tests drive directly. This site supplies the four steps and reacts to
         // the outcome; it no longer expresses the ordering itself.
         var committed: AttachmentCommitAttempt = .empty
+        // P6-I-03 / C1. The sharing choice is prepared INSIDE the save step — after
+        // the commit has mapped staged ids to saved ones, before `save()` — and
+        // written into the session's handoff marker, so the marker commits in the
+        // same transaction as `isPublic` or not at all. A failed save's undo group
+        // takes it back with everything else.
+        var attemptForChoice: AttachmentCommitAttempt = .empty
+        var preparedChoice: SessionSyncQueue.PostPublishPayload? = nil
         let outcome = AttachmentCommitTransaction.run(.init(
-            commit: { try commitStagedAttachments(to: s, ctx: viewContext) },
+            commit: {
+                let attempt = try commitStagedAttachments(to: s, ctx: viewContext)
+                attemptForChoice = attempt
+                return attempt
+            },
             save: {
+                preparedChoice = nil
+                if appModeManager.canShareWithFollowers, let sid = s.id {
+                    // C-82 — the map THIS editor's commit returned, not rebuilt.
+                    let stagedToFinal = attemptForChoice.stagedToFinalID
+                    let resolvedTitle = s.title ?? ""
+                    let instLabel =
+                        (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                        ?? s.instrument?.name
+
+                    let focusValue: Int? = {
+                        if let idx = selectedDotIndex { return idx }
+                        return nil
+                    }()
+
+                    let payload = SessionSyncQueue.PostPublishPayload(
+                        id: sid,
+                        sessionID: sid,
+                        sessionTimestamp: timestamp,
+                        title: resolvedTitle,
+                        durationSeconds: Int(durationSeconds),
+                        activityType: activityTypeString,
+                        activityDetail: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines),
+                        instrumentLabel: instLabel,
+                        mood: nil,
+                        effort: focusValue,
+                        isPublic: visibility,
+                        // UNIT 1b — durable consent, same semantics as the other
+                        // publish site: it travels with the publish, so a retry
+                        // omits exactly what was authorised and never re-prompts.
+                        // C-82 — translated to the SAVED ids the flush matches.
+                        authorisedOmissions: ConnectedSharePreflight.persistedOmissions(authorisedOmissions, stagedToFinal: stagedToFinal)
+                    )
+                    let choice = PublishService.shared.prepareSharingChoice(
+                        payload: payload, session: s, shouldPublish: visibility)
+                    // Throws on failure, which fails THIS save: never a choice
+                    // saved without its marker.
+                    try SharingHandoff.stage(choice, on: s)
+                    preparedChoice = choice
+                }
                 try viewContext.save()
                 viewContext.processPendingChanges()
             },
@@ -1961,60 +2011,40 @@ var body: some View {
         }
 
         let attempt = committed
-        let stagedToFinal = attempt.stagedToFinalID
         do {
 
             clearDraftIsPublic()
             // v7.12A — Social Pilot (local-only)
             var sharingSaveResult: SharingChoiceSaveResult = .saved
-            if appModeManager.canShareWithFollowers {
-                if let sid = s.id {
-                    let resolvedTitle = s.title ?? ""
-                    let instLabel =
-                        (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                        ?? s.instrument?.name
-
-                    let focusValue: Int? = {
-                        if let idx = selectedDotIndex { return idx }
-                        return nil
-                    }()
-
-                    let payload = SessionSyncQueue.PostPublishPayload(
-                        id: sid,
-                        sessionID: sid,
-                        sessionTimestamp: timestamp,
-                        title: resolvedTitle,
-                        durationSeconds: Int(durationSeconds),
-                        activityType: activityTypeString,
-                        activityDetail: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines),
-                        instrumentLabel: instLabel,
-                        mood: nil,
-                        effort: focusValue,
-                        isPublic: visibility,
-                        // UNIT 1b — durable consent, same semantics as the other
-                        // publish site: it travels with the publish, so a retry
-                        // omits exactly what was authorised and never re-prompts.
-                        // C-82 — translated to the SAVED ids the flush matches.
-                        authorisedOmissions: ConnectedSharePreflight.persistedOmissions(authorisedOmissions, stagedToFinal: stagedToFinal)
-                    )
-
-                    // P4-U2b. SHARED-ONLY UPLOADS -- see AddEditSessionView for
-                    // the full reasoning. `visibility` is this view's Share
-                    // toggle and is what `payload.isPublic` already carries, so
-                    // existence and visibility now give the same answer.
-                    sharingSaveResult = PublishService.shared.publish(
-                        payload: payload,
-                        objectID: s.objectID,
-                        shouldPublish: visibility
-                    )
-                    // `FeedInteractionStore.markForPublish(sid)` was removed here:
-                    // it queued a session-less `isPublic: true` stub BEFORE
-                    // `publish`'s asynchronous enqueue ran. The queue merge let the
-                    // real intent replace it, so no public post was ever
-                    // reproduced — removed as a redundant timing-risk stub.
-                } else {
-                    print("Publish skipped: missing Session.id")
+            if let preparedChoice, let sid = s.id {
+                // P4-U2b. SHARED-ONLY UPLOADS -- see AddEditSessionView for
+                // the full reasoning. `visibility` is this view's Share
+                // toggle and is what `payload.isPublic` already carries, so
+                // existence and visibility now give the same answer.
+                //
+                // P6-I-03 / C1. The choice queued here is the one PREPARED BEFORE
+                // THE SAVE and written into the session's handoff marker in that
+                // same save. Once the queue has durably taken it, the marker is
+                // cleared — only if it still holds this token.
+                sharingSaveResult = PublishService.shared.publishPrepared(
+                    preparedChoice,
+                    objectID: s.objectID,
+                    shouldPublish: visibility
+                )
+                // A fresh choice from this install replaces whatever marker blocked
+                // this post.
+                SessionSyncQueue.shared.unblockHandoffPost(sid)
+                if sharingSaveResult != .notSaved, let token = preparedChoice.choiceToken {
+                    SharingHandoff.clearIfMatches(objectID: s.objectID, token: token,
+                                                  container: PersistenceController.shared.container)
                 }
+                // `FeedInteractionStore.markForPublish(sid)` was removed here:
+                // it queued a session-less `isPublic: true` stub BEFORE
+                // `publish`'s asynchronous enqueue ran. The queue merge let the
+                // real intent replace it, so no public post was ever
+                // reproduced — removed as a redundant timing-risk stub.
+            } else if appModeManager.canShareWithFollowers {
+                print("Publish skipped: missing Session.id")
             }
 
             // Cleanup: remove staged items THAT WERE ACTUALLY COMMITTED.

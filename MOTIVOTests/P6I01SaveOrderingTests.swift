@@ -95,7 +95,12 @@ final class P6I01SaveOrderingTests: XCTestCase {
             let s = code(file)
             XCTAssertTrue(s.contains("AttachmentCommitTransaction.run(.init("),
                           "\(file): the save must go through the shared transaction")
-            XCTAssertTrue(s.contains("commit: { try commitStagedAttachments(to: s, ctx: viewContext) }"),
+            // P6-I-03 / C1 re-expressed, not relaxed: the commit step still TRIES
+            // this editor's own commit and returns its attempt unchanged; it now
+            // also hands that same attempt to the save step, which prepares the
+            // sharing choice from it before `save()`.
+            XCTAssertTrue(s.contains("let attempt = try commitStagedAttachments(to: s, ctx: viewContext)")
+                          && s.contains("attemptForChoice = attempt\n                return attempt"),
                           "\(file): the commit step must be this editor's own commit")
             XCTAssertTrue(s.contains("finaliseStagedAttachmentCommit(attempt)"),
                           "\(file): the finalise step must be this editor's own finalise")
@@ -124,7 +129,9 @@ final class P6I01SaveOrderingTests: XCTestCase {
         for file in editors {
             let s = code(file)
             let finalise = try XCTUnwrap(s.range(of: "finaliseStagedAttachmentCommit(attempt)"), "\(file)")
-            let publish = try XCTUnwrap(s.range(of: "PublishService.shared.publish("), "\(file)")
+            // P6-I-03 / C1: the enqueue is now `publishPrepared`; the payload it
+            // carries holds ids only, and attachment privacy is read at flush.
+            let publish = try XCTUnwrap(s.range(of: "PublishService.shared.publishPrepared("), "\(file)")
             XCTAssertTrue(finalise.upperBound < publish.lowerBound,
                           "\(file): privacy must be migrated onto the final ids before the publish reads them")
         }

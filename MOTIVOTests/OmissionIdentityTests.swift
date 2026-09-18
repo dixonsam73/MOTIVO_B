@@ -279,9 +279,13 @@ final class OmissionIdentityTests: XCTestCase {
             // ITS OWN commit produced. That is now two facts: the attempt comes
             // from a `try` on this editor's commit, and `stagedToFinal` is taken
             // from that attempt rather than rebuilt from staged ids.
-            XCTAssertTrue(code(e.view).contains("commit: { try commitStagedAttachments(to: s, ctx: viewContext) }"),
+            // P6-I-03 / C1 re-expressed: the payload is now built INSIDE the save
+            // step, from the attempt the commit step itself produced and handed
+            // over — still this editor's own `try`, still never rebuilt.
+            XCTAssertTrue(code(e.view).contains("let attempt = try commitStagedAttachments(to: s, ctx: viewContext)")
+                          && code(e.view).contains("attemptForChoice = attempt\n                return attempt"),
                           "\(e.view): the transaction's commit step must be this editor's own commit, and must not swallow a failure")
-            XCTAssertTrue(code(e.view).contains("let stagedToFinal = attempt.stagedToFinalID"),
+            XCTAssertTrue(code(e.view).contains("let stagedToFinal = attemptForChoice.stagedToFinalID"),
                           "\(e.view): the save must keep the map its commit returns")
             let payloads = constructions().filter { $0.file == e.view }
             XCTAssertEqual(payloads.count, 1, "\(e.view): exactly one payload construction")

@@ -154,6 +154,13 @@ public final class SessionSyncQueue: ObservableObject {
       /// is quarantined — never adopted by whoever happens to be signed in.
       public var ownerUserID: String? = nil
 
+      /// P6-I-03 / C1 — THE DURABLE IDENTITY OF ONE SAVED CHOICE. Minted when an
+      /// editor prepares the choice, written into the session's handoff marker in
+      /// the same Core Data save, and recorded in the queue's ledger once the
+      /// queue has durably taken it. Never sent. `nil` for work created before C1
+      /// or by paths that do not save a choice. Optional, the `op` precedent.
+      public var choiceToken: UUID? = nil
+
       public init(
           id: UUID,
           sessionID: UUID?,
@@ -245,6 +252,9 @@ public final class SessionSyncQueue: ObservableObject {
           // P6-I-02. Absent means UNKNOWN, not "mine".
           ownerUserID = try c.decodeIfPresent(String.self, forKey: .ownerUserID)?
               .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+          // C1. Explicit for the same reason as `authorisedOmissions`: a default
+          // compiles without it and the token would silently vanish on relaunch.
+          choiceToken = try c.decodeIfPresent(UUID.self, forKey: .choiceToken)
 
           let declared = try c.decodeIfPresent(PostOp.self, forKey: .op)
           op = (isPublic == false) ? .unshare : (declared ?? .publish)
@@ -288,6 +298,99 @@ public final class SessionSyncQueue: ObservableObject {
     /// the union or work queued before this launch would be discarded.
     private var memoryIsAuthoritative = false
 
+    // MARK: P6-I-03 / C1 — handoff ledger, install stream, recovery barrier
+
+    /// The ledger as memory holds it: for each (owner, post), the token of the
+    /// latest SAVED choice this queue has taken. Written into the envelope by
+    /// `persist()`.
+    private var handoffLedger: [String: UUID] = [:]
+
+    /// The ledger AS LAST VERIFIED ON DISK. Only a persist that wrote and read
+    /// back successfully advances it, so a failed write, a latched store or a
+    /// recovery that did not persist can never make a choice look handed off —
+    /// which would skip the replay that is its only way back.
+    private var verifiedHandoffLedger: [String: UUID] = [:]
+
+    /// This install's stream. Lives only in this store, which is excluded from
+    /// backup, so a restored or copied phone never shares it. `verified` is the
+    /// value as last read back from disk; `nil` until then.
+    private var installStream: UUID?
+    public private(set) var verifiedInstallStream: UUID?
+
+    /// C1. Whether the saved-choice recovery has completed in this process.
+    /// **Dispatch requires `.complete`.** It starts `.notRun` in every process.
+    public enum HandoffRecoveryState: Equatable {
+        case notRun
+        case complete
+        case blocked(String)
+    }
+    public private(set) var handoffRecovery: HandoffRecoveryState = .notRun
+
+    /// Posts whose saved choice could not be replayed — undecodable, or written by
+    /// another install. Their queued items are withheld from dispatch; other
+    /// posts proceed.
+    public private(set) var handoffBlockedPosts: Set<UUID> = []
+
+    #if DEBUG
+    /// Hosted unit tests start a process with no recovery run, and the existing
+    /// suites flush directly. The barrier is therefore enforced in hosted tests
+    /// ONLY when a test opts in — the C1 tests do, and exercise the real
+    /// recovery. Outside hosted tests it is always enforced.
+    nonisolated(unsafe) static var unitTestEnforceHandoffBarrier = false
+    #endif
+
+    private var handoffBarrierEnforced: Bool {
+        #if DEBUG
+        if UnitTestHost.isActive { return Self.unitTestEnforceHandoffBarrier }
+        #endif
+        return true
+    }
+
+    static func handoffLedgerKey(owner: String?, postID: UUID) -> String {
+        "\(normalisedOwner(owner) ?? "~")|\(postID.uuidString.lowercased())"
+    }
+
+    private func noteHandoff(_ payload: PostPublishPayload) {
+        guard let token = payload.choiceToken else { return }
+        handoffLedger[Self.handoffLedgerKey(owner: payload.ownerUserID, postID: payload.id)] = token
+    }
+
+    /// The token durably recorded for (owner, post), or nil.
+    func verifiedHandoffToken(owner: String?, postID: UUID) -> UUID? {
+        verifiedHandoffLedger[Self.handoffLedgerKey(owner: owner, postID: postID)]
+    }
+
+    /// The stream a NEW saved choice is marked with — **only ever one verified on
+    /// disk**. If there is none yet and the store is readable, one is created and
+    /// persisted now; if that write does not verify, or the store is halted,
+    /// this returns nil and the caller must NOT save the choice. A marker
+    /// carrying a stream the store never kept would read as another install's
+    /// after a restart, and the same-install choice would be held, not replayed.
+    /// A halted store never gets a substitute: its real stream is on disk and
+    /// comes back with recovery.
+    func streamForNewChoice() -> UUID? {
+        if let verified = verifiedInstallStream { return verified }
+        guard reconcileState.isOK else { return nil }
+        if installStream == nil { installStream = UUID() }
+        persist()
+        return verifiedInstallStream
+    }
+
+    /// Set by `SharingHandoffRecovery`. Never by anything else.
+    func setHandoffRecovery(_ state: HandoffRecoveryState, blockedPosts: Set<UUID>) {
+        handoffRecovery = state
+        handoffBlockedPosts = blockedPosts
+        BackendLogger.notice("Handoff recovery • \(state) • blocked posts=\(blockedPosts.count)")
+    }
+
+    /// A fresh saved choice for `postID` has just replaced its marker with one
+    /// from this install, so whatever blocked it no longer applies.
+    func unblockHandoffPost(_ postID: UUID) {
+        if handoffBlockedPosts.remove(postID) != nil {
+            BackendLogger.notice("Handoff block lifted by a fresh choice • postID=\(postID.uuidString)")
+        }
+    }
+
     private init() {
         self.store = SessionSyncQueueStore(root: SessionSyncQueue.storeRoot())
         reload()
@@ -320,6 +423,11 @@ public final class SessionSyncQueue: ObservableObject {
         self.envelope = normalised
         self.items = dispatchable
         self.quarantined = held
+        // C1. What disk holds IS verified: `reconcile()` wrote and read it back.
+        handoffLedger = envelope.handedOff ?? [:]
+        verifiedHandoffLedger = handoffLedger
+        installStream = envelope.installStream
+        verifiedInstallStream = envelope.installStream
         memoryIsAuthoritative = true
         for item in items { noteNewIntent(item) }
         if dispatchable.count != envelope.items.count {
@@ -328,6 +436,12 @@ public final class SessionSyncQueue: ObservableObject {
         if !quarantined.isEmpty {
             NSLog("[SessionSyncQueue] quarantined items held • count=%d", quarantined.count)
             BackendLogger.notice("Queue quarantine • held=\(quarantined.count) • not dispatchable")
+        }
+        // C1. A store with no stream (first run, or written before C1) gets one
+        // now, so it is durable before any choice needs it.
+        if installStream == nil {
+            installStream = UUID()
+            persist()
         }
     }
 
@@ -387,7 +501,15 @@ public final class SessionSyncQueue: ObservableObject {
         // invariant is enforced HERE and at load, and nothing is lost.
         guard let normalisedOwner = Self.normalisedOwner(payload.ownerUserID) else {
             let held = payload.withOwner(nil)
-            if !quarantined.contains(where: { $0.id == held.id }) { quarantined.append(held) }
+            if let index = quarantined.firstIndex(where: { $0.id == held.id }) {
+                // C1. A newer SAVED choice (it carries a token) replaces the older
+                // held item for the same post, exactly as a newer intent replaces an
+                // older one in `items`. Tokenless work keeps the 2a behaviour.
+                if held.choiceToken != nil { quarantined[index] = held }
+            } else {
+                quarantined.append(held)
+            }
+            noteHandoff(held)
             let durable = persist()
             BackendLogger.notice("Queue quarantined • unknown provenance • postID=\(payload.id.uuidString)")
             return durable
@@ -428,6 +550,7 @@ public final class SessionSyncQueue: ObservableObject {
             if payload.op != existing.op {
                 items[index] = payload
                 noteNewIntent(payload)
+                noteHandoff(payload)
                 let durable = persist()
                 BackendLogger.notice("Queue intent replaced • postID=\(payload.id.uuidString) • \(existing.op.rawValue)→\(payload.op.rawValue)")
                 return durable
@@ -439,7 +562,7 @@ public final class SessionSyncQueue: ObservableObject {
                 return existing.isPublic                              // stub should not change visibility
             }()
 
-            let merged = PostPublishPayload(
+            var merged = PostPublishPayload(
                 id: existing.id,
                 sessionID: payload.sessionID ?? existing.sessionID,
                 sessionTimestamp: payload.sessionTimestamp ?? existing.sessionTimestamp,
@@ -461,14 +584,19 @@ public final class SessionSyncQueue: ObservableObject {
                 authorisedOmissions: payload.authorisedOmissions ?? existing.authorisedOmissions,
                 ownerUserID: existing.ownerUserID
             )
+            // C1. The newer choice's identity, or the older one's if this update
+            // carries none.
+            merged.choiceToken = payload.choiceToken ?? existing.choiceToken
             items[index] = merged
             noteNewIntent(merged)
+            noteHandoff(merged)
             let durable = persist()
             BackendLogger.notice("Queue update • postID=\(payload.id.uuidString) • total=\(items.count)")
             return durable
         } else {
             items.append(payload)
             noteNewIntent(payload)
+            noteHandoff(payload)
             let durable = persist()
             BackendLogger.notice("Queue enqueue • postID=\(payload.id.uuidString) • total=\(items.count)")
             return durable
@@ -641,6 +769,15 @@ public final class SessionSyncQueue: ObservableObject {
             return
         }
 
+        // P6-I-03 / C1. THE RECOVERY BARRIER. Every dispatch passes through here,
+        // so no caller has to remember it: until this process has replayed any
+        // saved choice the queue never took, nothing is sent — otherwise an OLDER
+        // queued intent for the same post could go first.
+        if handoffBarrierEnforced && handoffRecovery != .complete {
+            BackendLogger.notice("Flush refused • saved-choice recovery \(handoffRecovery)")
+            return
+        }
+
         if mode == .backendPreview || mode == .backendConnected {
             // THE DISPATCH BOUNDARY.
             //
@@ -652,7 +789,11 @@ public final class SessionSyncQueue: ObservableObject {
             //
             // Held is not an error: it is A's work waiting for A.
             let owner = Self.currentOwner()
-            let dispatchable = items.filter { $0.ownerUserID != nil && $0.ownerUserID == owner }
+            // C1. A post whose saved choice could not be replayed is withheld.
+            let blocked = handoffBarrierEnforced ? handoffBlockedPosts : []
+            let dispatchable = items.filter {
+                $0.ownerUserID != nil && $0.ownerUserID == owner && !blocked.contains($0.id)
+            }
             let held = items.count - dispatchable.count
             if held > 0 {
                 BackendLogger.notice("Flush holding \(held) item(s) belonging to another identity")
@@ -854,6 +995,8 @@ func stopForFactoryReset() {
     items.removeAll()
     quarantined.removeAll()
     revisions.removeAll()
+    // C1. The markers go with the sessions, so their ledger goes too.
+    handoffLedger.removeAll()
     persist()
     NSLog("[SessionSyncQueue] stopForFactoryReset applied (items cleared)")
     BackendLogger.notice("stopForFactoryReset applied (items cleared)")
@@ -894,6 +1037,8 @@ func wipeOnDiskForFactoryReset() {
         guard reconcileState.isOK else { return false }
         envelope.items = items
         envelope.quarantined = quarantined
+        envelope.handedOff = handoffLedger.isEmpty ? nil : handoffLedger
+        envelope.installStream = installStream
         guard store.persist(envelope) else {
             // LATCH. The queue on disk is not what is in memory, so the store is
             // no longer a safe basis for dispatch.
@@ -904,6 +1049,9 @@ func wipeOnDiskForFactoryReset() {
             return false
         }
         memoryDivergesFromDisk = false
+        // C1. Only now — written AND read back — do the ledger and stream count.
+        verifiedHandoffLedger = handoffLedger
+        verifiedInstallStream = installStream
         return true
     }
 
@@ -970,6 +1118,17 @@ func wipeOnDiskForFactoryReset() {
             recovered.quarantined.append(item)
         }
 
+        // C1. The ledger follows the items: disk's entries, overlaid by memory's,
+        // because memory's are the newer choices it is carrying. A stream already
+        // durable on disk wins over one memory made up while halted; markers with
+        // the made-up one are then foreign and held (fail closed).
+        var ledger = recovered.handedOff ?? [:]
+        for (k, v) in handoffLedger { ledger[k] = v }
+        recovered.handedOff = ledger.isEmpty ? nil : ledger
+        recovered.installStream = recovered.installStream ?? installStream
+        handoffLedger = ledger
+        installStream = recovered.installStream
+
         envelope = recovered
         items = recovered.items
         quarantined = recovered.quarantined
@@ -990,6 +1149,8 @@ func wipeOnDiskForFactoryReset() {
         }
         memoryDivergesFromDisk = false
         memoryIsAuthoritative = true
+        verifiedHandoffLedger = handoffLedger
+        verifiedInstallStream = installStream
         BackendLogger.notice("Queue recovered • dispatchable=\(items.count) • quarantined=\(quarantined.count)")
         return .ok
     }
@@ -1002,6 +1163,28 @@ func wipeOnDiskForFactoryReset() {
     /// view of the store. It is established in `init` and there is no other
     /// route to it from a test, yet it is the branch where recovery has to merge
     /// rather than replace — so it is the branch most worth executing.
+    /// C1. TEST-ONLY. What a new process sees: memory dropped, the store reloaded
+    /// from disk, and the saved-choice recovery not yet run.
+    func unitTestSimulateRelaunch() {
+        guard UnitTestHost.isActive else { return }
+        generation += 1
+        activeFlush = nil
+        activeFlushID = nil
+        flushAgain = false
+        items = []
+        quarantined = []
+        revisions.removeAll()
+        handoffLedger = [:]
+        verifiedHandoffLedger = [:]
+        installStream = nil
+        verifiedInstallStream = nil
+        memoryDivergesFromDisk = false
+        memoryIsAuthoritative = false
+        handoffRecovery = .notRun
+        handoffBlockedPosts = []
+        reload()
+    }
+
     func unitTestSimulateStartupHalt() {
         guard UnitTestHost.isActive else { return }
         reconcileState = .haltCorruptV2

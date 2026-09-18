@@ -2107,12 +2107,61 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
         // P6-I-01 — the commit → save → finalise ORDER lives in
         // `AttachmentCommitTransaction`, shared with PostRecordDetailsView and
         // driven directly by the tests.
-        var committed: AttachmentCommitAttempt = .empty
+        // P6-I-03 / C1. The sharing choice is prepared INSIDE the save step — after
+        // the commit has mapped staged ids to saved ones, before `save()` — and
+        // written into the session's handoff marker, so the marker commits in the
+        // same transaction as `isPublic` or not at all. A failed save's undo group
+        // takes it back with everything else.
+        var attemptForChoice: AttachmentCommitAttempt = .empty
+        var preparedChoice: SessionSyncQueue.PostPublishPayload? = nil
         let outcome = AttachmentCommitTransaction.run(.init(
-            commit: { try commitStagedAttachments(to: s, ctx: viewContext) },
-            save: { try viewContext.save() },
+            commit: {
+                let attempt = try commitStagedAttachments(to: s, ctx: viewContext)
+                attemptForChoice = attempt
+                return attempt
+            },
+            save: {
+                preparedChoice = nil
+                if appModeManager.canShareWithFollowers, let sid = s.id {
+                    // C-82 — the map THIS editor's commit returned, not rebuilt.
+                    let stagedToFinal = attemptForChoice.stagedToFinalID
+                    let focusValue: Int? = isThoughtMode ? nil : selectedDotIndex_edit
+
+                    let activityTypeString = trimmedCustom.isEmpty ? activity.label : trimmedCustom
+                    let instLabel =
+                        (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                        ?? s.instrument?.name
+
+                    let payload = SessionSyncQueue.PostPublishPayload(
+                        id: sid,
+                        sessionID: sid,
+                        sessionTimestamp: timestamp,
+                        title: isThoughtMode ? nil : s.title,
+                        durationSeconds: effectiveDurationSeconds,
+                        activityType: isThoughtMode ? nil : activityTypeString,
+                        activityDetail: isThoughtMode ? nil : trimmedDetail,
+                        instrumentLabel: isThoughtMode ? nil : instLabel,
+                        mood: nil,
+                        effort: focusValue,
+                        isPublic: isPublic,
+                        notes: notes,
+                        areNotesPrivate: areNotesPrivate_edit,
+                        // UNIT 1b — durable consent travels with the publish, so a
+                        // retry omits exactly what the member authorised and never
+                        // re-prompts. The private-eye state is untouched.
+                        // C-82 — translated to the SAVED ids the flush matches.
+                        authorisedOmissions: ConnectedSharePreflight.persistedOmissions(authorisedOmissions, stagedToFinal: stagedToFinal)
+                    )
+                    let choice = PublishService.shared.prepareSharingChoice(
+                        payload: payload, session: s, shouldPublish: isPublic)
+                    // Throws on failure, which fails THIS save: never a choice
+                    // saved without its marker.
+                    try SharingHandoff.stage(choice, on: s)
+                    preparedChoice = choice
+                }
+                try viewContext.save()
+            },
             finalise: { attempt in
-                committed = attempt
                 AttemptScopedUndo.release(undoTicket)
                 finaliseStagedAttachmentCommit(attempt)
                 // The removals are durable now, so their files may go. Not before:
@@ -2145,8 +2194,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
             break
         }
 
-        let attempt = committed
-        let stagedToFinal = attempt.stagedToFinalID
         do {
             // Phase C has already run inside the transaction, BEFORE the tmp
             // hygiene sweep below — deliberately, because finalisation reads each
@@ -2169,35 +2216,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
 
             // P6-I-02 Unit 2d-1. What happened to the sharing choice, if one was made.
             var sharingSaveResult: SharingChoiceSaveResult = .saved
-            if appModeManager.canShareWithFollowers {
-                let focusValue: Int? = isThoughtMode ? nil : selectedDotIndex_edit
-
-                let activityTypeString = trimmedCustom.isEmpty ? activity.label : trimmedCustom
-                let instLabel =
-                    (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                    ?? s.instrument?.name
-
-                let payload = SessionSyncQueue.PostPublishPayload(
-                    id: sid,
-                    sessionID: sid,
-                    sessionTimestamp: timestamp,
-                    title: isThoughtMode ? nil : s.title,
-                    durationSeconds: effectiveDurationSeconds,
-                    activityType: isThoughtMode ? nil : activityTypeString,
-                    activityDetail: isThoughtMode ? nil : trimmedDetail,
-                    instrumentLabel: isThoughtMode ? nil : instLabel,
-                    mood: nil,
-                    effort: focusValue,
-                    isPublic: isPublic,
-                    notes: notes,
-                    areNotesPrivate: areNotesPrivate_edit,
-                    // UNIT 1b — durable consent travels with the publish, so a
-                    // retry omits exactly what the member authorised and never
-                    // re-prompts. The private-eye state is untouched.
-                    // C-82 — translated to the SAVED ids the flush matches.
-                    authorisedOmissions: ConnectedSharePreflight.persistedOmissions(authorisedOmissions, stagedToFinal: stagedToFinal)
-                )
-
+            if let preparedChoice {
                 // P4-U2b. SHARED-ONLY UPLOADS. `shouldPublish` controls EXISTENCE
                 // on the server and `isPublic` controls follower visibility, and
                 // they are now the same answer -- because invariant 2 says if
@@ -2222,11 +2241,23 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 // `false` is not "do nothing": it enqueues an `op: .unshare`
                 // that demotes then deletes, and converges across offline and
                 // restarts. See C-60 and C-61.
-                sharingSaveResult = PublishService.shared.publish(
-                    payload: payload,
+                //
+                // P6-I-03 / C1. The choice queued here is the one PREPARED BEFORE
+                // THE SAVE and written into the session's handoff marker in that
+                // same save. Once the queue has durably taken it, the marker is
+                // cleared — only if it still holds this token.
+                sharingSaveResult = PublishService.shared.publishPrepared(
+                    preparedChoice,
                     objectID: s.objectID,
                     shouldPublish: isPublic
                 )
+                // A fresh choice from this install replaces whatever marker blocked
+                // this post.
+                SessionSyncQueue.shared.unblockHandoffPost(sid)
+                if sharingSaveResult != .notSaved, let token = preparedChoice.choiceToken {
+                    SharingHandoff.clearIfMatches(objectID: s.objectID, token: token,
+                                                  container: PersistenceController.shared.container)
+                }
             }
 
             viewContext.processPendingChanges()
