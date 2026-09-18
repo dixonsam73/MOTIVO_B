@@ -95,7 +95,9 @@ struct AppSetUpView: View {
         .tint(Theme.Colors.accent)
         .sheet(isPresented: $showAboutEtudes) {
             NavigationStack {
-                AboutEtudesView()
+                AboutEtudesView {
+                    ConnectedIntroductionView()
+                }
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Done") { showAboutEtudes = false }

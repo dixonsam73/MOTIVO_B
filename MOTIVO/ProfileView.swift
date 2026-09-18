@@ -334,6 +334,40 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     @State private var signedOutGateWasVisible: Bool = false
  
 
+    private var connectedIntroduction: some View {
+        ConnectedIntroductionView(
+            onSignIn: {
+                connectedSignInIntent = .returning
+                showConnectedSignInSheet = true
+            },
+            onContinue: {
+                // CP-3: Apple's declared age range is requested BEFORE
+                // Sign in with Apple, so an ineligible or undisclosed
+                // result turns the member away WITHOUT minting an
+                // identity that would then need deleting. The band is
+                // held in memory only until an identity exists.
+                Task { @MainActor in
+                    switch await requestDeclaredAgeRange() {
+                    case .band(let band):
+                        auth.pendingAgeBand = band
+                        continueToConnectedJoin()
+                    case .ineligible:
+                        ageRangeRefusedNotice = "Études Connected is for ages 13 and over."
+                    case .unavailable:
+                        ageRangeRefusedNotice = "Études needs Apple to share your age range before Connected can be set up. You can change this in Settings, under your Apple Account."
+                    }
+                }
+            }
+        )
+        .alert("Connected isn’t available",
+               isPresented: Binding(get: { ageRangeRefusedNotice != nil },
+                                    set: { if !$0 { ageRangeRefusedNotice = nil } })) {
+            Button("OK", role: .cancel) { ageRangeRefusedNotice = nil }
+        } message: {
+            Text(ageRangeRefusedNotice ?? "")
+        }
+    }
+
     private var shouldSuppressSignedInProfileAfterGateSignIn: Bool {
         signedOutGateWasVisible && auth.currentUserID != nil && onClose != nil
     }
@@ -373,40 +407,10 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                      toolbarContent
                 }
                 .navigationDestination(isPresented: $showAboutEtudes) {
-                    AboutEtudesView()
+                    AboutEtudesView { connectedIntroduction }
                 }
                 .navigationDestination(isPresented: $showConnectedIntroduction) {
-                    ConnectedIntroductionView(
-                        onSignIn: {
-                            connectedSignInIntent = .returning
-                            showConnectedSignInSheet = true
-                        },
-                        onContinue: {
-                            // CP-3: Apple's declared age range is requested BEFORE
-                            // Sign in with Apple, so an ineligible or undisclosed
-                            // result turns the member away WITHOUT minting an
-                            // identity that would then need deleting. The band is
-                            // held in memory only until an identity exists.
-                            Task { @MainActor in
-                                switch await requestDeclaredAgeRange() {
-                                case .band(let band):
-                                    auth.pendingAgeBand = band
-                                    continueToConnectedJoin()
-                                case .ineligible:
-                                    ageRangeRefusedNotice = "Études Connected is for ages 13 and over."
-                                case .unavailable:
-                                    ageRangeRefusedNotice = "Études needs Apple to share your age range before Connected can be set up. You can change this in Settings, under your Apple Account."
-                                }
-                            }
-                        }
-                    )
-                    .alert("Connected isn’t available",
-                           isPresented: Binding(get: { ageRangeRefusedNotice != nil },
-                                                set: { if !$0 { ageRangeRefusedNotice = nil } })) {
-                        Button("OK", role: .cancel) { ageRangeRefusedNotice = nil }
-                    } message: {
-                        Text(ageRangeRefusedNotice ?? "")
-                    }
+                    connectedIntroduction
                 }
                 .navigationDestination(isPresented: $showMembershipSelection) {
                     MembershipSelectionView(
@@ -425,6 +429,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                             // SERVER and never decides the client's UI.
                             showMembershipSelection = false
                             showConnectedIntroduction = false
+                            showAboutEtudes = false
                         }
                     )
                 }
@@ -2017,6 +2022,7 @@ private func initials(from string: String) -> String {
                     showConnectedSignInSheet = false
                     showMembershipSelection = false
                     showConnectedIntroduction = false
+                    showAboutEtudes = false
                 }
             }
             .onChange(of: auth.currentUserID) { oldValue, newValue in

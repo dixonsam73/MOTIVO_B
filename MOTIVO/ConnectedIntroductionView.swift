@@ -1,8 +1,9 @@
 import SwiftUI
 
 struct ConnectedIntroductionView: View {
-    let onSignIn: () -> Void
-    let onContinue: () -> Void
+    // Without account actions, setup can show the introduction for browsing only.
+    var onSignIn: (() -> Void)? = nil
+    var onContinue: (() -> Void)? = nil
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -11,8 +12,10 @@ struct ConnectedIntroductionView: View {
             VStack(alignment: .leading, spacing: 0) {
                 heroImage
 
-                returningUserSection
-                    .padding(.top, Theme.Spacing.xxl)
+                if onSignIn != nil {
+                    returningUserSection
+                        .padding(.top, Theme.Spacing.xxl)
+                }
 
                 introductionSection
                     .padding(.top, Theme.Spacing.xxl)
@@ -33,16 +36,24 @@ struct ConnectedIntroductionView: View {
 
                 principlesSection
 
-                closingSection
-                    .padding(.top, Theme.Spacing.xxl)
+                if onContinue != nil {
+                    closingSection
+                        .padding(.top, Theme.Spacing.xxl)
 
-                continueSection
-                    .padding(.top, Theme.Spacing.xxl)
-                    .padding(.bottom, Theme.Spacing.xxl)
+                    continueSection
+                        .padding(.top, Theme.Spacing.xxl)
+                        .padding(.bottom, Theme.Spacing.xxl)
+                } else {
+                    Text("Finish setting up Études, then open Explore Connected in Profile when you’re ready to join.")
+                        .connectedBody()
+                        .editorialMargins()
+                        .padding(.vertical, Theme.Spacing.xxl)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .appBackground()
+        .tint(Theme.Colors.accent)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -77,7 +88,7 @@ struct ConnectedIntroductionView: View {
                     .font(Theme.Text.body)
                     .foregroundStyle(Theme.Colors.secondaryText)
 
-                Button("Sign In", action: onSignIn)
+                Button("Sign In") { onSignIn?() }
                     .font(Theme.Text.body.weight(.semibold))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
@@ -96,18 +107,11 @@ struct ConnectedIntroductionView: View {
 
     private var introductionSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
-            Text("Études Connected gives you a place to share musical work with the people already in your life.")
+            Text("Share your musical work with the people you make music with.")
                 .connectedBody()
 
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                Text("Teachers.")
-                Text("Students.")
-                Text("Bandmates.")
-                Text("Ensemble members.")
-                Text("Collaborators.")
-            }
-            .font(Theme.Text.body)
-            .foregroundStyle(.primary)
+            Text("Exchange recordings, ideas and rehearsal material with teachers, students, bandmates and collaborators.")
+                .connectedBody()
 
         }
         .editorialMargins()
@@ -121,6 +125,13 @@ struct ConnectedIntroductionView: View {
 
             Text("Share a recording of something you’ve worked out, an idea you want to discuss, or charts for the next rehearsal.")
                 .connectedBody()
+
+            ConnectedScreenshot(
+                "ConnectedSharedPost",
+                sourceSize: CGSize(width: 941, height: 1672),
+                crop: CGRect(x: 0, y: 0, width: 941, height: 1672),
+                description: "An example Feed with Feed selected beside Journal. Simon Hughes in Hatfield shares an Afternoon Practice post with a score, and Sue May in Boston shares a Morning Practice post with a playable cello video."
+            )
 
             Text("Find musicians by name or instrument, organise the people you follow into Ensembles, and save useful posts for another day.")
                 .connectedBody()
@@ -140,6 +151,20 @@ struct ConnectedIntroductionView: View {
             Text("Thoughts and attachments start private. Choose individual attachments to include when sharing, and keep session notes personal when you want to.")
                 .connectedBody()
 
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                ConnectedScreenshot(
+                    "ConnectedAttachmentPrivacy",
+                    sourceSize: CGSize(width: 1206, height: 2622),
+                    crop: CGRect(x: 38, y: 1260, width: 1130, height: 650),
+                    description: "An Attachments card with a double-bass video marked private by a crossed-out eye, alongside a bass-guitar photo."
+                )
+
+                Text("Keep individual attachments private.")
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Text("Your personal journal remains available whether or not you share anything.")
                 .connectedBody()
         }
@@ -157,6 +182,13 @@ struct ConnectedIntroductionView: View {
 
             Text("Comments are private conversations between you and the author of a post. Favourites are personal bookmarks, never public reactions.")
                 .connectedBody()
+
+            ConnectedScreenshot(
+                "ConnectedConversation",
+                sourceSize: CGSize(width: 1206, height: 2622),
+                crop: CGRect(x: 38, y: 560, width: 1130, height: 1110),
+                description: "A three-message conversation with Ben Craft about fretting a low A rather than using the open string, including a fingering suggestion and a reply saying he will try it."
+            )
         }
         .editorialMargins()
     }
@@ -190,7 +222,7 @@ struct ConnectedIntroductionView: View {
     }
 
     private var continueSection: some View {
-        Button("Continue", action: onContinue)
+        Button("Continue") { onContinue?() }
             .font(Theme.Text.body.weight(.semibold))
             .foregroundStyle(
                 Theme.Colors.primaryAction.opacity(0.92)
@@ -208,6 +240,44 @@ struct ConnectedIntroductionView: View {
             )
             .buttonStyle(.plain)
             .editorialMargins()
+    }
+}
+
+/// Crops original screenshot pixels, using the same image treatment as About Études.
+private struct ConnectedScreenshot: View {
+    let asset: String
+    let sourceSize: CGSize
+    let crop: CGRect
+    let description: String
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(_ asset: String, sourceSize: CGSize, crop: CGRect, description: String) {
+        self.asset = asset
+        self.sourceSize = sourceSize
+        self.crop = crop
+        self.description = description
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let scale = proxy.size.width / crop.width
+            Image(asset)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: sourceSize.width * scale, height: sourceSize.height * scale)
+                .offset(x: -crop.minX * scale, y: -crop.minY * scale)
+        }
+        .aspectRatio(crop.width / crop.height, contentMode: .fit)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                .strokeBorder(Theme.Colors.stroke(colorScheme), lineWidth: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(description)
+        .accessibilityAddTraits(.isImage)
     }
 }
 

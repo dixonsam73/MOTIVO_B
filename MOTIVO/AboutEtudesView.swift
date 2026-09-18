@@ -1,6 +1,8 @@
 import SwiftUI
 
-struct AboutEtudesView: View {
+struct AboutEtudesView<ConnectedDestination: View>: View {
+    @ViewBuilder let connectedDestination: () -> ConnectedDestination
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -10,7 +12,7 @@ struct AboutEtudesView: View {
                     .padding(.vertical, Theme.Spacing.xxl)
 
                 captureSection
-                tasksSection.padding(.top, Theme.Spacing.xxl)
+                listsSection.padding(.top, Theme.Spacing.xxl)
                 scoresSection.padding(.top, Theme.Spacing.xxl)
 
                 PracticeWindowSeparator(animationDelay: 0.5)
@@ -30,6 +32,7 @@ struct AboutEtudesView: View {
             .frame(maxWidth: .infinity)
         }
         .appBackground()
+        .tint(Theme.Colors.accent)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -66,15 +69,16 @@ struct AboutEtudesView: View {
         }
     }
 
-    private var tasksSection: some View {
-        aboutSection("Shape your practice") {
-            Text("Create reusable lists for practice, weekly assignments or setlists. Bring them into a session, tick off items as you go, and return to them next time. You can also import a list by pasting text or scanning handwritten notes.")
+    private var listsSection: some View {
+        aboutSection("Shape your practice with Lists") {
+            Text("Create reusable Lists for practice, lesson assignments or setlists. Bring a List into a session, tick off items as you go, and return to it next time. Import a List by pasting text or scanning handwritten notes.")
                 .aboutBody()
 
             AboutScreenshot(
-                "AboutTasks",
-                crop: CGRect(x: 32, y: 1310, width: 878, height: 552),
-                description: "Example list, with warm-up and scale patterns completed and work on Bach’s Cello Suite II still to do."
+                "AboutLists",
+                sourceSize: CGSize(width: 1206, height: 1777),
+                crop: CGRect(x: 40, y: 760, width: 1130, height: 780),
+                description: "A practice List grouped under Warm Up and Bach cello suites. Hanon major scale patterns are checked off, with two items still to do. Add line, Save list and Import list controls appear below."
             )
 
             Text("The built-in tuner, metronome and drone are there when you need them.")
@@ -89,8 +93,9 @@ struct AboutEtudesView: View {
 
             AboutScreenshot(
                 "AboutScore",
-                crop: CGRect(x: 55, y: 460, width: 832, height: 520),
-                description: "The opening of Bach’s Cello Suite II, Prélude, in the score viewer."
+                sourceSize: CGSize(width: 1206, height: 2622),
+                crop: CGRect(x: 24, y: 190, width: 1158, height: 1050),
+                description: "The opening of Bach’s Cello Suite II, Prélude, with recording, sharing and score library controls above the music."
             )
         }
     }
@@ -102,8 +107,9 @@ struct AboutEtudesView: View {
 
             AboutScreenshot(
                 "AboutSession",
-                crop: CGRect(x: 0, y: 246, width: 942, height: 1750),
-                description: "A saved Afternoon Practice session: Bass Guitar, two hours and five minutes, with notes, focus, a photo and page 8 of the Bach score attached."
+                sourceSize: CGSize(width: 1206, height: 2622),
+                crop: CGRect(x: 38, y: 1148, width: 1130, height: 990),
+                description: "A Journal card for Afternoon Practice on bass guitar, grouped under 7–13 September 2026, with a Bach Thread, a short note, a photo, a Favourite control and two attachments."
             )
 
             Text("Filter by instrument, activity or Thread, search your entries and recording titles, and bookmark useful Sessions and Thoughts with Favourites. Threads and Favourites are personal.")
@@ -118,20 +124,39 @@ struct AboutEtudesView: View {
 
             AboutScreenshot(
                 "AboutInsights",
-                crop: CGRect(x: 36, y: 1010, width: 870, height: 625),
-                description: "Example Insights showing varied session lengths and a current streak of one day."
+                sourceSize: CGSize(width: 1206, height: 2622),
+                crop: CGRect(x: 38, y: 1160, width: 1130, height: 1240),
+                description: "Three Insights cards: Practice rhythm varies week to week, Practice window is spread throughout the day, and Session shape shows a wide range of session lengths."
             )
         }
     }
 
     private var connectedSection: some View {
-        aboutSection("Explore Connected") {
-            Text("Your Journal, Lists and score library work offline without a Connected account.")
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            Text("Your Journal, Lists and score library work offline, without an account.")
                 .aboutBody()
 
-            Text("Études Connected adds sharing with other musicians. In Connected, sessions share with your followers by default; you can change this in Profile.")
+            Text("Études Connected lets you share your musical work, ideas and progress with fellow musicians, teachers and students. Exchange recordings, discuss what you’re working on, and prepare for your next lesson or rehearsal.")
                 .aboutBody()
 
+            Text("In Connected, sessions are shared with your followers by default. You can change this in Profile or choose what to share for each session.")
+                .aboutBody()
+
+            NavigationLink(destination: connectedDestination) {
+                HStack(spacing: Theme.Spacing.s) {
+                    Text("Explore Connected")
+                    Image(systemName: "arrow.right")
+                        .accessibilityHidden(true)
+                }
+                .font(Theme.Text.body.weight(.semibold))
+                .foregroundStyle(Theme.Colors.primaryAction.opacity(0.92))
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .background {
+                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                        .fill(Theme.Colors.primaryAction.opacity(0.18))
+                }
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -150,16 +175,18 @@ struct AboutEtudesView: View {
 }
 
 /// Presents a detail from a screenshot without altering its source pixels.
-/// Crop coordinates use the same 942 × 2048 reference canvas for every asset.
+/// Crop coordinates and source size are expressed in the original image’s pixels.
 private struct AboutScreenshot: View {
     let asset: String
+    let sourceSize: CGSize
     let crop: CGRect
     let description: String
 
     @Environment(\.colorScheme) private var colorScheme
 
-    init(_ asset: String, crop: CGRect, description: String) {
+    init(_ asset: String, sourceSize: CGSize, crop: CGRect, description: String) {
         self.asset = asset
+        self.sourceSize = sourceSize
         self.crop = crop
         self.description = description
     }
@@ -170,7 +197,7 @@ private struct AboutScreenshot: View {
             Image(asset)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 942 * scale, height: 2048 * scale)
+                .frame(width: sourceSize.width * scale, height: sourceSize.height * scale)
                 .offset(x: -crop.minX * scale, y: -crop.minY * scale)
         }
         .aspectRatio(crop.width / crop.height, contentMode: .fit)
