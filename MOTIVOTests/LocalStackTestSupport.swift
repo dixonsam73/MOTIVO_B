@@ -115,6 +115,40 @@ enum LocalStackSupport {
 /// mode while it runs. A write is attributed to the host app only when its call
 /// stack carries a `MOTIVOApp` frame — the measured writer — so a test's OWN
 /// deliberate mode changes (e.g. switching to backendPreview) are not flagged.
+/// C-100 — WHICH FRAMES MEAN "THE HOST APP WROTE THIS".
+///
+/// The sentinel exists to catch the host app's launch activation writing the
+/// backend mode during a test — measured on 2026-09-14 as
+/// `MOTIVOApp.handleMembershipState` → `AppModeManager.applyActivation` →
+/// `setBackendMode`, from a closure in `MOTIVOApp.body`. Those are `MOTIVOApp`
+/// CODE frames, and they still attribute.
+///
+/// **What no longer attributes: the app's SwiftUI `@main` entry point, and only
+/// that frame.** It sits at the bottom of EVERY main-thread stack in a hosted
+/// test process — measured 2026-09-18 in a probe (frame 64 of 68) and in a
+/// crash report's thread 0 — so matching it attributed any write whose
+/// notification the main run loop delivered, whoever made the write. That is
+/// the probable cause of the unexplained failure in the 2c full run.
+///
+/// The exclusion is the EXACT symbol as `Thread.callStackSymbols` prints it,
+/// not a substring: any other `MOTIVOApp` frame, and any line that cannot be
+/// parsed, still attributes — the rule fails towards reporting.
+enum HostActivationAttribution {
+    static let entryPointSymbol = "$s6Etudes9MOTIVOAppV5$mainyyFZ"
+
+    /// The symbol field of a `callStackSymbols` line:
+    /// `<index> <image> <address> <symbol> + <offset>`.
+    static func symbol(of frame: String) -> String? {
+        let fields = frame.split(separator: " ", omittingEmptySubsequences: true)
+        guard fields.count >= 4 else { return nil }
+        return String(fields[3])
+    }
+
+    static func attributingFrames(_ stack: [String]) -> [String] {
+        stack.filter { $0.contains("MOTIVOApp") && symbol(of: $0) != entryPointSymbol }
+    }
+}
+
 final class AppActivationWriteSentinel: NSObject {
     private let lock = NSLock()
     private var hostWrites: [String] = []
@@ -129,10 +163,20 @@ final class AppActivationWriteSentinel: NSObject {
     override func observeValue(forKeyPath keyPath: String?, of object: Any?,
                                change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
         let stack = Thread.callStackSymbols
-        guard stack.contains(where: { $0.contains("MOTIVOApp") }) else { return }
+        // C-100 CORRECTION (2026-09-18): the app's `@main` entry frame no longer
+        // counts. See `HostActivationAttribution`.
+        let attributing = HostActivationAttribution.attributingFrames(stack)
+        guard !attributing.isEmpty else { return }
         let value = (change?[.newKey] as? String) ?? "<nil>"
+        // The FULL stack is kept: the earlier 30-frame record cut off the very
+        // frame that had to be explained. Reported through `XCTFail` in
+        // `assertNoHostActivationWrites` only — never an XCTContext activity,
+        // which aborts the process when created off the main thread.
+        let report = "wrote \(value) (mainThread=\(Thread.isMainThread)):\n"
+            + "ATTRIBUTING FRAMES:\n" + attributing.joined(separator: "\n")
+            + "\nFULL STACK (\(stack.count) frames):\n" + stack.joined(separator: "\n")
         lock.lock()
-        hostWrites.append("wrote \(value):\n" + stack.prefix(30).joined(separator: "\n"))
+        hostWrites.append(report)
         lock.unlock()
     }
 
