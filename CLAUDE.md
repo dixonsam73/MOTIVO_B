@@ -14,6 +14,24 @@ Baseline verified at migration: Debug and Release both compile clean
 
 ---
 
+# CONNECTED IS TO BECOME ADULT-ONLY — PRODUCT DECISION, 2026-09-18. NOT IMPLEMENTED
+
+**Solo is unchanged, and the Études app does not become 18+:** Solo stays
+available, local and account-free, with no Études-imposed age restriction.
+**Connected is to become an 18+ service only.** See architectural invariant 5
+below and the decision record `docs/adult-only-connected-rescope-2026-09-18.md`.
+
+**This supersedes the 13+ Connected target as DIRECTION ONLY.** The shipped code
+and the production schema still implement the 13+ design, including B-40 and
+`tg_directory_requires_band`, and **stay in force until a reviewed replacement
+ships.** **No Apple result, including generic `.confirmed`, has been determined
+adequate for Ofcom HEAA**, and the server-trust architecture is unresolved. **No
+implementation is authorised.** Where passages below describe 13–17 Connected as
+the plan, they record the direction as it stood at their dates and are **not
+rewritten**.
+
+---
+
 # PHASE 3 IS CLOSED — 2026-09-03. UNATTENDED EXPIRY CLEANUP IS LIVE
 
 **U3, U4, U5, U6 and U7 are all complete and in production.** Membership is
@@ -2574,10 +2592,22 @@ release-readable logging is ever needed again, use `os.Logger` with
    decisions require authoritative server-side evidence.**
 4. **Personal durability is independent of Connected membership and follows
    Apple's normal backup model.**
+5. **Connected is to become an adult-only service; Solo is not.** Solo remains available
+   without an Études account or an Études-imposed age restriction. Connected
+   establishment and access require adulthood to be established through an
+   Apple-provided age-assurance mechanism that SD Songs Ltd has determined
+   adequate for the applicable assurance requirement. Under-18, declined,
+   unavailable, unrecognised or insufficient assurance fails closed to Solo. No
+   particular Apple result, including `.confirmed`, is considered adequate until
+   that determination is explicitly recorded. Age eligibility must never become a
+   precondition for account deletion.
 
-Settled after a four-phase client audit and a Supabase backend audit. Only
-genuine new evidence contradicting one of them is grounds to reopen — not a
-preference for a different design.
+Invariants 1–4 were settled after a four-phase client audit and a Supabase
+backend audit. **Invariant 5 was added 2026-09-18 as a product decision**
+(`docs/adult-only-connected-rescope-2026-09-18.md`). It is **not yet implemented**,
+and the mechanism that will satisfy it is undecided. Only genuine new evidence
+contradicting one of them is grounds to reopen — not a preference for a different
+design.
 
 `docs/architecture.md` — the four data domains, plus designed-but-parked work.
 `docs/audit-findings.md` — finding register (IDs C-n client, B-n backend).
@@ -2599,7 +2629,17 @@ fixed, and the trigger re-tested afterwards.
 `docs/phase-5-scope.md` — **PHASE 5 UNIT ORDER. IN PROGRESS — "NOT STARTED" WAS
 TRUE ON 2026-09-06 AND IS NOW FALSE; corrected 2026-09-08.** **P5-A, P5-C (CP-0),
 P5-D (CP-1 apply), P5-E (CP-2) and P5-F (CP-3) are COMPLETE.** **THE NEXT UNIT IS
-P5-G (CP-4) — DPIA and legal confirmations.**
+P5-G (CP-4) — DPIA and legal confirmations.** **RE-SCOPED 2026-09-18:** P5-G
+is now the legal and evidential determination for **adult-only Connected**
+(HEAA adequacy, server trust), and P5-H waits for it — see
+`docs/phase-5-scope.md` and `docs/adult-only-connected-rescope-2026-09-18.md`.
+
+**SUPERSEDED AS DIRECTION 2026-09-18 by adult-only Connected (invariant 5).** The
+two paragraphs that follow record the 13–17 and invitation positions as they
+stood on 2026-09-17 and are not rewritten. **The teen inbound-contact proposal is
+no longer a target.** B-40 remains deployed and in force until a reviewed
+replacement ships. The invitation documents have not yet been updated for the new
+direction.
 
 **THE 13-17 INBOUND-CONTACT RULE IS UNDER PROPOSED REVISION — DOCUMENTATION ONLY,
 2026-09-17.** Samuel has agreed that the blanket teen inbound-follow prohibition is
@@ -2673,6 +2713,9 @@ resubscription/hydration regression.**
 separate. **H-1 (ProfileView "Connected" section grouping) is logged-only** in
 `docs/phase-5-ui-housekeeping.md` and is **not part of CP-3 closure**.
 
+**[2026-09-18: the 13–17 Connected target of the CP workstream is SUPERSEDED as
+direction by adult-only Connected. CP-0…CP-3 stay closed as historical work;
+CP-4/CP-5 (P5-G/P5-H) are re-scoped. The paragraph below is kept as written.]**
 Carries the **children's privacy workstream CP-0…CP-5** (moved here, NOT Phase 4)
 alongside the existing 19 Phase 5 register rows and the playback-speed work.
 **The critical ordering is CP-1 DESIGN → CP-0 reset → CP-1 APPLY → CP-2 → CP-3**
@@ -3064,7 +3107,11 @@ before moving on. Six bounded, separately reviewable phases — not one rewrite.
 5. **Children's privacy, then remaining client fixes** — **the children's
    privacy workstream CP-0…CP-5 now belongs to Phase 5** (13–17 Connected
    support: age band, under-18 Share and discovery defaults OFF, DPIA and the
-   legal/publication gate). Plus the existing backlog: duplicate Score
+   legal/publication gate). **[SUPERSEDED AS DIRECTION 2026-09-18: Connected is
+   to become 18+ only (invariant 5). CP-4/CP-5 are re-scoped to the adult-only
+   legal determination and publication. See
+   `docs/adult-only-connected-rescope-2026-09-18.md`.]** Plus the existing
+   backlog: duplicate Score
    adoption; staged-video work if measurement justifies it; playback rate
    (AttachmentViewerView only, local and remote audio/video, discrete
    50/75/100%, pitch preserved, no looping, no PracticeTimerView changes, no
@@ -3110,6 +3157,12 @@ Verification gate after each phase. RC QA confirms an already-tested system.
   provenance Études deliberately never reads. **Études still consumes NEITHER
   `isEligibleForAgeFeatures` NOR `requiredRegulatoryFeatures`; age establishment
   and the 13-17 protections remain UNCONDITIONAL and globally uniform.**
+  **[2026-09-18: still an accurate description of the shipped code. As
+  direction, however, the 13-17 protections are superseded by adult-only
+  Connected, and "provenance Études deliberately never reads" is now an OPEN
+  question: whether any provenance, including `.confirmed` (iOS 26.5 only), must
+  be read is part of the unresolved HEAA determination. The deployment target is
+  unchanged. See `docs/adult-only-connected-rescope-2026-09-18.md` §5.]**
 - Flat source layout via `fileSystemSynchronizedGroups` — everything in
   `MOTIVO/` is auto-included in the app target.
 - Debug and Release use different bundle IDs, and **only Release can transact.**

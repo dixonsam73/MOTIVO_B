@@ -1,5 +1,13 @@
 # P5-G / CP-4 — LEGAL REVIEW PACKET
 
+> **SUPERSEDED — 18 SEPTEMBER 2026. HISTORICAL AND LEGAL-WORKING RECORD.** This
+> packet records the former **13+ Connected** design and the questions framed for it.
+> It is retained unchanged as a record. **The current target is adult-only
+> Connected** (Solo unchanged, no Études-imposed age restriction). **Any future
+> counsel brief must be built from `docs/adult-only-connected-rescope-2026-09-18.md`,
+> not from this packet.** Nothing here should be read as describing the current
+> target, or as a legal finding.
+
 **For deciding HOW to obtain confirmation, and for briefing whoever gives it.
 2026-09-09. This is a checklist and a fact base, not a memo and not legal
 analysis.**

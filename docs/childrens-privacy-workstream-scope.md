@@ -1,5 +1,12 @@
 # CHILDREN'S PRIVACY WORKSTREAM (CP) — SCOPE. 2026-09-06
 
+> **SUPERSEDED AS DIRECTION — 18 SEPTEMBER 2026.** This scope set the **13–17
+> Connected** target. That target is superseded: **Connected is to become 18+ only**,
+> and Solo is unchanged with no Études-imposed age restriction. This document is
+> retained **unchanged** as the historical origin of the previous design. CP-0…CP-3
+> stay closed as historical work; CP-4/CP-5 (P5-G/P5-H) are re-scoped. See
+> `docs/adult-only-connected-rescope-2026-09-18.md`.
+
 **A SEPARATE PRE-RELEASE WORKSTREAM. NOT PHASE 4, and not to be implemented
 inside it.** Phase 4 remains implementation-complete / exit-incomplete
 (`docs/phase-4-exit-assessment.md`); nothing here changes its status.

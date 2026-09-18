@@ -1,5 +1,63 @@
 # P5-G / CP-4 — DECISION REGISTER
 
+> **SUPERSEDED AS TARGET MODEL — 18 SEPTEMBER 2026. READ THIS FIRST.**
+> Connected is to become an **18+ service only**; Solo is unchanged and carries no
+> Études-imposed age restriction. **The 13–17 Connected architecture this register
+> decides for is no longer the target product model.** Every section below, §A to
+> §P and §4–§5, is **preserved as the historical record** of decisions made for
+> that model, and is **not rewritten**. The shipped code and production still
+> implement those decisions (B-40 included) until a reviewed replacement ships.
+> Decision record: `docs/adult-only-connected-rescope-2026-09-18.md`. What carries
+> forward is listed immediately below. **Nothing here is a legal finding.**
+
+## ADULT-ONLY RE-SCOPE — WHAT CARRIES FORWARD. 2026-09-18
+
+**These principles and questions do not depend on admitting teens.** They carry
+into the re-scoped P5-G. Each is restated from the section cited, not newly
+decided.
+
+- **Fail closed (Q4 / §A4).** A declined, unavailable or error result persists
+  nothing, refuses Connected, and remains retryable. Under the new direction, an
+  under-18, unrecognised or insufficiently assured result fails closed to Solo in
+  the same way. The Q4 wording question for legal carries forward.
+- **Accurate description of Apple-supplied assurance (§A4, §C1, §C2).** Copy and
+  the DPIA describe Apple *sharing* an age range, never Études *asking* for an age.
+  The characterisation must stay accurate: the range comes from the Apple Account
+  active on the device at request time, and it is not independently bound to the
+  Études identity. **Apple's underlying assurance may be self-declared,
+  guardian-declared or confirmed by other means.** Which of these, if any, is
+  adequate is **undetermined**.
+- **Data minimisation (Q5 / §A5).** No date of birth. **Whether provenance
+  (`ageRangeDeclaration`, including `.confirmed`) must now be read, and whether it
+  must be stored, is OPEN.** It depends on the HEAA and server-trust determination.
+  The earlier minimisation rationale should not be applied to it without review.
+- **Regional and ongoing obligations (§C4, §K, §O).** **Settled product
+  requirement: Connected is adult-only everywhere, with no regional exception to
+  the 18+ rule.** What remains open, for counsel, is whether particular regions
+  impose *additional* obligations on an adult-only service: assurance, consent,
+  notification, record-keeping or others. That includes regional app-store
+  age-assurance laws and `RESCIND_CONSENT`. §O's rule carries forward as it stands:
+  Apple's regulatory signals must never *weaken* a baseline protection that applies
+  globally.
+- **The membership kill switch never relaxes eligibility.** CP-2 stated this for
+  its child-safety clauses (the comments in `search_account_directory` and
+  `follow_requests_open`), and it carries forward as a principle for any future
+  eligibility clause. That clause is not designed here.
+- **Account deletion stays independent of entitlement and eligibility** (C-35).
+- **Launch configuration (§L, §N)** does not depend on age and stays release-gating
+  as recorded.
+- **Q6 (§A6)** needs re-examination. Its premise, establishing Samuel's band through
+  the ordinary path, depends on the adult-only architecture. It is neither executed
+  nor withdrawn here.
+
+**No longer target direction:** Q2 and §A2′ (teen inbound requests), Q3 and §A3′
+(`communicationLimits`, consequent on Q2), §J (teen-only recheck), Q1's teen-to-adult
+reasoning, the under-13 copy in §C1, §C3 and §4's teen limitation as DPIA content,
+and §O's 13–17 flow. **Open adult-only questions** are listed in the decision
+record's §5.
+
+---
+
 **Opened 2026-09-08. DECISIONS RECORDED 2026-09-08 — see §A.** This is the decision
 surface for the DPIA and the legal confirmations, not a design and not an
 implementation plan.

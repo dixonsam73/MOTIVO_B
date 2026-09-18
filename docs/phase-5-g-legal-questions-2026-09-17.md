@@ -1,5 +1,13 @@
 # Études — legal questions for confirmation
 
+> **SUPERSEDED — 18 SEPTEMBER 2026. HISTORICAL AND LEGAL-WORKING RECORD.** These
+> questions assume the former **13+ Connected** design. They are retained unchanged
+> as a record. **The current target is adult-only Connected** (Solo unchanged, no
+> Études-imposed age restriction). **Any future counsel brief must be built from
+> `docs/adult-only-connected-rescope-2026-09-18.md`.** Whether this brief was sent to
+> counsel is not recorded. If it was, counsel should be told that it describes a
+> superseded design.
+
 **SD Songs Ltd (UK) · 17 September 2026**
 
 **A targeted confirm/correct review, not a general international survey of age-assurance
