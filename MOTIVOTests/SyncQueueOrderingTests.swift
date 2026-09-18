@@ -69,6 +69,11 @@ final class QueueStubServer: URLProtocol {
     private static var refs: [String: [String]] = [:]
     private static var rowOwners: [String: String] = [:]
 
+    // P6-I-02 Unit 2c — ADDITIVE.
+    private static var forcedBodies: [String: [String]] = [:]
+    private static var dropAfterApply = Set<String>()
+    private static var deferredCommits = Set<String>()
+
     /// P6-I-02 Unit 2b. Set when the CLIENT abandons a request before its
     /// response was produced — the observable form of cancellation.
     private var loadingKey: String?
@@ -78,12 +83,30 @@ final class QueueStubServer: URLProtocol {
     static func reset() {
         cond.lock(); rows = []; requestLog = []; holds = []; failing = []
         auth = []; urls = []; forced = [:]; refs = [:]; rowOwners = [:]
+        forcedBodies = [:]; dropAfterApply = []; deferredCommits = []
         cond.broadcast(); cond.unlock()
     }
 
     /// Answer `key` with `status` the next time it arrives (queued, one per arrival).
     static func respond(_ key: String, with status: Int) {
         cond.lock(); forced[key, default: []].append(status); cond.unlock()
+    }
+    /// Answer `key` with this exact 2xx BODY the next time (queued).
+    static func respondBody(_ key: String, _ body: String) {
+        cond.lock(); forcedBodies[key, default: []].append(body); cond.unlock()
+    }
+    /// APPLY `key`'s effect, then lose the response: the client gets a
+    /// transport error although the server did the work.
+    static func dropResponseAfterApplying(_ key: String) {
+        cond.lock(); dropAfterApply.insert(key); cond.unlock()
+    }
+    /// The next POST for `id` answers a transport error WITHOUT committing; the
+    /// row appears only when `commitDeferred(id)` is called — a late commit.
+    static func deferCommit(_ id: UUID) {
+        cond.lock(); deferredCommits.insert(id.uuidString.uppercased()); cond.unlock()
+    }
+    static func commitDeferred(_ id: UUID) {
+        cond.lock(); rows.insert(id.uuidString.uppercased()); cond.unlock()
     }
     /// A row that already exists, with these storage object paths as its refs.
     static func seedRow(_ id: UUID, objectPaths: [String]) {
@@ -186,7 +209,19 @@ final class QueueStubServer: URLProtocol {
             self.responded = true
             var status = 204
             var data = Data()
-            if var queued = Self.forced[key], !queued.isEmpty {
+            var transportFailure = false
+            let wantsRows = self.request.value(forHTTPHeaderField: "Prefer")?.contains("return=representation") == true
+            let rowJSON = #"[{"id":""# + id + #""}]"#
+            if var bodies = Self.forcedBodies[key], !bodies.isEmpty {
+                data = Data(bodies.removeFirst().utf8)
+                Self.forcedBodies[key] = bodies
+                status = 200
+                if method == "DELETE" { Self.rows.remove(id) }
+            } else if method == "POST", !isObject, Self.deferredCommits.contains(id) {
+                // Received, NOT committed; the client is told it failed.
+                Self.deferredCommits.remove(id)
+                transportFailure = true
+            } else if var queued = Self.forced[key], !queued.isEmpty {
                 status = queued.removeFirst()
                 Self.forced[key] = queued
             } else if Self.failing.contains(key) {
@@ -196,7 +231,11 @@ final class QueueStubServer: URLProtocol {
             } else {
                 switch method {
                 case "POST": Self.rows.insert(id); status = 201
-                case "DELETE": Self.rows.remove(id)
+                case "DELETE":
+                    let existed = Self.rows.remove(id) != nil
+                    if wantsRows { status = 200; data = Data((existed ? rowJSON : "[]").utf8) }
+                case "PATCH" where wantsRows:
+                    status = 200; data = Data((Self.rows.contains(id) ? rowJSON : "[]").utf8)
                 case "GET":
                     status = 200
                     if Self.rows.contains(id) {
@@ -209,8 +248,13 @@ final class QueueStubServer: URLProtocol {
                 default: break
                 }
             }
-            Self.requestLog.append("\(key) done \(status)")
+            if Self.dropAfterApply.remove(key) != nil { transportFailure = true }
+            Self.requestLog.append(transportFailure ? "\(key) lost" : "\(key) done \(status)")
             Self.cond.unlock()
+            if transportFailure {
+                self.client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+                return
+            }
 
             let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
             self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

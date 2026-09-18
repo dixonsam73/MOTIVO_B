@@ -664,10 +664,36 @@ public final class SessionSyncQueue: ObservableObject {
                 if payload.op == .unshare {
                     let unshare = await BackendEnvironment.shared.publish.unsharePost(payload.id, binding: binding)
                     switch unshare {
-                    case .success:
-                        NSLog("[SessionSyncQueue] unshare converged • postID=%@", payload.id.uuidString)
-                        BackendLogger.notice("Unshare converged • postID=\(payload.id.uuidString)")
+                    case .success(let outcome):
+                        // P6-I-02 Unit 2c. ACKNOWLEDGED FOR WHAT IT IS, AND NO MORE.
+                        //
+                        // None of these means "withdrawn". A publish whose outcome
+                        // this client never learned can still commit after this
+                        // DELETE — whether it removed a row or matched nothing —
+                        // and after this acknowledgement. That is the OPEN
+                        // stable-withdrawal blocker; it is not closed here.
+                        //
+                        // `noRowMatched` is acknowledged because refusing it would
+                        // retry for ever on every never-published post, which every
+                        // Share-OFF save produces. That is today's behaviour, now
+                        // stated truthfully rather than logged as "converged".
+                        switch outcome {
+                        case .rowDeleted:
+                            BackendLogger.notice("Withdrawal • owner-scoped DELETE removed the row at completion (not proof of stable absence) • postID=\(payload.id.uuidString)")
+                        case .noRowMatched:
+                            BackendLogger.notice("Withdrawal • owner-scoped DELETE matched no row: absent, not owned, or not yet committed — indistinguishable • postID=\(payload.id.uuidString)")
+                        case .simulatedUnverified:
+                            // Acknowledged as before 2c. This path sends NOTHING
+                            // and is reachable in Connected mode when HTTP config
+                            // is absent — a separately identified concern, not
+                            // changed here and never evidence of a withdrawal.
+                            BackendLogger.notice("Withdrawal • SIMULATED service — nothing sent, UNVERIFIED • postID=\(payload.id.uuidString)")
+                        }
                         self.acknowledge(payload, revision: revision, generation: flushGeneration)
+                    case .failure(let error) where (error as? WithdrawalResultError) == .undetermined:
+                        // A 2xx that is not `[]` and not exactly the requested row.
+                        // Today this would have been acknowledged; it is HELD.
+                        BackendLogger.notice("Withdrawal held • DELETE result undetermined • postID=\(payload.id.uuidString)")
                     case .failure(let error) where error is TransportIdentityError || error is CancellationError:
                         // P6-I-02 Unit 2b. Not sent as its owner, or cancelled: HELD.
                         // The item stays and nothing is acknowledged. Cancellation

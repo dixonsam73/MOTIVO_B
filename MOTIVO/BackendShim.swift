@@ -273,6 +273,54 @@ public final class BackendFeedStore: ObservableObject {
     }
 
 
+// MARK: - P6-I-02 Unit 2c — what a bound withdrawal actually established
+
+/// What a bound withdrawal ESTABLISHED. There is deliberately no case meaning
+/// "withdrawn": a publish whose outcome the client never learned can still
+/// commit afterwards, and nothing the client observes can rule that out.
+public enum WithdrawalOutcome: Equatable {
+    /// The owner-scoped DELETE removed exactly the requested row — at that instant.
+    case rowDeleted
+    /// A validated `[]`: absent, not this owner's, or not yet committed. The
+    /// client cannot tell which, so this is NOT proof of absence.
+    case noRowMatched
+    /// `SimulatedPublishService` answered: nothing was sent, nothing verified.
+    /// REACHABLE WHENEVER HTTP CONFIG IS ABSENT — in backendPreview OR
+    /// backendConnected mode (`BackendEnvironment.publish` falls back to the
+    /// simulated service whenever `BackendConfig`/`NetworkManager.baseURL` is
+    /// missing). It is NOT preview-only, and it is never proof of anything.
+    case simulatedUnverified
+}
+
+/// The demote is a fail-safe, recorded and never decisive.
+public enum DemoteOutcome: Equatable { case applied, notApplied, undetermined }
+
+public enum WithdrawalResultError: Error, Equatable, CustomStringConvertible {
+    /// A 2xx whose body is not `[]` and not exactly the requested row.
+    case undetermined
+    public var description: String { "WithdrawalResultError.undetermined" }
+}
+
+/// A 2xx representation for a request filtered to ONE post id. Either `[]`, or
+/// exactly one object whose `id` is a UUID equal to the requested one. Anything
+/// else — not JSON, not an array, several rows, a missing or foreign id — is
+/// undetermined. "A well-formed array" is not enough, and neither is "≥1 row".
+enum SingleRowRepresentation: Equatable {
+    case zeroRows, theRequestedRow, undetermined
+
+    static func classify(_ data: Data, requestedID: UUID) -> SingleRowRepresentation {
+        guard let parsed = try? JSONSerialization.jsonObject(with: data),
+              let rows = parsed as? [Any] else { return .undetermined }
+        if rows.isEmpty { return .zeroRows }
+        guard rows.count == 1,
+              let row = rows[0] as? [String: Any],
+              let raw = row["id"] as? String,
+              let id = UUID(uuidString: raw),
+              id == requestedID else { return .undetermined }
+        return .theRequestedRow
+    }
+}
+
 public protocol BackendPublishService {
     func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload) async -> Result<Void, Error>
     func deletePost(_ postID: UUID) async -> Result<Void, Error>
@@ -282,7 +330,8 @@ public protocol BackendPublishService {
     /// `binding.expectedOwner`, or not at all. The unbound methods above are
     /// unchanged and remain the direct-delete and test paths.
     func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding) async -> Result<Void, Error>
-    func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<Void, Error>
+    /// P6-I-02 Unit 2c. Reports what the withdrawal ESTABLISHED — never "withdrawn".
+    func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<WithdrawalOutcome, Error>
     func updatePost(_ postID: UUID) async -> Result<Void, Error>
     func fetchFeed(scope: String) async -> Result<Void, Error>
     func fetchAllOwnerPostsForAnalytics(ownerUserID: String, pageSize: Int) async -> Result<[BackendPost], Error>
@@ -331,8 +380,10 @@ public final class SimulatedPublishService: BackendPublishService {
     public func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding) async -> Result<Void, Error> {
         await uploadPost(payload)
     }
-    public func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<Void, Error> {
-        await unsharePost(postID)
+    public func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<WithdrawalOutcome, Error> {
+        // The simulated service verifies nothing; it says so, and is never
+        // counted as evidence. Reached in ANY mode without HTTP config.
+        await unsharePost(postID).map { .simulatedUnverified }
     }
 
     public init() {}
@@ -933,8 +984,10 @@ public final class HTTPBackendPublishService: BackendPublishService {
         await uploadPostImpl(payload, binding: binding)
     }
 
-    public func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<Void, Error> {
-        await unsharePostImpl(postID, binding: binding)
+    public func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<WithdrawalOutcome, Error> {
+        await unsharePostImpl(postID, binding: binding).flatMap { outcome in
+            outcome.map { .success($0) } ?? .failure(WithdrawalResultError.undetermined)
+        }
     }
     public init() {}
 
@@ -1683,11 +1736,13 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]],
     /// no owner filter, same requests in the same order.
     @MainActor
     public func deletePost(_ postID: UUID) async -> Result<Void, Error> {
-        await deletePostImpl(postID, binding: nil)
+        await deletePostImpl(postID, binding: nil).map { _ in () }
     }
 
+    /// Unbound: `.success(nil)` on any 2xx, exactly as before. Bound: the
+    /// validated outcome of the owner-scoped row DELETE (P6-I-02 Unit 2c).
     @MainActor
-    private func deletePostImpl(_ postID: UUID, binding: OperationBinding?) async -> Result<Void, Error> {
+    private func deletePostImpl(_ postID: UUID, binding: OperationBinding?) async -> Result<WithdrawalOutcome?, Error> {
         guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
@@ -1726,17 +1781,28 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]],
         }
 
         // 3) Delete the post row.
+        // P6-I-02 Unit 2c. UNBOUND (the direct-delete path): `return=minimal`
+        // and any 2xx is success, byte for byte as before — `ContentView`
+        // deletes local data on it, including for sessions never published,
+        // whose row DELETE matches nothing. BOUND: ask for the removed rows and
+        // VALIDATE them, so the queue is told what actually happened.
         let deletePath = "rest/v1/posts?id=eq.\(postID.uuidString)" + ownerFilter(binding)
+            + (binding == nil ? "" : "&select=id")
         let deleteHeaders: [String: String] = [
             "apikey": apiKey,
-            "Prefer": "return=minimal"
+            "Prefer": binding == nil ? "return=minimal" : "return=representation"
         ]
 
         let deleteResult = await send(path: deletePath, method: "DELETE", headers: deleteHeaders, binding: binding)
 
         switch deleteResult {
-        case .success:
-            return .success(())
+        case .success(let data):
+            guard binding != nil else { return .success(nil) }
+            switch SingleRowRepresentation.classify(data, requestedID: postID) {
+            case .theRequestedRow: return .success(.rowDeleted)
+            case .zeroRows: return .success(.noRowMatched)
+            case .undetermined: return .failure(WithdrawalResultError.undetermined)
+            }
         case .failure(let e):
             return .failure(e)
         }
@@ -1845,20 +1911,21 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]],
     /// queued for the next launch/foreground flush.
     @MainActor
     public func unsharePost(_ postID: UUID) async -> Result<Void, Error> {
-        await unsharePostImpl(postID, binding: nil)
+        await unsharePostImpl(postID, binding: nil).map { _ in () }
     }
 
     @MainActor
-    private func unsharePostImpl(_ postID: UUID, binding: OperationBinding?) async -> Result<Void, Error> {
+    private func unsharePostImpl(_ postID: UUID, binding: OperationBinding?) async -> Result<WithdrawalOutcome?, Error> {
         guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
 
         let patchPath = "rest/v1/posts?id=eq.\(postID.uuidString)" + ownerFilter(binding)
+            + (binding == nil ? "" : "&select=id")
         let headers: [String: String] = [
             "apikey": apiKey,
             "Content-Type": "application/json",
-            "Prefer": "return=minimal"
+            "Prefer": binding == nil ? "return=minimal" : "return=representation"
         ]
         let body: [String: Any] = ["is_public": false]
         guard let jsonData = try? JSONSerialization.data(withJSONObject: body, options: []) else {
@@ -1871,6 +1938,20 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]],
         if case .failure(let e) = demote {
             NSLog("[HTTPBackendPublishService] unshare demote FAILED • %@ | error=%@", postID.uuidString, String(describing: e))
             return .failure(e)
+        }
+
+        // P6-I-02 Unit 2c. THE DEMOTE IS RECORDED, NEVER DECISIVE. Whatever it
+        // reports — applied, nothing matched (gated, absent or not owned), or an
+        // unreadable body — the delete runs next: it is the operation, and
+        // continuing is safe under every one of those causes.
+        if binding != nil, case .success(let data) = demote {
+            let demoteOutcome: DemoteOutcome
+            switch SingleRowRepresentation.classify(data, requestedID: postID) {
+            case .theRequestedRow: demoteOutcome = .applied
+            case .zeroRows: demoteOutcome = .notApplied
+            case .undetermined: demoteOutcome = .undetermined
+            }
+            BackendLogger.notice("Withdrawal demote • postID=\(postID.uuidString) • \(demoteOutcome)")
         }
 
         return await deletePostImpl(postID, binding: binding)
