@@ -190,9 +190,11 @@ final class C84SessionPreservationTests: XCTestCase {
 
     func testFailedSaveStaysInReview() {
         let s = code("PostRecordDetailsView.swift")
-        XCTAssertTrue(s.contains("private func saveToCoreData(visibility: Bool) -> Bool"), "the save must report failure")
+        // P6-I-02 Unit 2d-1: the save now reports failure as nil (success carries
+        // the sharing-choice save result), so the property is unchanged.
+        XCTAssertTrue(s.contains("private func saveToCoreData(visibility: Bool) -> SharingChoiceSaveResult?"), "the save must report failure")
         XCTAssertTrue(block(after: "private func commitSaveAndDismiss(", in: s)?
-            .contains("guard saveToCoreData(visibility: visibility) else") ?? false,
+            .contains("guard let sharingSaveResult = saveToCoreData(visibility: visibility) else { return }") ?? false,
                       "a failed Save must not dismiss — dismissal lands in the discard path")
     }
 

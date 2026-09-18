@@ -395,6 +395,13 @@ struct MOTIVOApp: App {
                         let ok = await auth.ensureValidSession(reason: "foreground")
                         guard ok else { return }
                         _ = await BackendEnvironment.shared.publish.fetchFeed(scope: "all")
+                        // P6-I-02 Unit 2d-1. ONE attempt, once per transition to active,
+                        // to save any sharing choice held only in memory — inside the
+                        // guards above, before the flush. No loop, no timer. Not run in a
+                        // hosted unit-test process, where tests latch the store on purpose.
+                        if !UnitTestHost.isActive {
+                            SessionSyncQueue.shared.recoverIfNeeded(reason: "foreground")
+                        }
                         await SessionSyncQueue.shared.flushNow()
                     }
                 }

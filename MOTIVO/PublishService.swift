@@ -239,11 +239,12 @@ final class PublishService: ObservableObject {
         }
     }
 
+    @discardableResult
     public func publish(
         payload: SessionSyncQueue.PostPublishPayload,
         objectID: NSManagedObjectID,
         shouldPublish: Bool
-    ) {
+    ) -> SharingChoiceSaveResult {
         // P6-I-02. THE OWNER IS CAPTURED HERE, SYNCHRONOUSLY, AT THE MEMBER'S
         // ACTION — before the deferred `Task` below and long before the flush.
         //
@@ -269,108 +270,116 @@ final class PublishService: ObservableObject {
             NSLog("[PublishService] %@ session → %@", shouldPublish ? "Published" : "Unpublished", uri)
         }
 
-        Task { @MainActor in
-            if shouldPublish {
-                // Step 12 parity: enrich payload with Core Data Session.notes + areNotesPrivate via objectID.
-                // This avoids UI changes (views can keep constructing payload without notes).
-                //
-                // C-88. Start from the INCOMING values. These used to start as
-                // nil/false, so a Session that could not be read replaced the
-                // caller's notes and privacy with "no notes, not private" -- the
-                // opposite of what the catch below says it does.
-                var resolvedNotes: String? = payload.notes
-                var resolvedAreNotesPrivate: Bool = payload.areNotesPrivate
+        // P6-I-02 Unit 2d-1. THE CHOICE IS QUEUED NOW, AT THE MEMBER'S ACTION,
+        // AND ITS SAVE RESULT IS RETURNED. This used to happen inside the deferred
+        // Task below, after the editor had already closed: the result was thrown
+        // away, and a kill in that gap lost the choice before it was queued.
+        // `PublishService` is @MainActor and both callers call this after their
+        // save, so the enrichment reads the same committed values (C-88). Only
+        // the FLUSH stays asynchronous.
+        let saveResult: SharingChoiceSaveResult
+        if shouldPublish {
+            // Step 12 parity: enrich payload with Core Data Session.notes + areNotesPrivate via objectID.
+            // This avoids UI changes (views can keep constructing payload without notes).
+            //
+            // C-88. Start from the INCOMING values. These used to start as
+            // nil/false, so a Session that could not be read replaced the
+            // caller's notes and privacy with "no notes, not private" -- the
+            // opposite of what the catch below says it does.
+            var resolvedNotes: String? = payload.notes
+            var resolvedAreNotesPrivate: Bool = payload.areNotesPrivate
 
-                do {
-                    let viewContext = PersistenceController.shared.container.viewContext
-                    let obj = try viewContext.existingObject(with: objectID)
-                    viewContext.refresh(obj, mergeChanges: true)
+            do {
+                let viewContext = PersistenceController.shared.container.viewContext
+                let obj = try viewContext.existingObject(with: objectID)
+                viewContext.refresh(obj, mergeChanges: true)
 
-                    func hasAttr(_ name: String) -> Bool { (obj.entity.attributesByName[name] != nil) }
-                    // C-88. A Session that was READ has definite notes. Empty,
-                    // whitespace-only or nil means the member has no notes, and is
-                    // queued as "" -- an explicit clear. It used to be queued as nil,
-                    // which the queue merge reads as "unspecified", so an older
-                    // queued publish kept its old notes and published them.
-                    if hasAttr("notes") {
-                        let saved = obj.value(forKey: "notes") as? String
-                        resolvedNotes = (saved ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    }
-                    if hasAttr("areNotesPrivate"), let val = obj.value(forKey: "areNotesPrivate") as? Bool {
-                        resolvedAreNotesPrivate = val
-                    }
-                } catch {
-                    // If we can't resolve notes, proceed with the incoming payload unchanged.
-                    // Unknown is not a clear: nil stays nil (C-88).
+                func hasAttr(_ name: String) -> Bool { (obj.entity.attributesByName[name] != nil) }
+                // C-88. A Session that was READ has definite notes. Empty,
+                // whitespace-only or nil means the member has no notes, and is
+                // queued as "" -- an explicit clear. It used to be queued as nil,
+                // which the queue merge reads as "unspecified", so an older
+                // queued publish kept its old notes and published them.
+                if hasAttr("notes") {
+                    let saved = obj.value(forKey: "notes") as? String
+                    resolvedNotes = (saved ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 }
-
-                let effectivePayload = SessionSyncQueue.PostPublishPayload(
-                    id: payload.id,
-                    sessionID: payload.sessionID,
-                    sessionTimestamp: payload.sessionTimestamp,
-                    title: payload.title,
-                    durationSeconds: payload.durationSeconds,
-                    activityType: payload.activityType,
-                    activityDetail: payload.activityDetail,
-                    instrumentLabel: payload.instrumentLabel,
-                    mood: payload.mood,
-                    effort: payload.effort,
-                    isPublic: payload.isPublic,
-                    notes: resolvedNotes,
-                    areNotesPrivate: resolvedAreNotesPrivate,
-                    // C-82 — this rebuild used to drop the member's "Share
-                    // Without It", so the consent never reached the queue.
-                    authorisedOmissions: payload.authorisedOmissions
-                )
-
-                // C-62 — the session TITLE is user content and is not logged;
-                // `postID` identifies the publish. Same rule the notes already
-                // follow (present/empty/nil, never the text).
-                NSLog("[PublishService][8F] enqueue payload keys • postID=%@ dur=%@ act=%@ mood=%@ effort=%@ notes=%@ notesPrivate=%@",
-                      effectivePayload.id.uuidString,
-                      effectivePayload.durationSeconds != nil ? String(effectivePayload.durationSeconds!) : "nil",
-                      effectivePayload.activityType ?? "nil",
-                      effectivePayload.mood != nil ? String(effectivePayload.mood!) : "nil",
-                      effectivePayload.effort != nil ? String(effectivePayload.effort!) : "nil",
-                      effectivePayload.notes.map { $0.isEmpty ? "empty" : "present" } ?? "nil",
-                      effectivePayload.areNotesPrivate ? "true" : "false")
-
-                SessionSyncQueue.shared.enqueue(effectivePayload.withOwner(capturedOwner))
-            } else {
-                // C-61 / P4-U2a-2. PERSIST THE WITHDRAWAL BEFORE TRUSTING THE
-                // NETWORK.
-                //
-                // This branch used to enqueue nothing and fire a one-shot
-                // delete whose result both call sites discarded. Measured: an
-                // offline unshare left NO durable intent, nothing retried it,
-                // and the post stayed public indefinitely -- while the same
-                // action today converges, purely because the shipping call
-                // sites still hard-code `shouldPublish: true` and therefore go
-                // through the queue.
-                //
-                // Enqueuing first gives the withdrawal that same durability:
-                // the file survives termination, and the existing
-                // launch/foreground flush (MOTIVOApp:330 → :379) retries it.
-                // The immediate flush below is only an optimisation -- THE
-                // QUEUE IS THE GUARANTEE.
-                SessionSyncQueue.shared.enqueue(
-                    SessionSyncQueue.PostPublishPayload(
-                        id: payload.id,
-                        sessionID: payload.sessionID,
-                        sessionTimestamp: nil, title: nil, durationSeconds: nil,
-                        activityType: nil, activityDetail: nil, instrumentLabel: nil,
-                        mood: nil, effort: nil,
-                        // `isPublic: false` IS the unshare intent now -- `op` is
-                        // derived from it and cannot be passed. P4-U2c.
-                        isPublic: false,
-                        notes: nil, areNotesPrivate: false,
-                        authorisedOmissions: nil,
-                        ownerUserID: capturedOwner
-                    )
-                )
+                if hasAttr("areNotesPrivate"), let val = obj.value(forKey: "areNotesPrivate") as? Bool {
+                    resolvedAreNotesPrivate = val
+                }
+            } catch {
+                // If we can't resolve notes, proceed with the incoming payload unchanged.
+                // Unknown is not a clear: nil stays nil (C-88).
             }
 
+            let effectivePayload = SessionSyncQueue.PostPublishPayload(
+                id: payload.id,
+                sessionID: payload.sessionID,
+                sessionTimestamp: payload.sessionTimestamp,
+                title: payload.title,
+                durationSeconds: payload.durationSeconds,
+                activityType: payload.activityType,
+                activityDetail: payload.activityDetail,
+                instrumentLabel: payload.instrumentLabel,
+                mood: payload.mood,
+                effort: payload.effort,
+                isPublic: payload.isPublic,
+                notes: resolvedNotes,
+                areNotesPrivate: resolvedAreNotesPrivate,
+                // C-82 — this rebuild used to drop the member's "Share
+                // Without It", so the consent never reached the queue.
+                authorisedOmissions: payload.authorisedOmissions
+            )
 
+            // C-62 — the session TITLE is user content and is not logged;
+            // `postID` identifies the publish. Same rule the notes already
+            // follow (present/empty/nil, never the text).
+            NSLog("[PublishService][8F] enqueue payload keys • postID=%@ dur=%@ act=%@ mood=%@ effort=%@ notes=%@ notesPrivate=%@",
+                  effectivePayload.id.uuidString,
+                  effectivePayload.durationSeconds != nil ? String(effectivePayload.durationSeconds!) : "nil",
+                  effectivePayload.activityType ?? "nil",
+                  effectivePayload.mood != nil ? String(effectivePayload.mood!) : "nil",
+                  effectivePayload.effort != nil ? String(effectivePayload.effort!) : "nil",
+                  effectivePayload.notes.map { $0.isEmpty ? "empty" : "present" } ?? "nil",
+                  effectivePayload.areNotesPrivate ? "true" : "false")
+
+            saveResult = SessionSyncQueue.shared.enqueueReportingSave(effectivePayload.withOwner(capturedOwner))
+        } else {
+            // C-61 / P4-U2a-2. PERSIST THE WITHDRAWAL BEFORE TRUSTING THE
+            // NETWORK.
+            //
+            // This branch used to enqueue nothing and fire a one-shot
+            // delete whose result both call sites discarded. Measured: an
+            // offline unshare left NO durable intent, nothing retried it,
+            // and the post stayed public indefinitely -- while the same
+            // action today converges, purely because the shipping call
+            // sites still hard-code `shouldPublish: true` and therefore go
+            // through the queue.
+            //
+            // Enqueuing first gives the withdrawal that same durability:
+            // the file survives termination, and the existing
+            // launch/foreground flush (MOTIVOApp:330 → :379) retries it.
+            // The immediate flush below is only an optimisation -- THE
+            // QUEUE IS THE GUARANTEE.
+            saveResult = SessionSyncQueue.shared.enqueueReportingSave(
+                SessionSyncQueue.PostPublishPayload(
+                    id: payload.id,
+                    sessionID: payload.sessionID,
+                    sessionTimestamp: nil, title: nil, durationSeconds: nil,
+                    activityType: nil, activityDetail: nil, instrumentLabel: nil,
+                    mood: nil, effort: nil,
+                    // `isPublic: false` IS the unshare intent now -- `op` is
+                    // derived from it and cannot be passed. P4-U2c.
+                    isPublic: false,
+                    notes: nil, areNotesPrivate: false,
+                    authorisedOmissions: nil,
+                    ownerUserID: capturedOwner
+                )
+            )
+        }
+
+
+        Task { @MainActor in
             await SessionSyncQueue.shared.flushNow()
 
             // C-60 / C-61 / P4-U2b. THE IMMEDIATE DELETE THAT USED TO SIT HERE
@@ -395,6 +404,7 @@ final class PublishService: ObservableObject {
                 NSLog("[PublishService] Preview enqueue + flush for published session → %@", payload.id.uuidString)
             }
         }
+        return saveResult
     }
 
     func publish(objectID: NSManagedObjectID) {

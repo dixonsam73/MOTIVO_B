@@ -190,6 +190,9 @@ struct AddEditSessionView: View {
     /// P6-I-01 — a save that could not complete must say so. Non-nil presents
     /// the alert; the editor keeps its staged attachments and nothing is removed.
     @State var attachmentSaveErrorMessage: String? = nil
+    /// P6-I-02 Unit 2d-1. Holds the editor's finish while the member answers a
+    /// "sharing change not saved" alert; runs it exactly once.
+    @StateObject private var sharingSaveGate = SharingChoiceSaveGate()
 
     // Activity description (short detail) + defaulting logic
     @State private var activityDetail: String = ""
@@ -788,6 +791,7 @@ struct AddEditSessionView: View {
                },
                message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
         .modifier(AttachmentSaveErrorAlert(message: $attachmentSaveErrorMessage))
+        .modifier(SharingChoiceSaveAlertModifier(gate: sharingSaveGate))
         .alert(consentState.title,
                isPresented: Binding(get: { consentState.isPresented },
                                     set: { if !$0 { consentState.dismiss() } }),
@@ -1709,7 +1713,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
             .background(Theme.Colors.primaryAction.opacity(0.17))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .buttonStyle(.plain)
-            .disabled(isThoughtMode ? !canSaveThought : (durationSeconds == 0 || instrument == nil))
+            .disabled((isThoughtMode ? !canSaveThought : (durationSeconds == 0 || instrument == nil))
+                      || sharingSaveGate.isAwaitingDecision)   // P6-I-02 2d-1: no second save behind the alert
             .accessibilityLabel(isThoughtMode ? "Save thought" : "Save session")
             .accessibilityIdentifier("button.saveSession")
 
@@ -2162,6 +2167,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 return
             }
 
+            // P6-I-02 Unit 2d-1. What happened to the sharing choice, if one was made.
+            var sharingSaveResult: SharingChoiceSaveResult = .saved
             if appModeManager.canShareWithFollowers {
                 let focusValue: Int? = isThoughtMode ? nil : selectedDotIndex_edit
 
@@ -2215,7 +2222,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 // `false` is not "do nothing": it enqueues an `op: .unshare`
                 // that demotes then deletes, and converges across offline and
                 // restarts. See C-60 and C-61.
-                PublishService.shared.publish(
+                sharingSaveResult = PublishService.shared.publish(
                     payload: payload,
                     objectID: s.objectID,
                     shouldPublish: isPublic
@@ -2226,13 +2233,19 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
             if shouldGeneratePracticeInsight {
                 PracticeInsightSessionStore.shared.generateInsight(forNewlySavedSession: s, in: viewContext)
             }
-            if let onSuccessfulSave {
-                onSuccessfulSave()
-            } else {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { dismiss() }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { dismiss() }
+            // P6-I-02 Unit 2d-1. The editor finishes EXACTLY ONCE: now, or — if the
+            // sharing choice could not be saved — when the member answers the alert.
+            // Everything above has already happened and is not repeated.
+            let finishEditor: () -> Void = {
+                if let onSuccessfulSave {
+                    onSuccessfulSave()
+                } else {
+                    dismiss()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { dismiss() }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { dismiss() }
+                }
             }
+            sharingSaveGate.handle(sharingSaveResult, stoppingSharing: !isPublic, finalise: finishEditor)
         }
         // P6-I-01 — THE SAVE-FAILURE BRANCH HAS MOVED into the transaction's
         // `.saveFailed` case above. The `objectID.isTemporaryID` sweep went with

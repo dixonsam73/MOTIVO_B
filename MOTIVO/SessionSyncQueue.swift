@@ -24,6 +24,18 @@
 // SCOPE: Decouple publish vs share: always publish session-backed post; is_public reflects Share toggle; eliminate stub posts from Share OFF.
 import Foundation
 
+/// P6-I-02 Unit 2d-1 — what happened to ONE sharing choice when it was queued.
+public enum SharingChoiceSaveResult: Equatable {
+    /// Written to the queue file, owned, and in the flush's hands.
+    case saved
+    /// No Connected identity to act as: written to the queue's QUARANTINE —
+    /// held, never sent and never adopted by whoever signs in. Saved, not shared.
+    case heldUnowned
+    /// NOT written. Kept in memory for this session and not sent until it is
+    /// saved. May be lost if Études closes first.
+    case notSaved
+}
+
 @MainActor
 public final class SessionSyncQueue: ObservableObject {
     public static let shared = SessionSyncQueue()
@@ -466,6 +478,37 @@ public final class SessionSyncQueue: ObservableObject {
     /// P6-I-02. PRESERVED SIGNATURE, but it can no longer create EXECUTABLE
     /// unowned work: with no owner supplied it captures the current one, and if
     /// there is none it refuses rather than queueing something unattributable.
+    /// P6-I-02 Unit 2d-1. `enqueue`, reporting what happened to THIS choice.
+    ///
+    /// Derived from the path the choice actually takes — the same owner test
+    /// `enqueue` uses to quarantine, and `enqueue`'s own result, which is the
+    /// `persist()` result for this write on every return path — never from
+    /// global state. An ownerless choice is still quarantined and persisted
+    /// exactly as before; it is reported as held, not as saved or as absent.
+    @discardableResult
+    func enqueueReportingSave(_ payload: PostPublishPayload) -> SharingChoiceSaveResult {
+        let unowned = Self.normalisedOwner(payload.ownerUserID) == nil
+        let durable = enqueue(payload)
+        if unowned { return durable ? .heldUnowned : .notSaved }
+        return durable ? .saved : .notSaved
+    }
+
+    /// P6-I-02 Unit 2d-1. Everything held in memory is also on disk. Re-read by
+    /// Try Again, in case a foreground recovery has already saved the choice.
+    var isFullySaved: Bool { reconcileState.isOK && !memoryDivergesFromDisk }
+
+    /// P6-I-02 Unit 2d-1. At most ONE recovery attempt, and only when something
+    /// is unsaved. It re-saves the queue and nothing else. Returns whether
+    /// everything is saved afterwards.
+    @discardableResult
+    func recoverIfNeeded(reason: String) -> Bool {
+        if isFullySaved { return true }
+        let state = attemptStoreRecovery()
+        let saved = state.isOK && !memoryDivergesFromDisk
+        BackendLogger.notice("Queue recovery attempt • \(reason) • \(saved ? "saved" : state.diagnostic)")
+        return saved
+    }
+
     /// CONVENIENCE: captures the owner AT THIS CALL. Only safe where the call is
     /// already synchronous with the member's action.
     @discardableResult

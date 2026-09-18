@@ -440,8 +440,14 @@ struct PostRecordDetailsView: View {
         let visibility = isPublic
         // C-84 — a failed Save stays in review and deletes nothing: dismissing
         // here would land in the timer's no-save path.
-        guard saveToCoreData(visibility: visibility) else { return }
-        DispatchQueue.main.async { withAnimation(.none) { isPresented = false } }
+        guard let sharingSaveResult = saveToCoreData(visibility: visibility) else { return }
+        // P6-I-02 Unit 2d-1. The callback and the dismissal run EXACTLY ONCE: now,
+        // or when the member answers "sharing change not saved". The save itself
+        // is never repeated.
+        sharingSaveGate.handle(sharingSaveResult, stoppingSharing: !visibility) {
+            onSaved?()
+            DispatchQueue.main.async { withAnimation(.none) { isPresented = false } }
+        }
     }
 
     // --- PATCH 8G3A: migrate staged privacy → final attachment keys using AttachmentPrivacy (file-backed) ---
@@ -488,6 +494,9 @@ struct PostRecordDetailsView: View {
         return totalStagedBytes > limit ? "Large staging size (~\(totalStagedBytes / (1024*1024)) MB). Consider saving or removing some items." : nil
     }
 
+    /// P6-I-02 Unit 2d-1. Holds the editor's finish while the member answers a
+    /// "sharing change not saved" alert; runs it exactly once.
+    @StateObject private var sharingSaveGate = SharingChoiceSaveGate()
     var onSaved: (() -> Void)?
     var onCancel: () -> Void = {}
 
@@ -1387,6 +1396,7 @@ var body: some View {
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
             .modifier(AttachmentSaveErrorAlert(message: $attachmentSaveErrorMessage))
+            .modifier(SharingChoiceSaveAlertModifier(gate: sharingSaveGate))
             .alert(consentState.title,
                    isPresented: Binding(get: { consentState.isPresented },
                                         set: { if !$0 { consentState.dismiss() } }),
@@ -1548,7 +1558,8 @@ var body: some View {
             .foregroundStyle(.primary)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .buttonStyle(.plain)
-            .disabled(durationSeconds == 0 || instrument == nil)
+            .disabled(durationSeconds == 0 || instrument == nil
+                      || sharingSaveGate.isAwaitingDecision)   // P6-I-02 2d-1: no second save behind the alert
 
             Spacer(minLength: 0)
         }
@@ -1833,7 +1844,10 @@ var body: some View {
     }
 
     @MainActor
-    private func saveToCoreData(visibility: Bool) -> Bool {
+    /// P6-I-02 Unit 2d-1. Returns nil when the session itself could not be
+    /// saved, otherwise what happened to its sharing choice (`.saved` when none
+    /// was made). The callback and the dismissal are the caller's, via the gate.
+    private func saveToCoreData(visibility: Bool) -> SharingChoiceSaveResult? {
         // P6-I-01 — THE ATTEMPT BOUNDARY OPENS HERE, BEFORE THE FIRST MUTATION.
         //
         // It must precede `Session(context:)` below: a group opened later cannot
@@ -1848,7 +1862,7 @@ var body: some View {
             // Nothing has been mutated yet, so there is nothing to undo.
             attachmentSaveErrorMessage = (error as? LocalizedError)?.errorDescription
                 ?? "This session could not be saved right now. Nothing has been changed — please try again."
-            return false
+            return nil
         }
         let s = Session(context: viewContext)
         if (s.value(forKey: "id") as? UUID) == nil {
@@ -1937,11 +1951,11 @@ var body: some View {
             attachmentSaveErrorMessage = (error as? AttachmentCommitFailure)?.errorDescription
                 ?? "Your recording could not be saved to this session. Nothing has been removed — please try saving again."
             print("Save aborted before commit (timer review): \(error)")
-            return false
+            return nil
         case .saveFailed(let error):
             attachmentSaveErrorMessage = "This session could not be saved. Your recordings are still here — please try again."
             print("Error saving session (timer review): \(error)")
-            return false
+            return nil
         case .committed:
             break
         }
@@ -1952,6 +1966,7 @@ var body: some View {
 
             clearDraftIsPublic()
             // v7.12A — Social Pilot (local-only)
+            var sharingSaveResult: SharingChoiceSaveResult = .saved
             if appModeManager.canShareWithFollowers {
                 if let sid = s.id {
                     let resolvedTitle = s.title ?? ""
@@ -1987,7 +2002,7 @@ var body: some View {
                     // the full reasoning. `visibility` is this view's Share
                     // toggle and is what `payload.isPublic` already carries, so
                     // existence and visibility now give the same answer.
-                    PublishService.shared.publish(
+                    sharingSaveResult = PublishService.shared.publish(
                         payload: payload,
                         objectID: s.objectID,
                         shouldPublish: visibility
@@ -2017,7 +2032,8 @@ var body: some View {
 
             PracticeInsightSessionStore.shared.generateInsight(forNewlySavedSession: s, in: viewContext)
 
-            onSaved?()
+            // P6-I-02 Unit 2d-1. `onSaved` moved to the caller's finish, which the
+            // gate runs exactly once — after the member answers the alert, if any.
             clearDraft()
             // Mark this session ID as seen so reopening within the same session doesn't clear again
             if let cur = currentSessionID() { UserDefaults.standard.set(cur, forKey: lastSeenSessionIDKey) }
@@ -2025,7 +2041,7 @@ var body: some View {
             // Reset local fields after save so next fresh session starts blank
             notes = ""
             selectedDotIndex = nil
-            return true
+            return sharingSaveResult
         }
         // P6-I-01 — THE SAVE-FAILURE BRANCH HAS MOVED into the transaction's
         // `.saveFailed` case above, which rolls this attempt's files back and
