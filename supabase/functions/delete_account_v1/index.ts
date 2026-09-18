@@ -1,4 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  assertBeforeDeadline,
+  deleteAll,
+  StorageDeleteError,
+  storageContext,
+  withStorageDeadline,
+} from "../_shared/storage/delete_one.ts";
 
 // delete_account_v1
 //
@@ -50,7 +57,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const ATTACHMENTS_BUCKET = "attachments";
 const AVATARS_BUCKET = "avatars";
 const LIST_PAGE = 1000;
-const REMOVE_CHUNK = 100;
 
 class StepError extends Error {
   constructor(readonly step: string, message: string) {
@@ -64,6 +70,8 @@ function must(step: string, error: { message?: string } | null): void {
 }
 
 Deno.serve(async (req) => {
+  // One storage deadline for the whole invocation, from its first moment.
+  const startedAt = Date.now();
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405 });
   }
@@ -90,6 +98,9 @@ Deno.serve(async (req) => {
 
   const uid = userData.user.id;
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
+  // Single-object deletes (see _shared/storage/delete_one.ts): the bulk
+  // `remove()` route can commit a row deletion while S3 keeps the bytes.
+  const storage = storageContext(SUPABASE_URL, SERVICE_ROLE, startedAt);
 
   /**
    * Every entry in one storage folder, paginated (B-12). Not recursive — the
@@ -104,9 +115,11 @@ Deno.serve(async (req) => {
     const all: { name: string; metadata?: unknown }[] = [];
     let offset = 0;
     for (;;) {
-      const { data: items, error } = await admin.storage
-        .from(bucket)
-        .list(folder, { limit: LIST_PAGE, offset });
+      // Bounded by the invocation budget, with the deadline re-checked after it
+      // returns (see withStorageDeadline).
+      const { data: items, error } = await withStorageDeadline(storage, step, (signal) =>
+        admin.storage.from(bucket).list(folder, { limit: LIST_PAGE, offset }, { signal })
+      );
       must(step, error);
 
       const page = (items ?? []) as { name: string; metadata?: unknown }[];
@@ -174,9 +187,7 @@ Deno.serve(async (req) => {
     //   users/<uid>/<postID>/<attachmentID>.<ext>   post attachments
     //   users/<uid>/connected/<assetID>.<ext>       Connected shares
     // Both are now swept unconditionally, so the shape does not matter.
-    const doomed: string[] = [];
-
-    async function collect(folder: string): Promise<void> {
+    async function collect(folder: string, into: string[]): Promise<void> {
       const entries = await listFolder(
         ATTACHMENTS_BUCKET,
         folder,
@@ -186,19 +197,35 @@ Deno.serve(async (req) => {
         const fullPath = `${folder}/${item.name}`;
         // supabase-js reports folders as entries with null metadata.
         if (item.metadata == null) {
-          await collect(fullPath);
+          await collect(fullPath, into);
         } else {
-          doomed.push(fullPath);
+          into.push(fullPath);
         }
       }
     }
 
-    await collect(`users/${uid}`);
+    const doomed: string[] = [];
+    await collect(`users/${uid}`, doomed);
 
-    for (let i = 0; i < doomed.length; i += REMOVE_CHUNK) {
-      const chunk = doomed.slice(i, i + REMOVE_CHUNK);
-      const { error } = await admin.storage.from(ATTACHMENTS_BUCKET).remove(chunk);
-      must(`storage.remove:${i}`, error);
+    // One single-object DELETE per object, at most DELETE_POOL in flight; the
+    // first failure or the deadline stops scheduling and fails this step, before
+    // step 3b or anything after it runs.
+    await deleteAll(storage, ATTACHMENTS_BUCKET, doomed, "storage.delete");
+
+    // Independent check: re-list. Metadata only — a row gone is not proof that
+    // bytes an earlier bulk delete may have orphaned were removed.
+    {
+      const still: string[] = [];
+      await collect(`users/${uid}`, still);
+      const present = new Set(still);
+      const survivors = doomed.filter((p) => present.has(p));
+      if (survivors.length > 0) {
+        throw new StepError(
+          "storage.verify",
+          `${survivors.length} object(s) still listed after deletion: ${survivors.slice(0, 3).join(", ")}`,
+        );
+      }
+      assertBeforeDeadline(storage, "storage.verify");
     }
 
     // 3b. Delete ALL of the departing member's SENT rows.
@@ -278,10 +305,26 @@ Deno.serve(async (req) => {
       if (acct?.avatar_key) avatarPaths.add(acct.avatar_key as string);
 
       if (avatarPaths.size > 0) {
-        const { error: rmErr } = await admin.storage
-          .from(AVATARS_BUCKET)
-          .remove([...avatarPaths]);
-        must("storage.remove.avatar", rmErr);
+        await deleteAll(storage, AVATARS_BUCKET, [...avatarPaths], "storage.delete.avatar");
+
+        // Independent check, metadata only: every targeted avatar path is no
+        // longer listed — including a pointer that lies OUTSIDE users/<uid>/,
+        // checked in its own parent folder.
+        const survivors: string[] = [];
+        for (const p of avatarPaths) {
+          const slash = p.lastIndexOf("/");
+          const parent = slash > 0 ? p.slice(0, slash) : "";
+          const name = slash >= 0 ? p.slice(slash + 1) : p;
+          const listed = await listFolder(AVATARS_BUCKET, parent, "storage.verify.avatar.list");
+          if (listed.some((i) => i.name === name && i.metadata != null)) survivors.push(p);
+        }
+        assertBeforeDeadline(storage, "storage.verify.avatar");
+        if (survivors.length > 0) {
+          throw new StepError(
+            "storage.verify.avatar",
+            `${survivors.length} avatar object(s) still listed after deletion: ${survivors.slice(0, 3).join(", ")}`,
+          );
+        }
       }
     }
 
@@ -404,7 +447,7 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({ success: true }), { status: 200 });
   } catch (err) {
-    const step = err instanceof StepError ? err.step : "unknown";
+    const step = err instanceof StepError || err instanceof StorageDeleteError ? err.step : "unknown";
     return new Response(
       JSON.stringify({ success: false, step, error: String(err) }),
       { status: 500 },

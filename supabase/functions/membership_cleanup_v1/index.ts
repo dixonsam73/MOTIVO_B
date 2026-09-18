@@ -8,6 +8,14 @@ import {
 } from "../_shared/appstore/api.ts";
 import { verifyAppleJWS } from "../_shared/appstore/jws.ts";
 import { deriveFromReconciliation } from "../_shared/appstore/derive.ts";
+import {
+  assertBeforeDeadline,
+  deleteAll,
+  StorageDeleteError,
+  type StorageDeleteContext,
+  storageContext,
+  withStorageDeadline,
+} from "../_shared/storage/delete_one.ts";
 
 // membership_cleanup_v1 — U7's expiry cleanup worker.
 //
@@ -41,7 +49,6 @@ import { deriveFromReconciliation } from "../_shared/appstore/derive.ts";
 const ATTACHMENTS = "attachments";
 const AVATARS = "avatars";
 const LIST_PAGE = 1000;
-const REMOVE_CHUNK = 100;
 
 type Mode = "dry_run" | "execute";
 
@@ -67,12 +74,16 @@ function secretEquals(a: string, b: string): boolean {
 
 /** Every entry in one storage folder, paginated (B-12). Not recursive. */
 async function listFolder(
-  admin: SupabaseClient, bucket: string, folder: string, step: string,
+  admin: SupabaseClient, bucket: string, folder: string, step: string, ctx: StorageDeleteContext,
 ): Promise<{ name: string; metadata?: unknown }[]> {
   const all: { name: string; metadata?: unknown }[] = [];
   let offset = 0;
   for (;;) {
-    const { data, error } = await admin.storage.from(bucket).list(folder, { limit: LIST_PAGE, offset });
+    // Bounded by the invocation budget, with the deadline re-checked after it
+    // returns (see withStorageDeadline).
+    const { data, error } = await withStorageDeadline(ctx, step, (signal) =>
+      admin.storage.from(bucket).list(folder, { limit: LIST_PAGE, offset }, { signal })
+    );
     must(step, error);
     const page = (data ?? []) as { name: string; metadata?: unknown }[];
     all.push(...page);
@@ -83,12 +94,14 @@ async function listFolder(
 }
 
 /** Every OBJECT (not folder) under a prefix, recursively. */
-async function listTree(admin: SupabaseClient, bucket: string, folder: string): Promise<string[]> {
+async function listTree(
+  admin: SupabaseClient, bucket: string, folder: string, ctx: StorageDeleteContext,
+): Promise<string[]> {
   const out: string[] = [];
-  for (const item of await listFolder(admin, bucket, folder, `storage.list:${folder}`)) {
+  for (const item of await listFolder(admin, bucket, folder, `storage.list:${folder}`, ctx)) {
     const full = `${folder}/${item.name}`;
     // supabase-js reports folders as entries with null metadata.
-    if (item.metadata == null) out.push(...await listTree(admin, bucket, full));
+    if (item.metadata == null) out.push(...await listTree(admin, bucket, full, ctx));
     else out.push(full);
   }
   return out;
@@ -106,7 +119,7 @@ async function listTree(admin: SupabaseClient, bucket: string, folder: string): 
 // connected_attachments_asset_recipient_unique is UNIQUE(asset_id,
 // recipient_user_id): one asset sent to two recipients is TWO rows sharing ONE
 // storage_path. An asset survives while ANY recipient reference is live.
-async function computeDoomed(admin: SupabaseClient, uid: string) {
+async function computeDoomed(admin: SupabaseClient, uid: string, ctx: StorageDeleteContext) {
   const { data: sent, error } = await admin
     .from("connected_attachments")
     .select("asset_id, storage_path, deleted_at")
@@ -126,7 +139,7 @@ async function computeDoomed(admin: SupabaseClient, uid: string) {
     else doomedAssets.push(asset);
   }
 
-  const all = await listTree(admin, ATTACHMENTS, `users/${uid}`);
+  const all = await listTree(admin, ATTACHMENTS, `users/${uid}`, ctx);
   const doomedObjects = all.filter((p) => !retainedPaths.has(p));
 
   return { doomedAssets, doomedObjects, retainedPaths: [...retainedPaths] };
@@ -153,24 +166,42 @@ async function computeDoomed(admin: SupabaseClient, uid: string) {
  * UNVERIFIED. The re-list is the independent check.
  */
 async function removeVerified(
-  admin: SupabaseClient, bucket: string, prefix: string, doomed: string[], step: string,
+  ctx: StorageDeleteContext, admin: SupabaseClient, bucket: string, doomed: string[], step: string,
 ): Promise<void> {
   if (doomed.length === 0) return;
-  for (let i = 0; i < doomed.length; i += REMOVE_CHUNK) {
-    const { error } = await admin.storage.from(bucket).remove(doomed.slice(i, i + REMOVE_CHUNK));
-    must(`${step}.remove:${i}`, error);
+  // One single-object DELETE per path (see _shared/storage/delete_one.ts): the
+  // bulk remove() route can commit a row deletion while S3 keeps the bytes. The
+  // first failure or the deadline stops scheduling and fails this step.
+  await deleteAll(ctx, bucket, doomed, step);
+  // Independent check, METADATA ONLY: list each targeted path's own parent
+  // folder, so a path outside users/<uid>/ (an avatar pointer) is checked too.
+  const byParent = new Map<string, Set<string>>();
+  for (const p of doomed) {
+    const slash = p.lastIndexOf("/");
+    const parent = slash > 0 ? p.slice(0, slash) : "";
+    const name = slash >= 0 ? p.slice(slash + 1) : p;
+    if (!byParent.has(parent)) byParent.set(parent, new Set());
+    byParent.get(parent)!.add(name);
   }
-  const still = new Set(await listTree(admin, bucket, prefix));
-  const survivors = doomed.filter((p) => still.has(p));
+  const survivors: string[] = [];
+  for (const [parent, names] of byParent) {
+    for (const item of await listFolder(admin, bucket, parent, `${step}.verify.list`, ctx)) {
+      if (item.metadata != null && names.has(item.name)) survivors.push(parent ? `${parent}/${item.name}` : item.name);
+    }
+  }
   if (survivors.length > 0) {
     throw new StepError(
       `${step}.verify`,
       `${survivors.length} object(s) still present after removal: ${survivors.slice(0, 3).join(", ")}`,
     );
   }
+  // Verified, but only counts if it finished inside the budget.
+  assertBeforeDeadline(ctx, `${step}.verify`);
 }
 
 Deno.serve(async (req) => {
+  // One storage deadline for the whole invocation, from its first moment.
+  const startedAt = Date.now();
   if (req.method !== "POST") return json(405, { error: "method not allowed" });
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -225,6 +256,7 @@ Deno.serve(async (req) => {
   const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+  const storage = storageContext(SUPABASE_URL, SERVICE_ROLE, startedAt);
 
   // ------------------------------------------------------------- selection
   //
@@ -261,7 +293,7 @@ Deno.serve(async (req) => {
   if (mode === "dry_run") {
     for (const [uid, userRows] of byUser) {
       try {
-        const { doomedAssets, doomedObjects, retainedPaths } = await computeDoomed(db, uid);
+        const { doomedAssets, doomedObjects, retainedPaths } = await computeDoomed(db, uid, storage);
         const counts: Record<string, number> = {};
         const count = async (table: string, col: string) => {
           const { count: n, error } = await db.from(table).select("*", { count: "exact", head: true }).eq(col, uid);
@@ -273,7 +305,7 @@ Deno.serve(async (req) => {
         await count("post_comment_views", "viewer_user_id");
         await count("connected_attachments", "recipient_user_id");
 
-        const avatarObjects = (await listFolder(db, AVATARS, `users/${uid}`, "storage.list.avatars"))
+        const avatarObjects = (await listFolder(db, AVATARS, `users/${uid}`, "storage.list.avatars", storage))
           .filter((i) => i.metadata != null).map((i) => `users/${uid}/${i.name}`);
 
         results.push({
@@ -314,6 +346,12 @@ Deno.serve(async (req) => {
   }
 
   for (const [uid, userRows] of byUser) {
+    // NO NEW CANDIDATE AFTER THE INVOCATION'S STORAGE DEADLINE. The identity keeps
+    // its lease, which expires on its own, and a later run takes it up again.
+    if (Date.now() >= storage.deadline) {
+      results.push({ user_id: uid, decision: "deferred", reason: "invocation storage deadline reached", deleted: false });
+      continue;
+    }
     // ---- step 2. REFRESH EVERY ROW OF THIS IDENTITY.
     //
     // Not only the due one. connected_member() reads every row, and cleanup
@@ -407,10 +445,10 @@ Deno.serve(async (req) => {
     // failure between the two leaves a row pointing at a missing object, which
     // the next run recomputes and completes.
     try {
-      const { doomedAssets, doomedObjects } = await computeDoomed(db, uid);
+      const { doomedAssets, doomedObjects } = await computeDoomed(db, uid, storage);
 
       // 4a. post-attachment and doomed connected OBJECTS, verified absent.
-      await removeVerified(db, ATTACHMENTS, `users/${uid}`, doomedObjects, "attachments");
+      await removeVerified(storage, db, ATTACHMENTS, doomedObjects, "attachments");
 
       // 4b. the sent rows whose objects have just been proven gone.
       if (doomedAssets.length > 0) {
@@ -452,12 +490,12 @@ Deno.serve(async (req) => {
         .from("account_directory").select("avatar_key").eq("user_id", uid).maybeSingle();
       must("account_directory.read", acctErr);
       const avatarPaths = new Set<string>();
-      for (const i of await listFolder(db, AVATARS, `users/${uid}`, "storage.list.avatars")) {
+      for (const i of await listFolder(db, AVATARS, `users/${uid}`, "storage.list.avatars", storage)) {
         if (i.metadata != null) avatarPaths.add(`users/${uid}/${i.name}`);
       }
       if (acct?.avatar_key) avatarPaths.add(acct.avatar_key as string);
       if (avatarPaths.size > 0) {
-        await removeVerified(db, AVATARS, `users/${uid}`, [...avatarPaths], "avatars");
+        await removeVerified(storage, db, AVATARS, [...avatarPaths], "avatars");
         // Reached only if every avatar object is verifiably gone.
         must("account_directory.clear_avatar",
           (await db.from("account_directory").update({ avatar_key: null }).eq("user_id", uid)).error);
@@ -476,7 +514,7 @@ Deno.serve(async (req) => {
       // authority -- the one thing this whole unit exists to prevent.
       results.push({
         user_id: uid, decision: "abort", deleted: "partial",
-        step: e instanceof StepError ? e.step : "unknown", reason: String(e),
+        step: e instanceof StepError || e instanceof StorageDeleteError ? e.step : "unknown", reason: String(e),
       });
     }
   }
