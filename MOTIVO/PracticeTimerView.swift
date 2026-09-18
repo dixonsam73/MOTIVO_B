@@ -490,6 +490,9 @@ struct PracticeTimerView: View {
     @State private var linkedSavedTaskSetID: UUID? = nil
     @State private var linkedSavedTaskSetIsDirty: Bool = false
     @State private var showSaveTaskSetPrompt: Bool = false
+    // P6-I-04: the saved-list library could not be read; saving a new List is blocked.
+    @State private var padSavedListsUnreadable = false
+    @State private var showUnreadableListsAlert = false
     @State private var draftSavedTaskSetName: String = ""
 
     // NEW: track explicit clears so we don't auto-refill
@@ -708,8 +711,10 @@ private func loadPracticeDefaultsIfNeeded() {
             }
         }
 
-        decodeSets(from: globalTaskSetsKey)
-        decodeSets(from: baseTasksKey + "::saved_sets_v1")
+        // P6-I-04 / F-1: the shared reader only. Legacy per-context keys are migrated
+        // once, owner-wide, by SavedListLibrary and never read here again, so a List
+        // deleted elsewhere cannot reappear; an unreadable library offers nothing.
+        if case .lists(let lists) = SavedListLibrary.load(ownerScope: ownerScope) { merge(lists) }
         return merged
     }
 
@@ -830,21 +835,6 @@ private func loadPracticeDefaultsIfNeeded() {
         return "device"
     }
 
-    private var globalTaskSetsKey: String {
-        "practiceTasks_saved_sets_v2::" + taskSetOwnerScope
-    }
-
-    private var currentTaskSetContextKeySuffix: String {
-        guard let instrumentID = instrument?.id?.uuidString else { return "" }
-        return "::inst:" + instrumentID
-    }
-
-    private var currentContextTaskSetsKey: String {
-        let ownerScope = taskSetOwnerScope
-        let activityRef = currentActivityRefForTasks()
-        return "practiceTasks_v1::" + ownerScope + "::" + activityRef + currentTaskSetContextKeySuffix + "::saved_sets_v1"
-    }
-
     private func normalizedSavedTaskSetLines(from lines: [TaskLine]) -> [SavedTaskSetPadLine] {
         lines
             .map {
@@ -888,88 +878,28 @@ private func loadPracticeDefaultsIfNeeded() {
         draftSavedTaskSetName = ""
     }
 
+    /// P6-I-04 / F-1: the shared reader. It never writes over an unreadable library,
+    /// and no longer merges this context's legacy key back in.
     private func loadPadSavedTaskSets() -> [SavedTaskSetPadRecord] {
-        let defaults = UserDefaults.standard
-        var merged: [SavedTaskSetPadRecord] = []
-
-        func normalize(_ lines: [SavedTaskSetPadLine]) -> [SavedTaskSetPadLine] {
-            lines
-                .map {
-                    SavedTaskSetPadLine(
-                        id: $0.id,
-                        text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                        type: $0.type
-                    )
-                }
-                .filter { !$0.text.isEmpty }
+        switch SavedListLibrary.load(ownerScope: taskSetOwnerScope) {
+        case .lists(let lists):
+            padSavedListsUnreadable = false
+            return lists
+        case .damaged:
+            padSavedListsUnreadable = true
+            return []
         }
-
-        func merge(_ sets: [SavedTaskSetPadRecord]) {
-            for set in sets {
-                let trimmedName = set.sourceSendID == nil ? set.name.trimmingCharacters(in: .whitespacesAndNewlines) : set.name
-                let normalizedItems = set.sourceSendID == nil ? normalize(set.items) : set.items
-                guard !normalizedItems.isEmpty else { continue }
-
-                if let existingIndex = merged.firstIndex(where: { $0.id == set.id }) {
-                    // v2 is authoritative for adopted copies; a context must never overwrite them.
-                    guard merged[existingIndex].sourceSendID == nil else { continue }
-                    merged[existingIndex].name = trimmedName.isEmpty ? merged[existingIndex].name : trimmedName
-                    merged[existingIndex].items = normalizedItems
-                } else {
-                    merged.append(
-                        SavedTaskSetPadRecord(
-                            id: set.id,
-                            name: trimmedName.isEmpty ? defaultSavedTaskSetName(from: normalizedItems.map(\.text)) : trimmedName,
-                            items: normalizedItems,
-                            sourceSendID: set.sourceSendID
-                        )
-                    )
-                }
-            }
-        }
-
-        if let data = defaults.data(forKey: globalTaskSetsKey) {
-            if let decoded = try? JSONDecoder().decode([SavedTaskSetPadRecord].self, from: data) {
-                merge(decoded)
-            } else if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSetPadRecord].self, from: data) {
-                merge(
-                    legacyDecoded.map {
-                        SavedTaskSetPadRecord(
-                            id: $0.id,
-                            name: $0.name,
-                            items: $0.items.map { SavedTaskSetPadLine(text: $0, type: .task) }
-                        )
-                    }
-                )
-            }
-        }
-
-        if let data = defaults.data(forKey: currentContextTaskSetsKey) {
-            if let decoded = try? JSONDecoder().decode([SavedTaskSetPadRecord].self, from: data) {
-                merge(decoded)
-            } else if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSetPadRecord].self, from: data) {
-                merge(
-                    legacyDecoded.map {
-                        SavedTaskSetPadRecord(
-                            id: $0.id,
-                            name: $0.name,
-                            items: $0.items.map { SavedTaskSetPadLine(text: $0, type: .task) }
-                        )
-                    }
-                )
-            }
-        }
-
-        return merged
     }
 
-    private func savePadSavedTaskSets(_ sets: [SavedTaskSetPadRecord]) {
-        if let data = try? JSONEncoder().encode(sets) {
-            let defaults = UserDefaults.standard
-            defaults.set(data, forKey: globalTaskSetsKey)
-            if let legacyData = try? JSONEncoder().encode(SavedListLibrary.legacyMirror(sets)) {
-                defaults.set(legacyData, forKey: currentContextTaskSetsKey)
-            }
+    /// Applies this edit to a FRESH load. The legacy per-context mirror is no longer
+    /// written — it was what brought deleted Lists back (F-1).
+    private func savePadSavedTaskSets(snapshot: [SavedTaskSetPadRecord], _ sets: [SavedTaskSetPadRecord]) -> Bool {
+        do {
+            try SavedListLibrary.commit(snapshot: snapshot, updated: sets, ownerScope: taskSetOwnerScope)
+            return true
+        } catch {
+            padSavedListsUnreadable = true
+            return false
         }
     }
 
@@ -1018,13 +948,16 @@ private func loadPracticeDefaultsIfNeeded() {
         guard !normalizedItems.isEmpty else { return }
 
         var sets = loadPadSavedTaskSets()
+        // P6-I-04: an unreadable library is never replaced; the task pad keeps working.
+        guard !padSavedListsUnreadable else { showUnreadableListsAlert = true; return }
+        let snapshot = sets
         let trimmedName = draftSavedTaskSetName.trimmingCharacters(in: .whitespacesAndNewlines)
         let baseName = trimmedName.isEmpty ? defaultSavedTaskSetName(from: normalizedItems.map(\.text)) : trimmedName
         let finalName = uniqueSavedTaskSetName(from: baseName, existingSets: sets)
         let newSet = SavedTaskSetPadRecord(id: UUID(), name: finalName, items: normalizedItems)
 
         sets.append(newSet)
-        savePadSavedTaskSets(sets)
+        guard savePadSavedTaskSets(snapshot: snapshot, sets) else { showUnreadableListsAlert = true; return }
 
         linkedSavedTaskSetID = newSet.id
         linkedSavedTaskSetIsDirty = false
@@ -1042,10 +975,13 @@ private func loadPracticeDefaultsIfNeeded() {
         }
 
         var sets = loadPadSavedTaskSets()
+        // P6-I-04: an unreadable library is never replaced; the task pad keeps working.
+        guard !padSavedListsUnreadable else { showUnreadableListsAlert = true; return }
+        let snapshot = sets
         if let linkedID = linkedSavedTaskSetID,
            let index = sets.firstIndex(where: { $0.id == linkedID }) {
             sets[index].items = normalizedItems
-            savePadSavedTaskSets(sets)
+            guard savePadSavedTaskSets(snapshot: snapshot, sets) else { showUnreadableListsAlert = true; return }
             linkedSavedTaskSetIsDirty = false
         } else {
             linkedSavedTaskSetID = nil
@@ -1668,6 +1604,11 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         .sheet(isPresented: $showTaskImportScanSheet) {
             taskImportScanSheet
+        }
+        .alert("Saved lists unavailable", isPresented: $showUnreadableListsAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(ConnectedListError.damagedLibrary.errorDescription ?? "Your saved lists could not be read. Nothing has been replaced.")
         }
         .alert("Save list", isPresented: $showSaveTaskSetPrompt) {
             TextField("List name", text: $draftSavedTaskSetName)

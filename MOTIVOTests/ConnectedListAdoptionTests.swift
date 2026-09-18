@@ -57,9 +57,6 @@ final class ConnectedListAdoptionTests: XCTestCase {
             let payload = ConnectedListPayload(list: original)
             let delivery = UUID()
             let first = try SavedListLibrary.adopt(payload, sourceSendID: delivery, ownerScope: "owner", defaults: defaults)
-            let local = original
-            let mirror = SavedListLibrary.legacyMirror([first, local])
-            XCTAssertEqual(mirror, [local])
             defaults.set(try JSONEncoder().encode([SavedList]()), forKey: SavedListLibrary.key(ownerScope: "owner"))
             let again = try SavedListLibrary.adopt(payload, sourceSendID: delivery, ownerScope: "owner", defaults: defaults)
             XCTAssertNotEqual(first.id, again.id)

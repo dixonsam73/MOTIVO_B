@@ -702,7 +702,6 @@ private struct PTVActivityCardPickerSheet: View {
 
 private typealias SavedTaskSetPickerLine = SavedListLine
 private typealias SavedTaskSetPickerRecord = SavedList
-private typealias LegacySavedTaskSetPickerRecord = LegacySavedList
 
 private enum TaskImportSourceOption: String, Identifiable, CaseIterable {
     case loadSavedSet
@@ -717,6 +716,7 @@ private struct TaskImportSourceSheet: View {
     let onConfirmImportedLines: ([TaskLine]) -> Void
 
     @State private var savedTaskSets: [SavedTaskSetPickerRecord] = []
+    @State private var savedListsUnreadable = false
     @State private var activeOption: TaskImportSourceOption? = nil
 
     var body: some View {
@@ -756,6 +756,13 @@ private struct TaskImportSourceSheet: View {
                         ) {
                             activeOption = .loadSavedSet
                         }
+
+                        if savedListsUnreadable {
+                            Text(ConnectedListError.damagedLibrary.errorDescription ?? "")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -770,7 +777,13 @@ private struct TaskImportSourceSheet: View {
                 }
             }
             .onAppear {
-                savedTaskSets = loadAllSavedTaskSets()
+                if let lists = loadAllSavedTaskSets() {
+                    savedTaskSets = lists
+                    savedListsUnreadable = false
+                } else {
+                    savedTaskSets = []
+                    savedListsUnreadable = true
+                }
             }
             .sheet(item: $activeOption) { option in
                 switch option {
@@ -861,9 +874,11 @@ private struct TaskImportSourceSheet: View {
         .opacity(isEnabled ? 1.0 : 0.6)
     }
 
-    private func loadAllSavedTaskSets() -> [SavedTaskSetPickerRecord] {
-        let defaults = UserDefaults.standard
-
+    /// P6-I-04 / F-1: the shared reader. It no longer scans legacy per-context keys
+    /// (they are migrated once, owner-wide), so a deleted List cannot reappear here.
+    /// Returns nil when the library cannot be read, so the sheet says so rather than
+    /// presenting an empty library as if it were valid.
+    private func loadAllSavedTaskSets() -> [SavedTaskSetPickerRecord]? {
         let ownerScope: String = {
             if let id = PersistenceController.shared.currentUserID,
                !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -871,91 +886,11 @@ private struct TaskImportSourceSheet: View {
             }
             return "device"
         }()
-
-        let globalTaskSetsKey = "practiceTasks_saved_sets_v2::" + ownerScope
-
-        var merged: [SavedTaskSetPickerRecord] = []
-        var mergeIdentity = SavedListMergeIdentity()
-
-        func normalizedLines(from lines: [SavedTaskSetPickerLine]) -> [SavedTaskSetPickerLine] {
-            lines
-                .map {
-                    SavedTaskSetPickerLine(
-                        id: $0.id,
-                        text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                        type: $0.type
-                    )
-                }
-                .filter { !$0.text.isEmpty }
-        }
-
-        func merge(_ sets: [SavedTaskSetPickerRecord]) {
-            for set in sets {
-                let trimmedName = set.sourceSendID == nil ? set.name.trimmingCharacters(in: .whitespacesAndNewlines) : set.name
-                let normalizedItems = set.sourceSendID == nil ? normalizedLines(from: set.items) : set.items
-                guard !normalizedItems.isEmpty else { continue }
-
-                let fallbackName = normalizedItems.first?.text ?? "Saved list"
-                let finalName = trimmedName.isEmpty ? fallbackName : trimmedName
-                let contentSignature = finalName.lowercased() + "||" + normalizedItems.map { $0.type.rawValue + ":" + $0.text.lowercased() }.joined(separator: "\u{241E}")
-
-                guard mergeIdentity.include(set, contentSignature: contentSignature) else { continue }
-                merged.append(SavedTaskSetPickerRecord(id: set.id, name: finalName, items: normalizedItems, sourceSendID: set.sourceSendID))
-            }
-        }
-
-        if let data = defaults.data(forKey: globalTaskSetsKey) {
-            if let decoded = try? JSONDecoder().decode([SavedTaskSetPickerRecord].self, from: data) {
-                merge(decoded)
-            } else if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSetPickerRecord].self, from: data) {
-                merge(
-                    legacyDecoded.map {
-                        SavedTaskSetPickerRecord(
-                            id: $0.id,
-                            name: $0.name,
-                            items: $0.items.map { SavedTaskSetPickerLine(text: $0, type: .task) }
-                        )
-                    }
-                )
-            }
-        }
-
-        for (key, value) in defaults.dictionaryRepresentation() {
-            guard key.hasPrefix("practiceTasks_v1::" + ownerScope + "::"),
-                  key.hasSuffix("::saved_sets_v1") else { continue }
-
-            let data: Data?
-            if let directData = defaults.data(forKey: key) {
-                data = directData
-            } else if let valueData = value as? Data {
-                data = valueData
-            } else {
-                data = nil
-            }
-
-            guard let data else { continue }
-
-            if let decoded = try? JSONDecoder().decode([SavedTaskSetPickerRecord].self, from: data) {
-                merge(decoded)
-                continue
-            }
-
-            if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSetPickerRecord].self, from: data) {
-                merge(
-                    legacyDecoded.map {
-                        SavedTaskSetPickerRecord(
-                            id: $0.id,
-                            name: $0.name,
-                            items: $0.items.map { SavedTaskSetPickerLine(text: $0, type: .task) }
-                        )
-                    }
-                )
-            }
-        }
-
-        return merged.sorted {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
+        guard case .lists(let lists) = SavedListLibrary.load(ownerScope: ownerScope) else { return nil }
+        // Display only, as before: lists with no text are not offered, ordered by name.
+        return lists
+            .filter { $0.items.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }
 

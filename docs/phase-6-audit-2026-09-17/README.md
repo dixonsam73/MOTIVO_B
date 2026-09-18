@@ -1,5 +1,9 @@
 # Phase 6 — two independent audits, 17 September 2026
 
+Later Phase 6 presentation work is recorded separately in
+[Presentation update, 18 September](../phase-6-presentation-update-2026-09-18.md).
+It does not change the audit findings or discharge unrelated QA gates.
+
 Archived report packet. **Every file here is a report or its evidence. No
 application code, schema or configuration is part of this folder.**
 

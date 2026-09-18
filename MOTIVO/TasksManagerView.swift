@@ -60,6 +60,10 @@ struct TasksManagerView: View {
     @State private var userActivities: [UserActivity] = []
     @State private var selectedTaskSetID: UUID? = nil
     @State private var savedTaskSets: [SavedTaskSet] = []
+    // P6-I-04 / F-1. The library as last read, so a save applies THIS screen's edit
+    // to a fresh load; and whether it could be read at all.
+    @State private var savedListsSnapshot: [SavedTaskSet] = []
+    @State private var savedListsUnreadable = false
     @State private var draftTaskSetName: String = ""
     @State private var showTaskImportLauncher: Bool = false
     @State private var showTaskImportPasteSheet: Bool = false
@@ -135,8 +139,6 @@ struct TasksManagerView: View {
     private var tasksKey: String { "practiceTasks_v1::" + ownerScope + "::" + currentNormalizedActivityRef + currentInstrumentKeySuffix }
     private var autofillCompatibilityKey: String { "practiceTasks_autofill_enabled::" + ownerScope + "::" + currentNormalizedActivityRef + currentInstrumentKeySuffix }
     private var legacyAutofillCompatibilityKey: String { "practiceTasks_autofill_enabled::" + ownerScope }
-    private var taskSetsKey: String { tasksKey + "::saved_sets_v1" }
-    private var globalTaskSetsKey: String { "practiceTasks_saved_sets_v2::" + ownerScope }
     private var defaultTaskSetIDKey: String { tasksKey + "::default_set_id_v1" }
 
     private var legacyTasksKey: String { "practiceTasks_v1::" + ownerScope }
@@ -352,7 +354,7 @@ struct TasksManagerView: View {
             set: { newValue in
                 guard let index = savedTaskSets.firstIndex(where: { $0.id == setID }) else { return }
                 savedTaskSets[index].name = newValue
-                saveSavedTaskSets()
+                guard saveSavedTaskSets() else { return }
                 if selectedTaskSetID == setID {
                     draftTaskSetName = newValue
                     saveTaskSetSelectionAndItems()
@@ -380,7 +382,7 @@ struct TasksManagerView: View {
     }
 
     private func persistEditedTaskSet(_ setID: UUID) {
-        saveSavedTaskSets()
+        guard saveSavedTaskSets() else { return }
         if selectedTaskSetID == setID {
             saveTaskSetSelectionAndItems()
         }
@@ -780,6 +782,13 @@ struct TasksManagerView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if savedListsUnreadable {
+                    Section {
+                        Text(ConnectedListError.damagedLibrary.errorDescription ?? "Your saved lists could not be read. Nothing has been replaced.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Section(header: Text("Default List When:").sectionHeader()) {
                     selectorSectionContent
                 }
@@ -867,7 +876,7 @@ struct TasksManagerView: View {
                         saveImportedTaskSetFromDraft()
                     }
                     .foregroundStyle(Theme.Colors.accent)
-                    .disabled(importDraftItems.isEmpty)
+                    .disabled(importDraftItems.isEmpty || savedListsUnreadable)
                 }
             }
             .appBackground()
@@ -1109,79 +1118,41 @@ struct TasksManagerView: View {
         userActivities = (try? viewContext.fetch(req)) ?? []
     }
 
+    /// P6-I-04 / F-1. One shared reader for every surface: it never writes over a
+    /// library it could not read, and migrates legacy per-context keys once, owner-wide.
     private func loadSavedTaskSets() -> [SavedTaskSet] {
-        let defaults = UserDefaults.standard
-        var merged: [SavedTaskSet] = []
-        var mergeIdentity = SavedListMergeIdentity()
-
-        func merge(_ sets: [SavedTaskSet]) {
-            for set in sets {
-                let trimmedName = set.sourceSendID == nil ? set.name.trimmingCharacters(in: .whitespacesAndNewlines) : set.name
-                let normalizedItems = set.sourceSendID == nil ? normalizedTaskTemplateLines(from: set.items) : set.items
-                let contentSignature = trimmedName.lowercased() + "||" + normalizedItems.map { $0.type.rawValue + ":" + $0.text.lowercased() }.joined(separator: "\u{241E}")
-
-                guard mergeIdentity.include(set, contentSignature: contentSignature) else { continue }
-                merged.append(SavedTaskSet(id: set.id, name: trimmedName.isEmpty ? defaultImportedTaskSetName(from: textItems(from: normalizedItems)) : trimmedName, items: normalizedItems, sourceSendID: set.sourceSendID))
-            }
-        }
-
-        if let data = defaults.data(forKey: globalTaskSetsKey) {
-            if let decoded = try? JSONDecoder().decode([SavedTaskSet].self, from: data) {
-                merge(decoded)
-            } else if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSet].self, from: data) {
-                merge(legacyDecoded.map { SavedTaskSet(id: $0.id, name: $0.name, items: normalizedTaskTemplateLines(from: $0.items)) })
-            }
-        }
-
-        let legacyKeys = legacyTaskSetKeysForMigration()
-        for key in legacyKeys {
-            guard let data = defaults.data(forKey: key) else { continue }
-
-            if let decoded = try? JSONDecoder().decode([SavedTaskSet].self, from: data) {
-                merge(decoded)
-                continue
-            }
-
-            if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSet].self, from: data) {
-                merge(legacyDecoded.map { SavedTaskSet(id: $0.id, name: $0.name, items: normalizedTaskTemplateLines(from: $0.items)) })
-            }
-        }
-
-        if let data = try? JSONEncoder().encode(merged) {
-            defaults.set(data, forKey: globalTaskSetsKey)
-        }
-
-        return merged
-    }
-
-    private func saveSavedTaskSets() {
-        if let data = try? JSONEncoder().encode(savedTaskSets) {
-            UserDefaults.standard.set(data, forKey: globalTaskSetsKey)
+        switch SavedListLibrary.load(ownerScope: ownerScope) {
+        case .lists(let lists):
+            savedListsUnreadable = false
+            savedListsSnapshot = lists
+            return lists
+        case .damaged:
+            savedListsUnreadable = true
+            savedListsSnapshot = []
+            return []
         }
     }
 
-    private func legacyTaskSetKeysForMigration() -> [String] {
-        var keys = Set<String>()
-
-        let activityRefs = allActivityRefs
-        let instrumentSuffixes: [String]
-        if shouldShowInstrumentSelector {
-            let ids = instrumentsForProfile.compactMap(\.id)
-            instrumentSuffixes = ids.isEmpty ? [""] : ids.map { "::inst:" + $0.uuidString }
-        } else {
-            instrumentSuffixes = [""]
+    /// Applies this screen's edit to a FRESH load (so a stale screen cannot bring
+    /// back a List deleted elsewhere or drop an adoption), and refuses entirely while
+    /// the library is unreadable — nothing is written. Returns whether the edit was
+    /// saved; on refusal the screen shows the unreadable state instead of the edit,
+    /// and callers keep the member's draft and selection.
+    @discardableResult
+    private func saveSavedTaskSets() -> Bool {
+        if !savedListsUnreadable {
+            do {
+                let result = try SavedListLibrary.commit(snapshot: savedListsSnapshot, updated: savedTaskSets, ownerScope: ownerScope)
+                savedListsSnapshot = result
+                savedTaskSets = result
+                return true
+            } catch {}
         }
-
-        for activityRef in activityRefs {
-            let normalizedRef = normalizedActivityRef(activityRef)
-            for instrumentSuffix in instrumentSuffixes {
-                let scopedTasksKey = "practiceTasks_v1::" + ownerScope + "::" + normalizedRef + instrumentSuffix
-                keys.insert(scopedTasksKey + "::saved_sets_v1")
-            }
-        }
-
-        keys.insert(taskSetsKey)
-        return Array(keys)
+        savedListsUnreadable = true
+        savedListsSnapshot = []
+        savedTaskSets = []
+        showTaskSetEditor = false
+        return false
     }
 
     private func toggleDefaultTaskSet(_ id: UUID) {
@@ -1229,7 +1200,7 @@ struct TasksManagerView: View {
         guard !trimmed.isEmpty else { return }
         guard savedTaskSets[index].name != trimmed else { return }
         savedTaskSets[index].name = trimmed
-        saveSavedTaskSets()
+        guard saveSavedTaskSets() else { return }
         saveTaskSetSelectionAndItems()
     }
 
@@ -1244,7 +1215,7 @@ struct TasksManagerView: View {
         let finalName = uniqueTaskSetName(from: baseName)
         let newSet = SavedTaskSet(id: UUID(), name: finalName, items: normalizedTaskTemplateLines(from: items))
         savedTaskSets.append(newSet)
-        saveSavedTaskSets()
+        guard saveSavedTaskSets() else { return }
         selectTaskSet(newSet.id)
         showSaveCurrentTaskSetPrompt = false
     }
@@ -1259,7 +1230,7 @@ struct TasksManagerView: View {
         let finalName = uniqueTaskSetName(from: baseName)
         let newSet = SavedTaskSet(id: UUID(), name: finalName, items: normalizedTaskTemplateLines(from: cleanedItems))
         savedTaskSets.append(newSet)
-        saveSavedTaskSets()
+        guard saveSavedTaskSets() else { return }   // keep the draft and the sheet
         selectTaskSet(newSet.id)
         pastedImportText = ""
         importDraftItems = []
@@ -1379,7 +1350,7 @@ struct TasksManagerView: View {
         guard let index = savedTaskSets.firstIndex(where: { $0.id == id }) else { return }
         let wasSelected = (selectedTaskSetID == id)
         savedTaskSets.remove(at: index)
-        saveSavedTaskSets()
+        guard saveSavedTaskSets() else { return }   // refused: the selection stays
 
         if wasSelected {
             selectedTaskSetID = nil
