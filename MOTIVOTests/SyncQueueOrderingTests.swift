@@ -196,9 +196,14 @@ enum QueueStubFixture {
     }
 
     static func payload(_ id: UUID, shared: Bool) -> SessionSyncQueue.PostPublishPayload {
+        // P6-I-02. The production capture site now binds the owner at the
+        // member's action, so a fixture that enqueues directly must do the same
+        // or it is modelling a path the app no longer has. The owner is NOT
+        // defaulted in production — adopting the current login is the defect.
+
         SessionSyncQueue.PostPublishPayload(id: id, sessionID: nil, sessionTimestamp: nil, title: "c87",
                                             durationSeconds: 60, activityType: nil, activityDetail: nil,
-                                            instrumentLabel: nil, mood: nil, effort: nil, isPublic: shared)
+                                            instrumentLabel: nil, mood: nil, effort: nil, isPublic: shared).withOwner(SessionSyncQueue.currentOwner())
     }
 
     /// Poll without asserting: used where a correct implementation may never

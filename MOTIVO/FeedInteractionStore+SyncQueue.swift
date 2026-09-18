@@ -14,8 +14,11 @@ import Foundation
 
 extension FeedInteractionStore {
     @MainActor
+    /// P6-I-02. SYMBOL PRESERVED. It has no callers today, and it must not become
+    /// a way to create executable unowned work if one is ever added: the owner is
+    /// captured here, synchronously, and the enqueue refuses when there is none.
     func enqueueForPublish(_ postID: UUID) {
-        SessionSyncQueue.shared.enqueue(postID: postID)
+        SessionSyncQueue.shared.enqueue(postID: postID, capturedOwner: SessionSyncQueue.currentOwner())
         Task { @MainActor in
             if BackendEnvironment.shared.isPreview {
                 await BackendDiagnostics.shared.simulatedCall(

@@ -317,10 +317,9 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
         // DURABLE ACROSS PROCESS DEATH, not merely in memory: the queue is a
         // file the initialiser reads back. Asserting the FILE is what makes
         // "survives termination" evidence rather than inference.
-        let queueFile = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MOTIVO", isDirectory: true)
-            .appendingPathComponent("SessionSyncQueue_v1.json")
+        // P6-I-02. The durable file is the envelope; the legacy path is
+        // neutralised by migration. The claim is unchanged.
+        let queueFile = SessionSyncQueue.currentFileURL()
         let onDisk = (try? String(contentsOf: queueFile, encoding: .utf8)) ?? ""
         XCTAssertTrue(onDisk.localizedCaseInsensitiveContains(postID.uuidString),
                       "G: the intent is PERSISTED TO DISK at \(queueFile.lastPathComponent)")
@@ -438,11 +437,16 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
     }
 
     private static func payload(_ id: UUID, isPublic: Bool = true) -> SessionSyncQueue.PostPublishPayload {
+        // P6-I-02. The production capture site now binds the owner at the
+        // member's action, so a fixture that enqueues directly must do the same
+        // or it is modelling a path the app no longer has. The owner is NOT
+        // defaulted in production — adopting the current login is the defect.
+
         SessionSyncQueue.PostPublishPayload(
             id: id, sessionID: id, sessionTimestamp: nil, title: nil,
             durationSeconds: nil, activityType: nil, activityDetail: nil,
             instrumentLabel: nil, mood: nil, effort: nil, isPublic: isPublic
-        )
+        ).withOwner(SessionSyncQueue.currentOwner())
     }
 
     /// Any valid NSManagedObjectID will do: on the `shouldPublish == false`

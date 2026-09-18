@@ -191,8 +191,10 @@ final class StalePathQueuedPublishTests: XCTestCase {
 
         // P5 — the intent survives decode from the REAL queue file, so the route
         // is exercised through disk rather than through in-memory state.
+        // P6-I-02. The durable file is the envelope now; `items` is what a
+        // relaunch would dispatch. The claim is unchanged.
         let onDisk = try Data(contentsOf: Self.queueFile)
-        let reconstructed = try JSONDecoder().decode([SessionSyncQueue.PostPublishPayload].self, from: onDisk)
+        let reconstructed = try JSONDecoder().decode(SessionSyncQueueEnvelope.self, from: onDisk).items
         XCTAssertTrue(reconstructed.contains { $0.id == staleID && $0.op == .publish },
                       "P5: the queued .publish survives reconstruction FROM DISK")
 
@@ -303,12 +305,9 @@ final class StalePathQueuedPublishTests: XCTestCase {
 
     // MARK: - Plumbing
 
-    private static var queueFile: URL {
-        let dir = try! FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                               appropriateFor: nil, create: true)
-            .appendingPathComponent("MOTIVO", isDirectory: true)
-        return dir.appendingPathComponent("SessionSyncQueue_v1.json")
-    }
+    /// P6-I-02. The durable file is the envelope; the legacy path is
+    /// neutralised by migration.
+    private static var queueFile: URL { SessionSyncQueue.currentFileURL() }
 
     private static func settle() async { try? await Task.sleep(nanoseconds: 3_000_000_000) }
 
@@ -322,11 +321,16 @@ final class StalePathQueuedPublishTests: XCTestCase {
     }
 
     private static func payload(_ id: UUID) -> SessionSyncQueue.PostPublishPayload {
+        // P6-I-02. The production capture site now binds the owner at the
+        // member's action, so a fixture that enqueues directly must do the same
+        // or it is modelling a path the app no longer has. The owner is NOT
+        // defaulted in production — adopting the current login is the defect.
+
         SessionSyncQueue.PostPublishPayload(
             id: id, sessionID: id, sessionTimestamp: Date(), title: "u6",
             durationSeconds: 60, activityType: nil, activityDetail: nil,
             instrumentLabel: nil, mood: nil, effort: nil,
-            isPublic: true, notes: nil, areNotesPrivate: false)
+            isPublic: true, notes: nil, areNotesPrivate: false).withOwner(SessionSyncQueue.currentOwner())
     }
 
     private static func mintJWT(sub: String) -> String {

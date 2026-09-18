@@ -32,11 +32,11 @@ final class UnshareDurabilityTests: XCTestCase {
     private var postIDs: [UUID] = []
     private var objectPaths: [String] = []
 
-    private static var queueFile: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MOTIVO", isDirectory: true)
-            .appendingPathComponent("SessionSyncQueue_v1.json")
-    }
+    /// P6-I-02. THE DURABLE FILE IS THE ENVELOPE NOW. The legacy path is
+    /// neutralised by migration, so reading it would assert against a file the
+    /// app deliberately empties. The claim is unchanged — the intent survives
+    /// reconstruction FROM DISK — only the file it is read from has moved.
+    private static var queueFile: URL { SessionSyncQueue.currentFileURL() }
 
     // MARK: - Lifecycle
 
@@ -199,8 +199,9 @@ final class UnshareDurabilityTests: XCTestCase {
         // --- PROCESS RECONSTRUCTION: decode the real file with the real type
         //     through the real decoder, exactly as `load(from:)` does.
         let onDisk = try Data(contentsOf: Self.queueFile)
-        let reconstructed = try JSONDecoder().decode([SessionSyncQueue.PostPublishPayload].self, from: onDisk)
-        XCTAssertTrue(reconstructed.contains { $0.id == id && $0.op == .unshare },
+        let envelope = try JSONDecoder().decode(SessionSyncQueueEnvelope.self, from: onDisk)
+        XCTAssertEqual(envelope.formatVersion, SessionSyncQueueEnvelope.supported)
+        XCTAssertTrue(envelope.items.contains { $0.id == id && $0.op == .unshare },
                       "the .unshare survives reconstruction FROM DISK, not merely in memory")
 
         // --- reconnect; flush only. The user does NOT touch the session again.
@@ -410,12 +411,17 @@ final class UnshareDurabilityTests: XCTestCase {
     /// `isPublic: false` is asking for the state this amendment abolished.
     private static func payload(_ id: UUID, op: SessionSyncQueue.PostOp, isPublic: Bool)
     -> SessionSyncQueue.PostPublishPayload {
+        // P6-I-02. The production capture site now binds the owner at the
+        // member's action, so a fixture that enqueues directly must do the same
+        // or it is modelling a path the app no longer has. The owner is NOT
+        // defaulted in production — adopting the current login is the defect.
+
         XCTAssertEqual(op, isPublic ? .publish : .unshare,
                        "a test may not ask for a contradictory payload")
         return SessionSyncQueue.PostPublishPayload(
             id: id, sessionID: id, sessionTimestamp: nil, title: nil, durationSeconds: nil,
             activityType: nil, activityDetail: nil, instrumentLabel: nil, mood: nil, effort: nil,
-            isPublic: isPublic, notes: nil, areNotesPrivate: false)
+            isPublic: isPublic, notes: nil, areNotesPrivate: false).withOwner(SessionSyncQueue.currentOwner())
     }
 
     private func throwawayObjectID() throws -> NSManagedObjectID {

@@ -168,18 +168,27 @@ final class OmissionIdentityTests: XCTestCase {
     }
 
     private static func payload(_ id: UUID, omissions: [UUID]?) -> SessionSyncQueue.PostPublishPayload {
+        // P6-I-02. The production capture site now binds the owner at the
+        // member's action, so a fixture that enqueues directly must do the same
+        // or it is modelling a path the app no longer has. The owner is NOT
+        // defaulted in production — adopting the current login is the defect.
+
         SessionSyncQueue.PostPublishPayload(
             id: id, sessionID: id, sessionTimestamp: Date(), title: "c82",
             durationSeconds: 60, activityType: nil, activityDetail: nil,
             instrumentLabel: nil, mood: nil, effort: nil,
             isPublic: true, notes: nil, areNotesPrivate: false,
-            authorisedOmissions: omissions)
+            authorisedOmissions: omissions).withOwner(SessionSyncQueue.currentOwner())
     }
 
     /// What a relaunch reads.
+    ///
+    /// P6-I-02. The durable file is the envelope; the legacy path is neutralised
+    /// by migration. Reading `items` keeps the claim identical — this is what a
+    /// relaunch would dispatch.
     private func decodedQueueFile() throws -> [SessionSyncQueue.PostPublishPayload] {
-        try JSONDecoder().decode([SessionSyncQueue.PostPublishPayload].self,
-                                 from: Data(contentsOf: SessionSyncQueue.makeFileURL()))
+        try JSONDecoder().decode(SessionSyncQueueEnvelope.self,
+                                 from: Data(contentsOf: SessionSyncQueue.currentFileURL())).items
     }
 
     // MARK: - Identity (real store, no network)

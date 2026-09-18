@@ -1284,6 +1284,11 @@ final class AuthManager: NSObject, ObservableObject {
         #if DEBUG
         NSLog("[Auth] clearConnectedIdentity reason=%@", reason)
         #endif
+        // P6-I-02. The identity beneath the queue has changed, so a flush already
+        // running must not acknowledge anything against the previous one. The
+        // queue's CONTENTS are deliberately retained: a withdrawal is owed to the
+        // member and must survive signing out and back in.
+        SessionSyncQueue.shared.noteIdentityChanged(reason: "clearConnectedIdentity:\(reason)")
         // C-27: leaving Connected is not leaving Études, so the local profile keeps the
         // location this identity presented. View-independent; `ProfileView` does the same
         // when mounted, and still runs afterwards. Never during a factory reset.
@@ -1337,6 +1342,9 @@ final class AuthManager: NSObject, ObservableObject {
 
     // Local sign-out
     func signOut() {
+        // P6-I-02. See `clearConnectedIdentity`. Queue retained, acknowledgements
+        // from the previous identity voided.
+        SessionSyncQueue.shared.noteIdentityChanged(reason: "signOut")
         // Cancel any in-flight hydration so it can't write into stores after sign-out/reset.
         // C-27: leaving Connected is not leaving Études, so the local profile keeps the
         // location this identity presented. View-independent; `ProfileView` does the same

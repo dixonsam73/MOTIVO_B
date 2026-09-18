@@ -46,11 +46,23 @@ public final class SessionSyncQueue: ObservableObject {
     ///     a newer intent is sent after the older one has finished.
     ///   - `generation` -- a factory reset starts a new generation, so a flush
     ///     from before the reset can neither acknowledge nor continue.
-    private var revisions: [UUID: Int] = [:]
+    ///
+    /// P6-I-02. The key is (OWNER, POST), not the post alone. Two identities
+    /// could otherwise merge into, supersede or acknowledge one another's intent
+    /// for the same post id.
+    struct QueueKey: Hashable {
+        let owner: String?
+        let postID: UUID
+    }
+
+    private var revisions: [QueueKey: Int] = [:]
     private var nextRevision = 0
     private var generation = 0
     private var activeFlush: Task<Void, Never>?
     private var activeFlushID: UUID?
+    /// The generation the running flush belongs to, so a joining caller can tell
+    /// whether that flush is still able to serve its request.
+    private var activeFlushGeneration = 0
     private var flushAgain = false
 
     /// C-61 / P4-U2a-2. WHAT THIS QUEUE ITEM ASKS FOR.
@@ -68,7 +80,7 @@ public final class SessionSyncQueue: ObservableObject {
         case unshare
     }
 
-    public struct PostPublishPayload: Codable, Identifiable {
+    public struct PostPublishPayload: Codable, Identifiable, Equatable {
       public let id: UUID            // == postID
       public let sessionID: UUID?
       public let sessionTimestamp: Date?
@@ -117,6 +129,19 @@ public final class SessionSyncQueue: ObservableObject {
       /// the same hole for a file on disk.
       public let op: PostOp
 
+      /// P6-I-02 — WHOSE INTENT THIS IS.
+      ///
+      /// Captured SYNCHRONOUSLY at the member's action, before any deferred
+      /// `Task`, and never re-derived at flush time. The defect this closes is
+      /// that the owner used to be read when the flush ran
+      /// (`BackendShim.uploadPost`), so a queue written by A and flushed while B
+      /// was signed in uploaded A's work as B.
+      ///
+      /// **Optional with a `nil` default**, the `op` / `authorisedOmissions`
+      /// precedent, so a legacy item decodes. `nil` means UNKNOWN PROVENANCE and
+      /// is quarantined — never adopted by whoever happens to be signed in.
+      public var ownerUserID: String? = nil
+
       public init(
           id: UUID,
           sessionID: UUID?,
@@ -131,7 +156,8 @@ public final class SessionSyncQueue: ObservableObject {
           isPublic: Bool = true,
           notes: String? = nil,
           areNotesPrivate: Bool = false,
-          authorisedOmissions: [UUID]? = nil
+          authorisedOmissions: [UUID]? = nil,
+          ownerUserID: String? = nil
       ) {
           self.id = id
           self.sessionID = sessionID
@@ -147,8 +173,16 @@ public final class SessionSyncQueue: ObservableObject {
           self.notes = notes
           self.areNotesPrivate = areNotesPrivate
           self.authorisedOmissions = authorisedOmissions
+          self.ownerUserID = ownerUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
           // DERIVED. See the `op` declaration above.
           self.op = isPublic ? .publish : .unshare
+      }
+
+      /// P6-I-02. A copy bound to `owner`, for the capture site.
+      public func withOwner(_ owner: String?) -> PostPublishPayload {
+          var copy = self
+          copy.ownerUserID = owner?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+          return copy
       }
 
       /// BACKWARD COMPATIBILITY IS THE WHOLE REASON THIS EXISTS. A synthesised
@@ -196,25 +230,160 @@ public final class SessionSyncQueue: ObservableObject {
           // touching it — and the member's consent would then be silently lost
           // on relaunch, re-prompting them or, worse, omitting nothing.
           authorisedOmissions = try c.decodeIfPresent([UUID].self, forKey: .authorisedOmissions)
+          // P6-I-02. Absent means UNKNOWN, not "mine".
+          ownerUserID = try c.decodeIfPresent(String.self, forKey: .ownerUserID)?
+              .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
           let declared = try c.decodeIfPresent(PostOp.self, forKey: .op)
           op = (isPublic == false) ? .unshare : (declared ?? .publish)
       }
     }
 
+    /// Attributable work, for EVERY owner. The dispatch boundary in `flushOnce`
+    /// decides which of it may be sent now; an item belonging to an identity that
+    /// is not current is HELD here, not discarded.
     @Published public private(set) var items: [PostPublishPayload] = []
-    private let fileURL: URL
+
+    /// P6-I-02. Work whose owner cannot be established — a queue file written
+    /// before this unit, or by an older build after a downgrade. **Never
+    /// dispatched, never adopted, never deleted on a timer.** It leaves
+    /// quarantine only through explicit owner reauthorisation, which is not built
+    /// in this unit.
+    @Published public private(set) var quarantined: [PostPublishPayload] = []
+
+    /// The store's last whole-store result. **Dispatch depends on this being
+    /// `.ok`**, not merely on a file decoding: after any halt the queue holds no
+    /// dispatchable work and writes nothing, so a valid older file is neither
+    /// dispatched nor overwritten.
+    public private(set) var reconcileState: SessionSyncQueueReconcile = .ok
+
+    private let store: SessionSyncQueueStore
+    private var envelope: SessionSyncQueueEnvelope = .empty()
+
+    /// True when a write failed and memory holds intent the disk does not. The
+    /// member's newer action is NOT discarded; it simply cannot be dispatched or
+    /// written until `attemptStoreRecovery()` succeeds.
+    public private(set) var memoryDivergesFromDisk = false
+
+    /// Whether memory has ever held a COMPLETE, successfully reconciled view of
+    /// the store.
+    ///
+    /// This is what makes recovery decidable. When it is true, memory is
+    /// everything disk had PLUS everything that happened since — including
+    /// REMOVALS — so memory is authoritative and an older on-disk item must not
+    /// come back. When it is false, the store was already halted when this
+    /// process started, memory never saw what disk held, and recovery must take
+    /// the union or work queued before this launch would be discarded.
+    private var memoryIsAuthoritative = false
 
     private init() {
-        self.fileURL = SessionSyncQueue.makeFileURL()
-        self.items = (try? Self.load(from: fileURL)) ?? []
-        for item in items { noteNewIntent(item.id) }
+        self.store = SessionSyncQueueStore(root: SessionSyncQueue.storeRoot())
+        reload()
+    }
+
+    /// Runs the store's whole-store reconciliation and adopts the result.
+    ///
+    /// There is deliberately NO `(try? load()) ?? []` here. A damaged store used
+    /// to read as "no pending work", which silently discarded a member's queued
+    /// publishes and owed withdrawals.
+    private func reload() {
+        let (state, envelope) = store.reconcile()
+        reconcileState = state
+        guard state.isOK, let envelope else {
+            self.items = []
+            self.quarantined = []
+            memoryIsAuthoritative = false
+            NSLog("[SessionSyncQueue] store halted • %@", state.diagnostic)
+            BackendLogger.notice("Queue store halted • \(state.diagnostic)")
+            return
+        }
+        // The same invariant on the way in: an item whose owner is absent or
+        // empty is quarantined rather than admitted to the dispatchable set.
+        // Nothing is discarded — it moves, it does not vanish.
+        let (dispatchable, unowned) = partitionByProvenance(envelope.items)
+        let held = envelope.quarantined + unowned
+        var normalised = envelope
+        normalised.items = dispatchable
+        normalised.quarantined = held
+        self.envelope = normalised
+        self.items = dispatchable
+        self.quarantined = held
+        memoryIsAuthoritative = true
+        for item in items { noteNewIntent(item) }
+        if dispatchable.count != envelope.items.count {
+            BackendLogger.notice("Queue load • \(envelope.items.count - dispatchable.count) item(s) moved to quarantine for unknown provenance")
+        }
+        if !quarantined.isEmpty {
+            NSLog("[SessionSyncQueue] quarantined items held • count=%d", quarantined.count)
+            BackendLogger.notice("Queue quarantine • held=\(quarantined.count) • not dispatchable")
+        }
     }
 
     // MARK: - Public API
 
-    public func enqueue(_ payload: PostPublishPayload) {
-        if let index = items.firstIndex(where: { $0.id == payload.id }) {
+    /// Returns a copy bound to `owner`. Used at the capture site, so the rest of
+    /// the publish path cannot forget to supply it.
+    /// Empty and whitespace-only are the SAME as absent: unknown provenance.
+    /// Normalising in one place stops `""` slipping into `items` and behaving
+    /// like an owner that merges, clears and compares.
+    static func normalisedOwner(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    /// THE DISPATCHABILITY INVARIANT, IN ONE PLACE. An item whose owner is
+    /// absent or empty is held, never dispatchable. Load and recovery both go
+    /// through this, so the two cannot drift: an earlier revision normalised on
+    /// load only, and recovery could therefore adopt an unowned item straight
+    /// into the dispatchable set.
+    private func partitionByProvenance(_ raw: [PostPublishPayload]) -> (dispatchable: [PostPublishPayload], held: [PostPublishPayload]) {
+        var dispatchable: [PostPublishPayload] = []
+        var held: [PostPublishPayload] = []
+        for item in raw {
+            if let owner = Self.normalisedOwner(item.ownerUserID) {
+                dispatchable.append(item.withOwner(owner))
+            } else {
+                held.append(item.withOwner(nil))
+            }
+        }
+        return (dispatchable, held)
+    }
+
+    private func key(_ payload: PostPublishPayload) -> QueueKey {
+        QueueKey(owner: payload.ownerUserID, postID: payload.id)
+    }
+
+    /// The identity the app is currently acting as, lowercased, or nil.
+    static func currentOwner() -> String? { AuthManager.canonicalBackendUserID() }
+
+    @discardableResult
+    public func enqueue(_ payload: PostPublishPayload) -> Bool {
+        // A halted store cannot make anything durable, but the member's newer
+        // intent must not be thrown away either. It is retained in memory,
+        // reported as NOT durable, and cannot be dispatched (the flush guard) or
+        // written (the persist guard) until recovery succeeds.
+        if !reconcileState.isOK {
+            memoryDivergesFromDisk = true
+            BackendLogger.notice("Enqueue not durable • store halted • \(reconcileState.diagnostic) • intent retained in memory only")
+        }
+        // P6-I-02. UNKNOWN PROVENANCE IS QUARANTINED, NEVER DISPATCHABLE.
+        //
+        // An earlier revision let a nil or empty owner into `items` and relied on
+        // the flush filter to skip it. That is the wrong place: such an item
+        // could still merge with, or be cleared alongside, real work. The
+        // invariant is enforced HERE and at load, and nothing is lost.
+        guard let normalisedOwner = Self.normalisedOwner(payload.ownerUserID) else {
+            let held = payload.withOwner(nil)
+            if !quarantined.contains(where: { $0.id == held.id }) { quarantined.append(held) }
+            let durable = persist()
+            BackendLogger.notice("Queue quarantined • unknown provenance • postID=\(payload.id.uuidString)")
+            return durable
+        }
+        let payload = payload.withOwner(normalisedOwner)
+
+        // Match within the SAME OWNER only.
+        if let index = items.firstIndex(where: { $0.id == payload.id && $0.ownerUserID == payload.ownerUserID }) {
             // Merge with existing item: prefer new non-nil values, otherwise keep old
             let existing = items[index]
 
@@ -246,10 +415,10 @@ public final class SessionSyncQueue: ObservableObject {
             // original visibility merge still apply.
             if payload.op != existing.op {
                 items[index] = payload
-                noteNewIntent(payload.id)
-                persist()
+                noteNewIntent(payload)
+                let durable = persist()
                 BackendLogger.notice("Queue intent replaced • postID=\(payload.id.uuidString) • \(existing.op.rawValue)→\(payload.op.rawValue)")
-                return
+                return durable
             }
 
             let mergedIsPublic: Bool = {
@@ -277,38 +446,95 @@ public final class SessionSyncQueue: ObservableObject {
                 // C-82 — the member's "Share Without It" must survive the merge.
                 // A newer consent replaces the older one; an update that says
                 // nothing about consent keeps it.
-                authorisedOmissions: payload.authorisedOmissions ?? existing.authorisedOmissions
+                authorisedOmissions: payload.authorisedOmissions ?? existing.authorisedOmissions,
+                ownerUserID: existing.ownerUserID
             )
             items[index] = merged
-            noteNewIntent(payload.id)
-            persist()
+            noteNewIntent(merged)
+            let durable = persist()
             BackendLogger.notice("Queue update • postID=\(payload.id.uuidString) • total=\(items.count)")
+            return durable
         } else {
             items.append(payload)
-            noteNewIntent(payload.id)
-            persist()
+            noteNewIntent(payload)
+            let durable = persist()
             BackendLogger.notice("Queue enqueue • postID=\(payload.id.uuidString) • total=\(items.count)")
+            return durable
         }
     }
 
-    public func enqueue(postID: UUID) {
-        guard items.contains(where: { $0.id == postID }) == false else { return }
-        let payload = PostPublishPayload(id: postID, sessionID: nil, sessionTimestamp: nil, title: nil, durationSeconds: nil, activityType: nil, activityDetail: nil, instrumentLabel: nil, mood: nil, effort: nil)
-        enqueue(payload)
+    /// P6-I-02. PRESERVED SIGNATURE, but it can no longer create EXECUTABLE
+    /// unowned work: with no owner supplied it captures the current one, and if
+    /// there is none it refuses rather than queueing something unattributable.
+    /// CONVENIENCE: captures the owner AT THIS CALL. Only safe where the call is
+    /// already synchronous with the member's action.
+    @discardableResult
+    public func enqueue(postID: UUID) -> Bool {
+        enqueue(postID: postID, capturedOwner: Self.currentOwner())
     }
 
+    /// EXPLICIT: the owner was captured earlier, by the caller.
+    ///
+    /// A `nil` here means "captured, and it was unknown" — it must NEVER fall
+    /// back to the current identity. An earlier revision wrote
+    /// `ownerUserID ?? currentOwner()`, so an explicit nil captured before a
+    /// deferred `Task` silently became whoever was signed in when it ran, which
+    /// is precisely the defect.
+    @discardableResult
+    public func enqueue(postID: UUID, capturedOwner: String?) -> Bool {
+        guard let owner = Self.normalisedOwner(capturedOwner) else {
+            BackendLogger.notice("Enqueue refused • unknown provenance • postID=\(postID.uuidString)")
+            return false
+        }
+        guard items.contains(where: { $0.id == postID && $0.ownerUserID == owner }) == false else { return true }
+        let payload = PostPublishPayload(id: postID, sessionID: nil, sessionTimestamp: nil, title: nil,
+                                         durationSeconds: nil, activityType: nil, activityDetail: nil,
+                                         instrumentLabel: nil, mood: nil, effort: nil,
+                                         ownerUserID: owner)
+        return enqueue(payload)
+    }
+
+    /// P6-I-02. SCOPED TO THE CURRENT OWNER. The signature is unchanged, but an
+    /// ownerless request can only safely mean "mine": removing every owner's
+    /// item for a post id is exactly the cross-account interference this unit
+    /// exists to stop.
     public func dequeue(postID: UUID) {
-        items.removeAll { $0.id == postID }
-        revisions.removeValue(forKey: postID)
+        let owner = Self.currentOwner()
+        items.removeAll { $0.id == postID && $0.ownerUserID == owner }
+        revisions.removeValue(forKey: QueueKey(owner: owner, postID: postID))
         persist()
         BackendLogger.notice("Queue dequeue • postID=\(postID.uuidString) • total=\(items.count)")
     }
 
+    /// Clears DISPATCHABLE work only. Quarantined items are a member's
+    /// unattributable work and are never removed by a routine clear.
     public func clear() {
         items.removeAll()
         revisions.removeAll()
         persist()
         BackendLogger.notice("Queue cleared")
+    }
+
+    /// P6-I-02. An identity change starts a new generation, so a flush already
+    /// running can acknowledge nothing once the identity beneath it has changed.
+    /// The queue itself is retained: a withdrawal is owed to the member and must
+    /// survive signing out and back in.
+    func noteIdentityChanged(reason: String) {
+        generation += 1
+        // THE IN-FLIGHT HANDLE IS DELIBERATELY RETAINED.
+        //
+        // An earlier revision set `activeFlush = nil` here. That does not stop
+        // the request — it only loses the handle, so the next `flushNow()` saw
+        // no active flush and started a SECOND one while A's was still
+        // suspended. The generation check withholds the acknowledgement; it does
+        // nothing about the concurrent request, so C-87's single flight was
+        // regressed by the very call meant to protect it.
+        //
+        // `flushNow()` now drains whatever is running before starting anything,
+        // and starts a fresh-generation pass afterwards so the wakeup a joining
+        // caller asked for is not lost when the old flush stops early.
+        NSLog("[SessionSyncQueue] identity changed • %@ • generation=%d", reason, generation)
+        BackendLogger.notice("Queue identity changed • \(reason) • acknowledgements from the previous identity are void; any in-flight request is drained before the next flush")
     }
 
     /// Flush now. In Backend Preview: prints simulated upload logs and drains on success.
@@ -324,13 +550,24 @@ public final class SessionSyncQueue: ObservableObject {
             BackendLogger.notice("Flush ignored (factory reset in progress)")
             return
         }
-        if let running = activeFlush {
+        // Drain whatever is running before starting anything. A flush from a
+        // superseded generation stops at its next check WITHOUT honouring
+        // `flushAgain`, so the joining caller's wakeup would be lost — hence the
+        // loop and the generation comparison rather than a bare `return`.
+        while let running = activeFlush {
+            let runningGeneration = activeFlushGeneration
             flushAgain = true
             BackendLogger.notice("Flush joined the flush in progress")
             await running.value
-            return
+            if runningGeneration == generation {
+                // Same generation: it honoured the extra pass on our behalf.
+                return
+            }
+            // Superseded: it drained without serving us. Loop, in case another
+            // caller started one meanwhile, then start a fresh-generation flush.
         }
         let flushGeneration = generation
+        activeFlushGeneration = flushGeneration
         let flushID = UUID()
         // The handle is released INSIDE the task, synchronously after its last
         // pass, so a caller arriving after that point starts a new flush rather
@@ -354,8 +591,30 @@ public final class SessionSyncQueue: ObservableObject {
         NSLog("[SessionSyncQueue] flushNow requested • mode=%@ • queued=%d", String(describing: mode), items.count)
         BackendLogger.notice("Flush requested • mode=\(String(describing: mode)) • queued=\(items.count)")
 
+        // P6-I-02. DISPATCH DEPENDS ON A SUCCESSFUL WHOLE-STORE RECONCILIATION.
+        guard reconcileState.isOK else {
+            NSLog("[SessionSyncQueue] flush refused • store halted • %@", reconcileState.diagnostic)
+            BackendLogger.notice("Flush refused • store halted • \(reconcileState.diagnostic)")
+            return
+        }
+
         if mode == .backendPreview || mode == .backendConnected {
-            let snapshot = items.map { (payload: $0, revision: revisions[$0.id] ?? 0) }
+            // THE DISPATCH BOUNDARY.
+            //
+            //   owner == current   -> dispatch
+            //   owner != current   -> HELD. Retained, retried when its owner returns
+            //   owner == nil       -> cannot occur here; unattributable work is
+            //                         quarantined by the store and never reaches `items`
+            //   no current owner   -> nothing dispatches
+            //
+            // Held is not an error: it is A's work waiting for A.
+            let owner = Self.currentOwner()
+            let dispatchable = items.filter { $0.ownerUserID != nil && $0.ownerUserID == owner }
+            let held = items.count - dispatchable.count
+            if held > 0 {
+                BackendLogger.notice("Flush holding \(held) item(s) belonging to another identity")
+            }
+            let snapshot = dispatchable.map { (payload: $0, revision: revisions[key($0)] ?? 0) }
             for (payload, revision) in snapshot {
                 // C-91. A reset since this flush began ends it here: nothing from
                 // before the reset is sent, and nothing is acknowledged.
@@ -364,8 +623,19 @@ public final class SessionSyncQueue: ObservableObject {
                     BackendLogger.notice("Flush stopped (superseded by factory reset)")
                     return
                 }
+                // THE HALT IS RE-CHECKED PER ITEM, NOT ONLY AT ENTRY. A write can
+                // fail WHILE this flush is awaiting a request — an acknowledgement's
+                // own persist is the likeliest one — and the entry guard has long
+                // since passed. The remaining items of the snapshot would then be
+                // dispatched from a store that is no longer a safe basis for
+                // dispatch.
+                guard reconcileState.isOK else {
+                    NSLog("[SessionSyncQueue] flush stopped • store halted mid-flush • %@", reconcileState.diagnostic)
+                    BackendLogger.notice("Flush stopped • store halted mid-flush • \(reconcileState.diagnostic) • \(items.count) item(s) retained")
+                    return
+                }
                 // C-87. Superseded before it was sent: the next pass sends the newer intent.
-                guard revisions[payload.id] == revision else { continue }
+                guard revisions[key(payload)] == revision else { continue }
                 // C-61 / P4-U2a-2. An .unshare converges to REMOVAL and is
                 // dequeued only once the row is confirmed absent; anything else
                 // stays queued for the next launch/foreground flush. The
@@ -376,7 +646,7 @@ public final class SessionSyncQueue: ObservableObject {
                     case .success:
                         NSLog("[SessionSyncQueue] unshare converged • postID=%@", payload.id.uuidString)
                         BackendLogger.notice("Unshare converged • postID=\(payload.id.uuidString)")
-                        self.acknowledge(payload.id, revision: revision, generation: flushGeneration)
+                        self.acknowledge(payload, revision: revision, generation: flushGeneration)
                     case .failure(let error):
                         // DELIBERATELY NO RETRY CAP AND NO BACKOFF. Abandoning
                         // an owed privacy withdrawal after N attempts is the
@@ -392,7 +662,7 @@ public final class SessionSyncQueue: ObservableObject {
                 case .success:
                     NSLog("[SessionSyncQueue] upload success • postID=%@", payload.id.uuidString)
                     BackendLogger.notice("Preview upload success • postID=\(payload.id.uuidString)")
-                    self.acknowledge(payload.id, revision: revision, generation: flushGeneration)
+                    self.acknowledge(payload, revision: revision, generation: flushGeneration)
                 case .failure(let error):
                     NSLog("[SessionSyncQueue] upload failed • postID=%@ • error=%@", payload.id.uuidString, error.localizedDescription)
                     BackendLogger.notice("Preview upload failed • postID=\(payload.id.uuidString) • error=\(error.localizedDescription)")
@@ -420,7 +690,7 @@ public final class SessionSyncQueue: ObservableObject {
                     if isHTTP409Duplicate {
                         NSLog("[SessionSyncQueue] duplicate postID %@ — treating as success", payload.id.uuidString)
                         BackendLogger.notice("Duplicate post • treating as success • postID=\(payload.id.uuidString)")
-                        self.acknowledge(payload.id, revision: revision, generation: flushGeneration)
+                        self.acknowledge(payload, revision: revision, generation: flushGeneration)
                     } else {
                         // Preserve semantics: failures remain queued; no retries/timers added here.
                     }
@@ -437,21 +707,32 @@ public final class SessionSyncQueue: ObservableObject {
 
     /// C-87. Every change to a post's queued intent gets a new revision, and a
     /// flush in progress is asked for another pass so that intent is sent.
-    private func noteNewIntent(_ postID: UUID) {
+    private func noteNewIntent(_ payload: PostPublishPayload) {
         nextRevision += 1
-        revisions[postID] = nextRevision
+        revisions[key(payload)] = nextRevision
         if activeFlush != nil { flushAgain = true }
     }
 
     /// C-87 / C-91. Dequeue ONLY the intent that was actually sent, and only
     /// within the generation that sent it. A newer intent, or a reset, withholds
     /// the acknowledgement and the item stays queued.
-    private func acknowledge(_ postID: UUID, revision: Int, generation flushGeneration: Int) {
-        guard flushGeneration == generation, revisions[postID] == revision else {
-            BackendLogger.notice("Acknowledgement withheld • postID=\(postID.uuidString) • superseded by a newer intent or a reset")
+    private func acknowledge(_ item: PostPublishPayload, revision: Int, generation flushGeneration: Int) {
+        let k = key(item)
+        // A latched store cannot record the removal, and dispatch should already
+        // have stopped. Withholding keeps memory and disk agreeing about what is
+        // still owed rather than dropping the item on a promise it cannot keep.
+        guard reconcileState.isOK else {
+            BackendLogger.notice("Acknowledgement withheld • postID=\(item.id.uuidString) • store halted")
             return
         }
-        dequeue(postID: postID)
+        guard flushGeneration == generation, revisions[k] == revision else {
+            BackendLogger.notice("Acknowledgement withheld • postID=\(item.id.uuidString) • superseded by a newer intent or a reset")
+            return
+        }
+        items.removeAll { $0.id == k.postID && $0.ownerUserID == k.owner }
+        revisions.removeValue(forKey: k)
+        persist()
+        BackendLogger.notice("Queue dequeue • postID=\(k.postID.uuidString) • total=\(items.count)")
     }
 
     // MARK: - Persistence
@@ -470,6 +751,7 @@ func stopForFactoryReset() {
     activeFlushID = nil
     flushAgain = false
     items.removeAll()
+    quarantined.removeAll()
     revisions.removeAll()
     persist()
     NSLog("[SessionSyncQueue] stopForFactoryReset applied (items cleared)")
@@ -487,48 +769,172 @@ func resumeAfterFactoryReset() {
 
 /// Deletes the on-disk queue file (best-effort). Safe to call multiple times.
 func wipeOnDiskForFactoryReset() {
-    let url = Self.makeFileURL()
-    do {
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
-        }
-        NSLog("[SessionSyncQueue] wipeOnDiskForFactoryReset ok")
-        BackendLogger.notice("wipeOnDiskForFactoryReset ok")
-    } catch {
-        NSLog("[SessionSyncQueue] wipeOnDiskForFactoryReset failed • %@", error.localizedDescription)
-        BackendLogger.notice("wipeOnDiskForFactoryReset failed • \(error.localizedDescription)")
-    }
+    // P6-I-02. The store owns every file now — current, legacy and the preserved
+    // copies — and a factory reset removes all of them. Quarantined work is the
+    // member's own and a reset is their explicit instruction to erase it.
+    store.wipe()
+    NSLog("[SessionSyncQueue] wipeOnDiskForFactoryReset ok")
+    BackendLogger.notice("wipeOnDiskForFactoryReset ok")
 }
 
-private func persist() {
-        do {
-            let data = try JSONEncoder().encode(items)
-            try data.write(to: fileURL, options: [.atomic])
-        } catch {
-            BackendLogger.notice("Queue persist error • \(error.localizedDescription)")
+/// P6-I-03 groundwork. **Reports whether the write is durable.** The previous
+    /// implementation returned `Void` and swallowed its error, so a withdrawal
+    /// the member had made could fail to reach disk while everything above it
+    /// carried on as though it had.
+    ///
+    /// This unit only propagates the result to `enqueue`'s caller; acting on it
+    /// in the publish flow is 2c.
+    @discardableResult
+    private func persist() -> Bool {
+        // Once the store has halted, NOTHING writes through the normal path. An
+        // earlier revision only logged a failed persist and left `reconcileState`
+        // `.ok`, so a later flush still dispatched from memory and a later
+        // enqueue overwrote the file the failed write had already damaged.
+        guard reconcileState.isOK else { return false }
+        envelope.items = items
+        envelope.quarantined = quarantined
+        guard store.persist(envelope) else {
+            // LATCH. The queue on disk is not what is in memory, so the store is
+            // no longer a safe basis for dispatch.
+            reconcileState = .haltReadbackMismatch
+            memoryDivergesFromDisk = true
+            NSLog("[SessionSyncQueue] persist FAILED • store latched • dispatch refused")
+            BackendLogger.notice("Queue persist FAILED • store latched • dispatch and further writes refused until recovery")
+            return false
         }
+        memoryDivergesFromDisk = false
+        return true
     }
 
-    private static func load(from url: URL) throws -> [PostPublishPayload] {
-        let data = try Data(contentsOf: url)
-        let decoder = JSONDecoder()
-        if let new = try? decoder.decode([PostPublishPayload].self, from: data) {
-            return new
+    /// EXPLICIT RECOVERY from a latched write failure.
+    ///
+    /// Re-runs the whole-store reconciliation and, if it succeeds, re-applies the
+    /// intent held in memory — which is NEWER than anything on disk — before
+    /// persisting. Nothing calls this automatically: retrying on every enqueue
+    /// would hammer a broken store, and the surface that offers it to the member
+    /// is out of this unit's scope.
+    @discardableResult
+    func attemptStoreRecovery() -> SessionSyncQueueReconcile {
+        let retainedItems = items
+        let retainedQuarantine = quarantined
+
+        let (state, recovered) = store.reconcile()
+        reconcileState = state
+        guard state.isOK, var recovered else {
+            BackendLogger.notice("Queue recovery failed • \(state.diagnostic) • in-memory intent retained")
+            return state
         }
-        if let old = try? decoder.decode([UUID].self, from: data) {
-            return old.map { uuid in
-                PostPublishPayload(id: uuid, sessionID: nil, sessionTimestamp: nil, title: nil, durationSeconds: nil, activityType: nil, activityDetail: nil, instrumentLabel: nil, mood: nil, effort: nil, notes: nil, areNotesPrivate: false)
+
+        // THE NEWER IN-MEMORY INTENT WINS — AND AN APPEND-WHAT-IS-MISSING UNION
+        // DOES NOT ACHIEVE THAT.
+        //
+        // The earlier revision appended only retained items whose (owner, post)
+        // key the file did not already carry, so for the SAME key the file won:
+        // a publish persisted before the halt beat the withdrawal the member
+        // made after it, which is the exact inversion this unit exists to
+        // prevent. It also resurrected work memory had already acknowledged,
+        // because an absent key read as "nothing to merge".
+        //
+        // When memory is authoritative it REPLACES the dispatchable set
+        // outright: presence and ABSENCE are both intent. Only when memory never
+        // saw the file — halted before this process could load it — is a union
+        // correct, and then there are no in-memory removals to honour.
+        if memoryIsAuthoritative {
+            recovered.items = retainedItems
+        } else {
+            // MEMORY NEVER SAW THIS FILE, so unrelated work on it is real and is
+            // kept — but where both hold the SAME (owner, post) key, memory is
+            // still the newer of the two and must OVERRIDE. Appending only what
+            // was missing left the older on-disk publish beating the withdrawal
+            // the member made after the halt.
+            var merged = recovered.items
+            for item in retainedItems {
+                if let index = merged.firstIndex(where: { $0.id == item.id && $0.ownerUserID == item.ownerUserID }) {
+                    merged[index] = item
+                } else {
+                    merged.append(item)
+                }
             }
+            recovered.items = merged
         }
-        // If neither format matches, propagate a decoding error
-        return try decoder.decode([PostPublishPayload].self, from: data)
+        for held in retainedQuarantine where !recovered.quarantined.contains(where: { $0.id == held.id }) {
+            recovered.quarantined.append(held)
+        }
+
+        // The same invariant load applies: anything adopted from the file whose
+        // owner cannot be established is quarantined, not dispatched.
+        let (dispatchable, unowned) = partitionByProvenance(recovered.items)
+        recovered.items = dispatchable
+        for item in unowned where !recovered.quarantined.contains(where: { $0.id == item.id }) {
+            recovered.quarantined.append(item)
+        }
+
+        envelope = recovered
+        items = recovered.items
+        quarantined = recovered.quarantined
+
+        // WORK ADOPTED FROM THE FILE HAS NO REVISION, AND WITHOUT ONE IT NEVER
+        // SENDS. The flush snapshot defaults a missing revision to 0 while the
+        // per-item guard compares `revisions[key] == revision` — nil against 0 —
+        // so such an item is skipped on every pass, for ever. Only keys that
+        // have no revision get one, so an intent already registered, and any
+        // in-flight comparison depending on it, is untouched.
+        for item in items where revisions[key(item)] == nil {
+            noteNewIntent(item)
+        }
+        guard store.persist(recovered) else {
+            reconcileState = .haltReadbackMismatch
+            memoryDivergesFromDisk = true
+            return reconcileState
+        }
+        memoryDivergesFromDisk = false
+        memoryIsAuthoritative = true
+        BackendLogger.notice("Queue recovered • dispatchable=\(items.count) • quarantined=\(quarantined.count)")
+        return .ok
     }
+
+    #if DEBUG
+    /// P6-I-01 precedent. TEST-ONLY, hosted test runs only.
+    ///
+    /// Reproduces the state a process starts in when the store was ALREADY
+    /// halted at launch: nothing loaded, and memory therefore NOT a complete
+    /// view of the store. It is established in `init` and there is no other
+    /// route to it from a test, yet it is the branch where recovery has to merge
+    /// rather than replace — so it is the branch most worth executing.
+    func unitTestSimulateStartupHalt() {
+        guard UnitTestHost.isActive else { return }
+        reconcileState = .haltCorruptV2
+        items = []
+        quarantined = []
+        revisions.removeAll()
+        memoryIsAuthoritative = false
+        memoryDivergesFromDisk = false
+    }
+    #endif
+
+    /// P6-I-02. DECODING MOVED TO `SessionSyncQueueStore`, which validates the
+    /// whole store before anything is dispatchable. The old two-shape decode is
+    /// preserved there, for the preserved copies of legacy files.
 
     /// C-16 — the non-throwing `URL.applicationSupportDirectory` names the same
     /// directory the old `try! url(for:…, create: true)` did, so queued
     /// publishes are found where they were written. A directory that cannot be
     /// created now surfaces as `persist()`'s logged write error instead of a
     /// crash at launch. Internal only so its path can be tested.
+    /// The directory both the legacy and the current queue file live in.
+    static func storeRoot() -> URL {
+        let fm = FileManager.default
+        let dir = URL.applicationSupportDirectory.appendingPathComponent("MOTIVO", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// The CURRENT queue file. `makeFileURL()` below still names the LEGACY file
+    /// and keeps its exact meaning, because existing assertions pin that path.
+    static func currentFileURL() -> URL {
+        storeRoot().appendingPathComponent("SessionSyncQueue_v2.json")
+    }
+
     static func makeFileURL() -> URL {
         let fm = FileManager.default
         let dir = URL.applicationSupportDirectory

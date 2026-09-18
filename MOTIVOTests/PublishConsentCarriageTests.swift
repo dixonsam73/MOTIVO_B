@@ -101,12 +101,18 @@ final class PublishConsentCarriageTests: XCTestCase {
         defer { queue.clear() }
         let postID = UUID(), sessionID = UUID(), omitted = [UUID()]
 
+        // P6-I-02. ONE OWNER, BOUND EXPLICITLY. The merge is owner-scoped now, so
+        // the fixture must say whose intent this is — an unowned payload is
+        // quarantined rather than queued, and quarantined work never merges.
+        // Binding the same synthetic owner to all three keeps this case asserting
+        // exactly what it always asserted.
+        let owner = "00000000-0000-0000-0000-0000000c8802"
         func payload(title: String, omissions: [UUID]?) -> SessionSyncQueue.PostPublishPayload {
             SessionSyncQueue.PostPublishPayload(
                 id: postID, sessionID: sessionID, sessionTimestamp: nil, title: title,
                 durationSeconds: nil, activityType: nil, activityDetail: nil,
                 instrumentLabel: nil, mood: nil, effort: nil,
-                isPublic: true, authorisedOmissions: omissions)
+                isPublic: true, authorisedOmissions: omissions).withOwner(owner)
         }
 
         queue.enqueue(payload(title: "first", omissions: omitted))

@@ -81,12 +81,17 @@ private enum NotesClearFixture {
     /// never because the incoming payload happened to carry the value.
     static func payload(_ id: UUID, title: String, notes: String? = nil, notesPrivate: Bool = false,
                         omissions: [UUID]? = nil) -> SessionSyncQueue.PostPublishPayload {
+        // P6-I-02. The production capture site now binds the owner at the
+        // member's action, so a fixture that enqueues directly must do the same
+        // or it is modelling a path the app no longer has. The owner is NOT
+        // defaulted in production — adopting the current login is the defect.
+
         SessionSyncQueue.PostPublishPayload(
             id: id, sessionID: id, sessionTimestamp: Date(), title: title,
             durationSeconds: 60, activityType: nil, activityDetail: nil,
             instrumentLabel: nil, mood: nil, effort: nil,
             isPublic: true, notes: notes, areNotesPrivate: notesPrivate,
-            authorisedOmissions: omissions)
+            authorisedOmissions: omissions).withOwner(SessionSyncQueue.currentOwner())
     }
 
     /// Waits until the asynchronous publish task has merged THIS save into the
@@ -117,6 +122,17 @@ final class NotesClearProducerQueueTests: XCTestCase {
         try await super.setUp()
         activationSentinel.start()
         setBackendMode(.localSimulation)
+        // P6-I-02. A REAL OWNERSHIP FIXTURE, not a workaround.
+        //
+        // These cases model the producer: a member saves, and the publish is
+        // queued. A member performing that action is signed in, so the fixture
+        // must be too — without an identity the payload has UNKNOWN PROVENANCE
+        // and is now quarantined rather than queued, which is correct behaviour
+        // and would leave these cases asserting against a path the app no longer
+        // has. A synthetic uid on disposable data; no account is involved.
+        UserDefaults.standard.set(Self.ownerUID, forKey: "supabaseUserID_v1")
+        XCTAssertEqual(SessionSyncQueue.currentOwner(), Self.ownerUID,
+                       "precondition: the producer has an identity to capture")
         SessionSyncQueue.shared.clear()
         XCTAssertEqual(BackendEnvironment.shared.mode, .localSimulation,
                        "precondition: local simulation, so the flush is skipped and the queued item stays")
@@ -125,11 +141,14 @@ final class NotesClearProducerQueueTests: XCTestCase {
     override func tearDown() async throws {
         activationSentinel.assertNoHostActivationWrites()
         SessionSyncQueue.shared.clear()
+        UserDefaults.standard.removeObject(forKey: "supabaseUserID_v1")
         for s in sessions where !s.isDeleted { NotesClearFixture.viewContext.delete(s) }
         try? NotesClearFixture.viewContext.save()
         sessions = []
         try await super.tearDown()
     }
+
+    private static let ownerUID = "00000000-0000-0000-0000-0000000c8801"
 
     private func session(notes: String?, notesPrivate: Bool) throws -> (id: UUID, object: NSManagedObject) {
         let made = try NotesClearFixture.makeSession(notes: notes, notesPrivate: notesPrivate)
@@ -281,8 +300,10 @@ final class NotesClearProducerQueueTests: XCTestCase {
         _ = try await NotesClearFixture.queued(s.id, title: "P-10-2")
 
         // The file the queue actually writes, through the decoder `load` uses.
-        let data = try Data(contentsOf: SessionSyncQueue.makeFileURL())
-        let onDisk = try JSONDecoder().decode([SessionSyncQueue.PostPublishPayload].self, from: data)
+        // P6-I-02. The durable file is the envelope now; `items` is what a
+        // relaunch would dispatch. The claim is unchanged.
+        let data = try Data(contentsOf: SessionSyncQueue.currentFileURL())
+        let onDisk = try JSONDecoder().decode(SessionSyncQueueEnvelope.self, from: data).items
         let item = try XCTUnwrap(onDisk.first { $0.id == s.id }, "P-10: the item is in the queue file")
         XCTAssertEqual(item.title, "P-10-2", "P-10: the file holds the latest save")
         XCTAssertEqual(item.notes, "", "P-10: the pending clear survives persistence, found \(NotesClearFixture.describe(item.notes))")

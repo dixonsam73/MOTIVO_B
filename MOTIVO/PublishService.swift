@@ -75,6 +75,12 @@ final class PublishService: ObservableObject {
     }
 
     func publishIfNeeded(usingContext context: NSManagedObjectContext, objectID: NSManagedObjectID, sessionID: UUID, shouldPublish: Bool) {
+        // P6-I-02. This legacy entry point has no callers today, but it is
+        // PRESERVED (existing assertions name it) and must not become a way to
+        // queue unattributable work if one is ever added. Captured synchronously,
+        // exactly as the live path does.
+        let capturedOwner = SessionSyncQueue.currentOwner()
+
         let uri = objectID.uriRepresentation().absoluteString
 
         var set = publishedURIs
@@ -181,9 +187,9 @@ final class PublishService: ObservableObject {
 
                 NSLog("[PublishService][8F] LEGACY publishIfNeeded path used • sessionID=%@", sessionID.uuidString)
                 if let payload = payload {
-                    SessionSyncQueue.shared.enqueue(payload)
+                    SessionSyncQueue.shared.enqueue(payload.withOwner(capturedOwner))
                 } else {
-                    SessionSyncQueue.shared.enqueue(postID: sessionID)
+                    SessionSyncQueue.shared.enqueue(postID: sessionID, capturedOwner: capturedOwner)
                 }
             } else {
                 // C-61 / P4-U2a-2. Same durable withdrawal as the payload path
@@ -199,7 +205,9 @@ final class PublishService: ObservableObject {
                         // `isPublic: false` IS the unshare intent now -- `op` is
                         // derived from it and cannot be passed. P4-U2c.
                         isPublic: false,
-                        notes: nil, areNotesPrivate: false
+                        notes: nil, areNotesPrivate: false,
+                        authorisedOmissions: nil,
+                        ownerUserID: capturedOwner
                     )
                 )
             }
@@ -236,6 +244,16 @@ final class PublishService: ObservableObject {
         objectID: NSManagedObjectID,
         shouldPublish: Bool
     ) {
+        // P6-I-02. THE OWNER IS CAPTURED HERE, SYNCHRONOUSLY, AT THE MEMBER'S
+        // ACTION — before the deferred `Task` below and long before the flush.
+        //
+        // It used to be read at flush time (`BackendShim.uploadPost`), so a
+        // queue written by A and flushed while B was signed in uploaded A's
+        // title, notes and media as B, to B's audience. Reading it here is the
+        // whole point: by the time anything is dispatched, the identity may
+        // already have changed.
+        let capturedOwner = SessionSyncQueue.currentOwner()
+
         let uri = objectID.uriRepresentation().absoluteString
 
         var set = publishedURIs
@@ -317,7 +335,7 @@ final class PublishService: ObservableObject {
                       effectivePayload.notes.map { $0.isEmpty ? "empty" : "present" } ?? "nil",
                       effectivePayload.areNotesPrivate ? "true" : "false")
 
-                SessionSyncQueue.shared.enqueue(effectivePayload)
+                SessionSyncQueue.shared.enqueue(effectivePayload.withOwner(capturedOwner))
             } else {
                 // C-61 / P4-U2a-2. PERSIST THE WITHDRAWAL BEFORE TRUSTING THE
                 // NETWORK.
@@ -345,7 +363,9 @@ final class PublishService: ObservableObject {
                         // `isPublic: false` IS the unshare intent now -- `op` is
                         // derived from it and cannot be passed. P4-U2c.
                         isPublic: false,
-                        notes: nil, areNotesPrivate: false
+                        notes: nil, areNotesPrivate: false,
+                        authorisedOmissions: nil,
+                        ownerUserID: capturedOwner
                     )
                 )
             }

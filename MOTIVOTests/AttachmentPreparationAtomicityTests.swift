@@ -256,6 +256,12 @@ final class AttachmentPreparationAtomicityTests: XCTestCase {
             durationSeconds: 60, activityType: nil, activityDetail: nil,
             instrumentLabel: nil, mood: nil, effort: nil,
             isPublic: true, notes: nil, areNotesPrivate: false)
+        // P6-I-02. The production capture site binds the owner at the member's
+        // action, so a fixture that enqueues directly must do the same. This
+        // class already signs in as `ownerUID`; binding it here keeps the
+        // fixture modelling the real producer instead of a path the app no
+        // longer has — an unowned payload is now quarantined, never dispatched.
+        .withOwner(Self.ownerUID)
     }
 
     // MARK: - REST helpers
