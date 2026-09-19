@@ -448,7 +448,6 @@ final class VideoRecorderController: NSObject,
 
     private var isSessionConfigured = false
     private var shouldResumeAfterInterruption = false
-    private var shouldResumeAfterRouteChange = false
     private var shouldResumeAfterResignActive = false
     private var captureSessionBecameRunningAt: Date?
     private var pendingStartRecordingToken: UUID?
@@ -1679,10 +1678,8 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         if reason == .oldDeviceUnavailable {
             if state == .recording {
                 stopRecording()
-                shouldResumeAfterRouteChange = true
             } else if state == .playing {
                 pausePlayback()
-                shouldResumeAfterRouteChange = true
             }
         }
     }

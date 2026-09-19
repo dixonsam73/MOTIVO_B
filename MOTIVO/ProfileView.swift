@@ -162,31 +162,6 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     }
 }
 
- // MARK: - Setting Row (label + value, single-line, calm)
- fileprivate struct SettingRow: View {
-     let title: String
-     let value: String
-     var body: some View {
-         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.m) {
-             Text(title)
-                 .font(.callout)
-                 .foregroundStyle(Theme.Colors.secondaryText.opacity(0.74))
-                 .lineLimit(1)
-                 .truncationMode(.tail)
- 
-             Spacer(minLength: Theme.Spacing.l)
- 
-             Text(value)
-                 .font(Theme.Text.body)
-                 .foregroundStyle(.primary)
-                 .lineLimit(1)
-                 .minimumScaleFactor(0.9)
-                 .truncationMode(.tail)
-         }
-         .contentShape(Rectangle())
-     }
- }
- 
  struct ProfileView: View {
      @Environment(\.managedObjectContext) private var ctx
      @EnvironmentObject private var auth: AuthManager

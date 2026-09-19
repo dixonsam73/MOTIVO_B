@@ -1077,34 +1077,6 @@ return AnyView(
         }
     }
 
-struct CommentContinuationMetaRow: View {
-        let timestamp: Date
-        let showsReplyAction: Bool
-        let onReply: (() -> Void)?
-
-        @Environment(\.colorScheme) private var scheme
-
-        var body: some View {
-            HStack(spacing: 6) {
-                Spacer(minLength: 0)
-
-                Text(CommentsView.relativeTimestamp(from: timestamp))
-                    .font(Theme.Text.meta)
-                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-
-                if showsReplyAction, let onReply {
-                    Button(action: onReply) {
-                        Text("Reply")
-                            .font(Theme.Text.meta)
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-
     private func commentRowLocal(comment: Comment, ownerID: String?, viewerID: String?, sessionID: UUID, isStartOfAuthorRun: Bool, isEndOfAuthorRun: Bool, prevTimestamp: Date?, authorDayCounts: [String: Int], replyEligibleCommentIDs: Set<UUID>) -> some View {
         let authorID = store.authorUserID(for: comment.id)
         let isViewerOwner: Bool = {

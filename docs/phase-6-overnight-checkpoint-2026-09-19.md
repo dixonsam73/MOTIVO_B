@@ -341,3 +341,9 @@ here.
   - F-3 and F-6 deferred;
   - optional clean-up continues one bounded unit at a time, **only after Samuel pushes**.
 - **This commit permission is specific to this checkpoint.**
+
+## Later on 19 September 2026: client clean-up
+
+After the `707b1fb` push, the dead-state, F-7 and internal-UI clean-up units, with their status,
+hashes, tests and the remaining inventory, are recorded in
+`docs/phase-6-client-cleanup-checkpoint-2026-09-19.md`. The record above is unchanged.

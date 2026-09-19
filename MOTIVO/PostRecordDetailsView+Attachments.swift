@@ -1291,16 +1291,3 @@ fileprivate struct AttachmentThumbCell: View {
         }
     }
 }
-
-#if canImport(UIKit)
-fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
-    let url: URL
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let vc = AVPlayerViewController()
-        vc.player = AVPlayer(url: url)
-        vc.player?.isMuted = true
-        return vc
-    }
-    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
-}
-#endif

@@ -439,61 +439,6 @@ private struct FollowActionPill: View {
     }
 }
 
-private struct StatChip: View {
-    @Environment(\.colorScheme) private var colorScheme
-    let title: String
-    let value: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(Theme.Text.meta)
-                .foregroundStyle(Theme.Colors.secondaryText)
-            Text(value)
-                .font(.title3.weight(.semibold))
-        }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: Theme.Radius.control))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.control)
-                .stroke(Theme.Colors.stroke(colorScheme).opacity(0.3), lineWidth: 0.5)
-        )
-    }
-}
-
-private struct TagChip: View {
-    let text: String
-    var body: some View {
-        Text(text)
-            .font(.subheadline)
-            .lineLimit(1)
-            .padding(.vertical, 6)
-            .padding(.horizontal, 12)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule().stroke(Color.black.opacity(0.06), lineWidth: 1)
-            )
-    }
-}
-
-private struct FlexibleChipsView: View {
-    let items: [String]
-
-    private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 120), spacing: Theme.Spacing.s)]
-    }
-
-    var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: Theme.Spacing.s) {
-            ForEach(items, id: \.self) { item in
-                TagChip(text: item)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(.top, 2)
-    }
-}
-
 // Minimal avatar helper using ProfileStore cache if present.
 private struct ProfileAvatar: View {
     let ownerID: String

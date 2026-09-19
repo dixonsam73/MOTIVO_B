@@ -557,22 +557,6 @@ struct PracticeTimerView: View {
         return "core:0"
     }
 
-    private func decodeTypedTaskPresetLines(from data: Data) -> [TaskLine]? {
-        guard let decoded = try? JSONDecoder().decode([SerializedTaskTemplateLine].self, from: data) else {
-            return nil
-        }
-
-        let mapped = decoded.map {
-            TaskLine(
-                text: $0.text,
-                isDone: false,
-                type: $0.type
-            )
-        }
-
-        return mapped.isEmpty ? nil : mapped
-    }
-
 
     /// Per-activity default tasks loader (core + custom), with optional Instrument×Activity overrides.
 /// Uses keys:

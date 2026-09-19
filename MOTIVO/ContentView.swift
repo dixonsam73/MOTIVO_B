@@ -2915,55 +2915,6 @@ fileprivate struct SessionsRootView: View {
     }
 }
 
-// MARK: - Stats (card content)
-
-fileprivate struct StatsBannerView: View {
-    let sessions: [Session]
-
-    private var totalSeconds: Int {
-        var total = 0
-        for s in sessions {
-            let attrs = s.entity.attributesByName
-            if attrs["durationSeconds"] != nil, let n = s.value(forKey: "durationSeconds") as? NSNumber {
-                total += n.intValue
-            } else if attrs["durationMinutes"] != nil, let n = s.value(forKey: "durationMinutes") as? NSNumber {
-                total += n.intValue * 60
-            } else if attrs["duration"] != nil, let n = s.value(forKey: "duration") as? NSNumber {
-                total += n.intValue * 60
-            } else if attrs["lengthMinutes"] != nil, let n = s.value(forKey: "lengthMinutes") as? NSNumber {
-                total += n.intValue * 60
-            }
-        }
-        return max(0, total)
-    }
-
-    private var totalTimeDisplay: String {
-        let h = totalSeconds / 3600
-        let m = (totalSeconds % 3600) / 60
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-    }
-
-    private var count: Int { sessions.count }
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Your Sessions")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                Text("\(count) activities")
-                    .font(.subheadline)
-                Text("\(totalTimeDisplay) total")
-                    .font(.subheadline)
-            }
-            Spacer()
-        }
-        .padding(.vertical, 4)
-
-    }
-}
-
-
 fileprivate struct JournalWeekLeadingTintCardModifier: ViewModifier {
     let tintColor: Color
     let strokeColor: Color?
@@ -3006,90 +2957,9 @@ fileprivate struct JournalWeekLeadingTintCardModifier: ViewModifier {
 
 
 
-fileprivate struct BackendPostRow: View {
-    let model: BackendSessionViewModel
-    let directoryAccount: DirectoryAccount?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-            // Identity (Phase 14): display_name primary; @account_id optional secondary (demoted)
-            if let acct = directoryAccount {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(acct.displayName)
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    if let handle = acct.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
-                       !handle.isEmpty {
-                        Text("@\(handle)")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.75))
-                    }
-
-                    Spacer(minLength: 0)
-                }
-            }
-
-            // Header: activity on the left, session time (if available) on the right
-            HStack(alignment: .firstTextBaseline) {
-                Text(model.activityLabel)
-                    .font(Theme.Text.body)
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                Text(model.sessionTimestampRaw ?? model.createdAtRaw ?? "")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .lineLimit(1)
-                    .multilineTextAlignment(.trailing)
-            }
-
-            // Secondary metadata lines
-            VStack(alignment: .leading, spacing: 8) {
-                if let instrument = model.instrumentLabel, !instrument.isEmpty {
-                    Text(instrument)
-                        .font(.footnote)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .lineLimit(1)
-                }
-
-                if !model.ownerUserID.isEmpty {
-                    Text(model.ownerUserID)
-                        .font(.footnote)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .lineLimit(1)
-                }
-            }
-        }
-        .padding(Theme.Spacing.m)
-        .cardSurface()
-    }
-}
-
 // Phase 14.2.1 — Remote post row that is a visual twin
 
 
-
-
-private struct PeoplePlaceholderView: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-            Text("People")
-                .font(Theme.Text.sectionHeader)
-                .foregroundStyle(Theme.Colors.secondaryText)
-
-            Text("Placeholder — People hub will live here.")
-                .font(Theme.Text.body)
-                .foregroundStyle(Theme.Colors.secondaryText)
-
-            Spacer()
-        }
-        .padding(Theme.Spacing.l)
-        .appBackground()
-        // No navigationTitle here — keep it quiet.
-    }
-}
 
 
 // MARK: - Thread label sanitizer (shared)

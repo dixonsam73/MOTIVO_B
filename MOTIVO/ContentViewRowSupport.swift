@@ -77,84 +77,6 @@ enum LocalAttachmentVideoPosterCache {
 }
 #endif
 
-struct VideoOrIconTile: View {
-    let attachment: Attachment
-    @State private var poster: UIImage? = nil
-
-    var body: some View {
-        let kind = attachmentKind(attachment)
-        ZStack(alignment: .center) {
-            if kind == "video" {
-                let url = attachmentFileURL(attachment)
-                let displayPoster = poster ?? LocalAttachmentVideoPosterCache.cachedPoster(for: attachment, url: url)
-
-                ZStack(alignment: .center) {
-                    if let displayPoster {
-                        Image(uiImage: displayPoster)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 64, height: 64)
-                            .clipped()
-                    } else {
-                        Image(systemName: "video")
-                            .imageScale(.large)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                    }
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .shadow(radius: 2)
-                }
-                .task {
-                    if poster == nil, let url {
-                        await loadPoster(url)
-                    }
-                }
-            } else {
-                Image(systemName: symbolName(for: kind))
-                    .imageScale(.large)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-            }
-        }
-        .frame(width: 64, height: 64)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(.black.opacity(0.05), lineWidth: 1)
-        )
-    }
-
-    private func symbolName(for kind: String) -> String {
-        switch kind {
-        case "audio": return "waveform"
-        case "video": return "video"
-        case "pdf":   return "doc.richtext"
-        default:        return "doc"
-        }
-    }
-
-    private func loadPoster(_ url: URL) async {
-        if let cached = LocalAttachmentVideoPosterCache.cachedPoster(for: attachment, url: url) {
-            poster = cached
-            return
-        }
-
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let img = AttachmentStore.generateVideoPoster(url: url)
-                DispatchQueue.main.async {
-                    if let img {
-                        LocalAttachmentVideoPosterCache.store(img, for: attachment, url: url)
-                    }
-                    self.poster = img
-                    continuation.resume()
-                }
-            }
-        }
-    }
-}
-
 // CHANGE-ID: 20260610_190300_PDFThumbContentViewParity
 // SCOPE: PDF Scores Phase 2C — render selected-page PDF thumbnails in local ContentView rows using existing page-aware thumbnail infrastructure; preserve photo/video/audio behaviour.
 // SEARCH-TOKEN: 20260610_190300-PDF-CONTENTVIEW-THUMB-PARITY
@@ -288,41 +210,6 @@ struct SingleAttachmentPreview: View {
                     continuation.resume()
                 }
             }
-        }
-    }
-}
-
-// PDF / audio / video icons
-struct NonImageTile: View {
-    let kind: String
-    @State private var poster: UIImage? = nil
-    @State private var triedLoad = false
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.secondary.opacity(0.08))
-            Group {
-                if kind == "video", let poster {
-                    Image(uiImage: poster).resizable().scaledToFill()
-                } else {
-                    Image(systemName: symbolName)
-                        .imageScale(.large)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-            }
-        }
-        .onAppear {
-            // Best-effort: if this is a video, attempt to load poster from the first available video attachment's URL in context.
-            guard !triedLoad, kind == "video" else { return }
-            triedLoad = true
-        }
-    }
-    private var symbolName: String {
-        switch kind {
-        case "audio": return "waveform"
-        case "video": return "video"
-        case "pdf":   return "doc.richtext"
-        default:        return "doc"
         }
     }
 }

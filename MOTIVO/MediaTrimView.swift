@@ -282,23 +282,6 @@ public struct MediaTrimView: View {
 
 // MARK: - Subviews
 
-private struct VideoPreview: View {
-    let player: AVPlayer?
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        if let player {
-            VideoPlayer(player: player)
-                .onDisappear { player.pause() }
-        } else {
-            ZStack {
-                Color(UIColor.secondarySystemBackground)
-                ProgressView()
-            }
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1))
-        }
-    }
-}
 private struct PlaybackControls: View {
     @ObservedObject var model: MediaTrimView.Model
     let mediaType: MediaTrimView.MediaType
