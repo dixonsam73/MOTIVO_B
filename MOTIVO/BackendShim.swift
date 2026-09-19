@@ -374,6 +374,21 @@ public protocol BackendFollowService {
     func removeFollower(_ followerUserID: String) async -> Result<Void, Error>
 }
 
+/// F-9. Why a simulated delete did nothing. Readable through both
+/// `localizedDescription` and `String(describing:)`, which the Debug viewer uses.
+public enum SimulatedPublishError: LocalizedError, CustomStringConvertible, Equatable {
+    case deletionNotPerformed
+
+    public var errorDescription: String? { description }
+
+    public var description: String {
+        switch self {
+        case .deletionNotPerformed:
+            return "Not deleted: the simulated backend performs no network deletion."
+        }
+    }
+}
+
 public final class SimulatedPublishService: BackendPublishService {
     /// P6-I-02 Unit 2b. Preview makes no identity-bearing request, so the bound
     /// entry points forward to the existing simulated behaviour unchanged.
@@ -394,190 +409,14 @@ public final class SimulatedPublishService: BackendPublishService {
         return .success(())
     }
 
+    /// F-9. The simulated service performs NO network deletion. It reports that
+    /// nothing was deleted as a failure, so no caller (the Debug viewer renders any
+    /// success as "Deleted") can present a deletion that did not happen, and a
+    /// caller that deletes locally only after the server succeeds fails closed.
     @MainActor
     public func deletePost(_ postID: UUID) async -> Result<Void, Error> {
-        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
-            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
-        }
-
-        // 1) Fetch attachments refs first so we can delete storage objects (prevents orphans).
-        let fetchPath = "rest/v1/posts?id=eq.\(postID.uuidString)&select=attachments"
-        let fetchHeaders: [String: String] = [
-            "apikey": apiKey
-        ]
-
-        let fetchResult = await NetworkManager.shared.request(
-            path: fetchPath,
-            method: "GET",
-            query: nil,
-            jsonBody: nil,
-            headers: fetchHeaders
-        )
-
-        switch fetchResult {
-        case .success(let data):
-            do {
-                let decoder = JSONDecoder()
-                let rows = try decoder.decode([PostAttachmentsRow].self, from: data)
-                let refs: [AttachmentRef] = rows.first?.attachments.refs ?? []
-
-                // 2) Delete storage objects (fail-closed). If any delete fails, do not delete the post row.
-                for ref in refs {
-                    guard !ref.bucket.isEmpty, !ref.path.isEmpty else { continue }
-                    let delResult = await deleteStorageObject(apiKey: apiKey, bucket: ref.bucket, objectPath: ref.path)
-                    if case .failure(let e) = delResult {
-                        return .failure(e)
-                    }
-                }
-            } catch {
-                // Fail-closed: if we cannot decode attachment refs, do not proceed to delete the post row.
-                return .failure(error)
-            }
-
-        case .failure(let e):
-            // Fail-closed: if we cannot fetch refs, do not proceed to delete the post row.
-            return .failure(e)
-        }
-
-        // 3) Delete the post row.
-        let deletePath = "rest/v1/posts?id=eq.\(postID.uuidString)"
-        let deleteHeaders: [String: String] = [
-            "apikey": apiKey,
-            "Prefer": "return=minimal"
-        ]
-
-        let deleteResult = await NetworkManager.shared.request(
-            path: deletePath,
-            method: "DELETE",
-            query: nil,
-            jsonBody: nil,
-            headers: deleteHeaders
-        )
-
-        switch deleteResult {
-        case .success:
-            return .success(())
-        case .failure(let e):
-            return .failure(e)
-        }
-    }
-
-    // CHANGE-ID: 20260224_223900_DeletePost_FailClosed_AttachmentsDecode_9c31
-// SCOPE: Fail-closed decode for posts.attachments when deleting a post. Null/empty allowed; malformed non-empty string throws to abort delete.
-
-private struct PostAttachmentsRow: Decodable {
-        let attachments: AttachmentsField
-    }
-
-    private struct AttachmentsField: Decodable {
-        let refs: [AttachmentRef]
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.singleValueContainer()
-
-            // Allow null/empty => no attachments.
-            if container.decodeNil() {
-                self.refs = []
-                return
-            }
-
-            // Common case: attachments is a JSON array (jsonb column).
-            if let direct = try? container.decode([AttachmentRef].self) {
-                self.refs = direct
-                return
-            }
-
-            // Fallback: attachments may arrive as an escaped JSON string.
-            if let str = try? container.decode(String.self) {
-                let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty {
-                    self.refs = []
-                    return
-                }
-
-                let data = Data(str.utf8)
-                do {
-                    self.refs = try JSONDecoder().decode([AttachmentRef].self, from: data)
-                    return
-                } catch {
-                    // Fail-closed: non-empty string that cannot be decoded is a hard error.
-                    throw DecodingError.dataCorruptedError(
-                        in: container,
-                        debugDescription: "posts.attachments malformed JSON string"
-                    )
-                }
-            }
-
-            // Fail-closed: unexpected type (neither array, string, nor null).
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "posts.attachments unexpected type"
-            )
-        }
-    }
-
-    private struct AttachmentRef: Decodable {
-        let kind: String?
-        let bucket: String
-        let path: String
-        let display_name: String?
-
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            self.kind = try? c.decode(String.self, forKey: .kind)
-            self.bucket = (try? c.decode(String.self, forKey: .bucket)) ?? ""
-            self.path = (try? c.decode(String.self, forKey: .path)) ?? ""
-            self.display_name = try? c.decode(String.self, forKey: .display_name)
-        }
-
-        private enum CodingKeys: String, CodingKey {
-            case kind, bucket, path, display_name
-        }
-    }
-
-    @MainActor
-    private func deleteStorageObject(apiKey: String, bucket: String, objectPath: String) async -> Result<Void, Error> {
-        let path = "storage/v1/object/\(bucket)/\(objectPath)"
-        let headers: [String: String] = [
-            "apikey": apiKey,
-            "Prefer": "return=minimal"
-        ]
-
-        let result = await NetworkManager.shared.request(
-            path: path,
-            method: "DELETE",
-            query: nil,
-            jsonBody: nil,
-            headers: headers
-        )
-
-        switch result {
-        case .success:
-            return .success(())
-        case .failure(let e):
-            // C-61 / P4-U2a-2. AN OBJECT THAT IS ALREADY GONE IS A SUCCESS.
-            //
-            // Without this, a retry after a PARTIAL deletion re-attempts the
-            // objects it already removed, fails on the first of them, and can
-            // never converge -- a poison item retried on every foreground for
-            // ever.
-            //
-            // THE STATUS CODE IS 400, NOT 404. Measured on the local stack:
-            // deleting an absent object answers HTTP 400 with the 404 in the
-            // BODY -- {"statusCode":"404","error":"not_found","code":"NoSuchKey"}.
-            // A rule written against the HTTP status would never fire.
-            //
-            // This necessarily also treats RLS-denial, a wrong bucket and a
-            // missing Authorization header as success, because Storage returns
-            // the IDENTICAL response for all of them. That is acceptable here
-            // only because `unsharePost` demotes FIRST: a broken session or a
-            // row we do not own fails at the PATCH, before anything
-            // destructive runs.
-            if Self.isAlreadyAbsent(e) {
-                return .success(())
-            }
-            return .failure(e)
-        }
+        await BackendDiagnostics.shared.simulatedCall("PublishService.deletePost", meta: ["postID": postID.uuidString])
+        return .failure(SimulatedPublishError.deletionNotPerformed)
     }
 
     /// True when Storage is telling us the object is not there.

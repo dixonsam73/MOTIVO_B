@@ -70,11 +70,17 @@ intended link section.
   - `TasksManagerImportLauncherSheet`, together with the Lists manager's unreachable import
     scaffolding (`taskImportPasteSheet`, and the save-current prompt paths);
   - `AttachmentSharePageScope`: public, and in the sharing area, which is under the freeze;
-  - `SimulatedPostCommentService`, together with **F-9** (`SimulatedPublishService`'s live
-    delete).
+  - `SimulatedPostCommentService` (public, simulated backend family). **F-9 itself is now
+    implemented; see below.**
 - **Optional clean-up:**
   - **C-22**, the AVFoundation deprecation sweep, bounded by F-3;
   - **C-12**, the unreachable deletion UI, whose dependencies need checking first.
+  - **C-15** (`PDFSelectedPagesStore`): **OPEN, P3 residue. Deferral is recommended; it is not
+    closed, and it is not user-accepted.** The trace found:
+    - the entries are UUID-to-page-number metadata, device-wide, cleared on removal inside an
+      editor but **not** on journal session deletion, and wiped by Erase All;
+    - **no document-content leakage was established**;
+    - growth has not been measured.
 - **Needs evidence or a decision:**
   - **F-3**, media sizing on a device (`xctrace`);
   - **F-6**, delivery reconciliation, deferred: no validated client-only option;
@@ -88,3 +94,49 @@ intended link section.
   - the sharing server ordering and byte-clean-up blockers (six OPEN), and SU-478356.
 
 **No further optional clean-up is started from this record.**
+
+## Later on 19 September 2026: F-9, implemented and ACCEPTED (uncommitted; awaiting Samuel's commit approval)
+
+**Independent review (Codex, 19 September 2026): ACCEPTED.** Codex checked:
+- the full source diff and the test;
+- that the hashes match;
+- that `HTTPBackendPublishService` through the end of the file, and the shared
+  `isAlreadyAbsent`, are unchanged from `HEAD` (compared independently);
+- the raw xcresult: **765 passed, 0 failed, 6 skipped, 771 total**;
+- that the focused and full logs show F-9 and B19 passing;
+- that Debug and Release succeed;
+- that the protected-file hashes are unchanged.
+
+**No device QA is required** for this scoped change.
+
+**The accepted trace:** no Release caller of `SimulatedPublishService.deletePost` was found in
+current source. A retained-token **Debug** path (the `#if DEBUG` Debug viewer, in local mode)
+could issue **live, authenticated** deletes.
+
+**The change** (`MOTIVO/BackendShim.swift` only):
+- **`SimulatedPublishService.deletePost` performs no network deletion.** It records a simulated
+  call and returns **`.failure(SimulatedPublishError.deletionNotPerformed)`**.
+- The error renders as *"Not deleted: the simulated backend performs no network deletion."*
+  through both `localizedDescription` and **`String(describing:)`, which the Debug viewer uses**.
+  **No false "Deleted" is shown.**
+- The class's nested, now-unused private helpers are removed (`PostAttachmentsRow`,
+  `AttachmentsField`, `AttachmentRef`, `deleteStorageObject`).
+- **`isAlreadyAbsent` and `HTTPBackendPublishService` are byte-identical.** Verified by comparing
+  the preserved regions with the pre-edit file.
+- **There is no Release behaviour change.**
+
+**Evidence:**
+- **`F9SimulatedDeleteTests`** (the held `QueueStubServer`; a configured backend; a retained
+  synthetic token; local mode): the simulated service is selected, the delete fails with
+  `.deletionNotPerformed`, the exact `String(describing:)` text matches, and **zero requests**
+  are sent.
+- **HTTP regression retained:** `P6I02BoundTransportTests.testB19_AmbientDeletePostIsUnbound`
+  passed.
+- Focused (F-9, `P6I02BoundTransportTests`, `P6I02WithdrawalOutcomeTests`): **46 passed, 0
+  failed.**
+- **Full suite: Passed; 765 passed, 0 failed, 6 skipped, 771 total**
+  (`Test-MOTIVO-2026.09.19_12-42-36-+0100.xcresult`, local scratchpad). Debug and Release
+  succeeded.
+- **Hashes:** `BackendShim.swift` `7b34a06b05a7b50fc140a68c66d5aa09495d624e2e669d8d75c340baf2dee23b`,
+  `F9SimulatedDeleteTests.swift` `78992f6b3deb74c72eddfbef656bf91efe9f2b12810f63d78a68e589f59d9b48`.
+- No device QA is expected.
