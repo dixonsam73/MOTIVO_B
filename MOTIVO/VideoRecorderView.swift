@@ -249,7 +249,7 @@ public struct VideoRecorderView: View {
                 try? StagingStore.bootstrap()
             }
         }
-        .alert("Recording audio", isPresented: Binding(
+        .alert("Video recording", isPresented: Binding(
             get: { controller.recordingError != nil },
             set: { if !$0 { controller.recordingError = nil } }
         )) {
@@ -346,6 +346,15 @@ final class VideoRecorderController: NSObject,
     @Published private(set) var isFinishingRecording = false
     @Published var recordingError: String?
     private var presentationID = UUID()
+    /// C-97 part (2). Main-thread only.
+    private var disruption = CaptureDisruptionTracker()
+    /// Advanced on every appear and disappear, so queued disruption work from an earlier
+    /// presentation is dropped. Main-thread only.
+    private var disruptionGeneration = 0
+    private var audioResetObserver: NSObjectProtocol?
+    /// `sessionQueue`-owned: the generation capture observers are bound to, and their tokens.
+    private var sessionGeneration = 0
+    private var captureObserverTokens: [NSObjectProtocol] = []
     @Published var elapsedRecordingTime: TimeInterval = 0
     @Published var elapsedPausedTime: TimeInterval = 0
     @Published var playerCurrentTime: TimeInterval = 0
@@ -507,6 +516,8 @@ final class VideoRecorderController: NSObject,
 
     func onAppear() {
         presentationID = UUID()
+        disruptionGeneration += 1
+        disruption.reset()
         installNotifications()
         DispatchQueue.main.async {
             self.isShowingLivePreview = true
@@ -514,7 +525,14 @@ final class VideoRecorderController: NSObject,
         isRecorderReady = false
         isArmedToRecord = false
 
+        let generation = disruptionGeneration
         sessionQueue.async {
+            // Bind capture observers to THIS presentation, including a session kept from init.
+            self.sessionGeneration = generation
+            if let session = self.captureSession {
+                self.unregisterCaptureObservers(for: session)
+                self.registerCaptureObservers(for: session)
+            }
             self.configureSessionIfNeeded()
             self.startCaptureSession()
         }
@@ -522,6 +540,7 @@ final class VideoRecorderController: NSObject,
 
     func onDisappear() {
         stopTimer()
+        disruptionGeneration += 1
         removeNotifications()
         // C-68 — release the review player explicitly rather than relying on
         // this controller being deallocated with the view. Lifecycle hardening
@@ -810,11 +829,14 @@ final class VideoRecorderController: NSObject,
         self.videoOutput = vOutput
         self.audioOutput = aOutput
         self.isSessionConfigured = true
+        registerCaptureObservers(for: session)
     }
 
     func flipCamera() {
         // If currently recording, ignore flip (button is disabled in UI)
         if state == .recording { return }
+        // C-97 (2): after a reset, capture is only rebuilt by closing and reopening.
+        if disruption.blocksNewCapture { recordingError = CaptureDisruptionTracker.reopenMessage; return }
 
         // Fade out preview on main for smooth transition
         DispatchQueue.main.async {
@@ -927,8 +949,9 @@ final class VideoRecorderController: NSObject,
     }
 
     private func stopCaptureSession() {
-        if let session = captureSession, session.isRunning {
-            session.stopRunning()
+        if let session = captureSession {
+            unregisterCaptureObservers(for: session)
+            if session.isRunning { session.stopRunning() }
         }
         captureSession = nil
         videoOutput = nil
@@ -1139,6 +1162,8 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
 
     private func startRecording() {
         guard state == .idle || state == .pausedRecording else { return }
+        // C-97 (2): after a reset, Record does not rebuild capture; close and reopen does.
+        if disruption.blocksNewCapture { recordingError = CaptureDisruptionTracker.reopenMessage; return }
         guard !isRecordStartInProgress && !isArmedToRecord else {
             return
         }
@@ -1225,6 +1250,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             state = .idle
             isFinishingRecording = false
             finishRecordingWithError()
+            disruptionWriterFinished(succeeded: false, url: nil, strongerMessage: nil)
             return
         }
 
@@ -1236,6 +1262,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
                     guard self.presentationID == presentation else { return }
                     self.isFinishingRecording = false
                     self.finishRecordingWithError()
+                    self.disruptionWriterFinished(succeeded: false, url: nil, strongerMessage: nil)
                 }
                 return
             }
@@ -1251,17 +1278,24 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
                 let completed: () -> Void = { [weak self] in
                     DispatchQueue.main.async {
                         guard let self, self.presentationID == presentation, self.assetWriter === writer else { return }
-                        if writer.status == .completed {
+                        let succeeded = writer.status == .completed
+                        var strongerMessage: String?
+                        if succeeded {
                             self.handleRecordingFinishedSuccessfully(url: finishURL)
                             if failure != nil {
                                 self.recordingError = "Recording stopped because some audio could not be saved. The available video has been kept; review its soundtrack before saving it."
+                                strongerMessage = self.recordingError
                             }
                         } else {
                             self.finishRecordingWithError()
                             self.recordingError = "The recording could not be completed. Please try again."
+                            strongerMessage = self.recordingError
                         }
                         self.isFinishingRecording = false
                         self.state = .idle
+                        // C-97 (2): only now — after verified finalisation — any disruption
+                        // message and deferred capture tear-down.
+                        self.disruptionWriterFinished(succeeded: succeeded, url: finishURL, strongerMessage: strongerMessage)
                     }
                 }
                 if writer.status == .writing {
@@ -1613,6 +1647,15 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
     // MARK: - Notifications
 
     private func installNotifications() {
+        // C-97 (2). Audio-session reset: NOT filtered by capture-session object; bound to
+        // this presentation's generation instead.
+        if let old = audioResetObserver { NotificationCenter.default.removeObserver(old) }
+        let generation = disruptionGeneration
+        audioResetObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            DispatchQueue.main.async { self?.handleDisruptionOnMain(.audioServicesReset, source: nil, generation: generation) }
+        }
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(handleAudioInterruption(_:)),
                                                name: AVAudioSession.interruptionNotification,
@@ -1633,6 +1676,8 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
 
     private func removeNotifications() {
         NotificationCenter.default.removeObserver(self)
+        if let old = audioResetObserver { NotificationCenter.default.removeObserver(old) }
+        audioResetObserver = nil
     }
 
     @objc private func handleAudioInterruption(_ notif: Notification) {
@@ -1699,6 +1744,99 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             if state == .paused { resumePlayback() }
             shouldResumeAfterResignActive = false
         }
+    }
+
+    // MARK: - C-97 (2) capture disruption
+
+    /// Capture events are observed for ONE session object and bound to the presentation
+    /// generation current on `sessionQueue` when registered. Called on `sessionQueue`.
+    private func registerCaptureObservers(for session: AVCaptureSession) {
+        let generation = sessionGeneration
+        let center = NotificationCenter.default
+        let pairs: [(Notification.Name, CaptureDisruptionTracker.Event)] = [
+            (AVCaptureSession.runtimeErrorNotification, .captureRuntimeError),
+            (AVCaptureSession.wasInterruptedNotification, .captureInterruptionBegan),
+            (AVCaptureSession.interruptionEndedNotification, .captureInterruptionEnded),
+        ]
+        captureObserverTokens = pairs.map { name, event in
+            center.addObserver(forName: name, object: session, queue: nil) { [weak self] note in
+                let source = note.object as AnyObject?
+                DispatchQueue.main.async {
+                    self?.handleDisruptionOnMain(event, source: source, generation: generation)
+                }
+            }
+        }
+    }
+
+    private func unregisterCaptureObservers(for session: AVCaptureSession) {
+        captureObserverTokens.forEach { NotificationCenter.default.removeObserver($0) }
+        captureObserverTokens = []
+    }
+
+    /// Main thread. Every delivery must belong to the current generation; a capture event
+    /// must also come from the current session.
+    private func handleDisruptionOnMain(_ event: CaptureDisruptionTracker.Event, source: AnyObject?, generation: Int?) {
+        if let generation, generation != disruptionGeneration { return }
+        let isCurrent = source.map { $0 === captureSession } ?? true
+        perform(disruption.handle(event, disruptionSnapshot(isCurrentSession: isCurrent)))
+    }
+
+    private func disruptionSnapshot(isCurrentSession: Bool) -> CaptureDisruptionTracker.Snapshot {
+        let take: CaptureDisruptionTracker.TakeState
+        if isFinishingRecording {
+            take = .finishing
+        } else if state == .recording || state == .pausedRecording {
+            take = .recording
+        } else if isArmedToRecord || isRecordStartInProgress {
+            take = .startPending
+        } else if recordingURL != nil && !isShowingLivePreview {
+            take = .underReview
+        } else {
+            take = .none
+        }
+        return .init(isCurrentSession: isCurrentSession, take: take,
+                     isAppActive: UIApplication.shared.applicationState == .active,
+                     isShowingLivePreview: isShowingLivePreview)
+    }
+
+    /// Main thread. Every capture change is re-checked on `sessionQueue` against the
+    /// session identity it was decided for.
+    private func perform(_ actions: [CaptureDisruptionTracker.Action]) {
+        for action in actions {
+            switch action {
+            case .stopActiveTake:
+                stopRecording()                       // the existing finalise path
+            case .inhibitPlaybackResume:
+                shouldResumeAfterResignActive = false
+                shouldResumeAfterInterruption = false
+                if state == .playing { pausePlayback() }   // the take and its file are untouched
+            case .tearDownCapture:
+                let expected = captureSession
+                let generation = disruptionGeneration
+                sessionQueue.async { [weak self] in
+                    guard let self, let expected, self.captureSession === expected else { return }
+                    // Eligibility is re-checked NOW, on main, not only when it was decided.
+                    // (`main.sync` from a background queue is the existing pattern here, e.g.
+                    // `currentOrientation()`; main never waits on `sessionQueue`.)
+                    let mayRun = DispatchQueue.main.sync {
+                        CaptureDisruptionTracker.mayExecute(
+                            action, sameGeneration: generation == self.disruptionGeneration,
+                            self.disruptionSnapshot(isCurrentSession: self.captureSession === expected),
+                            awaitingReopen: self.disruption.awaitingReopen)
+                    }
+                    guard mayRun else { return }
+                    self.stopCaptureSession()
+                }
+            case .showMessage(let message):
+                recordingError = message
+            }
+        }
+    }
+
+    /// The existing stop path has finished with the writer (or found none).
+    private func disruptionWriterFinished(succeeded: Bool, url: URL?, strongerMessage: String?) {
+        let kept = url.map { FileManager.default.fileExists(atPath: $0.path) && recordingURL == $0 } ?? false
+        perform(disruption.writerFinished(succeeded: succeeded, keptFileExists: kept, existingMessage: strongerMessage))
     }
 
     // MARK: - File URL Helpers

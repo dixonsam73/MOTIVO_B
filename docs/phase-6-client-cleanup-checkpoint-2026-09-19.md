@@ -140,3 +140,48 @@ could issue **live, authenticated** deletes.
 - **Hashes:** `BackendShim.swift` `7b34a06b05a7b50fc140a68c66d5aa09495d624e2e669d8d75c340baf2dee23b`,
   `F9SimulatedDeleteTests.swift` `78992f6b3deb74c72eddfbef656bf91efe9f2b12810f63d78a68e589f59d9b48`.
 - No device QA is expected.
+
+## Later on 19 September 2026: C-97 part (2), video-recorder capture disruption. Implemented; code review ACCEPTED for device QA; NOT committed
+
+**Change** (`MOTIVO/VideoRecorderView.swift`, new `MOTIVO/CaptureDisruptionTracker.swift`,
+tests in `MOTIVOTests/C97CaptureDisruptionTests.swift`):
+- **After a capture runtime error or an audio media-services reset:**
+  - an active take is finalised through the existing stop path;
+  - capture is torn down **after** the writer completes;
+  - the automatic playback resume is inhibited;
+  - Record and flip are refused **until the recorder is closed and reopened**, the only
+    recovery.
+- **A capture interruption** stops an active take; its end never restarts capture.
+- **Every queued delivery is bound to the recorder's presentation generation.**
+- **The "kept" message** is given only after verified successful finalisation, and stronger
+  messages win.
+- **The alert title** is corrected from "Recording audio" to "Video recording".
+- **Not touched:** the automatic audio configuration, the input logic, the writer. **No
+  watchdog.**
+
+**Device QA** (Samuel, the video recorder, the latest build; **the earlier audio-recorder trials
+are excluded**, since the instructions for them were ambiguous):
+1. **Idle, then Reset All Media Services:** the reopen alert; recovery worked as expected. **PASS.**
+2. **A finished video playing in review, then a reset, then return:** the review-specific
+   save/discard/reopen alert; paused state.
+   - **Preservation and Save: PASS.** The saved video then played in full in the timer
+     attachment viewer.
+   - **In-recorder playback after the reset:** black and non-functional. **A CONFIRMED
+     LIMITATION**, no longer merely unverified. The review player is not rebuilt.
+3. **The first video after an app relaunch (claps):** the opening audio and A/V sync are
+   **green**.
+
+**Verification:**
+- full `MOTIVOTests` **777 passed, 0 failed, 6 skipped** (783 total) before the title and comment
+  corrections;
+- Debug and Release succeeded;
+- after the title change: a Release compile, and `git diff --check` clean.
+
+**OPEN limitations (C-97 NOT closed):**
+- **A pending start** (armed, before its first frame) during a reset or interruption proceeds on
+  possibly unusable capture; safe cancellation needs a writer-setup audit;
+- **no device coverage of an active-take failure** (Settings backgrounds the app, and resigning
+  active stops the take first);
+- **in-recorder review playback after a reset** (confirmed; Save works);
+- no watchdog; interruption reasons are handled generically;
+- part (1) is unchanged.
