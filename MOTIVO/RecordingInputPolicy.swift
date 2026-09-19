@@ -27,6 +27,9 @@ enum RecordingInputFailure: LocalizedError {
 }
 
 enum RecordingInputPolicy {
+    /// The audio recorder's input: a USB microphone first, then the built-in microphone;
+    /// otherwise none. Bluetooth HFP input is never chosen here (the recording session
+    /// options do not enable it).
     static func preferred(in inputs: [RecordingInputPort]) -> RecordingInputPort? {
         inputs.first { $0.type == .usbAudio } ?? inputs.first { $0.type == .builtInMic }
     }

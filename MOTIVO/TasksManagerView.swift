@@ -136,10 +136,16 @@ struct TasksManagerView: View {
         normalizedActivityRef(selectedActivityRef)
     }
 
-    private var tasksKey: String { "practiceTasks_v1::" + ownerScope + "::" + currentNormalizedActivityRef + currentInstrumentKeySuffix }
-    private var autofillCompatibilityKey: String { "practiceTasks_autofill_enabled::" + ownerScope + "::" + currentNormalizedActivityRef + currentInstrumentKeySuffix }
+    /// The (instrument, activity) whose settings are shown and edited. Keyed by the
+    /// instrument whenever one exists, whatever the number of instruments.
+    private var listsContext: ListsDefaultContext {
+        ListsDefaultContext(ownerScope: ownerScope, activityRef: currentNormalizedActivityRef,
+                            instrumentID: effectiveInstrumentID)
+    }
+    private var tasksKey: String { listsContext.tasksKey }
+    private var autofillCompatibilityKey: String { listsContext.autofillKey }
     private var legacyAutofillCompatibilityKey: String { "practiceTasks_autofill_enabled::" + ownerScope }
-    private var defaultTaskSetIDKey: String { tasksKey + "::default_set_id_v1" }
+    private var defaultTaskSetIDKey: String { listsContext.defaultIDKey }
 
     private var legacyTasksKey: String { "practiceTasks_v1::" + ownerScope }
 
@@ -230,10 +236,14 @@ struct TasksManagerView: View {
         instrumentsForProfile.count > 1
     }
 
-    private var currentInstrumentKeySuffix: String {
-        guard shouldShowInstrumentSelector,
-              let id = selectedInstrumentID else { return "" }
-        return "::inst:" + id.uuidString
+    /// The current selection while it still exists, else the profile's primary, else the
+    /// first; nil only with no instruments. Computed, so a removed instrument can never
+    /// leave writes aimed at the activity-only keys.
+    private var effectiveInstrumentID: UUID? {
+        ListsDefaultContext.effectiveInstrument(
+            selected: selectedInstrumentID,
+            available: instrumentsForProfile.compactMap { inst in inst.id.map { ($0, inst.name ?? "") } },
+            primaryName: profiles.first?.primaryInstrument)
     }
 
     private func instrumentDisplayName(for id: UUID?) -> String {
@@ -652,7 +662,7 @@ struct TasksManagerView: View {
                 Button {
                     showManagerInstrumentPickerSheet = true
                 } label: {
-                    selectorRowLabel(value: instrumentDisplayName(for: selectedInstrumentID))
+                    selectorRowLabel(value: instrumentDisplayName(for: effectiveInstrumentID))
                 }
                 .buttonStyle(.plain)
 
@@ -705,7 +715,7 @@ struct TasksManagerView: View {
                     } label: {
                         pickerSheetRow(
                             title: inst.name ?? "Instrument",
-                            isSelected: inst.id == selectedInstrumentID
+                            isSelected: inst.id == effectiveInstrumentID
                         )
                     }
                     .buttonStyle(.plain)
@@ -835,13 +845,16 @@ struct TasksManagerView: View {
             .onAppear {
                 selectedActivityRef = normalizedActivityRef(activityRef)
                 loadUserActivities()
-                if shouldShowInstrumentSelector, selectedInstrumentID == nil {
-                    selectedInstrumentID = instrumentsForProfile.first?.id
-                }
+                selectedInstrumentID = effectiveInstrumentID
                 loadAll()
             }
             .onChange(of: selectedActivityRef) { loadAll() }
             .onChange(of: selectedInstrumentID) { loadAll() }
+            // Instruments added or removed while open: keep a still-valid selection,
+            // otherwise move to the primary/first. A read; nothing is written.
+            .onChange(of: instrumentsForProfile.compactMap(\.id)) {
+                if selectedInstrumentID != effectiveInstrumentID { selectedInstrumentID = effectiveInstrumentID }
+            }
             .appBackground()
         }
     }
@@ -1060,26 +1073,18 @@ struct TasksManagerView: View {
         saveItems()
     }
 
-    private func syncAutofillCompatibilityFlag() {
-        let defaults = UserDefaults.standard
-        defaults.set(selectedTaskSetID != nil, forKey: autofillCompatibilityKey)
-        defaults.removeObject(forKey: legacyAutofillCompatibilityKey)
-    }
-
+    /// A READ of THIS context only: it writes nothing, and shows a default exactly when
+    /// the timer would apply it (an explicit OFF shows none, even with an id stored).
     private func loadAll() {
         let defaults = UserDefaults.standard
 
         savedTaskSets = loadSavedTaskSets()
 
-        if let rawDefaultID = defaults.string(forKey: defaultTaskSetIDKey),
-           let uuid = UUID(uuidString: rawDefaultID),
-           savedTaskSets.contains(where: { $0.id == uuid }) {
-            selectedTaskSetID = uuid
+        if case .list(let list) = listsContext.resolve(defaults: defaults, lists: savedTaskSets) {
+            selectedTaskSetID = list.id
         } else {
             selectedTaskSetID = nil
         }
-
-        syncAutofillCompatibilityFlag()
 
         if let selectedTaskSet {
             items = normalizedTaskTemplateLines(from: selectedTaskSet.items)
@@ -1087,7 +1092,8 @@ struct TasksManagerView: View {
         } else if let typed = loadTypedTaskTemplateLines(forKey: tasksKey, defaults: defaults) {
             items = typed
             draftTaskSetName = ""
-        } else if let typedLegacy = loadTypedTaskTemplateLines(forKey: legacyTasksKey, defaults: defaults) {
+        } else if listsContext.instrumentID == nil,
+                  let typedLegacy = loadTypedTaskTemplateLines(forKey: legacyTasksKey, defaults: defaults) {
             items = typedLegacy
             draftTaskSetName = ""
         } else {
@@ -1173,24 +1179,16 @@ struct TasksManagerView: View {
         saveTaskSetSelectionAndItems()
     }
 
+    /// An explicit select / deselect / delete / rename of the shown default: writes THIS
+    /// (instrument, activity) context only — never another instrument or the activity-only keys.
     private func saveTaskSetSelectionAndItems() {
         let defaults = UserDefaults.standard
-        if let selectedTaskSet {
-            defaults.set(selectedTaskSet.id.uuidString, forKey: defaultTaskSetIDKey)
-            let normalizedItems = normalizedTaskTemplateLines(from: selectedTaskSet.items)
-            if let data = try? JSONEncoder().encode(normalizedItems) {
-                defaults.set(data, forKey: tasksKey)
-            }
-            items = normalizedItems
-        } else {
-            defaults.removeObject(forKey: defaultTaskSetIDKey)
-            let normalizedItems = normalizedTaskTemplateLines(from: items)
-            if let data = try? JSONEncoder().encode(normalizedItems) {
-                defaults.set(data, forKey: tasksKey)
-            }
-        }
-
-        syncAutofillCompatibilityFlag()
+        let normalizedItems = normalizedTaskTemplateLines(from: selectedTaskSet?.items ?? items)
+        listsContext.recordExplicitChoice(listID: selectedTaskSet?.id,
+                                          presetData: try? JSONEncoder().encode(normalizedItems),
+                                          defaults: defaults)
+        if selectedTaskSet != nil { items = normalizedItems }
+        defaults.removeObject(forKey: legacyAutofillCompatibilityKey)
     }
 
     private func commitTaskSetNameIfNeeded() {

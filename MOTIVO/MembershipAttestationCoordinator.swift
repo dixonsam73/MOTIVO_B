@@ -72,8 +72,19 @@ final class MembershipAttestationCoordinator: ObservableObject {
     /// costs little; erring long delays a legacy claim's second pass.
     private let minimumInterval: TimeInterval = 30
 
-    private var inFlight: Task<MembershipAttestationService.Outcome, Never>?
+    private var inFlight: Task<MembershipAttestationService.Outcome?, Never>?
     private var lastAttemptAt: Date?
+
+    /// P6-I-05. Which run owns the published state. A start and a real `reset()`
+    /// each advance it, so a run that finishes after a reset (cancelled or not)
+    /// finds it has been superseded and publishes nothing. This suppresses the
+    /// CLIENT's publication only: cancellation does not prove the request never
+    /// reached the server, and the server remains the authority either way.
+    private var generation = 0
+
+    /// How many callers have joined an in-flight run. In memory, for tests to
+    /// observe that a caller really reached the join path; never read as state.
+    private(set) var joinCount = 0
 
     /// The single entry point. Every trigger routes here.
     ///
@@ -94,7 +105,27 @@ final class MembershipAttestationCoordinator: ObservableObject {
         // Never run destructive-workflow-adjacent work during a local reset.
         guard !LocalFactoryReset.isInProgress else { return nil }
 
+        return await coordinate(force: force) {
+            await MembershipAttestationService.attest(
+                auth: auth,
+                isLocallyEntitled: isLocallyEntitled,
+                reason: reason
+            )
+        }
+    }
+
+    /// Single-flight, cooldown and completion ownership, without the trigger
+    /// guards (which stay in `attestIfNeeded`, the only production caller).
+    ///
+    /// The run's own task does the bookkeeping, so exactly one place publishes,
+    /// whichever awaiter resumes first. A run superseded by `reset()` returns nil
+    /// to its starter and to every caller that joined it, and changes nothing.
+    func coordinate(
+        force: Bool,
+        operation: @escaping @MainActor () async -> MembershipAttestationService.Outcome
+    ) async -> MembershipAttestationService.Outcome? {
         if let existing = inFlight {
+            joinCount += 1
             return await existing.value
         }
         if !force, let last = lastAttemptAt,
@@ -104,20 +135,19 @@ final class MembershipAttestationCoordinator: ObservableObject {
 
         lastAttemptAt = Date()
         isAttesting = true
+        generation += 1
+        let mine = generation
 
-        let task = Task<MembershipAttestationService.Outcome, Never> {
-            await MembershipAttestationService.attest(
-                auth: auth,
-                isLocallyEntitled: isLocallyEntitled,
-                reason: reason
-            )
+        let task = Task<MembershipAttestationService.Outcome?, Never> { @MainActor in
+            let outcome = await operation()
+            guard self.generation == mine else { return nil }   // superseded by reset()
+            self.inFlight = nil
+            self.isAttesting = false
+            self.lastOutcome = outcome
+            return outcome
         }
         inFlight = task
-        let outcome = await task.value
-        inFlight = nil
-        isAttesting = false
-        lastOutcome = outcome
-        return outcome
+        return await task.value
     }
 
     /// Clears the in-memory coordination so the next trigger runs immediately.
@@ -133,6 +163,7 @@ final class MembershipAttestationCoordinator: ObservableObject {
         // non-default the full clear runs exactly as before.
         if inFlight == nil, lastAttemptAt == nil, lastOutcome == nil, !isAttesting { return }
 
+        generation += 1   // any run still in flight no longer owns the state
         inFlight?.cancel()
         inFlight = nil
         lastAttemptAt = nil

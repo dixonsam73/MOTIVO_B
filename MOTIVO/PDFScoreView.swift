@@ -11,6 +11,10 @@ struct PDFScoreView: View {
     var background: Color = Color.clear
     var onPageChange: ((Int) -> Void)? = nil
     var onFailure: (() -> Void)? = nil
+    /// Called when the viewer disappears, AFTER its pending page and failure
+    /// reports have been withdrawn — so close-time work (such as flushing page
+    /// tracking) can never be followed by a late report from this viewer.
+    var onClose: (() -> Void)? = nil
 
     @StateObject private var controller = PDFScoreController()
 
@@ -55,6 +59,13 @@ struct PDFScoreView: View {
         }
         .sheet(isPresented: $showPageJump) {
             pageJumpSheet
+        }
+        .onAppear {
+            controller.viewDidAppear()
+        }
+        .onDisappear {
+            controller.viewDidDisappear()
+            onClose?()
         }
     }
 
@@ -105,11 +116,38 @@ struct PDFScoreView: View {
     }
 }
 
-private final class PDFScoreController: ObservableObject {
+final class PDFScoreController: ObservableObject {
     private weak var pdfView: PDFView?
+    private weak var coordinator: PDFScoreRepresentable.Coordinator?
+
+    /// Owns the ordering of the viewer's outward effects for its whole lifetime,
+    /// so closing the viewer can withdraw pending work before the caller flushes.
+    let effects: PDFScoreEffectGate
+
+    init(effects: PDFScoreEffectGate = PDFScoreEffectGate()) {
+        self.effects = effects
+    }
 
     func register(_ pdfView: PDFView) {
         self.pdfView = pdfView
+    }
+
+    func attach(_ coordinator: PDFScoreRepresentable.Coordinator) {
+        self.coordinator = coordinator
+    }
+
+    /// The viewer closed: withdraw pending reports. Close-time work runs after this.
+    func viewDidDisappear() {
+        effects.close()
+    }
+
+    /// The viewer is visible again. Only after a close: reports that close withdrew
+    /// were already counted as sent, so the current page (and any failure) is
+    /// reported afresh — never the initial page restored again, and never an
+    /// obsolete queued report replayed.
+    func viewDidAppear() {
+        guard effects.reopen() else { return }
+        coordinator?.reappeared()
     }
 
     func goToPage(_ pageNumber: Int) -> Bool {
@@ -127,7 +165,87 @@ private final class PDFScoreController: ObservableObject {
     }
 }
 
-private struct PDFScoreRepresentable: UIViewRepresentable {
+/// Orders the viewer's outward effects — binding writes, `onPageChange`,
+/// `onFailure` — so none is published from inside SwiftUI's view-update pass.
+///
+/// - Outside an update, with nothing pending, an effect runs immediately (a swipe
+///   behaves as it always has).
+/// - Otherwise it is queued and runs, in order, in a drain scheduled on the main
+///   queue. While anything is queued, scheduled or draining, later effects queue
+///   too, so a newer event can never overtake an older one.
+/// - Each effect carries the epoch it was created in. `invalidate()` (document
+///   replaced) and `close()` (viewer closed) advance the epoch and drop the queue,
+///   so obsolete state is never delivered.
+final class PDFScoreEffectGate {
+    typealias Scheduler = (@escaping () -> Void) -> Void
+
+    private(set) var epoch = 0
+    private(set) var isClosed = false
+    private var updateDepth = 0
+    private var queue: [(epoch: Int, effect: () -> Void)] = []
+    private var drainScheduled = false
+    private var isDraining = false
+    private let schedule: Scheduler
+
+    init(schedule: @escaping Scheduler = { DispatchQueue.main.async(execute: $0) }) {
+        self.schedule = schedule
+    }
+
+    var isInViewUpdate: Bool { updateDepth > 0 }
+
+    func beginViewUpdate() { updateDepth += 1 }
+    func endViewUpdate() { updateDepth = max(0, updateDepth - 1) }
+
+    func run(_ effect: @escaping () -> Void) {
+        guard !isClosed else { return }
+        if updateDepth == 0, queue.isEmpty, !drainScheduled, !isDraining {
+            effect()
+            return
+        }
+        queue.append((epoch, effect))
+        scheduleDrainIfNeeded()
+    }
+
+    func drain() {
+        drainScheduled = false
+        guard !isDraining else { return }
+        guard updateDepth == 0 else { return scheduleDrainIfNeeded() }
+        isDraining = true
+        defer { isDraining = false }
+        while !queue.isEmpty {
+            let item = queue.removeFirst()
+            guard !isClosed, item.epoch == epoch else { continue }
+            item.effect()   // anything it causes to run is appended and runs after it
+        }
+    }
+
+    /// The document was replaced: nothing produced for the old one is delivered.
+    func invalidate() {
+        epoch += 1
+        queue.removeAll()
+    }
+
+    /// The viewer closed. Idempotent. Called before the caller's own close work.
+    func close() {
+        invalidate()
+        isClosed = true
+    }
+
+    /// Returns whether the gate had been closed.
+    @discardableResult
+    func reopen() -> Bool {
+        defer { isClosed = false }
+        return isClosed
+    }
+
+    private func scheduleDrainIfNeeded() {
+        guard !drainScheduled, !isDraining else { return }
+        drainScheduled = true
+        schedule { [weak self] in self?.drain() }
+    }
+}
+
+struct PDFScoreRepresentable: UIViewRepresentable {
     let url: URL
     let selectedPages: [Int]?
     let controller: PDFScoreController
@@ -143,7 +261,8 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
             pageCount: $pageCount,
             initialPage: initialPage,
             onPageChange: onPageChange,
-            onFailure: onFailure
+            onFailure: onFailure,
+            effects: controller.effects
         )
     }
 
@@ -155,66 +274,37 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
         pdfView.autoScales = true
         pdfView.backgroundColor = .clear
         pdfView.displaysPageBreaks = false
-        pdfView.document = makeDocument(url: url, selectedPages: selectedPages)
-        pdfView.autoScales = true
-        pdfView.minScaleFactor = pdfView.scaleFactorForSizeToFit
 
         controller.register(pdfView)
-        context.coordinator.pdfView = pdfView
-        context.coordinator.loadedURL = url
-        context.coordinator.loadedSelectedPages = PDFSelectedPagesStore.sanitized(selectedPages)
-        context.coordinator.updateCallbacks(initialPage: initialPage, onPageChange: onPageChange)
-        context.coordinator.restoreInitialPageIfNeeded()
-        context.coordinator.refreshPageState()
-
-        if pdfView.document == nil {
-            onFailure?()
-        }
-
-        NotificationCenter.default.addObserver(
-            context.coordinator,
-            selector: #selector(Coordinator.pageChanged(_:)),
-            name: Notification.Name.PDFViewPageChanged,
-            object: pdfView
+        controller.attach(context.coordinator)
+        context.coordinator.didMake(
+            pdfView: pdfView,
+            url: url,
+            selectedPages: selectedPages,
+            initialPage: initialPage,
+            onPageChange: onPageChange,
+            onFailure: onFailure
         )
-
+        context.coordinator.startObserving()
         return pdfView
     }
 
     func updateUIView(_ pdfView: PDFView, context: Context) {
         controller.register(pdfView)
-        context.coordinator.updateCallbacks(initialPage: initialPage, onPageChange: onPageChange)
-
-        let sanitizedPages = PDFSelectedPagesStore.sanitized(selectedPages)
-        guard context.coordinator.loadedURL != url || context.coordinator.loadedSelectedPages != sanitizedPages else {
-            context.coordinator.restoreInitialPageIfNeeded()
-            context.coordinator.refreshPageState()
-            return
-        }
-
-        context.coordinator.loadedURL = url
-        context.coordinator.loadedSelectedPages = sanitizedPages
-        context.coordinator.resetInitialPageRestoration()
-        pdfView.document = makeDocument(url: url, selectedPages: sanitizedPages)
-        pdfView.autoScales = true
-        pdfView.minScaleFactor = pdfView.scaleFactorForSizeToFit
-        context.coordinator.restoreInitialPageIfNeeded()
-        context.coordinator.refreshPageState()
-
-        if pdfView.document == nil {
-            onFailure?()
-        }
-    }
-
-    static func dismantleUIView(_ pdfView: PDFView, coordinator: Coordinator) {
-        NotificationCenter.default.removeObserver(
-            coordinator,
-            name: Notification.Name.PDFViewPageChanged,
-            object: pdfView
+        context.coordinator.didUpdate(
+            url: url,
+            selectedPages: selectedPages,
+            initialPage: initialPage,
+            onPageChange: onPageChange,
+            onFailure: onFailure
         )
     }
 
-    private func makeDocument(url: URL, selectedPages: [Int]?) -> PDFDocument? {
+    static func dismantleUIView(_ pdfView: PDFView, coordinator: Coordinator) {
+        coordinator.dismantle()
+    }
+
+    static func makeDocument(url: URL, selectedPages: [Int]?) -> PDFDocument? {
         guard let source = PDFDocument(url: url) else { return nil }
         guard let clean = PDFSelectedPagesStore.sanitized(selectedPages), !clean.isEmpty else {
             return source
@@ -241,9 +331,11 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
         @Binding private var pageCount: Int
         private var initialPage: Int?
         private var onPageChange: ((Int) -> Void)?
-        private let onFailure: (() -> Void)?
+        private var onFailure: (() -> Void)?
         private var hasRestoredInitialPage = false
         private var lastReportedPage: Int?
+        private var hasReportedFailure = false
+        let effects: PDFScoreEffectGate
 
         weak var pdfView: PDFView?
         var loadedURL: URL?
@@ -254,23 +346,102 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
             pageCount: Binding<Int>,
             initialPage: Int?,
             onPageChange: ((Int) -> Void)?,
-            onFailure: (() -> Void)?
+            onFailure: (() -> Void)?,
+            effects: PDFScoreEffectGate
         ) {
             self._pageIndex = pageIndex
             self._pageCount = pageCount
             self.initialPage = initialPage
             self.onPageChange = onPageChange
             self.onFailure = onFailure
+            self.effects = effects
         }
 
-        func updateCallbacks(initialPage: Int?, onPageChange: ((Int) -> Void)?) {
+        /// `makeUIView`'s work after configuring the view, inside the update window.
+        func didMake(pdfView: PDFView, url: URL, selectedPages: [Int]?, initialPage: Int?,
+                     onPageChange: ((Int) -> Void)?, onFailure: (() -> Void)?) {
+            effects.beginViewUpdate()
+            defer { effects.endViewUpdate() }
+
+            pdfView.document = PDFScoreRepresentable.makeDocument(url: url, selectedPages: selectedPages)
+            pdfView.autoScales = true
+            pdfView.minScaleFactor = pdfView.scaleFactorForSizeToFit
+
+            self.pdfView = pdfView
+            loadedURL = url
+            loadedSelectedPages = PDFSelectedPagesStore.sanitized(selectedPages)
+            updateCallbacks(initialPage: initialPage, onPageChange: onPageChange, onFailure: onFailure)
+            restoreInitialPageIfNeeded()
+            refreshPageState()
+        }
+
+        /// `updateUIView`'s work, inside the update window.
+        func didUpdate(url: URL, selectedPages: [Int]?, initialPage: Int?,
+                       onPageChange: ((Int) -> Void)?, onFailure: (() -> Void)?) {
+            effects.beginViewUpdate()
+            defer { effects.endViewUpdate() }
+
+            updateCallbacks(initialPage: initialPage, onPageChange: onPageChange, onFailure: onFailure)
+
+            let sanitizedPages = PDFSelectedPagesStore.sanitized(selectedPages)
+            guard loadedURL != url || loadedSelectedPages != sanitizedPages else {
+                restoreInitialPageIfNeeded()
+                refreshPageState()
+                return
+            }
+            guard let pdfView else { return }
+
+            loadedURL = url
+            loadedSelectedPages = sanitizedPages
+            resetInitialPageRestoration()
+            pdfView.document = PDFScoreRepresentable.makeDocument(url: url, selectedPages: sanitizedPages)
+            pdfView.autoScales = true
+            pdfView.minScaleFactor = pdfView.scaleFactorForSizeToFit
+            restoreInitialPageIfNeeded()
+            refreshPageState()
+        }
+
+        func startObserving() {
+            guard let pdfView else { return }
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(pageChanged(_:)),
+                name: Notification.Name.PDFViewPageChanged,
+                object: pdfView
+            )
+        }
+
+        /// The viewer reappeared after a close. Report the CURRENT state afresh,
+        /// through the update window so nothing is published synchronously here.
+        func reappeared() {
+            lastReportedPage = nil
+            hasReportedFailure = false
+            effects.beginViewUpdate()
+            defer { effects.endViewUpdate() }
+            refreshPageState()
+        }
+
+        /// Backstop for the view's own close: idempotent.
+        func dismantle() {
+            if let pdfView {
+                NotificationCenter.default.removeObserver(self, name: Notification.Name.PDFViewPageChanged, object: pdfView)
+            }
+            effects.close()
+        }
+
+        func updateCallbacks(initialPage: Int?, onPageChange: ((Int) -> Void)?, onFailure: (() -> Void)?) {
             self.initialPage = initialPage
             self.onPageChange = onPageChange
+            self.onFailure = onFailure
         }
 
+        /// A new document: its reports start afresh, and nothing queued for the old
+        /// one is delivered.
         func resetInitialPageRestoration() {
             hasRestoredInitialPage = false
             lastReportedPage = nil
+            hasReportedFailure = false
+            effects.invalidate()
         }
 
         func restoreInitialPageIfNeeded() {
@@ -298,6 +469,8 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
             refreshPageState()
         }
 
+        /// Computes now; publishes through the gate as ONE snapshot, with the
+        /// callbacks current at this moment.
         func refreshPageState() {
             guard let pdfView else { return }
 
@@ -306,30 +479,42 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
             if fittedScale > 0 {
                 pdfView.minScaleFactor = fittedScale
             }
-            guard let document = pdfView.document else {
-                pageIndex = 0
-                pageCount = 0
-                onFailure?()
-                return
-            }
 
-            pageCount = document.pageCount
-            let newPageIndex: Int
+            let newIndex: Int
+            let newCount: Int
+            var report: Int? = nil
+            var fail = false
 
-            if let currentPage = pdfView.currentPage {
-                newPageIndex = max(0, document.index(for: currentPage))
+            if let document = pdfView.document {
+                newCount = document.pageCount
+                if let currentPage = pdfView.currentPage {
+                    newIndex = max(0, document.index(for: currentPage))
+                } else {
+                    newIndex = 0
+                }
+                let visiblePage = newIndex + 1
+                if visiblePage >= 1, visiblePage <= document.pageCount, lastReportedPage != visiblePage {
+                    lastReportedPage = visiblePage
+                    report = visiblePage
+                }
             } else {
-                newPageIndex = 0
+                newIndex = 0
+                newCount = 0
+                if !hasReportedFailure {
+                    hasReportedFailure = true
+                    fail = true
+                }
             }
 
-            pageIndex = newPageIndex
-
-            let visiblePage = newPageIndex + 1
-            if visiblePage >= 1,
-               visiblePage <= document.pageCount,
-               lastReportedPage != visiblePage {
-                lastReportedPage = visiblePage
-                onPageChange?(visiblePage)
+            let onPageChange = self.onPageChange
+            let onFailure = self.onFailure
+            effects.run { [weak self] in
+                if let self {
+                    if self.pageCount != newCount { self.pageCount = newCount }
+                    if self.pageIndex != newIndex { self.pageIndex = newIndex }
+                }
+                if fail { onFailure?() }
+                if let report { onPageChange?(report) }
             }
         }
     }

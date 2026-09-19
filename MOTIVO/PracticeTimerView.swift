@@ -718,90 +718,28 @@ private func loadPracticeDefaultsIfNeeded() {
         return merged
     }
 
-    func applyDefaultTaskSetIfAvailable(for baseTasksKey: String) -> Bool {
-        let defaultSetIDKey = baseTasksKey + "::default_set_id_v1"
-        guard let rawID = defaults.string(forKey: defaultSetIDKey),
-              let selectedID = UUID(uuidString: rawID) else {
-            return false
-        }
-
-        guard let selectedSet = savedTaskSets(for: baseTasksKey).first(where: { $0.id == selectedID }) else {
-            return false
-        }
-
-        applyTemplateLines(
-            selectedSet.items.map {
-                TaskLine(text: $0.text, isDone: false, type: $0.type)
-            }
-        )
-        return !taskLines.isEmpty
-    }
-
-    // 0) Preferred path (when instrument is selected): Instrument×Activity template.
-    if let inst = instrumentUUID {
-        let instTasksKey = "practiceTasks_v1::\(ownerScope)::\(activityRef)::inst:\(inst)"
-        let instToggleKey = "practiceTasks_autofill_enabled::\(ownerScope)::\(activityRef)::inst:\(inst)"
-
-        // If explicitly OFF for this instrument+activity, do not fall back.
-        if defaults.object(forKey: instToggleKey) != nil, defaults.bool(forKey: instToggleKey) == false {
-            return
-        }
-
-        // Default ON when no explicit preference exists.
-        let instToggleValue: Bool
-        if defaults.object(forKey: instToggleKey) == nil {
-            instToggleValue = true
-        } else {
-            instToggleValue = defaults.bool(forKey: instToggleKey)
-        }
-
-        if instToggleValue {
-            if applyDefaultTaskSetIfAvailable(for: instTasksKey) {
-                return
-            }
-
-            if let data = defaults.data(forKey: instTasksKey),
-               let decoded = decodeTypedTaskPresetLines(from: data) {
-                applyTemplateLines(decoded)
-                return
-            }
-
-            if let arr = defaults.array(forKey: instTasksKey) as? [String] {
-                applyTemplate(arr)
-                return
-            }
-        }
-        // If no instrument-specific list exists (or it's empty/missing), fall through to activity-only.
-    }
-
-    // 1) Activity-only path (existing behavior).
-    let tasksKey = "practiceTasks_v1::\(ownerScope)::\(activityRef)"
-    let toggleKey = "practiceTasks_autofill_enabled::\(ownerScope)::\(activityRef)"
-
-    // Default ON when no explicit preference exists.
-    let toggleValue: Bool
-    if defaults.object(forKey: toggleKey) == nil {
-        toggleValue = true
-    } else {
-        toggleValue = defaults.bool(forKey: toggleKey)
-    }
-    guard toggleValue else { return }
-
-    if applyDefaultTaskSetIfAvailable(for: tasksKey) {
+    // Explicit per (instrument, activity), whatever the number of instruments: resolve
+    // the session's OWN context only, with the same keys and order as the Lists manager.
+    // An instrument session never falls back to the activity-only context — that
+    // fallback was inheritance of a default nobody assigned to this instrument.
+    let context = ListsDefaultContext(ownerScope: ownerScope, activityRef: activityRef,
+                                      instrumentID: instrument?.id)
+    switch context.resolve(defaults: defaults, lists: savedTaskSets(for: context.tasksKey)) {
+    case .off:
         return
-    }
-
-    // 1a) Preferred: per-activity template already exists.
-    if let data = defaults.data(forKey: tasksKey),
-       let decoded = decodeTypedTaskPresetLines(from: data) {
-        applyTemplateLines(decoded)
+    case .list(let list):
+        applyTemplateLines(list.items.map { TaskLine(text: $0.text, isDone: false, type: $0.type) })
         return
-    }
-
-    if let arr = defaults.array(forKey: tasksKey) as? [String] {
-        applyTemplate(arr)
+    case .typed(let lines):
+        applyTemplateLines(lines.map { TaskLine(text: $0.text, isDone: false, type: $0.type) })
         return
+    case .legacyArray(let strings):
+        applyTemplate(strings)
+        return
+    case .none:
+        guard context.instrumentID == nil else { return }
     }
+    let tasksKey = context.tasksKey
 
     // 2) Backwards-compat: if we're on Practice, migrate from legacy practice-only key.
     if activity == .practice {
@@ -2051,11 +1989,13 @@ private func loadPracticeDefaultsIfNeeded() {
                     onPageChange: { page in
                         scoreLibraryStore.updateLastViewedPage(for: request.id, page: page)
                         recordMeaningfulScorePageChange(scoreID: request.id, page: page)
-                    }
-                )
-                    .onDisappear {
+                    },
+                    // Runs after the viewer has withdrawn its pending reports, so no
+                    // late page report can reopen tracking after this flush.
+                    onClose: {
                         flushMeaningfulScorePageTracking(for: request.id)
                     }
+                )
                     .toolbar(.hidden, for: .navigationBar)
                     .overlay(alignment: .top) {
                         scoreViewerDestinationOverlay(request: request)
