@@ -637,6 +637,50 @@ public final class SessionSyncQueue: ObservableObject {
         return saved
     }
 
+    /// JOURNAL DELETE, Connected. Called only AFTER the backend delete succeeded
+    /// and BEFORE local deletion. Returns whether local deletion may proceed.
+    ///
+    /// A same-owner `.publish` for this post that is still queued would otherwise
+    /// re-create the deleted entry's post on a later flush, because the payload is
+    /// self-contained and a missing session only empties its attachments. It is
+    /// superseded by an owner-bound `.unshare` (C-61: last intent wins).
+    ///
+    /// - The owner is the one captured at the member's action. It is never
+    ///   derived from the current sign-in, and an account switch across the
+    ///   backend await refuses.
+    /// - Memory answers "is a publish queued?" only once it is known to be saved:
+    ///   a halted store, or an earlier supersession whose write did not take, is
+    ///   recovered first and refuses if it cannot be. Otherwise an older envelope
+    ///   on disk could still hold the publish.
+    /// - Another owner's work is never read, merged or superseded.
+    ///
+    /// Not covered: a publish already in flight. The delayed `.unshare` is
+    /// owner-scoped and later deletes whatever row of that id this owner holds.
+    func supersedeQueuedPublishForJournalDelete(postID: UUID, capturedOwner: String?) -> Bool {
+        let owner = Self.normalisedOwner(capturedOwner)
+        guard Self.normalisedOwner(Self.currentOwner()) == owner else {
+            BackendLogger.notice("Journal delete refused • identity changed during the backend delete • postID=\(postID.uuidString)")
+            return false
+        }
+        guard let owner else { return true }   // no owner: nothing can be same-owner work
+        guard recoverIfNeeded(reason: "journal-delete") else {
+            BackendLogger.notice("Journal delete refused • queue not saved • postID=\(postID.uuidString)")
+            return false
+        }
+        guard let existing = items.first(where: { $0.id == postID && $0.ownerUserID == owner }),
+              existing.op == .publish else { return true }
+        let withdrawal = PostPublishPayload(
+            id: postID, sessionID: postID, sessionTimestamp: nil, title: nil, durationSeconds: nil,
+            activityType: nil, activityDetail: nil, instrumentLabel: nil, mood: nil, effort: nil,
+            isPublic: false, ownerUserID: owner
+        )
+        let durable = enqueue(withdrawal)
+        if !durable {
+            BackendLogger.notice("Journal delete refused • withdrawal not saved • postID=\(postID.uuidString)")
+        }
+        return durable
+    }
+
     /// CONVENIENCE: captures the owner AT THIS CALL. Only safe where the call is
     /// already synchronous with the member's action.
     @discardableResult

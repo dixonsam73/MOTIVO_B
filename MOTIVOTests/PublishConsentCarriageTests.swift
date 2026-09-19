@@ -64,7 +64,10 @@ final class PublishConsentCarriageTests: XCTestCase {
     /// **THE C-82 GUARD.** No construction may silently drop the consent.
     func testEveryPayloadConstructionCarriesOmissionsOrCannotCarryAttachments() {
         let all = constructions()
-        XCTAssertEqual(all.count, 9,
+        // 10: the journal-delete withdrawal in SessionSyncQueue
+        // (supersedeQueuedPublishForJournalDelete) is `isPublic: false`, an
+        // `.unshare`, so it cannot carry attachments.
+        XCTAssertEqual(all.count, 10,
                        "the payload inventory changed — decide deliberately whether the new site can carry attachments")
         var offenders: [String] = []
         for (file, args) in all {

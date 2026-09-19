@@ -2597,13 +2597,15 @@ fileprivate struct SessionsRootView: View {
 
     private func deleteSessions(at offsets: IndexSet) {
         // Keep List's onDelete handler synchronous; do async backend delete + Core Data work on MainActor.
+        // The owner is captured here, synchronously with the member's action.
+        let capturedOwner = SessionSyncQueue.currentOwner()
         Task { @MainActor in
-            await deleteSessionsWithBackendIfNeeded(at: offsets)
+            await deleteSessionsWithBackendIfNeeded(at: offsets, capturedOwner: capturedOwner)
         }
     }
 
     @MainActor
-    private func deleteSessionsWithBackendIfNeeded(at offsets: IndexSet) async {
+    private func deleteSessionsWithBackendIfNeeded(at offsets: IndexSet, capturedOwner: String?) async {
         let rows = filteredSessions
         var didDeleteAny: Bool = false
 
@@ -2621,13 +2623,9 @@ fileprivate struct SessionsRootView: View {
                         return
                     }
 
-                    let result = await BackendEnvironment.shared.publish.deletePost(postID)
-                    switch result {
-                    case .success:
-                        break
-                    case .failure(let err):
-                        // Fail-closed: abort immediately — do NOT proceed to any local deletion.
-                        print("[Delete][FAIL-CLOSED] backend deletePost failed postID=\(postID) err=\(err)")
+                    // Backend delete, then supersede this owner's queued publish.
+                    // Fail-closed: abort immediately — do NOT proceed to any local deletion.
+                    guard await JournalDeleteBackendStep.run(postID: postID, capturedOwner: capturedOwner) else {
                         return
                     }
                 }

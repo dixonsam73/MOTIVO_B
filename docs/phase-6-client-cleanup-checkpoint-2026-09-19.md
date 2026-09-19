@@ -185,3 +185,124 @@ are excluded**, since the instructions for them were ambiguous):
 - **in-recorder review playback after a reset** (confirmed; Save works);
 - no watchdog; interruption reasons are handled generically;
 - part (1) is unchanged.
+
+## Later on 19 September 2026: journal delete must not re-create a queued post. Code review ACCEPTED; NOT committed
+
+**The defect.** A Connected journal delete (`ContentView.deleteSessionsWithBackendIfNeeded`)
+deleted the backend post and then the local entry, but **never touched `SessionSyncQueue`**. A
+same-owner publish still queued for that post stayed queued. On the next flush,
+`loadIncludedAttachments` found no session and returned `[]`, and `uploadPostImpl` INSERTed the
+post from the self-contained payload. **The result was a re-created, text-only post for an entry
+the member had deleted, with no in-app route left to withdraw it.**
+
+**Reproduced first, with synthetic fixtures only** (loopback `QueueStubServer`, a synthetic owner,
+a disposable Session). The timeline:
+1. POST 500 (the first attempt fails, so the publish stays queued);
+2. the journal delete sends GET, then DELETE;
+3. the next flush sends **POST 201**.
+
+**The bounded fix (same owner only).**
+- **`JournalDeleteBackendStep.run`** (new), called by ContentView:
+  1. the existing backend delete, unchanged and fail-closed;
+  2. then **`SessionSyncQueue.supersedeQueuedPublishForJournalDelete`**.
+- **Local deletion happens only if both succeed.**
+- **The owner is captured in `deleteSessions` before the `Task`.** An account switch across the
+  backend await refuses.
+- **The queue must be saved before it can answer.** A halted or diverged store gets one
+  `recoverIfNeeded` attempt and refuses if that fails. **An in-memory `.unshare` from an earlier
+  failed write does not bypass this.**
+- **The replacement:** the captured owner's queued `.publish` is replaced by an owner-bound
+  `.unshare` (C-61: last intent wins). **A non-durable enqueue refuses.**
+- **With nothing queued, the requests and the queue are unchanged. Other owners' work is
+  untouched.**
+
+**Stated behaviour changes:**
+- **A halted or unsaved queue now refuses a journal delete** unless recovery succeeds. The entry
+  stays; the server post is already deleted.
+- **An account switch during the backend delete now refuses.**
+
+### Verification
+
+- **Focused `JournalDeleteQueuedPublishTests`:** 9 / 9 passed.
+- **Mutation check:** with the supersession made a no-op, 5 cases fail (repro, owner switch,
+  repeat durability, halted-then-recover, halted-unrecoverable). The 4 that assert unchanged paths
+  pass. **The source was restored and its hash re-verified.**
+- **`PublishConsentCarriageTests`:** the payload inventory count moved **9 → 10**, deliberately,
+  because the new site is `isPublic: false` and cannot carry attachments. The first full run
+  failed on exactly this assertion.
+- **Full Debug suite (iOS 26.4 simulator): 787 passed / 0 failed / 9 skipped (796).**
+- **Release build: succeeded.** `git diff --check` is clean.
+
+**Skip accounting against the C-97 baseline** (777 / 0 / 6, 783):
+- **No baseline case is missing, and no case changed result.**
+- **The baseline's 6 skips are identical:** three `SyncQueueOrderingReproductionTests` sequences
+  (not exercised in the run), and `P6I02WithdrawalLocalStackTests` TL5 to TL7 (isolated rehearsal
+  modes only).
+- **The +13 cases are:**
+  - the 9 new tests;
+  - **4 UI-test cases absent from the baseline bundle**: `testLaunch` passed, and three
+    `AccessibilityAndPersistenceTests` skipped on their own preconditions (*"Timer not present"*,
+    *"No sessions available to open"*, *"Activity Manager not available"*).
+- **Why the baseline bundle has no UI-test cases is not established.**
+
+**Device fault injection was not required** for this queue-only checkpoint (Codex): the synthetic
+fault and retry tests cover the changed path.
+
+### Limitations
+
+- **Guarantee:** on this installation, after a Connected journal delete returns success, a
+  same-owner publish for that post that was still queued, not dispatched, when the supersession
+  was enqueued does not re-create the post.
+- **A publish already in flight is NOT solved** (open sharing blocker 1).
+- **The delayed `.unshare` is new.** When it runs, it deletes whatever row of that id this owner
+  holds at that time. **A newer legitimate share of the same id published elsewhere in between
+  would be withdrawn.** A restored backup bringing the session back on another device is one
+  example; whether other routes exist is not established.
+- **Core Data is not transactional with the backend or the queue.** If the final save fails, the
+  entry reappears on relaunch while its post stays deleted. A refusal's early `return` also skips
+  saving earlier rows in a multi-row delete (a pre-existing shape; current callers pass one
+  index).
+- **Not covered:**
+  - other devices and restores;
+  - the Solo / lapsed journal delete;
+  - row-less or unreferenced bytes;
+  - physical file deletion (API-reported only, subject to vendor unknowns);
+  - `noRowMatched` ambiguity.
+- **The six broader sharing and deletion blockers remain OPEN.**
+
+### Agreed intended behaviour: cross-owner follow-up
+
+**Samuel has agreed:** deleting a local journal entry should prevent pending shares under
+**either** account on this installation from publishing later, and server withdrawal must remain
+**authorised by the owning account**.
+- **This is recorded intended behaviour, not a pending decision.**
+- **It is deliberately outside this same-owner checkpoint.** It needs its own bounded scope and
+  review, covering at least:
+  - how another owner's queued publish is stopped without acting as that owner;
+  - durability and recovery;
+  - quarantined (unknown-owner) items;
+  - what the member sees.
+
+## Separate evidence: cleanup run #25 (USER-SUPPLIED, not independently fetched)
+
+**Source.** Samuel supplied the invoke-step log of the first scheduled `membership_cleanup_v1`
+run after the recorded 18 September deploy. Run `35431142646`, job `105865822133`, on
+2026-09-19. Claude's sessions could not read the log; an anonymous API request returned 403.
+
+**Supplied values:**
+- mode `execute`;
+- request body `{"mode":"execute","limit":25}` (29 bytes, sha256
+  `1c1d0b8d3562235732a3b60ba5fd5ed13685c733ae14e9f0b0567cc07597b93a`);
+- proxy env present `False`;
+- HTTP 200;
+- response `{"ok":true,"mode":"execute","identities":0,"results":[]}`.
+
+**What this establishes, for this run only:** it ran in execute mode, **processed zero
+identities**, returned an empty per-identity result list, and reported **no per-identity
+failures**.
+
+**What it does NOT establish:**
+- any real deletion;
+- a global candidate census;
+- which deployed function version answered;
+- **G7, which remains OPEN** (the Phase 3 obligation, earliest 2026-11-01).
