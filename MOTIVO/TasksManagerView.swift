@@ -12,35 +12,6 @@ import UniformTypeIdentifiers
 import Vision
 #endif
 
-private struct ImportedTaskDraftLineDropDelegate: DropDelegate {
-    let targetID: UUID
-    @Binding var draftLines: [TasksManagerView.EditableImportedTaskLine]
-    @Binding var draggedLineID: UUID?
-
-    func dropEntered(info: DropInfo) {
-        guard let draggedLineID,
-              draggedLineID != targetID,
-              let from = draftLines.firstIndex(where: { $0.id == draggedLineID }),
-              let to = draftLines.firstIndex(where: { $0.id == targetID })
-        else { return }
-
-        if draftLines[to].id != draggedLineID {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                draftLines.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
-            }
-        }
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        draggedLineID = nil
-        return true
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-}
-
 
 #if canImport(VisionKit)
 import VisionKit
@@ -66,17 +37,8 @@ struct TasksManagerView: View {
     @State private var savedListsUnreadable = false
     @State private var draftTaskSetName: String = ""
     @State private var showTaskImportLauncher: Bool = false
-    @State private var showTaskImportPasteSheet: Bool = false
     @State private var showTaskImportScanSheet: Bool = false
-    @State private var showSaveCurrentTaskSetPrompt: Bool = false
     @State private var showDefaultTaskSetSheet: Bool = false
-    @State private var pastedImportText: String = ""
-    @State private var importDraftItems: [TaskTemplateLine] = []
-    @State private var importDraftTaskSetName: String = ""
-    @State private var importDraftLines: [EditableImportedTaskLine] = []
-    @State private var draggedImportLineID: UUID? = nil
-    @State private var suppressImportedRawTextObserver: Bool = false
-    @FocusState private var focusedImportLineID: UUID?
     @FocusState private var focusedManagerLineID: UUID?
     @State private var ignoreNextManagerTapLineID: UUID? = nil
     @State private var showTaskSetEditor: Bool = false
@@ -105,11 +67,6 @@ struct TasksManagerView: View {
     fileprivate typealias TaskTemplateLine = SavedListLine
     fileprivate typealias SavedTaskSet = SavedList
     fileprivate typealias LegacySavedTaskSet = LegacySavedList
-
-    fileprivate struct EditableImportedTaskLine: Identifiable, Equatable {
-        let id: UUID = UUID()
-        var text: String
-    }
 
     init(activityRef: String) {
         self.activityRef = activityRef
@@ -859,117 +816,6 @@ struct TasksManagerView: View {
         }
     }
 
-    private var taskImportPasteSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    importPasteHeader
-                    importDraftEditorCard
-                    importTaskSetNameSection
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .onTapGesture {
-                dismissImportedTaskKeyboard()
-            }
-            .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        showTaskImportPasteSheet = false
-                    }
-                    .foregroundStyle(Theme.Colors.accent)
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save list") {
-                        saveImportedTaskSetFromDraft()
-                    }
-                    .foregroundStyle(Theme.Colors.accent)
-                    .disabled(importDraftItems.isEmpty || savedListsUnreadable)
-                }
-            }
-            .appBackground()
-        }
-    }
-
-    private var importPasteHeader: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text("Add items")
-                .sectionHeader()
-
-            Spacer()
-
-            Button(action: pasteImportedTasksFromClipboard) {
-                Text("Paste")
-                    .font(Theme.Text.body.weight(.semibold))
-                    .foregroundStyle(Color.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(importPasteButtonBackground)
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var importPasteButtonBackground: some View {
-        RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-            .fill(Color.secondary.opacity(0.12))
-    }
-
-    private var importDraftEditorCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if !importDraftLines.isEmpty {
-                ForEach($importDraftLines) { $line in
-                    importedTaskDraftRow($line)
-                        .onDrop(
-                            of: [UTType.text],
-                            delegate: ImportedTaskDraftLineDropDelegate(
-                                targetID: line.id,
-                                draftLines: $importDraftLines,
-                                draggedLineID: $draggedImportLineID
-                            )
-                        )
-
-                    if line.id != importDraftLines.last?.id {
-                        Divider()
-                    }
-                }
-            }
-
-            if !importDraftLines.isEmpty && !pastedImportText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Divider()
-                    .padding(.vertical, 8)
-            }
-
-            TextEditor(text: $pastedImportText)
-                .frame(minHeight: importDraftLines.isEmpty ? 140 : 44)
-                .font(Theme.Text.body)
-                .scrollContentBackground(.hidden)
-                .onChange(of: pastedImportText) { oldValue, newValue in
-                    handleImportedRawTextChanged(oldValue: oldValue, newValue: newValue)
-                }
-        }
-        .cardSurface()
-    }
-
-    private var importTaskSetNameSection: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("List name")
-                .sectionHeader()
-            TextField("List name", text: $importDraftTaskSetName)
-                .font(Theme.Text.body)
-                .textInputAutocapitalization(.words)
-                .padding(.horizontal, 14)
-                .frame(height: 44)
-                .cardSurface()
-        }
-    }
-
     private var defaultTaskSetSheet: some View {
         NavigationStack {
             Form {
@@ -1045,19 +891,6 @@ struct TasksManagerView: View {
             }
             .buttonStyle(.plain)
         }
-    }
-
-    private func pasteImportedTasksFromClipboard() {
-        #if canImport(UIKit)
-        guard let pasted = UIPasteboard.general.string else { return }
-        let trimmed = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.isEmpty == false else { return }
-
-        suppressImportedRawTextObserver = true
-        pastedImportText = pasted
-        suppressImportedRawTextObserver = false
-        handleImportedRawTextChanged(oldValue: "", newValue: pasted)
-        #endif
     }
 
     private func addItem() {
@@ -1202,134 +1035,6 @@ struct TasksManagerView: View {
         saveTaskSetSelectionAndItems()
     }
 
-    private func saveCurrentItemsAsTaskSet() {
-        draftTaskSetName = defaultImportedTaskSetName(from: textItems(from: items))
-        showSaveCurrentTaskSetPrompt = true
-    }
-
-    private func commitSaveCurrentItemsAsTaskSet() {
-        let trimmedName = draftTaskSetName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseName = trimmedName.isEmpty ? defaultImportedTaskSetName(from: textItems(from: items)) : trimmedName
-        let finalName = uniqueTaskSetName(from: baseName)
-        let newSet = SavedTaskSet(id: UUID(), name: finalName, items: normalizedTaskTemplateLines(from: items))
-        savedTaskSets.append(newSet)
-        guard saveSavedTaskSets() else { return }
-        selectTaskSet(newSet.id)
-        showSaveCurrentTaskSetPrompt = false
-    }
-
-    private func saveImportedTaskSetFromDraft() {
-        syncImportDraftItemsFromLines()
-        let cleanedItems = importDraftItems
-        guard !cleanedItems.isEmpty else { return }
-
-        let trimmedName = importDraftTaskSetName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseName = trimmedName.isEmpty ? defaultImportedTaskSetName(from: textItems(from: cleanedItems)) : trimmedName
-        let finalName = uniqueTaskSetName(from: baseName)
-        let newSet = SavedTaskSet(id: UUID(), name: finalName, items: normalizedTaskTemplateLines(from: cleanedItems))
-        savedTaskSets.append(newSet)
-        guard saveSavedTaskSets() else { return }   // keep the draft and the sheet
-        selectTaskSet(newSet.id)
-        pastedImportText = ""
-        importDraftItems = []
-        importDraftLines = []
-        importDraftTaskSetName = ""
-        showTaskImportPasteSheet = false
-    }
-
-    @ViewBuilder
-    private func importedTaskDraftRow(_ line: Binding<EditableImportedTaskLine>) -> some View {
-        HStack(spacing: 6) {
-            TextField("Item", text: line.text)
-                .textFieldStyle(.plain)
-                .font(Theme.Text.body)
-                .disableAutocorrection(true)
-                .focused($focusedImportLineID, equals: line.wrappedValue.id)
-                .onChange(of: line.wrappedValue.text) { _, _ in
-                    syncImportDraftItemsFromLines()
-                }
-
-            Spacer(minLength: 8)
-
-            HStack(spacing: 16) {
-                Image(systemName: "line.3.horizontal")
-                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
-                    .frame(width: 20, height: 28)
-                    .contentShape(Rectangle())
-                    .onDrag {
-                        dismissImportedTaskKeyboard()
-                        draggedImportLineID = line.wrappedValue.id
-                        return NSItemProvider(object: NSString(string: line.wrappedValue.id.uuidString))
-                    }
-                    .accessibilityLabel("Reorder item")
-
-                Button(role: .destructive) {
-                    importDraftLines.removeAll { $0.id == line.wrappedValue.id }
-                    syncImportDraftItemsFromLines()
-                } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
-                        .frame(width: 20, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .frame(width: 56, alignment: .trailing)
-        }
-        .padding(.vertical, 10)
-        .contentShape(Rectangle())
-    }
-
-    private func handleImportedRawTextChanged(oldValue: String, newValue: String) {
-        guard suppressImportedRawTextObserver == false else { return }
-        guard newValue.contains("\n") else { return }
-
-        let isLikelyPaste = abs(newValue.count - oldValue.count) > 1
-
-        let committedText: String
-        let remainingText: String
-
-        if isLikelyPaste {
-            committedText = newValue
-            remainingText = ""
-        } else if newValue.hasSuffix("\n") {
-            committedText = newValue
-            remainingText = ""
-        } else {
-            var components = newValue.components(separatedBy: .newlines)
-            remainingText = components.popLast() ?? ""
-            committedText = components.joined(separator: "\n")
-        }
-
-        let parsed = Self.parseImportedTaskLines(from: committedText)
-        guard !parsed.isEmpty else { return }
-
-        importDraftLines.append(contentsOf: parsed.map { EditableImportedTaskLine(text: $0) })
-        syncImportDraftItemsFromLines()
-
-        if importDraftTaskSetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || importDraftTaskSetName == defaultImportedTaskSetName(from: textItems(from: importDraftItems)) {
-            importDraftTaskSetName = defaultImportedTaskSetName(from: textItems(from: importDraftItems))
-        }
-
-        suppressImportedRawTextObserver = true
-        pastedImportText = remainingText
-        suppressImportedRawTextObserver = false
-
-        dismissImportedTaskKeyboard()
-    }
-
-    private func syncImportDraftItemsFromLines() {
-        importDraftItems = importDraftLines
-            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map { TaskTemplateLine(text: $0, type: .task) }
-    }
-
-    private func dismissImportedTaskKeyboard() {
-        focusedImportLineID = nil
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
-
     private func dismissManagerKeyboard() {
         focusedManagerLineID = nil
         ignoreNextManagerTapLineID = nil
@@ -1386,118 +1091,8 @@ struct TasksManagerView: View {
         return formatter.string(from: Date())
     }
 
-    static func parseImportedTaskLines(from text: String) -> [String] {
-        text
-            .components(separatedBy: .newlines)
-            .map { line in
-                line.replacingOccurrences(
-                    of: #"^\s*(?:[-•*]|\d+[\.)])\s*"#,
-                    with: "",
-                    options: .regularExpression
-                )
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            .filter { !$0.isEmpty }
-    }
 }
 
-
-private struct TasksManagerImportLauncherSheet: View {
-    let onCancel: () -> Void
-    let onPasteOrType: () -> Void
-    let onScan: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Import list")
-                        .sectionHeader()
-
-                    Text("Bring items into this list from paper or text.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.bottom, 8)
-
-                    VStack(spacing: 12) {
-                        importOptionButton(
-                            title: "Scan list",
-                            subtitle: "Import from paper or notes",
-                            systemImage: "camera",
-                            action: onScan
-                        )
-
-                        importOptionButton(
-                            title: "Paste or type",
-                            subtitle: "Enter items manually",
-                            systemImage: "keyboard",
-                            action: onPasteOrType
-                        )
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
-            }
-            .appBackground()
-            .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        onCancel()
-                    }
-                    .foregroundStyle(Theme.Colors.accent)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func importOptionButton(
-        title: String,
-        subtitle: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: Theme.Spacing.m) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundStyle(Theme.Colors.accent)
-                    .frame(width: 44)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title)
-                        .font(Theme.Text.body)
-                        .foregroundStyle(.primary)
-
-                    Text(subtitle)
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.secondaryText)
-            }
-            .padding(.horizontal, Theme.Spacing.m)
-            .padding(.vertical, Theme.Spacing.m)
-            .background(
-                RoundedRectangle(
-                    cornerRadius: Theme.Radius.control,
-                    style: .continuous
-                )
-                .fill(Color.secondary.opacity(0.12))
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
 
 #if canImport(VisionKit) && canImport(UIKit)
 private struct TasksManagerImportScanSheet: UIViewControllerRepresentable {

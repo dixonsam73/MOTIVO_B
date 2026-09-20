@@ -200,7 +200,6 @@ struct SessionDetailView: View {
     @State private var showEdit = false
     @State private var shouldDismissAfterEditSave = false
     @State private var editWasPresented: Bool = false
-    @State private var showDeleteConfirm = false
     @State private var previewURL: URL?
     @State private var isShowingPreview = false
     
@@ -862,10 +861,6 @@ return AttachmentViewerView(
         #endif
         .fullScreenCover(item: $viewerRequest) { req in
             attachmentViewerSheetErased(req)
-        }
-        .alert("Delete Session?", isPresented: $showDeleteConfirm) {
-            Button("Delete", role: .destructive) { deleteSession() }
-            Button("Cancel", role: .cancel) { }
         }
         
         .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange)) { note in
@@ -1781,22 +1776,6 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
         guard let s = fileURLString, !s.isEmpty else { return base }
         let name = URL(fileURLWithPath: s).lastPathComponent
         return name.isEmpty ? base : "\(base), \(name)"
-    }
-
-    private func deleteSession() {
-        // Delete on-disk media files for this session's attachments before deleting the Core Data object
-        let attachments = (session.attachments as? Set<Attachment>) ?? []
-        let paths: [String] = attachments.compactMap { att in
-            if let s = att.value(forKey: "fileURL") as? String, !s.isEmpty { return s }
-            return nil
-        }
-        if !paths.isEmpty {
-            AttachmentStore.deleteAttachmentFiles(atPaths: paths)
-        }
-
-        viewContext.delete(session)
-        do { try viewContext.save() } catch { print("Delete error: \(error)") }
-        dismiss()
     }
 
     private var saveHintView: some View {
