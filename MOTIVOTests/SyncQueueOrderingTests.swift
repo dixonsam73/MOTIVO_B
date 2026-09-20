@@ -74,6 +74,19 @@ final class QueueStubServer: URLProtocol {
     private static var dropAfterApply = Set<String>()
     private static var deferredCommits = Set<String>()
 
+    // U3 — ADDITIVE, OFF BY DEFAULT. When on, a posts request carrying
+    // `owner_user_id=eq.<X>` sees a row only if X owns it, as RLS plus the
+    // client's owner filter would. Existing suites never turn it on.
+    private static var enforceOwnerFilter = false
+    static func enforceOwnerFilterForTest() { cond.lock(); enforceOwnerFilter = true; cond.unlock() }
+    /// A row owned by `owner`, with these storage object paths as its refs.
+    static func seedRow(_ id: UUID, objectPaths: [String], owner: String) {
+        cond.lock()
+        let k = id.uuidString.uppercased()
+        rows.insert(k); refs[k] = objectPaths; rowOwners[k] = owner.lowercased()
+        cond.unlock()
+    }
+
     /// P6-I-02 Unit 2b. Set when the CLIENT abandons a request before its
     /// response was produced — the observable form of cancellation.
     private var loadingKey: String?
@@ -84,6 +97,7 @@ final class QueueStubServer: URLProtocol {
         cond.lock(); rows = []; requestLog = []; holds = []; failing = []
         auth = []; urls = []; forced = [:]; refs = [:]; rowOwners = [:]
         forcedBodies = [:]; dropAfterApply = []; deferredCommits = []
+        enforceOwnerFilter = false
         cond.broadcast(); cond.unlock()
     }
 
@@ -211,6 +225,11 @@ final class QueueStubServer: URLProtocol {
             var data = Data()
             var transportFailure = false
             let wantsRows = self.request.value(forHTTPHeaderField: "Prefer")?.contains("return=representation") == true
+            // U3. Hidden from this request when the owner filter names someone else.
+            let filterOwner = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first(where: { $0.name == "owner_user_id" })?.value.map { $0.hasPrefix("eq.") ? String($0.dropFirst(3)) : $0 }
+            let hidden = Self.enforceOwnerFilter && !isObject && filterOwner != nil
+                && Self.rowOwners[id] != filterOwner?.lowercased()
             let rowJSON = #"[{"id":""# + id + #""}]"#
             if var bodies = Self.forcedBodies[key], !bodies.isEmpty {
                 data = Data(bodies.removeFirst().utf8)
@@ -232,13 +251,13 @@ final class QueueStubServer: URLProtocol {
                 switch method {
                 case "POST": Self.rows.insert(id); status = 201
                 case "DELETE":
-                    let existed = Self.rows.remove(id) != nil
+                    let existed = !hidden && Self.rows.remove(id) != nil
                     if wantsRows { status = 200; data = Data((existed ? rowJSON : "[]").utf8) }
                 case "PATCH" where wantsRows:
-                    status = 200; data = Data((Self.rows.contains(id) ? rowJSON : "[]").utf8)
+                    status = 200; data = Data((Self.rows.contains(id) && !hidden ? rowJSON : "[]").utf8)
                 case "GET":
                     status = 200
-                    if Self.rows.contains(id) {
+                    if Self.rows.contains(id) && !hidden {
                         let paths = (Self.refs[id] ?? []).map { #"{"bucket":"attachments","path":""# + $0 + #""}"# }
                         let body = #"[{"attachments":["# + paths.joined(separator: ",") + "]}]"
                         data = Data(body.utf8)

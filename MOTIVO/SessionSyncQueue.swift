@@ -637,48 +637,111 @@ public final class SessionSyncQueue: ObservableObject {
         return saved
     }
 
-    /// JOURNAL DELETE, Connected. Called only AFTER the backend delete succeeded
-    /// and BEFORE local deletion. Returns whether local deletion may proceed.
+    /// Why a journal delete's queue step refused.
+    enum JournalDeleteSupersession: Equatable {
+        case proceed
+        case identityChanged
+        case notSaved
+    }
+
+    /// JOURNAL DELETE. Called before local deletion: in Connected only AFTER the
+    /// backend delete succeeded, in Solo with no backend call. `.proceed` means
+    /// local deletion may go ahead.
     ///
-    /// A same-owner `.publish` for this post that is still queued would otherwise
-    /// re-create the deleted entry's post on a later flush, because the payload is
-    /// self-contained and a missing session only empties its attachments. It is
-    /// superseded by an owner-bound `.unshare` (C-61: last intent wins).
+    /// Every queued `.publish` for this post, OF ANY OWNER, is replaced by an
+    /// `.unshare` owned by that SAME owner, so a later flush cannot re-create the
+    /// deleted entry's post. The withdrawal is sent only by the existing dispatch
+    /// boundary, as that owner, when that owner is current. A quarantined
+    /// `.publish` becomes an `.unshare` that stays unowned and quarantined. All of
+    /// it is ONE write.
     ///
-    /// - The owner is the one captured at the member's action. It is never
-    ///   derived from the current sign-in, and an account switch across the
-    ///   backend await refuses.
+    /// - The owner captured at the member's action must still be current (it may
+    ///   be nil, signed out); otherwise nothing is written.
     /// - Memory answers "is a publish queued?" only once it is known to be saved:
-    ///   a halted store, or an earlier supersession whose write did not take, is
-    ///   recovered first and refuses if it cannot be. Otherwise an older envelope
-    ///   on disk could still hold the publish.
-    /// - Another owner's work is never read, merged or superseded.
+    ///   a halted store, or an earlier write that did not take, is recovered first
+    ///   and refuses if it cannot be.
+    /// - C1: the replacement is in place, carries no `choiceToken`, and never
+    ///   touches the handoff ledger or any marker. Removing a ledger entry would
+    ///   let a surviving marker replay the publish over the withdrawal.
+    /// - No owner is ever assigned: not to other owners' work, not to quarantine.
     ///
-    /// Not covered: a publish already in flight. The delayed `.unshare` is
-    /// owner-scoped and later deletes whatever row of that id this owner holds.
-    func supersedeQueuedPublishForJournalDelete(postID: UUID, capturedOwner: String?) -> Bool {
-        let owner = Self.normalisedOwner(capturedOwner)
-        guard Self.normalisedOwner(Self.currentOwner()) == owner else {
-            BackendLogger.notice("Journal delete refused • identity changed during the backend delete • postID=\(postID.uuidString)")
-            return false
+    /// U3. Posts already ACKNOWLEDGED leave no queue item, so candidate owners are
+    /// also given a withdrawal ATTEMPT, appended in the same write:
+    /// - every owner the durable C1 handoff ledger names for this post (evidence
+    ///   that this install queued a saved choice as that owner; NOT proof that the
+    ///   post was published). Malformed, unowned (`~`) and non-UUID keys are skipped;
+    /// - the captured identity, only when the entry was shared (`sessionWasShared`):
+    ///   a self-scoped attempt, not an inference of ownership.
+    /// Every request of a withdrawal is sent as its owner and filtered on
+    /// `owner_user_id`, so a candidate that does not own the post matches nothing.
+    /// No owner is added that the ledger or the member's own identity does not name.
+    ///
+    /// Not covered: a publish already in flight. A delayed `.unshare` later
+    /// deletes whatever row of that id its owner then holds.
+    func supersedeQueuedPublishForJournalDelete(postID: UUID, capturedOwner: String?,
+                                                sessionWasShared: Bool = false) -> JournalDeleteSupersession {
+        guard Self.normalisedOwner(Self.currentOwner()) == Self.normalisedOwner(capturedOwner) else {
+            BackendLogger.notice("Journal delete refused • identity changed • postID=\(postID.uuidString)")
+            return .identityChanged
         }
-        guard let owner else { return true }   // no owner: nothing can be same-owner work
         guard recoverIfNeeded(reason: "journal-delete") else {
             BackendLogger.notice("Journal delete refused • queue not saved • postID=\(postID.uuidString)")
-            return false
+            return .notSaved
         }
-        guard let existing = items.first(where: { $0.id == postID && $0.ownerUserID == owner }),
-              existing.op == .publish else { return true }
-        let withdrawal = PostPublishPayload(
-            id: postID, sessionID: postID, sessionTimestamp: nil, title: nil, durationSeconds: nil,
-            activityType: nil, activityDetail: nil, instrumentLabel: nil, mood: nil, effort: nil,
-            isPublic: false, ownerUserID: owner
-        )
-        let durable = enqueue(withdrawal)
-        if !durable {
-            BackendLogger.notice("Journal delete refused • withdrawal not saved • postID=\(postID.uuidString)")
+        func withdrawal(owner: String?) -> PostPublishPayload {
+            PostPublishPayload(
+                id: postID, sessionID: postID, sessionTimestamp: nil, title: nil, durationSeconds: nil,
+                activityType: nil, activityDetail: nil, instrumentLabel: nil, mood: nil, effort: nil,
+                isPublic: false, ownerUserID: owner
+            )
         }
-        return durable
+        var converted = 0
+        for index in items.indices where items[index].id == postID && items[index].op == .publish {
+            let replacement = withdrawal(owner: items[index].ownerUserID)
+            items[index] = replacement
+            noteNewIntent(replacement)
+            converted += 1
+        }
+        for index in quarantined.indices where quarantined[index].id == postID && quarantined[index].op == .publish {
+            quarantined[index] = withdrawal(owner: nil)
+            converted += 1
+        }
+        // U3. Candidate owners with no item for this post get a withdrawal attempt.
+        // The ledger is read only after the recovery guard above, from its
+        // durable (verified) state, and is never modified.
+        var candidates = Self.ledgerOwners(for: postID, in: verifiedHandoffLedger)
+        if sessionWasShared, let owner = Self.normalisedOwner(capturedOwner) {
+            candidates.insert(owner)
+        }
+        for owner in candidates.sorted() where !items.contains(where: { $0.id == postID && $0.ownerUserID == owner }) {
+            let attempt = withdrawal(owner: owner)
+            items.append(attempt)
+            noteNewIntent(attempt)
+            converted += 1
+        }
+        guard converted > 0 else { return .proceed }   // nothing queued or owed: no write
+        guard persist() else {
+            BackendLogger.notice("Journal delete refused • withdrawals not saved • postID=\(postID.uuidString)")
+            return .notSaved
+        }
+        BackendLogger.notice("Journal delete • \(converted) queued publish(es) replaced by withdrawals • postID=\(postID.uuidString)")
+        return .proceed
+    }
+
+    /// U3. Owners the handoff ledger names for `postID`. A key is "owner|post";
+    /// only a well-formed key whose post suffix matches exactly and whose owner is
+    /// a normalised UUID counts. `~` (unowned) and anything malformed are skipped.
+    static func ledgerOwners(for postID: UUID, in ledger: [String: UUID]) -> Set<String> {
+        let suffix = postID.uuidString.lowercased()
+        var owners: Set<String> = []
+        for key in ledger.keys {
+            let parts = key.split(separator: "|", omittingEmptySubsequences: false)
+            guard parts.count == 2, parts[1] == suffix else { continue }
+            let owner = String(parts[0])
+            guard owner != "~", UUID(uuidString: owner) != nil, normalisedOwner(owner) == owner else { continue }
+            owners.insert(owner)
+        }
+        return owners
     }
 
     /// CONVENIENCE: captures the owner AT THIS CALL. Only safe where the call is

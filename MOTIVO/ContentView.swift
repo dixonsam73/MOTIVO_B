@@ -521,6 +521,7 @@ fileprivate struct SessionsRootView: View {
     @EnvironmentObject private var appModeManager: AppModeManager
 
     @State private var showPublishSkipOversizeAlert = false
+    @State private var journalDeleteRefusal: JournalDeleteRefusal?
     @State private var publishSkipOversizeMessage = ""
     @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
 
@@ -1811,6 +1812,13 @@ fileprivate struct SessionsRootView: View {
         } message: {
             Text(publishSkipOversizeMessage)
         }
+        .alert(JournalDeleteRefusal.title,
+               isPresented: Binding(get: { journalDeleteRefusal != nil },
+                                    set: { if !$0 { journalDeleteRefusal = nil } })) {
+            Button("OK", role: .cancel) { journalDeleteRefusal = nil }
+        } message: {
+            Text(journalDeleteRefusal?.message ?? "")
+        }
     }
 
  
@@ -2609,52 +2617,47 @@ fileprivate struct SessionsRootView: View {
         let rows = filteredSessions
         var didDeleteAny: Bool = false
 
-        do {
-            for idx in offsets {
-                guard idx < rows.count else { continue }
-                let session = rows[idx]
+        for idx in offsets {
+            guard idx < rows.count else { continue }
+            let session = rows[idx]
+            // Local deletion runs in its own context, in the same turn as the queue
+            // step; media files go only after that save succeeds.
+            let objectID = session.objectID
+            let sessionWasShared = session.isPublic
+            let deleteLocally = { JournalDeleteBackendStep.deleteSessionLocally(objectID: objectID) }
 
-                // Connected mode: delete matching backend post first.
+            let outcome: JournalDeleteBackendStep.Outcome
+            if useBackendFeed {
                 // Invariant (published sessions): posts.id is client-assigned and equals the local Session UUID.
-                if useBackendFeed {
-                    guard let postID = session.id else {
-                        // Fail-closed: if we cannot derive the backend postID, abort the entire delete operation.
-                        print("[Delete][FAIL-CLOSED] session.id missing; cannot delete backend post. Aborting delete.")
-                        return
-                    }
-
-                    // Backend delete, then supersede this owner's queued publish.
-                    // Fail-closed: abort immediately — do NOT proceed to any local deletion.
-                    guard await JournalDeleteBackendStep.run(postID: postID, capturedOwner: capturedOwner) else {
-                        return
-                    }
+                guard let postID = session.id else {
+                    // Fail-closed: if we cannot derive the backend postID, abort the entire delete operation.
+                    print("[Delete][FAIL-CLOSED] session.id missing; cannot delete backend post. Aborting delete.")
+                    journalDeleteRefusal = .missingIdentifier
+                    break
                 }
-
-                // Gather attachment file paths for this session and delete from disk before deleting Core Data objects.
-                let attachments = (session.attachments as? Set<Attachment>) ?? []
-                let paths: [String] = attachments.compactMap { att in
-                    if let s = att.value(forKey: "fileURL") as? String, !s.isEmpty { return s }
-                    return nil
-                }
-                if !paths.isEmpty {
-                    AttachmentStore.deleteAttachmentFiles(atPaths: paths)
-                }
-
-                viewContext.delete(session)
-                didDeleteAny = true
+                // Backend delete, then withdraw every queued publish for the post, then delete locally.
+                outcome = await JournalDeleteBackendStep.run(postID: postID, capturedOwner: capturedOwner,
+                                                          sessionWasShared: sessionWasShared, deleteLocally: deleteLocally)
+            } else if let postID = session.id {
+                // Solo, lapsed or signed out: no backend call, but queued publishes are still withdrawn.
+                outcome = JournalDeleteBackendStep.runLocalOnly(postID: postID, capturedOwner: capturedOwner,
+                                                         sessionWasShared: sessionWasShared, deleteLocally: deleteLocally)
+            } else {
+                outcome = deleteLocally() ? .deleted : .refused(.localSaveFailed)
             }
 
-            if didDeleteAny {
-                try viewContext.save()
-
-                // Refresh backend feed after deletions so remote rows don't rehydrate.
-                if useBackendFeed {
-                    let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
-                    _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
-                }
+            if case .refused(let reason) = outcome {
+                // Fail-closed: stop, and say why.
+                journalDeleteRefusal = reason
+                break
             }
-        } catch {
-            print("Delete error: \(error)")
+            didDeleteAny = true
+        }
+
+        // Refresh backend feed after deletions so remote rows don't rehydrate.
+        if didDeleteAny && useBackendFeed {
+            let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
+            _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
         }
     }
 

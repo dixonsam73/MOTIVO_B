@@ -306,3 +306,177 @@ failures**.
 - a global candidate census;
 - which deployed function version answered;
 - **G7, which remains OPEN** (the Phase 3 obligation, earliest 2026-11-01).
+
+## Later on 19 September 2026 (overnight): U1, journal delete withdraws every queued publish and explains refusals. Code review ACCEPTED; NOT committed
+
+**Samuel's decisions (recorded, not to be re-asked):**
+- **D1:** deleting a journal entry withdraws its pending **and** already-published posts, including
+  in Solo / lapsed, acting only as the owning account.
+- **D2:** Erase All removes ALL local data, including any queue or cleanup records.
+- **D3:** a refused deletion is explained.
+- **The product model is one Connected account.**
+
+**D1 is NOT fully met by U1:** posts already acknowledged (published and dequeued) need
+ownership evidence, which is scoped separately (U3).
+
+**What U1 changes** (it extends `a0313cb`'s same-owner fix):
+- **`SessionSyncQueue.supersedeQueuedPublishForJournalDelete`:**
+  - every queued `.publish` for the post, **of any owner**, becomes an `.unshare` owned by that
+    same owner, sent only as that owner, when that owner is current;
+  - a quarantined `.publish` becomes an unowned `.unshare` that stays quarantined;
+  - **all of it is one write**; a non-durable write refuses, and an unsaved queue is recovered
+    first or refuses;
+  - **the C1 handoff ledger and markers are untouched** (the withdrawal carries no token), so a
+    surviving marker is cleared rather than replayed over the withdrawal;
+  - **no owner is ever invented.**
+- **`JournalDeleteBackendStep`:**
+  - `run` (Connected: backend delete first) and `runLocalOnly` (Solo, lapsed, signed out);
+  - each runs the queue step and then, **in the same synchronous turn**, a `deleteLocally`
+    closure;
+  - `deleteSessionLocally` deletes the Session in its **own** background context and saves only
+    that change. **Media files are removed only after the save succeeds.** On failure, the view
+    context holds nothing pending and no unrelated edit is discarded. The view context learns of
+    the deletion through its normal automatic merge.
+- **`ContentView`:** every journal-delete branch goes through the helper. A refusal shows **"Session
+  not deleted"** with one of three neutral messages:
+  - "Études couldn’t confirm that this session’s shared post was removed, so the session has been
+    kept. Try again."
+  - "Your Études account changed while this session was being deleted, so it has been kept. Try
+    again."
+  - "Études couldn’t finish deleting this session, so it has been kept. Try again."
+
+  **None of them promises anything about server state.**
+
+### Verification
+
+- **`JournalDeleteQueuedPublishTests`: 20 cases through the production helper and queue,** with
+  synthetic fixtures only (a loopback stub, synthetic owners, disposable Sessions and files). They
+  cover:
+  - another owner's queued publish sent later as that owner, with no POST;
+  - signed-out and Solo deletes;
+  - an account switch;
+  - quarantine;
+  - several owners in one write, with no partial state on failure;
+  - a failed write, a retry, and a relaunch;
+  - a store halted at launch;
+  - the handoff ledger untouched, a surviving marker cleared rather than replayed, and a marker
+    that was never taken removed with its row;
+  - a failed local save keeping the session and its files with nothing pending;
+  - a successful delete removing the row through the normal merge, with unrelated unsaved edits
+    surviving.
+
+  **An immediate recovery was run while the view context was still stale**, and it re-enqueued
+  nothing.
+- **Four mutations were caught** (converting only the captured owner, no quarantine, a ledger
+  entry removed, files deleted before the save), and the source was restored by hash.
+- **Full Debug suite: 798 passed / 0 failed / 9 skipped (807).** The skips match the earlier
+  accounting (6 baseline, 3 UI preconditions). **Release: build succeeded.**
+
+### Limitations
+
+- **Not covered:**
+  - already-acknowledged posts (U3);
+  - a publish already in flight;
+  - other devices;
+  - `noRowMatched` ambiguity;
+  - row-less or unreferenced bytes;
+  - physical deletion (API-reported only, vendor unknowns).
+- **The delayed withdrawal now applies to every owner.** When it runs it deletes whatever row of
+  that id its owner then holds. A newer legitimate share published elsewhere in between would be
+  withdrawn (a restored backup on another device is one example).
+- **If the local save fails after the queue step,** the entry is kept, but its pending shares are
+  now withdrawals. **The entry still reads Share ON while its post will be withdrawn.** Saving the
+  entry again re-shares it.
+- **A withdrawal whose owner never returns is held indefinitely,** as its publish was.
+  `handoffBlockedPosts` withholds a converted withdrawal until the next recovery recomputes it.
+- **Device smoke test is pending for the morning** (Release: Connected and Solo swipe-deletes). No
+  forced fault injection on Samuel's device.
+- **The six broader sharing and deletion blockers remain OPEN.**
+
+## Later on 19 September 2026 (overnight): U2 (erase copy) and U3 (withdrawal attempts for acknowledged posts). Reviewed; NOT committed
+
+**U2, copy only (Codex ACCEPTED).** `ProfileView.eraseAllEtudesDataExplanation`:
+- **The local erase explanation now adds:** *"This does not delete posts already shared with Études
+  Connected. Any pending requests to remove shared posts will also be erased. To delete a Connected
+  account and its posts, sign in to that account and use Delete Account."*
+- **The account-delete explanation now adds:** *"This deletes only the Connected account you are
+  signed in to. If you previously used another Connected account on this device, its shared posts
+  are not deleted by this action."*
+
+**No behaviour changed.** D2 already held: Erase All wipes the whole queue and ledger.
+
+**U3: posts already acknowledged (no queue item left).** In the same single write as U1, the
+journal delete also gives **candidate owners** a durable, owner-bound **withdrawal attempt**:
+- **every owner the durable C1 handoff ledger names for the post.**
+  - The ledger survives acknowledgement and is cleared only by a factory reset.
+  - It is **evidence that this install queued a saved choice as that owner, not proof of
+    publication.**
+  - Malformed, `~` and non-UUID keys are skipped, and the ledger is never modified.
+- **the captured identity, only when the entry was shared.** This is a **self-scoped attempt, not an
+  inference of ownership.**
+
+**Why it is safe:** every request of a withdrawal is sent as its owner and filtered on
+`owner_user_id`, so a candidate that does not own the post matches nothing. **No owner is invented.**
+
+### U3 guarantee (bounded)
+
+**U3 guarantees only durable, authorised withdrawal ATTEMPTS for the candidates it can name. It
+guarantees removal for no post:**
+- an owner may never return;
+- a candidate may not be the owner;
+- a publish may be in flight;
+- other devices are not covered.
+
+**The legacy gap stays OPEN as a product disposition for Samuel, and is NOT accepted:** a post
+acknowledged before C1 (no ledger entry), then deleted while signed out, gets no attempt.
+Unknown-owner (quarantined) withdrawals still cannot dispatch.
+
+### U3 verification
+
+- **Eight new cases through the production helper and queue** (synthetic, loopback stub):
+  - a ledger owner's attempt is sent as that owner with its owner filter;
+  - a signed-out ledger owner waits for that identity;
+  - legacy attempts happen only when shared, and nothing is added when signed out (the gap);
+  - a **non-owner candidate matches nothing**, and the owner's row, refs and objects are
+    untouched (no storage call);
+  - each candidate is sent only as its own owner;
+  - malformed and unowned ledger keys are skipped, both in the parser and through a reloaded
+    durable ledger;
+  - conversion and appends go in one write: nothing partial on failure, durable after recovery
+    and relaunch, and existing withdrawals unchanged.
+- **The loopback stub gained an opt-in owner filter** (off by default, reset per test), in
+  `SyncQueueOrderingTests.swift`, so the non-owner cases can see RLS-like owner scoping.
+- **Full Debug suite: 806 passed / 0 failed / 9 skipped (815).** The +8 are exactly the U3 cases;
+  the 9 skips are unchanged. **Release: build succeeded.**
+
+## Later on 19 September 2026 (overnight): read-only findings (no code change)
+
+- **Sharing blockers #2 (lifecycle release / epoch ownership) and #6 (refusal handling) are
+  prospective only.**
+  - Their constructs (`cleaned_through`, `satisfied_by_cleanup`, `refs_invalid`, `seq_reused`)
+    exist nowhere in client or server code.
+  - The only current analogue of #6, the flush's phase-blind "409 means success" heuristic, is
+    **latent**. The POST 409 is already absorbed by typed status in `uploadPostImpl`; `posts`
+    carries only its primary key; and no later-phase 409 trigger is established. It is **not**
+    treated as a production defect. A stub-supplied-409 regression test would still test the
+    failure-handling contract; any defensive fix awaits its own scope.
+  - **No bounded local fix was identified in this limited pass. That is not a finding of
+    impossibility. All six remain OPEN.**
+- **B-38.** The client never writes `avatar_version`. **The register's candidate column revoke would
+  not work,** because `authenticated` holds table-level INSERT/UPDATE on `account_directory`. The
+  guard-trigger or privilege shape is to be chosen only after local proof. **Any production change
+  needs Samuel's approval and deploy.**
+  - **Local proof (overnight, revised on review):** the **exact** apply and rollback statement
+    bodies, extracted verbatim, ran inside one outer rolled-back transaction on the positively
+    identified local stack, with synthetic identities.
+    - Each re-stamp or "unchanged" assertion first set a distinguishable old value (2000-01-01).
+    - **14/14 passed:** a baseline defect reproduction, the guard behaviour, a same-value re-stamp,
+      the cleanup re-stamp, and the rollback restoring grants, the stamping trigger and the
+      original behaviour.
+    - **Local DB unchanged:** 10 users, 0 directory rows, no guard, no synthetic rows.
+  - **The guard applies to every role,** including `service_role` and `postgres`.
+  - **Status: PROPOSED.** The SQL is prepared outside `supabase/migrations/`, **not applied**. It
+    needs a fresh production-parity capture, the B-23 gate, and Samuel's approval.
+- **B-37.** Its Phase 6 disposition is **unresolved, for Samuel** (what the directory publishes; any
+  rate limiting). Enumeration affects adults too, so it is **not** folded into the frozen adult-only
+  work.

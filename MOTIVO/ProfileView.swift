@@ -1657,6 +1657,8 @@ case .failure(let error):
              return """
              This permanently deletes your Études Connected account and the data associated with it — your profile, posts, comments, avatar, follows, and the attachments you have sent.
 
+             This deletes only the Connected account you are signed in to. If you previously used another Connected account on this device, its shared posts are not deleted by this action.
+
              It also erases everything stored in Études on this device: your Journal, Scores, profile, attachments, instruments, activities and settings. Études will return to its first-launch state.
 
              Files you have already sent may remain on the devices of people you sent them to.
@@ -1666,7 +1668,7 @@ case .failure(let error):
              This can’t be undone.
              """
          }
-         return "This permanently erases everything stored in Études on this device, including your Journal, Scores, profile, attachments, instruments, activities, and settings. Études will return to its first-launch state. This can’t be undone."
+         return "This permanently erases everything stored in Études on this device, including your Journal, Scores, profile, attachments, instruments, activities, and settings. Études will return to its first-launch state. This does not delete posts already shared with Études Connected. Any pending requests to remove shared posts will also be erased. To delete a Connected account and its posts, sign in to that account and use Delete Account. This can’t be undone."
      }
 
      private var deleteAccountSheet: some View {
