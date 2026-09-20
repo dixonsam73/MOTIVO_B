@@ -480,3 +480,35 @@ Unknown-owner (quarantined) withdrawals still cannot dispatch.
 - **B-37.** Its Phase 6 disposition is **unresolved, for Samuel** (what the directory publishes; any
   rate limiting). Enumeration affects adults too, so it is **not** folded into the frozen adult-only
   work.
+
+## 20 September 2026 — Samuel's morning decisions, and what was committed
+
+**Decisions (recorded; not to be re-asked):**
+- **The U3 legacy gap is ACCEPTED as a stated limitation.** A post acknowledged **before** the C1
+  handoff ledger existed, then deleted while signed out, leaves no local evidence of its owner, so
+  **no withdrawal attempt is made for it**. No new bookkeeping is being built for it, because none
+  could reach posts that are already acknowledged.
+- **Beta and TestFlight accounts and their posts are expendable.** **Device B is valuable
+  long-term**, and Samuel accepts collateral loss there if it is genuinely needed. **This is NOT an
+  instruction to delete anything**, and nothing was deleted.
+- **B-37 stays a Phase 6 product and search question**, unresolved: what the directory publishes,
+  and whether any rate limiting is wanted. **This is not a closure, and no rate-limiting decision
+  has been invented.** It is **not** transferred to the frozen adult-only work; enumeration affects
+  adults too.
+- **B-38 deployment is approved by Samuel**, with the reviewed SQL, a fresh production-parity
+  capture and independent preflight review still required before the apply.
+
+**Committed 2026-09-20 (`0b606dfb`, not pushed):** the reviewed U1–U3 unit, seven files —
+`SessionSyncQueue.swift`, `JournalDeleteBackendStep.swift`, `ContentView.swift`,
+`ProfileView.swift`, `JournalDeleteQueuedPublishTests.swift`, `SyncQueueOrderingTests.swift` and
+this document. Full suite **806 passed / 0 failed / 9 skipped (815)**; Release build succeeded.
+**The protected invitation documents and `AGENTS.md` were excluded.**
+
+**Device smoke testing remains OUTSTANDING and is not green:** a journal swipe-delete while
+Connected, and one in Solo. C-97's remainder (effective-route enforcement and the drone unplug
+discriminator) and F-3 media sizing are carried, unchanged; **QA7 and QA1–8 stay green and are not
+re-requested.**
+
+**B-38's deployment artifacts are prepared in `supabase/sql/`** (the guarded apply, its rollback,
+`README-b38-avatar-version-guard.md` and the local-proof evidence). **Nothing has been applied to
+production.**
