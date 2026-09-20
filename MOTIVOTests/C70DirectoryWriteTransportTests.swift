@@ -170,12 +170,14 @@ final class C70DirectoryWriteTransportTests: XCTestCase {
     private func write(displayName: String = "Ada",
                        accountID: String? = nil,
                        location: String? = "London",
-                       instruments: [String]? = ["piano"]) async -> DirectoryWriteResult {
+                       instruments: [String]? = ["piano"],
+                       authChallenge: (() async -> Bool)? = nil) async -> DirectoryWriteResult {
         await AccountDirectoryService.shared.upsertSelfRow(userID: owner,
                                                            displayName: displayName,
                                                            accountID: accountID,
                                                            location: location,
-                                                           instruments: instruments)
+                                                           instruments: instruments,
+                                                           authChallenge: authChallenge)
     }
 
     private func query(_ url: URL) -> [String: String] {
@@ -279,6 +281,93 @@ final class C70DirectoryWriteTransportTests: XCTestCase {
         XCTAssertEqual(C70DirectoryStub.requests.count, 1, "a 403 is never re-sent")
         XCTAssertEqual(challenges, 0, "a 403 must never provoke a session refresh")
         guard case .refusedByPolicy = result.outcome else { return XCTFail("got \(result.outcome)") }
+    }
+
+    // MARK: - C-70 remaining gaps: the scoped 401 handler
+
+    /// **NARROW CLAIM, named for what it actually shows: HANDLER SELECTION and
+    /// the retry.** The stub handler returns `true` without rotating a bearer, so
+    /// this establishes that the per-operation handler is the one consulted, that
+    /// the global one is not, and that a successful challenge produces exactly one
+    /// retry. **It does NOT establish that a real token refresh occurred** — that
+    /// is `AuthManager`'s behaviour and is covered by `C98AuthRefreshLifecycleTests`
+    /// against the scripted auth harness.
+    func testAScoped401HandlerIsTheOneConsultedAndTheRetrySucceeds() async {
+        var global = 0, scoped = 0
+        NetworkManager.shared.onAuthChallenge = { global += 1; return true }
+        C70DirectoryStub.reset([.init(status: 401, body: #"{"message":"JWT expired"}"#),
+                                .init(status: 200, body: row(owner))])
+
+        let result = await write(authChallenge: { scoped += 1; return true })
+
+        XCTAssertEqual(scoped, 1, "the per-operation handler must be the one consulted")
+        XCTAssertEqual(global, 0, "the global handler must not run when a scoped one is supplied")
+        XCTAssertEqual(C70DirectoryStub.requests.count, 2, "one 401, one retry")
+        XCTAssertTrue(result.isApplied)
+    }
+
+    /// Every OTHER caller is unchanged: with no scoped handler the global slot
+    /// is used exactly as before.
+    func testWithNoScopedHandlerTheGlobalOneIsStillUsed() async {
+        var global = 0
+        NetworkManager.shared.onAuthChallenge = { global += 1; return true }
+        C70DirectoryStub.reset([.init(status: 401, body: #"{"message":"JWT expired"}"#),
+                                .init(status: 200, body: row(owner))])
+
+        let result = await write()
+
+        XCTAssertEqual(global, 1, "the default path must fall back to the global slot")
+        XCTAssertEqual(C70DirectoryStub.requests.count, 2)
+        XCTAssertTrue(result.isApplied)
+    }
+
+    /// A 403 is a policy refusal, not an auth failure — neither handler runs.
+    func testAScopedHandlerIsNotConsultedOnA403() async {
+        var scoped = 0
+        C70DirectoryStub.reset([.init(status: 403, body: #"{"code":"42501","message":"rls"}"#)])
+
+        let result = await write(authChallenge: { scoped += 1; return true })
+
+        XCTAssertEqual(scoped, 0, "a 403 must never provoke a refresh, scoped or global")
+        XCTAssertEqual(C70DirectoryStub.requests.count, 1)
+        guard case .refusedByPolicy = result.outcome else { return XCTFail("got \(result.outcome)") }
+    }
+
+    /// A refusal to refresh is not a retry: the original 401 stands.
+    func testAScopedHandlerThatCannotRefreshDoesNotRetry() async {
+        var scoped = 0
+        C70DirectoryStub.reset([.init(status: 401, body: #"{"message":"JWT expired"}"#)])
+
+        let result = await write(authChallenge: { scoped += 1; return false })
+
+        XCTAssertEqual(scoped, 1)
+        XCTAssertEqual(C70DirectoryStub.requests.count, 1, "a failed refresh must not be retried")
+        XCTAssertFalse(result.isApplied)
+    }
+
+    /// **The C-98 boundary, on the scoped route.** An identity change DURING the
+    /// refresh must abandon the operation rather than retry it under whoever
+    /// replaced the owner — the scoped handler gains no latitude here, because
+    /// `boundRequest` resolves it inside the same owner/generation guards.
+    func testAnIdentityChangeDuringTheScopedRefreshAbandonsTheWrite() async {
+        C70DirectoryStub.reset([.init(status: 401, body: #"{"message":"JWT expired"}"#),
+                                .init(status: 200, body: row(owner))])
+
+        let before = DirectoryWriteCoordinator.shared.identityGeneration
+        let result = await write(authChallenge: {
+            // A REAL transition: the generation ADVANCES. `resetForTesting()`
+            // would set it back to 0 — this suite's own starting value — so it
+            // would not be a transition at all, and the guard would be tested
+            // against an unchanged generation.
+            DirectoryWriteCoordinator.shared.noteIdentityTransition()
+            XCTAssertGreaterThan(DirectoryWriteCoordinator.shared.identityGeneration, before,
+                                 "the harness must actually advance the generation")
+            return true
+        })
+
+        XCTAssertEqual(C70DirectoryStub.requests.count, 1,
+                       "the retry must not be sent after the owner moved")
+        XCTAssertFalse(result.isApplied)
     }
 
     /// The request was sent and its outcome is unknown. A blind replay could

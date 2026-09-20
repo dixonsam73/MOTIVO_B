@@ -553,6 +553,70 @@ final class C98AuthRefreshLifecycleTests: XCTestCase {
         XCTAssertEqual(s.backendUserID, "userA"); XCTAssertEqual(s.apple, "present"); XCTAssertTrue(s.signedIn)
     }
 
+    // MARK: - C-70: the forced, mode-independent backend refresh
+
+    /// **C-70 — `force: true` rotates an UNEXPIRED token, in Solo.**
+    ///
+    /// This is the behaviour the owner-maintenance 401 route depends on. The
+    /// server can refuse a token our clock still considers valid — revocation,
+    /// key rotation, clock skew — so the expiry gate must be bypassed or the
+    /// retry re-presents the refused token.
+    func testC70_forcedBackendRefreshRotatesAnUnexpiredTokenInSolo() async throws {
+        let f = C98Fixture()
+        try arrange(f, mode: .localSimulation,
+                    access: f.access("A1", sub: f.userA, expiresIn: 3600),
+                    refresh: f.refresh("R1"))
+        C98AuthStub.setReply(0, f.success(access: f.access("A2", sub: f.userA, expiresIn: 3600),
+                                          refresh: f.refresh("RA2"), user: f.userA))
+
+        try start("A") { await $0.ensureValidBackendSession(reason: "c70-forced", force: true) }
+        await join("A")
+
+        let s = try await readState(f)
+        XCTAssertEqual(results["A"], true)
+        XCTAssertEqual(s.access, "A2", "a forced refresh must rotate even an unexpired token")
+        XCTAssertEqual(s.bearer, "A2")
+        XCTAssertEqual(C98AuthStub.tokenRequests.count, 1)
+    }
+
+    /// **The default is unchanged.** Without `force`, an unexpired token rotates
+    /// nothing — so every existing caller behaves exactly as before.
+    func testC70_nonForcedBackendRefreshLeavesAnUnexpiredTokenAlone() async throws {
+        let f = C98Fixture()
+        try arrange(f, mode: .localSimulation,
+                    access: f.access("A1", sub: f.userA, expiresIn: 3600),
+                    refresh: f.refresh("R1"))
+
+        try start("A") { await $0.ensureValidBackendSession(reason: "c70-default") }
+        await join("A")
+
+        let s = try await readState(f)
+        XCTAssertEqual(results["A"], true)
+        XCTAssertEqual(s.access, "A1", "the non-forced default must not rotate a valid token")
+        XCTAssertEqual(C98AuthStub.tokenRequests.count, 0, "and must make no token request at all")
+    }
+
+    /// **THE PREMISE OF GAP 1, measured rather than argued.**
+    ///
+    /// `ensureValidSession` is mode-gated: in Solo it returns without rotating
+    /// anything, even when forced. That is why the GLOBAL `onAuthChallenge` —
+    /// which routes through it — cannot recover a lapsed owner's 401, and why
+    /// owner maintenance supplies its own handler instead.
+    func testC70_ensureValidSessionIsModeGatedAndRotatesNothingInSolo() async throws {
+        let f = C98Fixture()
+        try arrange(f, mode: .localSimulation,
+                    access: f.access("A1", sub: f.userA, expiresIn: -30),
+                    refresh: f.refresh("R1"))
+
+        try start("A") { await $0.ensureValidSession(reason: "c70-global-shape", force: true) }
+        await join("A")
+
+        let s = try await readState(f)
+        XCTAssertEqual(s.access, "A1",
+                       "in Solo the global challenge's route rotates nothing — the retry would re-present the refused token")
+        XCTAssertEqual(C98AuthStub.tokenRequests.count, 0)
+    }
+
     /// F-1 — a terminal failure of the still-current token withdraws the identity.
     func testF1_currentTokenTerminalFailureWithdraws() async throws {
         let f = C98Fixture()

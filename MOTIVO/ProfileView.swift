@@ -162,6 +162,142 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - C-70 owner-maintenance policy and local draft state
+
+/// **C-70. The two decisions this unit turns on, as PURE VALUES.**
+///
+/// They live outside the `View` deliberately. Both were previously expressed as
+/// `appModeManager.canShowConnectedAccountManagement`, which is `mode ==
+/// .connected` and therefore folds in `isEntitled` — so a lapsed member holding
+/// a real Connected account could neither publish owner maintenance nor even see
+/// whether it had failed. That is C-35's shape, and the correction is the one
+/// C-35 already made for account deletion in this same file: **gate on IDENTITY
+/// and CONFIGURATION, never on `AppMode`.**
+///
+/// **Settled owner-maintenance policy exposed consistently — NOT a new membership
+/// rule.** D-U6-3 has always intended the owner to be able to maintain their
+/// existing directory row, and `account_directory_update_owner` carries no gate.
+/// Creation stays gated and stays the SERVER's decision; automatic handle
+/// generation stays Connected-only.
+enum ProfileMaintenancePolicy {
+
+    /// May this device attempt an owner directory write at all?
+    /// Deliberately not a mode check and not a membership check.
+    static func mayAttemptRemoteMaintenance(hasConnectedIdentity: Bool,
+                                            isBackendConfigured: Bool,
+                                            hasAccessToken: Bool,
+                                            backendUserID: String?) -> Bool {
+        guard hasConnectedIdentity, isBackendConfigured, hasAccessToken else { return false }
+        guard let id = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !id.isEmpty else { return false }
+        return true
+    }
+
+    /// May the profile-maintenance surface — the sync message and the Account ID
+    /// editor — be shown?
+    ///
+    /// **Narrower than general Connected account management on purpose.** It must
+    /// not unlock the feed, access, or the rest of the Connected section.
+    ///
+    /// **NOT gated on the handle text being non-empty**: the text can become empty
+    /// mid-edit, and a field that vanishes while being typed into is worse than
+    /// one that stays. Filling an existing row's empty handle by hand is owner
+    /// maintenance; it is NOT automatic generation, which stays Connected-only.
+    static func mayShowMaintenanceSurface(hasConnectedIdentity: Bool,
+                                          isBackendConfigured: Bool) -> Bool {
+        hasConnectedIdentity && isBackendConfigured
+    }
+}
+
+/// **C-70. The local-first gate — SYNCHRONOUS, and named for what it decides.**
+///
+/// `syncDirectoryFromCurrentState` calls exactly this before it captures the
+/// owner and the snapshot. It commits locally and then reports whether remote
+/// work is PERMITTED; it does not perform the publish and never claims to.
+///
+/// **It is deliberately synchronous.** An `async` version would introduce a new
+/// suspension between the local commit and the capture of owner, generation and
+/// snapshot — across which an identity change or a newer unsaved edit could slip,
+/// so a value the member has already moved on from could be published. Adding a
+/// seam must not weaken the thing the seam exists to protect.
+///
+/// **And it takes the real effects.** Passing a no-op to make a testable pipeline
+/// appear used would be worse than no seam at all: the test would pass while
+/// production ran a different order.
+enum ProfileMaintenanceGate {
+    enum Decision: Equatable {
+        /// The local commit failed, so nothing may be published.
+        case blockedByLocalFailure
+        /// Committed locally; remote work is not permitted (Solo, no identity…).
+        case localOnly
+        /// Committed locally and remote work is permitted.
+        case remotePermitted
+    }
+
+    static func decide(commitLocally: () -> Result<Void, Error>,
+                       mayAttemptRemote: () -> Bool) -> Decision {
+        guard case .success = commitLocally() else { return .blockedByLocalFailure }
+        return mayAttemptRemote() ? .remotePermitted : .localOnly
+    }
+}
+
+/// **C-70. May this view still touch local storage?**
+///
+/// Extracted because the interesting case is precisely the one a single boolean
+/// hides: a reset whose global `isInProgress` flag has ALREADY been cleared by
+/// its own `defer`, while this view is still the erased one. `.onDisappear` and
+/// a late `onChange` both arrive in that window.
+enum ProfileLocalStorageGate {
+    static func isUsable(viewInvalidatedByReset: Bool, resetInProgress: Bool) -> Bool {
+        !viewInvalidatedByReset && !resetInProgress
+    }
+}
+
+/// **C-70. Pre-submit staleness.**
+///
+/// Captured when work is SCHEDULED and rechecked before any local or remote
+/// effect. `DirectoryWriteCoordinator` owns a write only after submission, so
+/// this window has no other guard. Cancellation is cooperative and cannot be
+/// relied on alone.
+struct ProfilePreSubmitToken: Equatable {
+    let owner: String?
+    let generation: Int
+
+    func isStillCurrent(owner: String?, generation: Int) -> Bool {
+        self.owner == owner && self.generation == generation
+    }
+}
+
+/// **C-70. Whether the newest local name edit is safe to overwrite by hydration.**
+///
+/// MEASURED, not assumed — `docs/phase-6-c70-remaining-gaps-scope-2026-09-20.md`
+/// §2.6. The draft lives in view state and only reaches the managed object inside
+/// `save()`, so between a keystroke and the next save the stored value is stale —
+/// and `load()` is reached by ANY save on the shared context, not just this
+/// screen's. **Every edit reopens that window; it is not opened once.**
+///
+/// A failed save does NOT post `NSManagedObjectContextDidSave` (M1), and after a
+/// save attempt the managed object already carries the text (M2) — but only until
+/// the next keystroke, which is why this tracks the NEWEST draft rather than
+/// "whether a save has ever run".
+struct ProfileNameDraftState: Equatable {
+    /// True when the newest edit has not yet been EVIDENCED as saved.
+    private(set) var isDirty: Bool = false
+
+    mutating func edited() { isDirty = true }
+
+    /// Cleared on evidenced success ONLY — never optimistically on the attempt,
+    /// so the in-flight window neither clears the flag nor permits hydration.
+    mutating func evidencedSaved() { isDirty = false }
+
+    /// **Factory reset is the explicit exception to draft retention.** The draft
+    /// is dropped and must not be resurrected afterwards.
+    mutating func invalidateForFactoryReset() { isDirty = false }
+
+    /// Hydration may assign only when no newer unsaved edit exists.
+    var mayHydrate: Bool { !isDirty }
+}
+
  struct ProfileView: View {
      @Environment(\.managedObjectContext) private var ctx
      @EnvironmentObject private var auth: AuthManager
@@ -264,6 +400,22 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     /// C-70. Not a bare fingerprint: see `DirectorySyncLatch` for the A→B→A
     /// revert this shape exists to stop losing.
     @State private var directorySyncLatch = DirectorySyncLatch()
+    /// C-70. The newest local name edit, and whether it is safe to hydrate over.
+    @Environment(\.scenePhase) private var scenePhase
+    /// C-70. **View-lifetime invalidation, set BEFORE a factory reset starts.**
+    ///
+    /// `LocalFactoryReset.isInProgress` is not sufficient on its own: a local-only
+    /// reset need not involve an identity transition, and `.onDisappear` runs
+    /// AFTER `isInProgress` has returned to false — at which point
+    /// `persistProfileEdits()` would re-create, through `ProfileStore.setLocation`
+    /// and `ctx.save()`, the very text the reset just erased. Once this is set it
+    /// is never cleared for the lifetime of this view.
+    @State private var viewInvalidatedByReset = false
+    @State private var nameDraft = ProfileNameDraftState()
+    /// C-70. Local-save failure. DELIBERATELY SEPARATE from `directorySyncMessage`,
+    /// which concerns the REMOTE write — conflating them would re-create exactly
+    /// the false attribution C-70(a) removed.
+    @State private var localSaveMessage: String? = nil
     @State private var lastAccountIDSubmitAt: Date? = nil
     @State private var accountIDAutoGenerationInFlight: Bool = false
     @State private var accountIDAutoGenerationAttemptedBackendID: String? = nil
@@ -566,11 +718,17 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                                  }
                              }
 
-                         TextField("Name", text: $name)
+                         TextField("Name", text: nameEditingBinding)
                              .textInputAutocapitalization(.words)
                              .disableAutocorrection(true)
                              .focused($isNameFocused)
                              .onSubmit { isNameFocused = false }
+                             // C-70. Blur is a commit point, not the only one:
+                             // a member can pause while STILL FOCUSED, which is
+                             // why the debounced path commits locally too.
+                             .onChange(of: isNameFocused) { was, now in
+                                 if was && !now { persistProfileEdits() }
+                             }
                              .scaleEffect(isNameFocused ? 0.995 : 1)
                              .overlay(alignment: .bottomLeading) {
                                  Rectangle().frame(height: 1).opacity(isNameFocused ? 0.15 : 0)
@@ -595,6 +753,9 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                              .disableAutocorrection(true)
                              .focused($isLocationFocused)
                              .onSubmit { isLocationFocused = false }
+                             .onChange(of: isLocationFocused) { was, now in
+                                 if was && !now { persistProfileEdits() }
+                             }
                      }
                      .padding(.vertical, Theme.Spacing.s)
                      .frame(minHeight: 44, alignment: .center)
@@ -602,7 +763,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                          quietDivider()
                      }
 
-                     if appModeManager.canShowConnectedAccountManagement {
+                     if mayShowMaintenanceSurface {
                          HStack(spacing: 10) {
                              if !accountIDText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                  Text("@")
@@ -615,6 +776,12 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                                  .autocorrectionDisabled(true)
                                  .keyboardType(.asciiCapable)
                                  .onChange(of: accountIDText) { _, newValue in
+                                     // C-70. No resurrection: the reset path clears
+                                     // `accountIDText` programmatically, which fires
+                                     // this handler — and an unguarded write here
+                                     // would persist that value straight back into
+                                     // `ProfileStore` for the erased identity.
+                                     guard localStorageIsUsable else { return }
                                      let normalized = normalizeAccountID(newValue)
                                      if normalized != newValue { accountIDText = normalized }
                                      // Clear any prior sync feedback as the user edits.
@@ -630,13 +797,13 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                                          if let t = lastAccountIDSubmitAt, Date().timeIntervalSince(t) < 0.35 {
                                              return
                                          }
-                                         Task { await syncDirectoryFromCurrentState() }
+                                         submitDirectorySyncNow()
                                      }
                                  }
                                  .onSubmit {
                                      // Commit-only: on Return/Done, sync once.
                                      lastAccountIDSubmitAt = Date()
-                                     Task { await syncDirectoryFromCurrentState() }
+                                     submitDirectorySyncNow()
                                      isAccountIDFocused = false
                                  }
                                  .font(Theme.Text.meta)
@@ -648,7 +815,30 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  }
                  .cardSurface(padding: profileInnerCardPadding)
 
-                 if appModeManager.canShowConnectedAccountManagement, let msg = directorySyncMessage {
+                 // C-70. The LOCAL save failure, on its own surface. It is shown
+                 // regardless of Connected state, because the local record is the
+                 // account-free one and its failure concerns every member.
+                 if let localMsg = localSaveMessage {
+                     HStack(spacing: 8) {
+                         Text(localMsg)
+                             .font(Theme.Text.meta)
+                             .foregroundStyle(Color.red)
+                         // C-70. "Try again" must be ACTIONABLE. The retry goes
+                         // through the SAME local-first path as every other
+                         // commit point, so a success clears the message, marks
+                         // the draft evidenced-saved and — only then — lets the
+                         // remote publish proceed.
+                         Button("Retry") {
+                             submitDirectorySyncNow()
+                         }
+                         .font(Theme.Text.meta)
+                         .foregroundStyle(Theme.Colors.accent)
+                         .accessibilityLabel("Retry saving your profile")
+                     }
+                     .padding(.top, 2)
+                 }
+
+                 if mayShowMaintenanceSurface, let msg = directorySyncMessage {
                      Text(msg)
                          .font(Theme.Text.meta)
                          .foregroundStyle(directorySyncIsError ? Color.red : Theme.Colors.secondaryText)
@@ -1355,6 +1545,9 @@ private var sessionSetupSection: some View {
      }
  
      private func load() {
+         // C-70. Do not re-hydrate an erased view; that is how erased text
+         // reappears on screen after a reset.
+         guard localStorageIsUsable else { return }
          let req: NSFetchRequest<Profile> = Profile.fetchRequest()
          req.fetchLimit = 1
          do {
@@ -1377,27 +1570,91 @@ private var sessionSetupSection: some View {
              // Minimal handling; non-fatal for UI
          }
  
-         name = profile?.name ?? ""
+         // C-70. HYDRATION MUST NOT OVERWRITE THE NEWEST UNSAVED EDIT.
+         //
+         // The guard is here, in `load()`, rather than in `onAppearLoad()`,
+         // because two call sites reach `load()` DIRECTLY and would otherwise
+         // bypass it: `NSManagedObjectContextDidSave` — which fires for ANY save
+         // on the shared context, including saves made by other screens — and the
+         // instrument manager closing.
+         //
+         // The draft lives in `@State` and only reaches the managed object inside
+         // `save()`, so EVERY edit reopens this window; it is not opened once.
+         if nameDraft.mayHydrate {
+             name = profile?.name ?? ""
+         }
          primaryInstrumentName = (profile?.primaryInstrument ?? "").isEmpty
              ? (instrumentsArray.first ?? "")
              : (profile?.primaryInstrument ?? "")
          defaultPrivacy = profile?.defaultPrivacy ?? false
      }
  
-     private func save() {
-         guard let p = profile else { return }
+     @discardableResult
+     private func save() -> Result<Void, Error> {
+         // C-70. NO PROFILE IS A LOCAL FAILURE, NOT A SUCCESS.
+         //
+         // Returning `.success` here would report evidenced persistence for a
+         // write that never happened, and — because the local commit gates the
+         // remote publish — it would also UNBLOCK publishing a value the device
+         // had not recorded. `load()` creates a Profile when none exists, so this
+         // is the unexpected path; it fails closed rather than quietly.
+         guard localStorageIsUsable else {
+             return .failure(NSError(domain: "ProfileView", code: 2, userInfo: [
+                 NSLocalizedDescriptionKey: "Local storage unavailable (reset)."
+             ]))
+         }
+         guard let p = profile else {
+             return .failure(NSError(domain: "ProfileView", code: 1, userInfo: [
+                 NSLocalizedDescriptionKey: "No local profile to save into."
+             ]))
+         }
          if p.value(forKey: "id") == nil {
              p.setValue(UUID(), forKey: "id")
          }
          p.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
          p.primaryInstrument = primaryInstrumentName.trimmingCharacters(in: .whitespacesAndNewlines)
          p.defaultPrivacy = defaultPrivacy
-         do { try ctx.save() } catch { }
+         // C-70. The empty catch is gone. A swallowed Core Data failure was the
+         // whole of gap 2: the member saw an edit on screen that had not been
+         // recorded, and nothing anywhere said so.
+         //
+         // THE CONTEXT IS NEVER ROLLED BACK OR RESET on failure. It is shared, so
+         // a rollback would discard unrelated pending edits belonging to other
+         // screens — and it would also discard THIS edit, which M5 shows the next
+         // successful save commits without it being re-applied.
+         do {
+             try ctx.save()
+             return .success(())
+         } catch {
+             return .failure(error)
+         }
      }
 
-     private func persistProfileEdits() {
-         save()
+     /// Commit local profile edits. Called from every commit point, and from
+     /// `syncDirectoryFromCurrentState` BEFORE any remote precondition.
+     @discardableResult
+     private func persistProfileEdits() -> Result<Void, Error> {
+         // C-70. An erased or erasing view writes NOTHING — not Core Data and not
+         // `ProfileStore`. This is the `.onDisappear`-after-reset path, where
+         // `isInProgress` is already false again.
+         guard localStorageIsUsable else {
+             return .failure(NSError(domain: "ProfileView", code: 2, userInfo: [
+                 NSLocalizedDescriptionKey: "Local storage unavailable (reset)."
+             ]))
+         }
+         let outcome = save()
          ProfileStore.setLocation(locationText, for: auth.backendUserID)
+         switch outcome {
+         case .success:
+             // Evidenced success ONLY — never optimistic.
+             nameDraft.evidencedSaved()
+             localSaveMessage = nil
+         case .failure:
+             // Preserve the pending state and ask for a retry. NEVER presented as
+             // saved, and never attributed to a field the failure does not name.
+             localSaveMessage = "Not saved yet. Your changes are still here — try again."
+         }
+         return outcome
      }
  
      // MARK: - Primary Activity helpers
@@ -1470,12 +1727,42 @@ private var sessionSetupSection: some View {
 
  
     // Phase 12C hygiene: avoid directory upserts on every keystroke.
+    /// C-70. Submit immediately, capturing owner and generation **before** the
+    /// `Task` is created.
+    ///
+    /// The direct Account-ID blur/submit callers and the local-save Retry all go
+    /// through here. A bare `Task { await sync… }` captures nothing, so a task
+    /// created just before an identity transition could run after it and compose
+    /// the old identity's edit under the new one — the same pre-submit window the
+    /// debounce path guards, reached by a different route.
+    @MainActor
+    private func submitDirectorySyncNow() {
+        let token = ProfilePreSubmitToken(owner: auth.backendUserID,
+                                          generation: DirectoryWriteCoordinator.shared.identityGeneration)
+        Task { @MainActor in
+            guard token.isStillCurrent(owner: auth.backendUserID,
+                                       generation: DirectoryWriteCoordinator.shared.identityGeneration) else { return }
+            await syncDirectoryFromCurrentState()
+        }
+    }
+
     @MainActor
     private func scheduleDirectorySyncDebounced(nanoseconds: UInt64 = 650_000_000) {
         directorySyncDebounceTask?.cancel()
-        directorySyncDebounceTask = Task {
+        // C-70. CAPTURE THE OWNER AND GENERATION AT SCHEDULING TIME.
+        //
+        // Cancellation alone does not prove an old intent cannot reach a new
+        // identity: cancellation is cooperative and a task can already be past
+        // its sleep. The coordinator owns a write only AFTER submission, so this
+        // pre-submit window needs its own evidence — captured here and rechecked
+        // below, before ANY local or remote work.
+        let token = ProfilePreSubmitToken(owner: auth.backendUserID,
+                                          generation: DirectoryWriteCoordinator.shared.identityGeneration)
+        directorySyncDebounceTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: nanoseconds)
             guard !Task.isCancelled else { return }
+            guard token.isStillCurrent(owner: auth.backendUserID,
+                                       generation: DirectoryWriteCoordinator.shared.identityGeneration) else { return }
             await syncDirectoryFromCurrentState()
         }
     }
@@ -1520,14 +1807,88 @@ private var sessionSetupSection: some View {
                                       fingerprint: fingerprint)
     }
 
+     /// C-70. May this view still read or write local storage?
+     ///
+     /// False once a reset has been initiated from this screen, and false while
+     /// one is running. **Deliberately not consulted before a reset actually
+     /// starts** — a pre-reset failure must not suppress ordinary saving.
+     private var localStorageIsUsable: Bool {
+         ProfileLocalStorageGate.isUsable(viewInvalidatedByReset: viewInvalidatedByReset,
+                                          resetInProgress: LocalFactoryReset.isInProgress)
+     }
+
+     /// C-70. The name field's binding, which marks the draft dirty **in the
+     /// setter**.
+     ///
+     /// Two reasons it is not `.onChange(of: name)`. **Timing:** the setter runs
+     /// at the edit, so an unrelated save landing in the same turn cannot hydrate
+     /// over a draft that has not been flagged yet. **Correctness:** `.onChange`
+     /// also fires for PROGRAMMATIC assignment, so marking there would let
+     /// `load()` flag its own hydration as an unsaved edit — after which the flag
+     /// could never legitimately clear.
+     private var nameEditingBinding: Binding<String> {
+         Binding(
+             get: { name },
+             set: { newValue in
+                 guard newValue != name else { return }
+                 nameDraft.edited()
+                 name = newValue
+             }
+         )
+     }
+
+     /// C-70. Identity + configuration, never `AppMode`. See `ProfileMaintenancePolicy`.
+     private var mayShowMaintenanceSurface: Bool {
+         ProfileMaintenancePolicy.mayShowMaintenanceSurface(
+             hasConnectedIdentity: auth.hasConnectedIdentity,
+             isBackendConfigured: BackendConfig.isConfigured)
+     }
+
      @MainActor
      private func syncDirectoryFromCurrentState() async {
         // Phase 14.3H (B2) — Never attempt account_directory upsert unless we have a valid Supabase bearer token.
         // Prevents unauthenticated upsert attempts during the sign-in transition (which can leave ProfileView in an empty limbo on first sign-in).
         let auth = _auth.wrappedValue
-        guard appModeManager.canShowConnectedAccountManagement else { return }
-        guard BackendEnvironment.shared.isConnected else { return }
-        guard auth.hasSupabaseAccessToken else { return }
+
+        // C-70. LOCAL FIRST, AND BEFORE EVERY REMOTE PRECONDITION.
+        //
+        // This runs ahead of the identity guards on purpose. A Solo member with
+        // no Connected identity returns below, and if the local commit sat after
+        // that return they would get NO debounce-driven local persistence at all
+        // — the very members for whom the local record is the only record. Local
+        // persistence must never be reachable only through a remote path's
+        // preconditions.
+        //
+        // It also guards the remote submission: the device must not publish a
+        // value it could not record. A pending edit survives in the shared
+        // context but NOT a process kill, so this is a real safety gate and not
+        // merely a consistency preference.
+        // No new suspension here, deliberately: the owner, generation and
+        // snapshot are captured below, and an await between the local commit and
+        // that capture would let an identity change or a newer unsaved edit slip
+        // in and be published.
+        let decision = ProfileMaintenanceGate.decide(
+            commitLocally: { persistProfileEdits() },
+            mayAttemptRemote: {
+                ProfileMaintenancePolicy.mayAttemptRemoteMaintenance(
+                    hasConnectedIdentity: auth.hasConnectedIdentity,
+                    isBackendConfigured: BackendConfig.isConfigured,
+                    hasAccessToken: auth.hasSupabaseAccessToken,
+                    backendUserID: auth.backendUserID)
+            })
+        guard decision == .remotePermitted else { return }
+
+        // C-70/C-35. The gate above is IDENTITY AND CONFIGURATION, NEVER AppMode.
+        //
+        // It used to be `canShowConnectedAccountManagement` plus
+        // `BackendEnvironment.shared.isConnected`. The first is `mode ==
+        // .connected`; the second reads `backendMode_v1` from UserDefaults, which
+        // `AppModeManager.applyBackendRuntimeMode` writes FROM that same mode.
+        // Both fold in `isEntitled` without naming it, so a lapsed member holding
+        // a real Connected account could not maintain their own directory row —
+        // while `account_directory_update_owner` carries no gate and D-U6-3
+        // always intended exactly that. This is the substitution C-35 already
+        // made for `performDeleteAccount` in this same file.
 
          guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
          let snapshot = currentDirectorySnapshot(backendID: backendID)
@@ -1541,7 +1902,16 @@ private var sessionSetupSection: some View {
              displayName: snapshot.display,
              accountID: snapshot.accountID,
              location: snapshot.location,
-             instruments: snapshot.instruments
+             instruments: snapshot.instruments,
+             // C-70. Owner maintenance is the ONE path that must be able to
+             // refresh while the app is in Solo. The GLOBAL `onAuthChallenge` is
+             // unchanged and still forced, but it routes through
+             // `ensureValidSession`, which is mode-gated and in Solo returns
+             // `isSignedIn` having rotated nothing — so the retry would re-present
+             // the token the server just refused. `boundRequest` resolves this
+             // closure INSIDE its owner/generation guards, so a scoped handler
+             // gains no latitude over identity.
+             authChallenge: { await auth.ensureValidBackendSession(reason: "profile-maintenance", force: true) }
          )
 
          // C-70. EVERY UI EFFECT IS GUARDED HERE -- the message as much as the
@@ -1895,7 +2265,20 @@ private var sessionSetupSection: some View {
                  deleteAccountInFlight = true
                  defer { deleteAccountInFlight = false }
                  // The sheet is already dismissed — onDismiss is what started us.
-                 await LocalFactoryReset.perform(reason: "erase-all-etudes-data-local", auth: auth)
+                 // C-70. FACTORY RESET IS THE EXPLICIT EXCEPTION TO DRAFT RETENTION.
+                 // Set BEFORE the reset runs, and never cleared for this view's
+                 // lifetime: `.onDisappear` fires after `isInProgress` is false
+                 // again, and would otherwise re-create the erased text through
+                 // `ProfileStore.setLocation` and `ctx.save()`.
+                 viewInvalidatedByReset = true
+                 directorySyncDebounceTask?.cancel()
+                 directorySyncDebounceTask = nil
+                 nameDraft.invalidateForFactoryReset()
+                 localSaveMessage = nil
+                 name = ""
+                 locationText = ""
+                 accountIDText = ""
+                await LocalFactoryReset.perform(reason: "erase-all-etudes-data-local", auth: auth)
                  dismissProfileAfterSuccessfulErase()
              }
              return
@@ -1968,7 +2351,20 @@ private var sessionSetupSection: some View {
                  auth: auth,
                  reason: "delete-account"
              )
-             await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
+             // C-70. FACTORY RESET IS THE EXPLICIT EXCEPTION TO DRAFT RETENTION.
+             // Set BEFORE the reset runs, and never cleared for this view's
+             // lifetime: `.onDisappear` fires after `isInProgress` is false
+             // again, and would otherwise re-create the erased text through
+             // `ProfileStore.setLocation` and `ctx.save()`.
+             viewInvalidatedByReset = true
+             directorySyncDebounceTask?.cancel()
+             directorySyncDebounceTask = nil
+             nameDraft.invalidateForFactoryReset()
+             localSaveMessage = nil
+             name = ""
+             locationText = ""
+             accountIDText = ""
+                await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
              dismissProfileAfterSuccessfulErase()
 
              // TN3194 step 2 — "Direct the user to manually revoke access for
@@ -2025,7 +2421,13 @@ private func initials(from string: String) -> String {
          var view = AnyView(base)
          view = AnyView(view
             .onAppear(perform: onAppearLoad)
-            .onDisappear(perform: persistProfileEdits)
+            .onDisappear { persistProfileEdits() }
+            // C-70. Backgrounding is a commit point. Without it an app killed
+            // while Profile is on screen loses the edit entirely — the pending
+            // change is NOT on disk (measured, M4 proxy).
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { persistProfileEdits() }
+            }
             // C-24: sign-in completion is an event, not a change of identity. On a
             // reinstall the Keychain still holds the Apple user ID, so `currentUserID`
             // never changes and none of this would run if it were keyed on that.
@@ -2079,7 +2481,14 @@ private func initials(from string: String) -> String {
                 // before we clear UI state (location is stored per-user in ProfileStore).
                 if newValue == nil {
                     // Delete Account v2: during a factory reset, never persist per-user location back to ProfileStore.
-                    if LocalFactoryReset.isInProgress {
+                    //
+                    // C-70. `localStorageIsUsable`, NOT `isInProgress` alone. A
+                    // SwiftUI `onChange` can arrive after the reset's `defer` has
+                    // cleared that flag, and while `save()` would then refuse via
+                    // the view-lifetime flag, these two `ProfileStore` writes
+                    // would still run and re-create the erased location. Same
+                    // no-resurrection boundary, not extra scope.
+                    if !localStorageIsUsable {
                         clearUserPresentedStateForSignOut()
                         return
                     }
@@ -2089,7 +2498,20 @@ private func initials(from string: String) -> String {
                     }
 
                     // Preserve the currently presented profile as the local Études profile after sign-out.
-                    save()
+                    //
+                    // C-70. The Result is no longer discarded. Identity scoping is
+                    // DELIBERATELY UNCHANGED — the old-owner write above and the
+                    // `nil`-owner write below both still happen exactly as before;
+                    // only the silence is removed. Without this, a failure here
+                    // reports nowhere, and the debounce that might otherwise have
+                    // retried has just been cancelled by the identity transition.
+                    switch save() {
+                    case .success:
+                        nameDraft.evidencedSaved()
+                        localSaveMessage = nil
+                    case .failure:
+                        localSaveMessage = "Not saved yet. Your changes are still here — try again."
+                    }
                     ProfileStore.setLocation(locationText, for: nil)
                     onAppearLoad()
                 } else {
@@ -2097,6 +2519,21 @@ private func initials(from string: String) -> String {
                 }
             }
             .onChange(of: auth.backendUserID) { _, newValue in
+                // C-70. CANCEL THE PRE-SUBMIT DEBOUNCE.
+                //
+                // `DirectoryWriteCoordinator` owns a write only AFTER it is
+                // submitted. A task scheduled under identity A that fires after a
+                // switch to B has not been submitted yet, so no token can see it
+                // — it would compose A's edit and send it as B.
+                //
+                // The local NAME draft is deliberately NOT discarded here: it is
+                // device-local (`Profile` is fetched with no owner predicate) and
+                // sign-out already preserves it as the local Études profile. Only
+                // the remote submission and the per-owner handle/location drafts
+                // belong to the identity.
+                directorySyncDebounceTask?.cancel()
+                directorySyncDebounceTask = nil
+                directorySyncLatch.invalidate()
                 // Phase 12C: user-scoped lookup state (per backend identity)
                 if newValue == nil {
                     accountIDText = ""
@@ -2112,7 +2549,16 @@ private func initials(from string: String) -> String {
                 primaryActivityChoice = normalizedPrimaryActivityRef()
             }
              .onChange(of: name) { _, _ in
-                 Task { @MainActor in scheduleDirectorySyncDebounced() }
+                 // C-70. Dirty is marked in `nameEditingBinding`, NOT here — this
+                 // also fires for PROGRAMMATIC assignment, so marking here would
+                 // let hydration mark its own result dirty and never clear.
+                 //
+                 // NO OUTER `Task`: it was untracked, so it could run AFTER the
+                 // identity handler cancelled the current debounce and schedule a
+                 // fresh task carrying the old identity's edit. `onChange` is
+                 // already on the main actor, so the call is direct and the
+                 // cancellation in the identity handler is actually sufficient.
+                 scheduleDirectorySyncDebounced()
              }
              .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: ctx)) { _ in
                  guard showInstrumentManager == false,
@@ -2124,7 +2570,8 @@ private func initials(from string: String) -> String {
                  load()
              }
              .onChange(of: locationText) { _, _ in
-                 Task { @MainActor in scheduleDirectorySyncDebounced() }
+                 // C-70. Same reasoning as `name` above: no untracked outer Task.
+                 scheduleDirectorySyncDebounced()
              }
              .alert("Primary Activity reset", isPresented: $showPrimaryFallbackAlert) {
                  Button("OK", role: .cancel) {}

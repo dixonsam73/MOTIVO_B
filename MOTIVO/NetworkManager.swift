@@ -996,9 +996,18 @@ extension NetworkManager {
     ///  • the refresh policy is otherwise UNCHANGED: 401 only, never 403, at most
     ///    one retry.
     @MainActor
+    /// - Parameter authChallenge: **C-70.** An OPTIONAL per-operation 401 handler.
+    ///   When `nil` — which is every existing caller, by default — the global
+    ///   `onAuthChallenge` slot is used exactly as before, and that global slot
+    ///   is unchanged and still forced. One caller supplies its own: owner
+    ///   profile maintenance, which must be able to refresh while the app is in
+    ///   Solo, where the global handler's `ensureValidSession` is mode-gated and
+    ///   rotates nothing. The owner/generation guards around the call are shared
+    ///   by both routes, so a scoped handler gains no latitude over identity.
     func boundRequest(path: String, method: String, query: [URLQueryItem]? = nil,
                       jsonBody: Data? = nil, headers: [String: String] = [:],
-                      binding: OperationBinding) async -> Result<Data, Error> {
+                      binding: OperationBinding,
+                      authChallenge: (() async -> Bool)? = nil) async -> Result<Data, Error> {
         if headers.keys.contains(where: { $0.caseInsensitiveCompare("Authorization") == .orderedSame }) {
             return .failure(TransportIdentityError.authorizationHeaderOverride)
         }
@@ -1081,7 +1090,10 @@ extension NetworkManager {
         guard binding.isStillCurrent(), currentSubject == binding.expectedOwner else {
             return .failure(TransportIdentityError.identityChanged)
         }
-        guard let handler = onAuthChallenge else { return first }
+        // C-70. The per-operation handler wins when supplied; otherwise the
+        // global slot, unchanged. Resolved HERE, inside the owner/generation
+        // guards, so neither route can refresh an operation whose owner moved.
+        guard let handler = authChallenge ?? onAuthChallenge else { return first }
         let refreshed = await handler()
 
         // AFTER THE REFRESH, whatever it returned: an operation whose gate or

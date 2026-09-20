@@ -545,7 +545,8 @@ public final class AccountDirectoryService {
                                     query: [URLQueryItem],
                                     payload: [String: Any],
                                     owner: String,
-                                    binding: OperationBinding) async -> DirectoryWriteOutcome {
+                                    binding: OperationBinding,
+                                    authChallenge: (() async -> Bool)? = nil) async -> DirectoryWriteOutcome {
         let body: Data
         do {
             body = try JSONSerialization.data(withJSONObject: payload, options: [])
@@ -561,7 +562,8 @@ public final class AccountDirectoryService {
             headers: ["Prefer": method == "POST"
                       ? "resolution=merge-duplicates,return=representation"
                       : "return=representation"],
-            binding: binding
+            binding: binding,
+            authChallenge: authChallenge
         )
 
         switch result {
@@ -654,11 +656,16 @@ public final class AccountDirectoryService {
     /// outcome for a banded row and for the one pre-CP row alike (Q6/§B; Q6/B
     /// remains unauthorised).
     @MainActor
+    /// - Parameter authChallenge: **C-70.** Optional per-operation 401 handler,
+    ///   supplied ONLY by the `ProfileView` owner-maintenance path so it can
+    ///   refresh while the app is in Solo. Every other caller — generation, setup
+    ///   and hydration — passes nothing and keeps the global handler unchanged.
     public func upsertSelfRow(userID: String,
                               displayName: String,
                               accountID: String?,
                               location: String? = nil,
-                              instruments: [String]? = nil) async -> DirectoryWriteResult {
+                              instruments: [String]? = nil,
+                              authChallenge: (() async -> Bool)? = nil) async -> DirectoryWriteResult {
         let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !uid.isEmpty else {
             return DirectoryWriteResult(outcome: .failed(NSError(domain: "AccountDirectoryService", code: 1,
@@ -691,7 +698,8 @@ public final class AccountDirectoryService {
             resultGeneration = capturedGeneration
             guard let self else { return .superseded }
             return await self.performProfileWrite(uid: uid, owner: owner, payload: payload,
-                                                  seq: seq, capturedGeneration: capturedGeneration)
+                                                  seq: seq, capturedGeneration: capturedGeneration,
+                                                  authChallenge: authChallenge)
         }
         return DirectoryWriteResult(outcome: outcome, seq: resultSeq, generation: resultGeneration)
     }
@@ -703,7 +711,8 @@ public final class AccountDirectoryService {
                                      owner: String,
                                      payload: [String: Any],
                                      seq: Int,
-                                     capturedGeneration: Int) async -> DirectoryWriteOutcome {
+                                     capturedGeneration: Int,
+                                     authChallenge: (() async -> Bool)? = nil) async -> DirectoryWriteOutcome {
         let coordinator = DirectoryWriteCoordinator.shared
         guard let binding = coordinator.binding(owner: owner, capturedGeneration: capturedGeneration) else {
             return .supersededIdentity
@@ -713,7 +722,8 @@ public final class AccountDirectoryService {
                           URLQueryItem(name: "select", value: Self.writeSelect)]
 
         var outcome = await sendDirectoryWrite(method: "PATCH", query: patchQuery,
-                                               payload: payload, owner: owner, binding: binding)
+                                               payload: payload, owner: owner, binding: binding,
+                                               authChallenge: authChallenge)
 
         if case .noRowMatched = outcome {
             // No row matched: create one. Still gated, still band-checked.
@@ -722,7 +732,8 @@ public final class AccountDirectoryService {
             let postQuery = [URLQueryItem(name: "on_conflict", value: "user_id"),
                              URLQueryItem(name: "select", value: Self.writeSelect)]
             let created = await sendDirectoryWrite(method: "POST", query: postQuery,
-                                                   payload: creationPayload, owner: owner, binding: binding)
+                                                   payload: creationPayload, owner: owner, binding: binding,
+                                                   authChallenge: authChallenge)
 
             switch created {
             case .refusedByPolicy, .rowConflict:
@@ -736,7 +747,8 @@ public final class AccountDirectoryService {
                 // 401 rule and never refreshes a 403), and ambiguous transport
                 // is never probed — an unknown outcome must not be replayed.
                 let probe = await sendDirectoryWrite(method: "PATCH", query: patchQuery,
-                                                     payload: payload, owner: owner, binding: binding)
+                                                     payload: payload, owner: owner, binding: binding,
+                                                     authChallenge: authChallenge)
                 if case .noRowMatched = probe {
                     outcome = created
                 } else {

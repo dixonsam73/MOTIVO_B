@@ -1212,7 +1212,19 @@ final class AuthManager: NSObject, ObservableObject {
     /// returns `false` here; it deliberately does **not** sign the user out, which
     /// `ensureValidSession` does. A liveness helper that can revoke a session is
     /// the wrong shape for a path that runs on every foreground.
-    func ensureValidBackendSession(reason: String) async -> Bool {
+    ///
+    /// **C-70 — `force` DEFAULTS TO `false`, so every existing caller is unchanged.**
+    /// A forced refresh is needed on exactly one path: a 401 on owner profile
+    /// maintenance while the app is in Solo. The server has just refused the
+    /// token, and a token can be refused while still unexpired by our clock, so
+    /// the expiry gate would otherwise rotate nothing and hand the retry the very
+    /// token that was refused. This mirrors `ensureValidSession(reason:force:)`
+    /// exactly — including that a forced refresh must NOT be answered by an
+    /// in-flight coalesced one, which may have started before the refusal.
+    ///
+    /// **It is NOT the global `onAuthChallenge` callback**, which is unchanged and
+    /// remains `ensureValidSession(reason:force:true)`.
+    func ensureValidBackendSession(reason: String, force: Bool = false) async -> Bool {
         guard !LocalFactoryReset.isInProgress else {
             #if DEBUG
             NSLog("[Auth] %@ skipped (factory reset in progress) reason=%@", #function, reason)
@@ -1238,7 +1250,11 @@ final class AuthManager: NSObject, ObservableObject {
             return false
         }
 
-        if let existing = sessionRefreshInFlight {
+        // C-70. A forced refresh must not be answered by an in-flight coalesced
+        // one: that refresh may have begun BEFORE the server refused the token,
+        // so joining it would return the refused token and guarantee a second
+        // 401. Same rule as `ensureValidSession`.
+        if !force, let existing = sessionRefreshInFlight {
             #if DEBUG
             unitTestReachSlot(.coalesced(reason))
             #endif
@@ -1247,7 +1263,7 @@ final class AuthManager: NSObject, ObservableObject {
 
         let task = Task<Bool, Never> { [weak self] in
             guard let self else { return false }
-            return await self.refreshSupabaseSession(reason: reason)
+            return await self.refreshSupabaseSession(reason: reason, force: force)
         }
         sessionRefreshInFlight = task
         #if DEBUG
