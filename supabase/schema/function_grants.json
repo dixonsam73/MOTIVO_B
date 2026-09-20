@@ -780,6 +780,27 @@
     "can_execute": false,
     "direct_execute": false,
     "grantee": "anon",
+    "proname": "tg_guard_avatar_version",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "tg_guard_avatar_version",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "tg_guard_avatar_version",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
     "proname": "tg_membership_propagate_entitled_until",
     "public_execute": false
   },

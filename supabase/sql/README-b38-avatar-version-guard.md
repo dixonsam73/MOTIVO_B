@@ -144,7 +144,47 @@ anything else — the only server writers of this table set `entitled_until` (a 
 `avatar_key` (`membership_cleanup_v1`). **A future backfill would have to disable this trigger
 deliberately.**
 
-## Apply procedure (when review clears it)
+## Apply record — 2026-09-20, APPLIED TO PRODUCTION
+
+**Authorised by Samuel; the exact reviewed text was applied by Claude to the linked project
+`rlwtqxumfobakvdueugm`.** No behavioural fixture was created and nothing was deleted: the change
+is DDL only.
+
+1. **Pre-apply parity re-check:** `./supabase/capture-schema.sh` → **empty diff**, and the script's
+   sha256 re-verified as `11b7499d…`.
+2. **Apply:** `supabase db query --linked -f supabase/sql/2026-09-20-b38-avatar-version-guard.sql`,
+   one submission. **Scored on the RESPONSE BODY, not the exit code** (the CLI exits 0 even on an
+   error), and the body carried the final SELECT:
+
+   ```json
+   "rows": [ { "guard_triggers": 1, "result": "B-38 applied" } ]
+   ```
+
+   **That row is the proof the intended text ran.** A bare success message would not have been.
+3. **Recapture:** `./supabase/capture-schema.sh`. The snapshot diff is **exactly the prediction**,
+   **32 insertions, 0 deletions, 0 modifications**, in three files:
+   - `functions.json` **+1**: `tg_guard_avatar_version`, `security_definer: false`,
+     `SET search_path TO ''`;
+   - `triggers.json` **+1**: `CREATE TRIGGER tg_directory_avatar_guard BEFORE INSERT OR UPDATE ON
+     public.account_directory FOR EACH ROW EXECUTE FUNCTION tg_guard_avatar_version()`,
+     `tgenabled: "O"`;
+   - `function_grants.json` **+3**: `anon`, `authenticated`, `service_role`, each with
+     `can_execute`, `direct_execute` and `public_execute` **false**.
+   - `columns`, `constraints`, `policies`, `rls_enabled`, `table_grants`, `column_grants` and
+     `storage_buckets`: **untouched**.
+4. **Local fidelity after the apply:** the replay migration was applied with
+   `supabase migration up --local` (no reset; local test data unchanged at 10 users, 0 directory
+   rows), and **the B-23 gate returned GATE MET** against the recaptured production snapshot, with
+   only the standing `account_id_format` exception. Log:
+   `evidence/b38-b23-gate-after-apply.log`.
+
+**Rollback remains available:** `2026-09-20-b38-avatar-version-guard-rollback.sql`. Run it as one
+submission and recapture; the diff must return to the pre-apply snapshot.
+
+**Not verified by this record:** any device or behavioural observation in production. The change
+is structural, and its behaviour is evidenced by the local proof.
+
+## Apply procedure (as followed; kept for the rollback path)
 
 1. Re-run `./supabase/capture-schema.sh` and confirm the diff is still empty. **If it is not,
    stop:** the PRE guards encode the snapshot and the apply will refuse anyway.

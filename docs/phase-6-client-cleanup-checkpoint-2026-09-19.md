@@ -512,3 +512,22 @@ re-requested.**
 **B-38's deployment artifacts are prepared in `supabase/sql/`** (the guarded apply, its rollback,
 `README-b38-avatar-version-guard.md` and the local-proof evidence). **Nothing has been applied to
 production.**
+
+## 20 September 2026 — B-38 IS APPLIED TO PRODUCTION
+
+**`account_directory.avatar_version` is now server-derived.** `tg_directory_avatar_guard`
+(BEFORE INSERT OR UPDATE) discards any supplied value for **every** role, and runs before the
+stamping trigger, so a real `avatar_key` change still re-stamps.
+
+- **Authorised by Samuel; the reviewed text applied by Claude** to the linked project.
+- **Scored on the response body**, which returned `B-38 applied` with `guard_triggers = 1`.
+- **The recaptured snapshot diff is exactly the prediction:** +1 function, +1 trigger, +3
+  all-false grant rows; 32 insertions, no deletions, everything else untouched.
+- **The B-23 gate FAILED first** (8 differences, all local drift behind three reviewed
+  migrations), was repaired by replaying those migrations locally with no reset and no data loss,
+  and **MET both before and after the apply**. That failure is recorded, not waived.
+- **A replay migration** (`20260920120000_b38_avatar_version_guard.sql`) keeps a rebuilt local
+  baseline faithful.
+- **Rollback is prepared and unused.** **No production behavioural fixture, and nothing deleted.**
+
+**Full record:** `supabase/sql/README-b38-avatar-version-guard.md`.

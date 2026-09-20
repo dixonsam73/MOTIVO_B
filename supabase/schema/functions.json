@@ -185,6 +185,11 @@
     "security_definer": true
   },
   {
+    "definition": "CREATE OR REPLACE FUNCTION public.tg_guard_avatar_version()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\nbegin\n  if tg_op = 'INSERT' then\n    new.avatar_version := null;          -- nullable, no default; no writer supplies it\n  else\n    new.avatar_version := old.avatar_version;\n  end if;\n  return new;\nend\n$function$\n",
+    "proname": "tg_guard_avatar_version",
+    "security_definer": false
+  },
+  {
     "definition": "CREATE OR REPLACE FUNCTION public.tg_membership_propagate_entitled_until()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\ndeclare v_uid uuid; v_until timestamptz;\nbegin\n  if tg_op = 'DELETE' then v_uid := old.user_id; else v_uid := new.user_id; end if;\n  v_until := public.membership_entitled_until(v_uid);\n\n  update public.posts             set owner_entitled_until    = v_until\n   where owner_user_id    = v_uid and owner_entitled_until    is distinct from v_until;\n  update public.post_shares       set owner_entitled_until    = v_until\n   where owner_user_id    = v_uid and owner_entitled_until    is distinct from v_until;\n  update public.follows           set followed_entitled_until = v_until\n   where followed_user_id = v_uid and followed_entitled_until is distinct from v_until;\n  update public.account_directory set entitled_until          = v_until\n   where user_id          = v_uid and entitled_until          is distinct from v_until;\n\n  return null;\nend\n$function$\n",
     "proname": "tg_membership_propagate_entitled_until",
     "security_definer": true
