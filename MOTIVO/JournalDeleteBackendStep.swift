@@ -14,6 +14,8 @@ enum JournalDeleteRefusal: Equatable {
     case localSaveFailed
     /// Connected: the session has no id to name its post.
     case missingIdentifier
+    /// S1: the captured owner is not a backend identity, so nothing was sent.
+    case ownerUnavailable
 
     static let title = "Session not deleted"
 
@@ -23,7 +25,7 @@ enum JournalDeleteRefusal: Equatable {
             return "Études couldn’t confirm that this session’s shared post was removed, so the session has been kept. Try again."
         case .identityChanged:
             return "Your Études account changed while this session was being deleted, so it has been kept. Try again."
-        case .queueNotSaved, .localSaveFailed, .missingIdentifier:
+        case .queueNotSaved, .localSaveFailed, .missingIdentifier, .ownerUnavailable:
             return "Études couldn’t finish deleting this session, so it has been kept. Try again."
         }
     }
@@ -48,12 +50,30 @@ enum JournalDeleteBackendStep {
     }
 
     /// Connected.
+    ///
+    /// S1. The backend delete is OWNER-BOUND before any request goes out, and the
+    /// gate is re-checked after the last await, before anything local or queued is
+    /// touched. The binding captures the identity generation, so an A→B→A switch or
+    /// a factory reset invalidates it.
+    ///
+    /// A validated empty result is SUCCESS: a never-shared entry deletes locally,
+    /// exactly as before. `[]` is never read as "another owner holds it". Only a
+    /// malformed or mismatched response refuses.
     static func run(postID: UUID, capturedOwner: String?, sessionWasShared: Bool = false,
                     deleteLocally: () -> Bool) async -> Outcome {
-        let result = await BackendEnvironment.shared.publish.deletePost(postID)
+        guard let binding = SessionSyncQueue.shared.journalDeleteBinding(capturedOwner: capturedOwner) else {
+            print("[Delete][FAIL-CLOSED] no backend identity for the captured owner; nothing sent postID=\(postID)")
+            return .refused(.ownerUnavailable)
+        }
+        let result = await BackendEnvironment.shared.publish.deletePost(postID, binding: binding)
         if case .failure(let err) = result {
             print("[Delete][FAIL-CLOSED] backend deletePost failed postID=\(postID) err=\(err)")
             return .refused(.backendDeleteUnconfirmed)
+        }
+        // The identity may have changed while the last request was in flight.
+        guard binding.isStillCurrent() else {
+            print("[Delete][FAIL-CLOSED] identity changed during the backend delete postID=\(postID)")
+            return .refused(.identityChanged)
         }
         return finish(postID: postID, capturedOwner: capturedOwner, sessionWasShared: sessionWasShared, deleteLocally: deleteLocally)
     }

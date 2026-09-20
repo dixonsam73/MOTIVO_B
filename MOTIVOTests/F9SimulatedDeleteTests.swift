@@ -38,5 +38,15 @@ final class F9SimulatedDeleteTests: XCTestCase {
                        "Not deleted: the simulated backend performs no network deletion.")
         XCTAssertTrue(QueueStubServer.allURLs.isEmpty,
                       "no request of any kind: \(QueueStubServer.allURLs.map(\.key))")
+
+        // S1. The bound entry point the journal delete now uses keeps F-9's rule:
+        // the simulated service still performs no network deletion.
+        let binding = SessionSyncQueue.shared.journalDeleteBinding(capturedOwner: QueueStubFixture.ownerUID)
+        let bound = await service.deletePost(UUID(), binding: try XCTUnwrap(binding))
+        guard case .failure(let boundError) = bound else {
+            return XCTFail("a simulated bound delete must not report success: \(bound)")
+        }
+        XCTAssertEqual(boundError as? SimulatedPublishError, .deletionNotPerformed)
+        XCTAssertTrue(QueueStubServer.allURLs.isEmpty, "still nothing sent")
     }
 }

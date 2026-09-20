@@ -541,3 +541,129 @@ no production behavioural observation is claimed.**
 - **F-3** media sizing.
 
 **Full record:** `supabase/sql/README-b38-avatar-version-guard.md`.
+
+## 20 September 2026 — U1–U3 device smoke checks accepted
+
+Samuel reports both requested checks **GREEN on the latest build**:
+- **Connected:** created and shared a disposable session, confirmed its post appeared,
+  swipe-deleted the journal entry, confirmed the entry and refreshed Connected post disappeared,
+  and confirmed the entry stayed deleted after relaunch.
+- **Solo:** swipe-deleted a disposable unshared session without a hang or unexpected error,
+  and confirmed it stayed deleted after relaunch.
+- **Other journal entries remained intact in both cases.**
+
+This supersedes the outstanding U1–U3 smoke checks above. Evidence is Samuel's device report;
+the exact build identifier/configuration and whether the Solo entry contained an attachment
+were not separately specified. No refusal fault injection, Erase All, account deletion,
+cross-device/in-flight race guarantee or physical-byte deletion is claimed by these checks.
+
+**Still separate and outstanding:** C-97 effective-route enforcement/drone unplug discriminator
+and F-3 media sizing. Previously accepted recorder QA remains accepted. Phase 6 is not closed.
+
+## 20 September 2026 — extra drone diagnostic waived
+
+Samuel explicitly waived the additional drone button-highlight/output-disconnect diagnostic
+("Don't worry about that extra drone test"). It is no longer outstanding device QA; its
+mechanism remains unmeasured, not newly verified. The accepted CM-15/Bluetooth/drone checks
+remain green. Video effective-input enforcement is an engineering concern, not a defined
+additional user checklist; do not request a repeat of accepted USB/video QA under that label.
+F-3 remains a separate physical-device performance measurement, to be prepared and supervised
+by Claude/Codex rather than presented as a recording-quality check.
+
+## 20 September 2026 — F-3 PARTIALLY MEASURED on device (SessionDetailView only). No fix; nothing committed here
+
+**Device A (SD beta burner, iPhone 16e, iOS 26.6.1), Release `com.sdsongs.etudes` 1.0 (131),**
+Time Profiler attached to the already-running process. **Nothing installed, replaced or deleted;**
+the two local unshared fixtures ("Media QA — Empty", "Media QA — 8 Audio") were kept.
+
+**Measured, main thread, over a ~157 s session** (6118 rows; two independent parses agree after a
+full `ref`-resolving parse):
+- main-thread sampled running time **3069 ms**;
+- `SessionDetailView` inclusive **183 ms**;
+- **`AVURLAsset` construction and teardown beneath that body: 96 ms inclusive sampled CPU**
+  (init 82, dealloc 22; **subframes overlap, not additive**), in eight clusters, heaviest **27 ms**.
+- **One `SessionDetailView` cluster carries no `AVURLAsset` time**, which is **consistent with the
+  instructed alternating sequence** but **does not measure the fixture contrast**.
+
+**NOT established:**
+- **Sampled CPU is not wall-clock stall;** no per-open stall figure follows.
+- **No duration accessor appears by name;** the only literal "duration" symbol is a
+  navigation-animation frame, excluded. The 96 ms is asset construction and teardown, **not a
+  measured accessor**.
+- **No cluster is attributed to a named user step** — the steps were unmarked and there are more
+  clusters than planned opens. The largest main-thread bursts (418 ms, 669 ms per 5 s) contain no
+  `AVURLAsset`, and **what produced them is not established**.
+- **Absence of `AVURLAsset` frames does not exclude other media or I/O work**, which was not
+  searched for.
+- **`PostRecordDetailsView+Attachments:336–346` (the staging surrogate write) is UNMEASURED.**
+- One device, one session; no thermal, contention or repeat controls.
+
+**Disposition: F-3 is PARTIALLY MEASURED** — `SessionDetailView` sampled CPU only. **This capture
+does not justify an immediate fix**, which is a statement about this evidence and **not** a
+finding that the cost is insignificant overall. If a change is later wanted, **C-22's AVFoundation
+sweep is one plausible home, not the only one**, and it would need its own scope. **No further
+capture is requested.**
+
+**Full report and raw artefact paths:** `claude-opus5-f3-device-measurement.md` (trace, export and
+analyses in the session scratchpad).
+
+## 20 September 2026 — S1 and S2b implemented and independently reviewed
+
+Claude implemented these two bounded client safeguards; Codex reviewed the actual source,
+tests and final result bundles. Baseline: `064525cbc68eea8b615971061b2c065e7cdfacdc`,
+branch `feature/solo-connected`. No server change, deployment or push in this pass.
+Samuel subsequently authorised committing this reviewed checkpoint, before further B-37
+discussion. The selective commit includes the files listed below; pushing remains Samuel's step.
+
+**S1 — bind the journal's direct backend deletion to its initiating identity.**
+Every request, refresh and retry uses the captured owner and existing identity gate; post
+requests are owner-filtered and the row deletion response is validated. A final gate check
+precedes local/queue mutation, including account A→B→A and reset cases. A validated empty
+response still permits ordinary never-shared local deletion. Queue-store health is deliberately
+not a transport precondition: the existing recovery step must remain reachable. The simulated
+service still refuses to report a deletion it did not perform.
+
+**S2b — check the current publish intent once after preparation, before entering the first
+transport call.** A request superseded while attachments are prepared sends nothing. A newer
+publish or withdrawal remains available for the queue to process. Once admitted, the existing
+request sequence and identity protections continue unchanged; this is not cancellation between
+upload phases. The check is not claimed atomic with actual transmission or server completion.
+Compatibility callers without a queue revision retain their previous behaviour.
+
+**Validation:**
+- S1 focused: 40 passed; S1 full suite: **817 passed, 0 failed, 9 skipped (826)**;
+  S1 Release build succeeded before S2b changes.
+- S2b focused: **6 passed, 0 failed**. Final combined full suite:
+  **823 passed, 0 failed, 9 skipped (832)**; **Release build succeeded**.
+- Codex independently read the result bundles and Release logs. The nine skips are unchanged.
+- Initial S1 tests caught an over-broad store-health gate that blocked existing recovery; it
+  was removed before the passing runs. S2b fixture/assertion failures were corrected: no-media
+  posts have no refs PATCH; a newer intent can run in the same flush; attachments default to
+  private; invalid dummy audio cannot produce a derivative. The final upload fixture is a tiny
+  generated JPEG, explicitly included for sharing.
+- The held-upload case observes upload → refs → object DELETE → row DELETE. This proves
+  request ordering in the synthetic test, **not physical-byte removal**. Preparation is paused
+  through a DEBUG-only, actor-isolated hook with bounded waits and teardown cleanup.
+- Prepared-temporary cleanup on admission refusal is **source-reviewed through the existing
+  defer**, not newly exercised: the JPEG fixture has no derived temporary file.
+- A subsequent source tidy only moved the two F-9 documentation-comment lines back to their
+  enum. It changes no executable code and needs no additional test/build gate.
+
+**Limits and disposition:** no new device QA requested. Earlier accepted device smoke checks
+remain their own evidence, not tests of these injected races. All six broader sharing/deletion
+blockers remain OPEN; neither safeguard establishes stable withdrawal or protection from a
+late server commit. All-phase revision cancellation and a broad object-prefix sweep were
+rejected as unsafe within this scope. B-37 remains awaiting Samuel's product decision; no
+beta acceptance or launch disposition has been inferred. Age-assurance implementation remains
+frozen. This is a reviewed checkpoint, **not Phase 6 closure**.
+
+**Files in this pass:** `MOTIVO/BackendShim.swift`, `MOTIVO/JournalDeleteBackendStep.swift`,
+`MOTIVO/SessionSyncQueue.swift`, `MOTIVOTests/F9SimulatedDeleteTests.swift`,
+`MOTIVOTests/SyncQueueOrderingTests.swift`, new `MOTIVOTests/S1BoundJournalDeleteTests.swift`,
+new `MOTIVOTests/S2bPublishAdmissionTests.swift`, and this checkpoint (including the preceding
+device/F-3 updates). The two unrelated invitation documents and untracked `AGENTS.md` remain
+untouched and must not be included accidentally in a later selective commit.
+
+**Evidence:** session scratchpad
+`/private/tmp/claude-501/-Users-samueldixon-Documents-Xcode-projects-MOTIVO-B-MOTIVO/d9d4fc7d-cd76-4fdf-a378-c352abfe0694/scratchpad/`:
+`s1-full.xcresult`, `s1-rel.log`, `s2b-focus.xcresult`, `s2b-full.xcresult`, `s2b-rel.log`.

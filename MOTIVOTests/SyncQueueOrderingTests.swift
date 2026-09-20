@@ -248,6 +248,12 @@ final class QueueStubServer: URLProtocol {
             } else if isObject {
                 status = 200
             } else {
+                // S2b — ADDITIVE SIDE EFFECT, no response change: remember the refs
+                // a publish attaches, so a later withdrawal's GET returns them and
+                // its object deletes can be observed.
+                if isRefs, let list = json?["attachments"] as? [[String: Any]] {
+                    Self.refs[id] = list.compactMap { $0["path"] as? String }
+                }
                 switch method {
                 case "POST": Self.rows.insert(id); status = 201
                 case "DELETE":

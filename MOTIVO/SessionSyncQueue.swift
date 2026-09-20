@@ -728,6 +728,32 @@ public final class SessionSyncQueue: ObservableObject {
         return .proceed
     }
 
+    /// S1. The binding for the journal delete's DIRECT backend call.
+    ///
+    /// The same IDENTITY checks the flush's binding makes, for the same reason:
+    /// every request, refresh and retry is sent as this owner or not at all. It is
+    /// **not** the flush's whole gate — store health is deliberately omitted (see
+    /// below). **It captures the identity
+    /// GENERATION**, so an A→B→A switch or a factory reset invalidates it — owner
+    /// equality alone would not, because A is A again.
+    ///
+    /// Returns nil when the captured owner is not a backend identity, and the caller
+    /// must then send nothing.
+    func journalDeleteBinding(capturedOwner: String?) -> OperationBinding? {
+        let expected = Self.normalisedOwner(capturedOwner)
+        let capturedGeneration = generation
+        // STORE HEALTH IS DELIBERATELY NOT PART OF THIS GATE. It is the queue
+        // step's business: `supersedeQueuedPublishForJournalDelete` recovers a
+        // latched store or refuses with `queueNotSaved`. Gating the transport on it
+        // would refuse the backend call first and make that recovery unreachable.
+        return OperationBinding(expectedOwner: expected, isStillCurrent: { [weak self] in
+            guard let self else { return false }
+            return capturedGeneration == self.generation
+                && !self.isFactoryResetting
+                && Self.currentOwner() == expected
+        })
+    }
+
     /// U3. Owners the handoff ledger names for `postID`. A key is "owner|post";
     /// only a well-formed key whose post suffix matches exactly and whose owner is
     /// a normalised UUID counts. `~` (unowned) and anything malformed are skipped.
@@ -1000,12 +1026,26 @@ public final class SessionSyncQueue: ObservableObject {
                     continue
                 }
 
-                let result = await BackendEnvironment.shared.publish.uploadPost(payload, binding: binding)
+                // S2b. The admission question, asked once by the publish SERVICE
+                // just before its first transport call: is this still the current
+                // intent?
+                // Preparation (an audio derivative) awaits before that first call,
+                // and a newer choice can land in that window.
+                let intentKey = key(payload)
+                let result = await BackendEnvironment.shared.publish.uploadPost(
+                    payload, binding: binding,
+                    admission: { [weak self] in self?.revisions[intentKey] == revision })
                 switch result {
                 case .success:
                     NSLog("[SessionSyncQueue] upload success • postID=%@", payload.id.uuidString)
                     BackendLogger.notice("Preview upload success • postID=\(payload.id.uuidString)")
                     self.acknowledge(payload, revision: revision, generation: flushGeneration)
+                case .failure(let error) where error is PublishAdmissionError:
+                    // S2b. Superseded during preparation: NOTHING was sent, so there
+                    // is nothing to acknowledge and nothing to clean up. The newer
+                    // intent is already in the queue and goes on the next pass.
+                    // Checked before the 409 heuristic for the same reason as below.
+                    BackendLogger.notice("Publish not admitted • postID=\(payload.id.uuidString) • \(String(describing: error))")
                 case .failure(let error) where error is TransportIdentityError || error is CancellationError:
                     // P6-I-02 Unit 2b. CHECKED BEFORE THE DUPLICATE-409 HEURISTIC
                     // BELOW, which string-matches the error's description and treats

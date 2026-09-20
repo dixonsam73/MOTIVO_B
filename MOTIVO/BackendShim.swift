@@ -329,12 +329,32 @@ public protocol BackendPublishService {
     /// P6-I-02 Unit 2b. The QUEUE's entry points: every request is sent as
     /// `binding.expectedOwner`, or not at all. The unbound methods above are
     /// unchanged and remain the direct-delete and test paths.
-    func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding) async -> Result<Void, Error>
+    /// S2b. `admission` is asked EXACTLY ONCE, immediately before the service's
+    /// first transport call, after attachment preparation and body encoding. It
+    /// answers "is this still the member's current intent?"; identity stays
+    /// `binding`'s question, asked before every request. Callers with no queue
+    /// revision use the compatibility overload below, which always admits.
+    func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding,
+                    admission: @MainActor @escaping () -> Bool) async -> Result<Void, Error>
     /// P6-I-02 Unit 2c. Reports what the withdrawal ESTABLISHED — never "withdrawn".
     func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<WithdrawalOutcome, Error>
+    /// S1. The journal delete's direct delete, OWNER-BOUND. Same sequence as the
+    /// unbound `deletePost` (refs, objects, row), but every request is sent as the
+    /// binding's owner, owner-filtered, and the row DELETE is validated.
+    /// A validated `[]` is `.noRowMatched`, which the caller treats as success:
+    /// a never-shared entry produces exactly that.
+    func deletePost(_ postID: UUID, binding: OperationBinding) async -> Result<WithdrawalOutcome, Error>
     func updatePost(_ postID: UUID) async -> Result<Void, Error>
     func fetchFeed(scope: String) async -> Result<Void, Error>
     func fetchAllOwnerPostsForAnalytics(ownerUserID: String, pageSize: Int) async -> Result<[BackendPost], Error>
+}
+
+public extension BackendPublishService {
+    /// S2b compatibility: the pre-S2b bound signature, which always admits. It
+    /// keeps callers that hold no queue revision (and existing tests) unchanged.
+    func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding) async -> Result<Void, Error> {
+        await uploadPost(payload, binding: binding, admission: { true })
+    }
 }
 
 public protocol BackendProfileService {}
@@ -374,6 +394,14 @@ public protocol BackendFollowService {
     func removeFollower(_ followerUserID: String) async -> Result<Void, Error>
 }
 
+/// S2b. The publish was superseded by a newer intent while its attachments were
+/// being prepared, so it was never admitted to the transport. ALWAYS a hold for the
+/// queue: never success, never a duplicate-409.
+public enum PublishAdmissionError: Error, Equatable, CustomStringConvertible {
+    case supersededBeforeFirstSend
+    public var description: String { "Superseded before the first send: nothing was sent." }
+}
+
 /// F-9. Why a simulated delete did nothing. Readable through both
 /// `localizedDescription` and `String(describing:)`, which the Debug viewer uses.
 public enum SimulatedPublishError: LocalizedError, CustomStringConvertible, Equatable {
@@ -392,13 +420,24 @@ public enum SimulatedPublishError: LocalizedError, CustomStringConvertible, Equa
 public final class SimulatedPublishService: BackendPublishService {
     /// P6-I-02 Unit 2b. Preview makes no identity-bearing request, so the bound
     /// entry points forward to the existing simulated behaviour unchanged.
-    public func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding) async -> Result<Void, Error> {
-        await uploadPost(payload)
+    @MainActor
+    public func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding,
+                           admission: @MainActor @escaping () -> Bool) async -> Result<Void, Error> {
+        // S2b. Honoured here too: a refusal must not be reported as a simulated
+        // success. Everything else about the simulated service is unchanged.
+        guard admission() else { return .failure(PublishAdmissionError.supersededBeforeFirstSend) }
+        return await uploadPost(payload)
     }
     public func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<WithdrawalOutcome, Error> {
         // The simulated service verifies nothing; it says so, and is never
         // counted as evidence. Reached in ANY mode without HTTP config.
         await unsharePost(postID).map { .simulatedUnverified }
+    }
+
+    /// F-9 preserved: the simulated service performs NO network deletion, so a
+    /// bound delete reports that nothing was deleted rather than a false success.
+    public func deletePost(_ postID: UUID, binding: OperationBinding) async -> Result<WithdrawalOutcome, Error> {
+        await deletePost(postID).map { .simulatedUnverified }
     }
 
     public init() {}
@@ -796,6 +835,14 @@ public func fetchIncomingRequests() async -> Result<[String], Error> {
 
 public final class HTTPBackendPublishService: BackendPublishService {
 
+    #if DEBUG
+    /// S2b. TEST-ONLY, hosted runs only, and **main-actor isolated** — no global
+    /// unsafe mutable state. Awaited immediately before the admission check, so a
+    /// test can supersede the intent during "preparation" deterministically.
+    /// Tests must clear it in teardown.
+    @MainActor static var unitTestHoldBeforeFirstPublishSend: (() async -> Void)?
+    #endif
+
     // MARK: P6-I-02 Unit 2b — one seam for every publish/unshare request
 
     /// With no binding this is exactly the ambient `request(...)` every call site
@@ -819,12 +866,23 @@ public final class HTTPBackendPublishService: BackendPublishService {
         binding.map { "&owner_user_id=eq.\($0.expectedOwner)" } ?? ""
     }
 
-    public func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding) async -> Result<Void, Error> {
-        await uploadPostImpl(payload, binding: binding)
+    public func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding,
+                           admission: @MainActor @escaping () -> Bool) async -> Result<Void, Error> {
+        await uploadPostImpl(payload, binding: binding, admission: admission)
     }
 
     public func unsharePost(_ postID: UUID, binding: OperationBinding) async -> Result<WithdrawalOutcome, Error> {
         await unsharePostImpl(postID, binding: binding).flatMap { outcome in
+            outcome.map { .success($0) } ?? .failure(WithdrawalResultError.undetermined)
+        }
+    }
+
+    /// S1. The bound journal delete. It reuses `deletePostImpl` unchanged — no
+    /// demotion PATCH, unlike the withdrawal — so the only difference from the
+    /// unbound path is that every request is owner-bound, owner-filtered and the
+    /// row DELETE is validated.
+    public func deletePost(_ postID: UUID, binding: OperationBinding) async -> Result<WithdrawalOutcome, Error> {
+        await deletePostImpl(postID, binding: binding).flatMap { outcome in
             outcome.map { .success($0) } ?? .failure(WithdrawalResultError.undetermined)
         }
     }
@@ -895,7 +953,8 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
     }
 
     @MainActor
-    private func uploadPostImpl(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding?) async -> Result<Void, Error> {
+    private func uploadPostImpl(_ payload: SessionSyncQueue.PostPublishPayload, binding: OperationBinding?,
+                                admission: (@MainActor () -> Bool)? = nil) async -> Result<Void, Error> {
         guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
@@ -1038,6 +1097,25 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
             "apikey": apiKey,
             "Prefer": "return=minimal"
         ]
+
+        // S2b. THE ADMISSION CHECK, asked ONCE, here: after attachment preparation
+        // (which awaits, and can take seconds for an audio derivative) and after the
+        // body is encoded, immediately before the FIRST transport call below.
+        //
+        // It is NOT atomic with bytes leaving the device: `send` may itself await
+        // auth or a preflight, and a newer intent can land inside that. What it
+        // guarantees is narrower and is the whole point: a publish superseded during
+        // PREPARATION creates nothing — no row, no object, no refs — so it cannot
+        // orphan anything. Once admitted, every later phase runs to completion
+        // exactly as before, and the binding's identity gate still applies to every
+        // request, refresh and retry.
+        #if DEBUG
+        await Self.unitTestHoldBeforeFirstPublishSend?()
+        #endif
+        if let admission, admission() == false {
+            BackendLogger.notice("Publish not admitted • superseded during preparation • postID=\(payload.id.uuidString)")
+            return .failure(PublishAdmissionError.supersededBeforeFirstSend)
+        }
 
         let result = await send(path: "rest/v1/posts", method: "POST", jsonBody: jsonData,
                                 headers: headers, binding: binding)
@@ -1570,9 +1648,12 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]],
         }
     }
 
-    /// THE DIRECT-DELETE PATH (`ContentView`, `DebugViewerView`). Unbound, and
-    /// P6-I-02 Unit 2b leaves it exactly as it was: ambient token, ambient refresh,
-    /// no owner filter, same requests in the same order.
+    /// THE UNBOUND DIRECT-DELETE PATH. Unchanged since P6-I-02 Unit 2b: ambient
+    /// token, ambient refresh, no owner filter, same requests in the same order.
+    ///
+    /// S1: its only remaining caller is `DebugViewerView`. `ContentView`'s journal
+    /// delete now goes through `deletePost(_:binding:)`, which is owner-bound and
+    /// owner-filtered.
     @MainActor
     public func deletePost(_ postID: UUID) async -> Result<Void, Error> {
         await deletePostImpl(postID, binding: nil).map { _ in () }
@@ -1620,11 +1701,13 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]],
         }
 
         // 3) Delete the post row.
-        // P6-I-02 Unit 2c. UNBOUND (the direct-delete path): `return=minimal`
-        // and any 2xx is success, byte for byte as before — `ContentView`
-        // deletes local data on it, including for sessions never published,
-        // whose row DELETE matches nothing. BOUND: ask for the removed rows and
-        // VALIDATE them, so the queue is told what actually happened.
+        // P6-I-02 Unit 2c, amended by S1. UNBOUND: `return=minimal`, any 2xx is
+        // success. Its remaining caller is the DEBUG viewer; ContentView's journal
+        // delete now uses the BOUND entry point. BOUND: ask for the removed rows
+        // and VALIDATE them, so the caller is told what actually happened — and a
+        // validated `[]` is `noRowMatched`, which the journal delete treats as
+        // success, because a session that was never published produces exactly
+        // that.
         let deletePath = "rest/v1/posts?id=eq.\(postID.uuidString)" + ownerFilter(binding)
             + (binding == nil ? "" : "&select=id")
         let deleteHeaders: [String: String] = [
