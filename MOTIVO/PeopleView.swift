@@ -622,8 +622,20 @@ struct PeopleView: View {
         case .success(let rows):
             searchResults = rows
             searchError = rows.isEmpty ? "No results." : nil
-        case .failure:
-            searchError = "Search unavailable."
+        case .failure(let error):
+            // B-37. A budget refusal and a fault are DIFFERENT outcomes and must
+            // not share copy: an empty list reading as "nobody matched" is a
+            // worse lie than saying the search was throttled. A counter fault
+            // stays on the ordinary message, because it is not the member's
+            // doing and there is no duration to offer.
+            //
+            // `searchText` is deliberately left alone, so the query survives and
+            // the member can simply tap again. No countdown, no disabled state.
+            if case DirectorySearchError.rateLimited(let retryAfterSeconds) = error {
+                searchError = DirectorySearchThrottleCopy.message(retryAfterSeconds: retryAfterSeconds)
+            } else {
+                searchError = "Search unavailable."
+            }
         }
     }
 

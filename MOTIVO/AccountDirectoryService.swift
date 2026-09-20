@@ -54,7 +54,52 @@
 // SCOPE: Multi-device bootstrap hardening foundation — extend owner self-row fetch to include canonical display_name/location/instruments for second-device hydration. No UI changes.
 // SEARCH-TOKEN: 20260308_194900_MultiDeviceBootstrap_ADS
 
+// CHANGE-ID: 20260920_130000_B37_SearchBudgetRefusal
+// SCOPE: B-37 — surface the server's search-budget refusal as a typed error carrying
+// the server-derived retry duration, so a throttle reads as a throttle and never as
+// "No results." No change to what is searched or returned.
+// SEARCH-TOKEN: 20260920_130000_B37_SearchBudgetRefusal
+
 import Foundation
+
+/// B-37. The directory search RPC refuses a caller who has exhausted their
+/// per-account budget. The refusal arrives as **HTTP 429**, deliberately never
+/// 401 — `NetworkManager` refreshes the session and retries on 401 only, and a
+/// throttle must never be mistaken for an authentication challenge.
+public enum DirectorySearchError: Error, Equatable {
+    /// `retryAfterSeconds` is the server's own derivation from the end of the
+    /// blocking window. It is optional because **the client must never invent
+    /// one**: a missing or malformed value means the copy names no time at all.
+    case rateLimited(retryAfterSeconds: Int?)
+}
+
+/// The refusal copy. A pure function so it can be tested without a view.
+public enum DirectorySearchThrottleCopy {
+
+    /// Deliberately NOT a countdown or a timer. The duration is server-derived,
+    /// rounded once, and stated once.
+    public static func message(retryAfterSeconds: Int?) -> String {
+        let lead = "You've searched a lot just now."
+        guard let s = retryAfterSeconds, s > 0, s <= 24 * 60 * 60 else {
+            // No usable duration: say nothing about when, not even vaguely.
+            // "shortly" would be the same invention in softer words.
+            return "\(lead) Please try again later."
+        }
+        return "\(lead) Try again in \(roundedDuration(seconds: s))."
+    }
+
+    static func roundedDuration(seconds: Int) -> String {
+        // Rounded UP throughout, so the member is never told to come back
+        // before the window has actually ended: 61 seconds is "about 2
+        // minutes", never "about a minute".
+        let minutes = Int((Double(seconds) / 60.0).rounded(.up))
+        if minutes <= 1 { return "about a minute" }
+        if minutes < 55 { return "about \(minutes) minutes" }
+        let hours = Int((Double(minutes) / 60.0).rounded(.up))
+        if hours <= 1 { return "about an hour" }
+        return "about \(hours) hours"
+    }
+}
 
 public struct DirectoryAccount: Codable, Identifiable, Hashable {
     public var id: String { userID }
@@ -358,8 +403,54 @@ public final class AccountDirectoryService {
             }
 
         case .failure(let error):
-            return .failure(error)
+            return .failure(Self.mapSearchFailure(error))
         }
+    }
+
+    /// B-37. Translate the server's budget refusal into a typed error, leaving
+    /// every other failure exactly as it was.
+    ///
+    /// Matched on the PostgREST error code as well as the status, so a 429 from
+    /// anywhere else in the stack still reads as a throttle while a body we do
+    /// not recognise degrades to "no duration" rather than to a wrong one.
+    static func mapSearchFailure(_ error: Error) -> Error {
+        guard let network = error as? NetworkManager.NetworkError,
+              case .httpError(let status, let body) = network,
+              status == 429
+        else { return error }
+
+        // A 429 ALONE is enough to be a throttle, but it is NOT enough to trust
+        // a duration. Only our own refusal shape carries one; any other 429 --
+        // an edge proxy, a gateway -- yields a throttle with no time named.
+        let payload = Self.parseRefusal(body)
+        let isOurRefusal = payload.code == "PT429" && payload.message == "search_rate_limited"
+        return DirectorySearchError.rateLimited(
+            retryAfterSeconds: isOurRefusal ? payload.retryAfterSeconds : nil)
+    }
+
+    /// `retry_after_seconds` inside `details`, which arrives as a JSON **string**
+    /// containing JSON.
+    private struct RefusalDetail: Decodable { let retry_after_seconds: Int }
+
+    /// Decoded with `JSONDecoder` rather than read out of an `Any` dictionary,
+    /// because `JSONSerialization` bridges JSON `true` to `NSNumber` and
+    /// `as? Int` would silently turn it into a one-second duration. `JSONDecoder`
+    /// rejects a boolean, a fraction and a quoted number for an `Int` field.
+    static func parseRefusal(_ body: String?) -> (code: String?, message: String?, retryAfterSeconds: Int?) {
+        guard let body,
+              let data = body.data(using: .utf8),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return (nil, nil, nil) }
+
+        let code = root["code"] as? String
+        let message = root["message"] as? String
+
+        var seconds: Int?
+        if let detailString = root["details"] as? String,
+           let detailData = detailString.data(using: .utf8) {
+            seconds = (try? JSONDecoder().decode(RefusalDetail.self, from: detailData))?.retry_after_seconds
+        }
+        return (code, message, seconds)
     }
 
     /// Upsert the caller's account_directory row (owner-only via RLS).
