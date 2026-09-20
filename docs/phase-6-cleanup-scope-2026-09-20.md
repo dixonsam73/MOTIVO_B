@@ -5,8 +5,15 @@
 C-12's three sites, with Tier C and the shared naming helpers retained.** The removal was then
 implemented exactly as approved and nothing was widened. The tables below are retained **as
 written** as the reachability record the approval was given against; §8 records what was
-actually done and what was measured. **Nothing is committed or pushed** — that needs Samuel's
-specific instruction.
+actually done and what was measured.
+
+**STATUS SUPERSEDED 20 September 2026 — ACCEPTED, COMMITTED AND PUSHED.** Committed as
+**`e5b3b08788e88324c942421ed64b640db122acf0`** on `feature/solo-connected`, carrying exactly
+four paths Samuel named: the two source files, the C-12 audit row and this record. **Samuel
+reports it pushed, and the locally recorded `origin/feature/solo-connected` agrees at the same
+SHA; no fetch was performed to confirm that independently.** The sentences below that read
+"nothing is committed or pushed" were true when written and are **left in place as dated
+history rather than rewritten** — this heading supersedes them.
 
 **Codex applied four wording corrections to this record before implementation** (§0 items 1–2,
 §2.1, §2.1.1, §1.1 and §2.5). They were proof-wording corrections, not source blockers.
@@ -515,3 +522,30 @@ run and no fixture was manufactured to unskip it.**
 - **Two local-stack tests that passed in the C-70 baseline were SKIPPED here**, so this run's
   coverage is narrower than that baseline's in a second, independent way. See §8.4(b).
 - **Nothing is committed or pushed.** That needs Samuel's specific instruction.
+  **[SUPERSEDED 20 September 2026 — committed as `e5b3b08` and pushed per Samuel; see the
+  status note at the TOP OF THIS DOCUMENT, in the header. The line is preserved as written,
+  not rewritten.]**
+
+
+---
+
+# 9. STATUS AT CLOSE OF THIS UNIT — 20 September 2026
+
+**This clean-up unit is complete and accepted.** Codex accepted the scope, the source diff, the
+build and unit evidence within the explicit limits recorded in §8.5, and the two final
+documentation corrections. Samuel instructed the commit and reports it pushed.
+
+**What is NOT established by that acceptance, stated because it would otherwise be assumed:**
+
+- **The Phase 6 CLEAN-UP CHECKPOINT is complete. PHASE 6 IS NOT CLOSED.** Formal phase closure
+  and carryover acceptance have **not** been separately granted by Samuel.
+- **Codex's disposition recommendations remain recommendations**, not implicitly accepted
+  deferrals — including every row of `docs/phase-6-disposition-codex-2026-09-20.md` and every
+  item in my own feedback.
+- **Adult-assurance implementation remains FROZEN** pending the legal, Apple, HEAA and
+  server-trust gates. **B-40 and the current band protections remain in force.**
+- **Sharing-protocol implementation remains FROZEN** pending a sound reviewed design. The
+  provider reply (SU-478356) is useful but is **not the only design gate**, and **its absence
+  is not a blanket block on independent work.**
+- **No blanket down-tools, and no indefinite wait on Supabase.** The two local-stack tests
+  skipped in §8.4(b) are a recorded coverage limit, not a reason to halt.
