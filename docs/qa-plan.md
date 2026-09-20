@@ -3776,6 +3776,271 @@ point of the feature is that origin is invisible to the user.
 
 ---
 
+## Group C70 — Profile write path, Device A. PREPARED 2026-09-20, NOT RUN
+
+**HOLD FOR SAMUEL. Nothing here has been installed, launched or run.** The code
+is locally accepted and device QA is the remaining gate; C-70 is **not closed**.
+
+### Build and install route, and how the build is identified
+
+| | |
+|---|---|
+| Device | **Device A — "SD beta burner", iPhone 16e**, `BA5D3570-3D85-5EFE-A62B-81881AD110D6`, observed **connected** 2026-09-20 |
+| Bundle | **`com.sdsongs.etudes`** — the only Études install on Device A |
+| Configuration | **Release**, which is the shared scheme's Run action and the only configuration that can transact |
+| StoreKit configuration | **None** (unpinned; pinned by `SchemeConfigurationGuardTests` against regression) |
+| Deployment target | **26.4** — Device A must be on 26.4 or later. *(Samuel's iPad is 26.3.1 and cannot run this build; it is not a QA device here.)* |
+| Route | Xcode → Run, destination **SD beta burner**, Release. **Not TestFlight** — this is an unreleased local change |
+
+**THE BUILD NUMBER CANNOT IDENTIFY THE BUILD.** Both configurations hard-code
+`MARKETING_VERSION 1.0` / `CURRENT_PROJECT_VERSION 131`, neither is incremented,
+`devicectl` exposes no install date or hash, and the app displays no version —
+so **every install from this project reports `1.0 (131)` whatever commit it came
+from.** Identity must be recorded at build time, not read back afterwards.
+
+**The SOURCE manifest is recorded and is the identity of the source:**
+`c70-source-manifest.txt` in the Codex outputs directory. It carries `HEAD`
+(`79fe153`, tree **DIRTY** — C-70 is uncommitted, so the commit alone does not
+identify this source), the Release configuration, a digest of the whole tracked
+diff, and a **per-file SHA-256 of every modified tracked source file and every
+untracked C-70 Swift and test file**.
+
+**CORRECTED 2026-09-20: an earlier revision of this section proposed
+`git status --porcelain | md5`. That is wrong and would have been misleading —
+it digests PATHS AND STATUS LETTERS, not file contents**, so every byte of the
+implementation could change while the fingerprint held steady. Content digests
+replace it.
+
+**THE BINARY HASH IS A SEPARATE CLAIM AND MAY NOT BE AVAILABLE BEFORE INSTALL.**
+Xcode's Run action builds **and installs** as one action, so on that route there
+is normally **no pre-install window** in which to hash the product. Therefore:
+
+- hash `Etudes.app/Etudes` from DerivedData **after** the Release device build
+  and, **only if the route actually allows it, before installation**;
+- otherwise **do not claim a pre-install hash.** A hash taken afterwards is
+  still worth recording, but it evidences only what is in DerivedData at that
+  moment and is void if anything rebuilt in between — record it as such.
+
+### What the run must NOT do
+
+No purchase, no membership mutation, no reset or erase, no onboarding or
+first-join replay, no account deletion, no second account, no production policy
+or schema work, no recorder involvement. **Use the existing `Ben Craft` account
+only.** `account_directory.lookup_enabled = false` and
+`account_privacy.lookup_enabled = true` on `6fd0a833` are **protected evidence of
+an explicit user preference and must both survive unchanged** — as must every
+other privacy value.
+
+### MEASURED BACKEND AND CLIENT STATE — read-only, 2026-09-20 19:07:18 UTC
+
+**Nothing was mutated. No device operation, no purchase, no mode override.**
+Identity corroborated, not invented: uid prefix `6fd0a833`, `original_transaction_id`
+`2000001228947923` — both matching the rig record for Device A.
+
+| measure | value |
+|---|---|
+| `connected_member` (scope011) | **false** |
+| `environment` | **Sandbox** |
+| `renewal_date` / `entitlement_ended_at` | **2026-09-20 17:09:33+00 — PAST** |
+| `is_in_billing_retry` / `grace_period_expires_date` | false / null → **not in grace** |
+| `revocation_date` | **null — not revoked** |
+| `pending_cleanup_at` | 2026-11-19 17:09:33+00 (60-day quarantine, as designed) |
+| `binding_method` | `purchase` |
+| `account_directory.display_name` | **`Ben Craft QA1`** |
+| `account_id` | `devicearlease` |
+| `age_band` | `band_18_plus` |
+| `account_directory.lookup_enabled` | **false — protected evidence, INTACT** |
+| `account_privacy.lookup_enabled` / `lookup_changed_at` | **true** / `2026-09-10 06:02:41.524643+00` — **INTACT** |
+
+**This is an ORDINARY NATURAL LAPSE**, decomposed rather than inferred: the
+environment is accepted under scope011 and the row is not revoked, so the only
+false conjunct is `renewal_date > now()`. It is **not** an environment
+exclusion. **`membership_state()` is deliberately not cited** — it reports
+`sandbox_only` regardless of entitlement and is not eligibility evidence.
+
+**THE DISPLAY NAME ON THE SERVER DIFFERS FROM THE LAST RECORDED VALUE, AND THE
+CAUSE IS UNKNOWN.** Three observations, kept as observations:
+
+| observed at | `display_name` | source |
+|---|---|---|
+| `2026-09-20 15:53:02.222042+00` | `Ben Craft` | C-70 addendum |
+| `2026-09-20 16:12:54.889440+00` | `Ben Craft` (restoration) | independent Codex record |
+| `2026-09-20 19:07:18+00` | **`Ben Craft QA1`** | this read |
+
+**The discrepancy is preserved with its cause UNKNOWN. Nothing about when, how
+or by what route it changed is established, and none is asserted.** There is
+**no request provenance** — no captured request, no log, nothing that names a
+writer.
+
+**AN EARLIER REVISION OF THIS SECTION IS WITHDRAWN AS UNSUPPORTED.** It argued
+that the write "can only have been applied while `connected_member` was true,
+so it landed at or before 17:09:33". **That is false, and it is false because of
+the very thing this unit changed:** `account_directory_update_owner` is
+**UNGATED**, so an owner UPDATE does not require `connected_member` at all and
+carries no such time bound. The same revision inferred the local-first snapshot
+publish as the mechanism and concluded the divergence had "resolved toward the
+local value". **All three claims — the time, the mechanism, and the
+resolution — are withdrawn.** They were inference presented alongside
+measurement.
+
+**Consequence for the run: the starting value must be READ from the server
+immediately before the step and agreed explicitly, never assumed.**
+
+### C70-3 IS UNAVAILABLE ON DEVICE — and the reason is the CLIENT, not the server
+
+`ProductionAppModeActivation.resolve` returns `.solo` unless **local StoreKit
+entitlement AND a Connected identity** both hold (`AppModeManager.swift:124-128`).
+The Sandbox subscription has lapsed, so the app is in Solo — which matches what
+Samuel observed after signing in, and the sign-in itself is not the problem.
+
+`syncDirectoryFromCurrentState` then returns at its **first** guard,
+`canShowConnectedAccountManagement` (`mode == .connected`), before
+`BackendEnvironment.isConnected`, before the token check, and long before any
+request. **So in a natural lapse the client never attempts a directory write at
+all.**
+
+**THIS IS A MISSING CLIENT REACHABILITY, NOT AN OPEN POLICY QUESTION.**
+**D-U6-3 is SETTLED** — self-profile maintenance is allowed while lapsed — and
+nothing here reopens it. C-70 made that carve-out reachable **at the server** by
+replacing the gated upsert with an owner PATCH. What remains is that the
+**client** does not attempt the write while in Solo, so the settled behaviour
+is still not reachable on device. **An earlier revision framed this as "a
+product question about whether the client gate should change"; that framing is
+withdrawn, because it re-opened a decision already taken.**
+
+**NO CLIENT GATE IS CHANGED IN THIS UNIT.** The reachability gap is recorded as
+a scope limit and is carried, not fixed here.
+
+**What each excluded route would and would not do:**
+
+- **A renewal or purchase would enable C70-1 and C70-2** by restoring Connected.
+  It would **NOT** exercise C70-3, because it removes the very lapse C70-3
+  exists to test. **C70-3 cannot be reached by renewing.**
+- **A DEBUG `forceConnected` override is excluded by SCOPE, not impossible.**
+  It sets the mode without purchasing anything. The bundle-id point is about
+  Debug being unable to TRANSACT with App Store Connect, which is a different
+  question and must not be offered as a reason the override could not set the
+  mode. An earlier revision conflated the two; that is withdrawn.
+
+**C70-3 is recorded as NOT EXERCISED, with the D-U6-3 carve-out verified
+locally only. C70-1 and C70-2 are blocked by the same lapse.**
+
+### RESULTS — RUN 2026-09-20, Device A, Release, existing account
+
+Samuel performed every device action. I performed only read-only backend reads.
+**UI observations are user-reported and are recorded SEPARATELY from the backend
+readings; neither is treated as evidence of the other.**
+
+Entitlement was restored by Samuel renewing the existing Sandbox subscription,
+same `original_transaction_id` `2000001228947923`. **A matching
+`original_transaction_id` evidences the same subscription CHAIN and is not by
+itself proof that no second membership row exists**, so the rows were counted:
+at `2026-09-20 19:18:19.200358+00` the identity holds **`membership_rows` = 1,
+`distinct_otids` = 1, environment `Sandbox`**
+(`c70-device-qa-membership-count.json`).
+Raw captures in the Codex outputs directory: `c70-device-qa-PRE-baseline.json`,
+`c70-device-qa-POST1-after-name-edit.json`, `c70-device-qa-POST2-after-revert.json`.
+
+| read | UTC | `display_name` | `connected_member` |
+|---|---|---|---|
+| PRE | 19:11:06.071988 | `Ben Craft QA1` | true |
+| POST1 | 19:12:37.369720 | **`Ben Craft C70`** | true |
+| POST2 | 19:14:54.742106 | **`Ben Craft`** | true |
+
+**C70-1 — PASS on the normal path.** Backend holds the expected value and **no
+warning was shown** (user-reported). Both conditions met, recorded separately.
+
+**C70-2 — PASS, as an EVENTUAL LATEST-VALUE check and nothing more.** Samuel set
+`Ben Craft Temp`, waited about a second, set `Ben Craft`, then left and reopened;
+the server holds `Ben Craft` and no warning appeared. **This does NOT establish
+that the temporary write was in flight when the revert was made** — the timing
+was not controlled and is not observable from the device. **The controlled
+in-flight race is LOCAL TEST COVERAGE ONLY** (`C70DirectorySyncLatchTests`).
+
+**C70-3 — NOT EXERCISED.** See the client-reachability section above.
+
+**Protected privacy values unchanged across all three reads:**
+`account_directory.lookup_enabled` **false**, `account_privacy.lookup_enabled`
+**true**, `lookup_changed_at` `2026-09-10 06:02:41.524643+00`,
+`follow_requests_enabled` true. `account_id`, `location`, `age_band`,
+`environment`, `binding_method` and every membership field also unchanged —
+**CP-3's payload omission held on real device traffic.**
+
+**WHAT THIS RUN DOES NOT ESTABLISH.** The failure paths — refusal, ambiguous
+transport, unevidenced receipts, the bounded creation probe — are not exercised
+and need fault injection. No creation path ran. Generation did not fire, the
+account already holding a handle. Identity-transition guards were not exercised.
+**The build identification limitation stands: `1.0 (131)` cannot identify a
+build, and no pre-install binary hash was obtainable on the Xcode Run route, so
+the run is attributed to this source by the recorded manifest and by nothing
+read back from the device.**
+
+### The bracket that makes the run mean anything
+
+**Local persistence and remote success are separate outcomes, and the screen
+cannot distinguish them** — that is the whole of C-70's addendum. So each step
+is bracketed by an **authoritative read-only backend read** of that identity's
+`account_directory` row (`display_name`, `account_id`, `location`,
+`instruments`, `entitled_until`, both `lookup_enabled` values) **before and
+after**. The server is the verdict; the screen is the thing under test and
+cannot also be the evidence.
+
+| # | Step | What a PASS looks like |
+|---|---|---|
+| **C70-1** | Ordinary display-name edit on the existing account. Observe what the UI says — or does not say — exactly as presented, then leave the screen and return | **PASS on the normal path = the server row holds the new name AND no warning was shown.** Record the acknowledgement outcome and the backend outcome **separately**; neither is evidence of the other |
+| **C70-2** | Temporary edit, then **revert to the agreed starting/restore value** — READ it from the server immediately beforehand and agree it explicitly; do not assume. It was `Ben Craft` at 16:12:54+00 and **`Ben Craft QA1`** at 19:07:18+00, cause of the difference unknown | The server ends on **that same agreed value**, and the local screen agrees. **Expected and starting value are by definition the same string; they must not be written independently** |
+| **C70-3** | Existing-owner edit **while membership has naturally lapsed**, *only if that state is reachable without purchasing, resetting or mutating membership* | The edit **succeeds** — this is D-U6-3's carve-out finally reachable from the client. **If entitlement cannot be observed in the lapsed state without mutating anything, SKIP and record it as not exercised.** Do not manufacture the state |
+
+**C70-1 — WHAT A WARNING DOES AND DOES NOT ESTABLISH. CORRECTED 2026-09-20.**
+An earlier revision of this section required the backend to be *unchanged*
+whenever the generic warning appears. **That is wrong in both directions:**
+
+- **an ambiguous response can follow a committed write** — the request reached
+  the server, the server applied it, and the client never learned the outcome.
+  **Warning + changed backend is a valid UNCERTAIN ACKNOWLEDGEMENT, not proof of
+  failure**, and is exactly what `.ambiguous` is for;
+- **warning + unchanged backend is not silent divergence either.** The local
+  edit is retained by design and the member was told accurately that Connected
+  could not be confirmed. That is the designed behaviour, not a defect.
+
+So an unexpected warning is recorded as **a separate acknowledgement outcome**,
+alongside the backend reading, **without inventing whether the write happened.**
+What would be a genuine defect is the case the copy was rewritten to remove: a
+changed screen **presented as saved** over an unchanged server row.
+
+**C70-2 — WHAT THE MANUAL REVERT PROVES. CORRECTED 2026-09-20.** A hand-timed
+revert establishes only that the **eventual latest value wins**. It does **NOT**
+establish that the temporary write was still in flight when the revert was made,
+and it must not be written up as having exercised that race — the timing is not
+controlled and is not observable from the device. **The controlled race coverage
+is the deterministic test** (`C70DirectorySyncLatchTests`), which exercises
+saved-A → in-flight-B → revert-to-A directly. C70-2 is a real-world sanity check
+on top of that, not a substitute for it.
+
+### Coverage limits — state these with any result
+
+- **C70-3 may be unreachable.** It depends on the natural membership state at run
+  time, and nothing may be purchased, reset or mutated to reach it. Skipping it
+  leaves the ungated-UPDATE carve-out **verified locally only**.
+- **The failure paths are not exercised.** Refusal, ambiguous transport,
+  unevidenced receipts and the bounded creation probe need fault injection; the
+  run above exercises the success paths and the revert.
+- **No creation path is exercised** — the account already has a row, and
+  creation stays gated.
+- **Generation is unlikely to fire**, because the account already holds a handle.
+- **The identity-transition guards cannot be exercised** without a sign-out or a
+  second account, both excluded here.
+- **CARRIED SCOPE LIMIT: the client does not attempt a self-profile write in
+  Solo**, so D-U6-3's settled carve-out stays unreachable on device. No client
+  gate is changed in this unit, and no device evidence for it exists.
+- **C70-2 does not exercise the in-flight race**, only eventual latest value;
+  the race is covered deterministically by test, not on device.
+- **A pre-install binary hash may not be obtainable** on the Xcode Run route,
+  in which case none is claimed.
+- **Local-save error swallowing is NOT under test** — `save()` runs only on
+  `.onDisappear` and discards its error, so a local persistence failure would be
+  invisible on device as well. Recorded on C-70; unchanged by this work.
+
 ## Regression areas after any change
 
 Timer state recovery across launch · staged-media rehydration on foreground ·

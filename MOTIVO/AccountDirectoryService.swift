@@ -247,6 +247,43 @@ public final class AccountDirectoryService {
                 store[a.userID] = (a, fetchedAt)
             }
         }
+
+        /// C-70. The last write epoch applied per key.
+        private var lastWriteEpoch: [String: Int] = [:]
+
+
+        /// Apply a directory-write result ONLY if it is newer than the last one
+        /// applied to that key.
+        ///
+        /// **The ordering decision is taken INSIDE the actor, which is the only
+        /// place it can be enforced.** A caller-side guard runs before the hop
+        /// onto this actor, and the state it inspected can change during that
+        /// suspension — so a check on the caller establishes what was true
+        /// before the mutation was scheduled, never what is true when it runs.
+        /// A monotonic epoch compared here cannot be overtaken that way.
+        /// `validity` is consulted HERE, in the same synchronous segment as the
+        /// mutation. Comparing only previously APPLIED epochs is not enough on
+        /// its own: if a newer write has been submitted but has not yet applied
+        /// anything, there is nothing for the older one to lose to and it would
+        /// proceed. The token is invalidated synchronously at submission and at
+        /// identity transitions, so it answers "is this still the current
+        /// intent" rather than "did anything newer already land".
+        func applyIfNewer(_ accounts: [DirectoryAccount],
+                          owner: String,
+                          generation: Int,
+                          epoch: Int,
+                          validity: DirectoryWriteValidity,
+                          fetchedAt: Date = Date()) {
+            // The check and the assignment happen under ONE hold of the token's
+            // lock, so an invalidation cannot land between them.
+            validity.withCurrent(owner: owner, generation: generation, seq: epoch) {
+                for a in accounts {
+                    if let seen = lastWriteEpoch[a.userID], seen >= epoch { continue }
+                    lastWriteEpoch[a.userID] = epoch
+                    store[a.userID] = (a, fetchedAt)
+                }
+            }
+        }
     }
 
     private let cache = DirectoryAccountCache()
@@ -453,48 +490,282 @@ public final class AccountDirectoryService {
         return (code, message, seconds)
     }
 
-    /// Upsert the caller's account_directory row (owner-only via RLS).
-    /// - Important: This is the only write surface for Phase 12C.
-    /// CP-3: `lookupEnabled` and `followRequestsEnabled` are GONE, not defaulted.
-    /// They were dead parameters that read as controls -- discarded here and
-    /// hard-coded in the payload -- so a shipped, server-hydrated discovery
-    /// toggle never once persisted the member's choice. Those preferences now
-    /// live in `account_privacy` and are written only by AccountPrivacyService.
-    /// Ordinary profile publishing therefore cannot touch them: the columns are
-    /// no longer sent at all.
-    public func upsertSelfRow(userID: String, displayName: String, accountID: String?, location: String? = nil, instruments: [String]? = nil) async -> Result<Void, Error> {
-        let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !uid.isEmpty else {
-            return .failure(NSError(domain: "AccountDirectoryService", code: 1, userInfo: [NSLocalizedDescriptionKey: "empty userID"]))
+    // MARK: - C-70 · the directory write path
+
+    /// The columns a write asks the server to return.
+    ///
+    /// **`avatar_key` and `avatar_version` are deliberately absent.** Once
+    /// completions can race, a fetched avatar field is not automatically more
+    /// current than the cached one, so adopting it would be a change of
+    /// behaviour dressed as an improvement. C-34's caching is untouched here.
+    ///
+    /// **`lookup_enabled` and `follow_requests_enabled` are deliberately absent
+    /// too** — CP-3 keeps them out of the payload, and keeping them out of the
+    /// `select=` makes "ordinary profile publishing does not touch a privacy
+    /// preference" structural on the response side as well.
+    private static var writeSelect: String { DirectoryWriteEvidence.selectList }
+
+    /// The row body, WITHOUT `user_id`.
+    ///
+    /// A PATCH never sends `user_id`: the owner is already pinned by the query
+    /// filter and by the policy's `with_check`, and not sending it means this
+    /// path cannot reassign a row's owner even though the column grant would
+    /// permit it.
+    private func directoryPayload(displayName: String,
+                                  accountIDToWrite: String?,
+                                  includeAccountID: Bool,
+                                  location: String?,
+                                  instruments: [String]?) -> [String: Any] {
+        // CP-3: the two privacy columns are NOT sent. They are dead in the
+        // directory (CP-2 stopped reading them) and authoritative in
+        // account_privacy.
+        var payload: [String: Any] = [
+            "display_name": displayName,
+            "location": sanitizedLocation(location) ?? NSNull()
+        ]
+        if includeAccountID, let accountIDToWrite = sanitizedAccountID(accountIDToWrite) {
+            payload["account_id"] = accountIDToWrite
+        }
+        if let instruments = instruments {
+            payload["instruments"] = instruments
+        }
+        return payload
+    }
+
+    /// Send one owner-bound directory write and score what came back.
+    ///
+    /// Every write goes through `NetworkManager.boundRequest`, so the OUTBOUND
+    /// credential is bound to the owner — a response-side identity check cannot
+    /// establish that, because by then the request has already been sent as
+    /// whoever the ambient token belonged to. The receipt check below is a
+    /// second, independent gate: the binding proves who we sent as, the receipt
+    /// proves which row answered.
+    @MainActor
+    private func sendDirectoryWrite(method: String,
+                                    query: [URLQueryItem],
+                                    payload: [String: Any],
+                                    owner: String,
+                                    binding: OperationBinding) async -> DirectoryWriteOutcome {
+        let body: Data
+        do {
+            body = try JSONSerialization.data(withJSONObject: payload, options: [])
+        } catch {
+            return .failed(error)
         }
 
-        if let explicitAccountID = sanitizedAccountID(accountID) {
-            return await upsertSelfRowOnce(
-                userID: uid,
-                displayName: displayName,
-                accountIDToWrite: explicitAccountID,
-                includeAccountID: true,
-                location: location,
-                instruments: instruments
-            )
+        let result = await NetworkManager.shared.boundRequest(
+            path: "rest/v1/account_directory",
+            method: method,
+            query: query,
+            jsonBody: body,
+            headers: ["Prefer": method == "POST"
+                      ? "resolution=merge-duplicates,return=representation"
+                      : "return=representation"],
+            binding: binding
+        )
+
+        switch result {
+        case .failure(let error):
+            return DirectoryWriteEvidence.classify(error)
+        case .success(let data):
+            switch DirectoryWriteEvidence.resolve(data: data, owner: owner) {
+            case .settled(let outcome):
+                return outcome
+            case .row(let receipt):
+                let expectation = DirectoryWriteEvidence.expectation(from: payload)
+                return DirectoryWriteEvidence.matches(expectation, receipt)
+                    ? .applied(receipt)
+                    : .notEvidenced(receipt)
+            }
         }
+    }
+
+    /// Merge an EVIDENCED receipt into the live identity caches.
+    ///
+    /// Called only for `.applied`. A `.notEvidenced` receipt describes a row
+    /// whose contents we cannot account for, and publishing it into the shared
+    /// identity would be the original defect in a new place.
+    ///
+    /// **Ordering is enforced where the mutation happens, not where it is
+    /// requested.** The caller-side checks below are real but insufficient on
+    /// their own: `cache` is an actor, so every call to it is a suspension, and
+    /// a guard taken before one describes the state the mutation was scheduled
+    /// in rather than the state it runs in. `applyIfNewer` therefore carries a
+    /// monotonic epoch that the actor itself compares. `BackendFeedStore` is
+    /// `@MainActor` and its merge is synchronous, so on this actor the guard
+    /// immediately before it genuinely is adjacent to the mutation.
+    ///
+    /// Every column in `writeSelect` is required to be present in the receipt
+    /// (see `DirectoryWriteEvidence.resolve`), so the server's value is used
+    /// directly for each of them — a missing key would otherwise read as nil
+    /// and silently CLEAR a cached value the write never targeted, which is
+    /// exactly what a handle-only generation write would have done to a cached
+    /// location.
+    @MainActor
+    private func applyReceiptToCaches(_ receipt: DirectoryWriteReceipt,
+                                      cacheKey: String,
+                                      owner: String,
+                                      capturedGeneration: Int,
+                                      epoch: Int) async {
+        let coordinator = DirectoryWriteCoordinator.shared
+        guard coordinator.mayApplyEffects(owner: owner, capturedGeneration: capturedGeneration, seq: epoch) else { return }
+        let existing = await cache.getMany([cacheKey])[cacheKey]
+        guard coordinator.mayApplyEffects(owner: owner, capturedGeneration: capturedGeneration, seq: epoch) else { return }
+
+        let merged = DirectoryAccount(userID: cacheKey,
+                                      accountID: receipt.accountID,
+                                      displayName: receipt.displayName ?? existing?.displayName ?? "",
+                                      location: receipt.location,
+                                      // Carried forward, NOT taken from the receipt — the
+                                      // write never targeted avatar_key, the guard trigger
+                                      // pins avatar_version on UPDATE, and C-70 does not
+                                      // change C-34's caching. Neither column is even selected.
+                                      avatarKey: existing?.avatarKey,
+                                      instruments: receipt.instruments,
+                                      avatarVersion: existing?.avatarVersion)
+        await cache.applyIfNewer([merged], owner: owner, generation: capturedGeneration,
+                                 epoch: epoch, validity: coordinator.validity)
+        // The feed merge takes the same hold, for the same reason: the owner
+        // check is advisory, the token check is the one that must be atomic
+        // with the mutation it protects.
+        guard coordinator.mayApplyEffects(owner: owner, capturedGeneration: capturedGeneration, seq: epoch) else { return }
+        coordinator.validity.withCurrent(owner: owner, generation: capturedGeneration, seq: epoch) {
+            BackendFeedStore.shared.mergeDirectoryAccounts([cacheKey: merged])
+        }
+    }
+
+    /// Write the caller's `account_directory` row (owner-only via RLS).
+    ///
+    /// **PATCH FIRST, CREATE ONLY IF NOTHING MATCHED.** `account_directory` has
+    /// a gated INSERT policy and an UNGATED owner-UPDATE policy, and Postgres
+    /// evaluates the INSERT policy for `INSERT … ON CONFLICT DO UPDATE` — so the
+    /// upsert this replaced required entitlement even when only an UPDATE would
+    /// occur, and the owner-UPDATE carve-out D-U6-3 intends was unreachable from
+    /// the client. Sending a PATCH for an existing row uses the policy surface
+    /// as deployed: it weakens nothing and creates no carve-out.
+    ///
+    /// A prior existence check is not used: it would cost a round trip on every
+    /// edit and still race. The zero-row answer IS the existence check, taken
+    /// atomically with the attempted write.
+    ///
+    /// **Creation stays gated**, and the CP-1 band trigger is untouched — it is
+    /// `BEFORE INSERT` only, and its own body returns early when a row already
+    /// exists, so an existing-row PATCH and the old upsert reach the same
+    /// outcome for a banded row and for the one pre-CP row alike (Q6/§B; Q6/B
+    /// remains unauthorised).
+    @MainActor
+    public func upsertSelfRow(userID: String,
+                              displayName: String,
+                              accountID: String?,
+                              location: String? = nil,
+                              instruments: [String]? = nil) async -> DirectoryWriteResult {
+        let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty else {
+            return DirectoryWriteResult(outcome: .failed(NSError(domain: "AccountDirectoryService", code: 1,
+                                   userInfo: [NSLocalizedDescriptionKey: "empty userID"])),
+                                        seq: 0, generation: DirectoryWriteCoordinator.shared.identityGeneration)
+        }
+        let owner = uid.lowercased()
 
         // Blank/invalid account_id values are intentionally omitted. This preserves any existing
         // generated/backend account_id instead of clearing it back to NULL.
-        return await upsertSelfRowOnce(
-            userID: uid,
-            displayName: displayName,
-            accountIDToWrite: nil,
-            includeAccountID: false,
-            location: location,
-            instruments: instruments
-        )
+        let explicit = sanitizedAccountID(accountID)
+        let payload = directoryPayload(displayName: displayName,
+                                       accountIDToWrite: explicit,
+                                       includeAccountID: explicit != nil,
+                                       location: location,
+                                       instruments: instruments)
+
+        let coordinator = DirectoryWriteCoordinator.shared
+        // The tokens travel back with the outcome so the CALLER can guard its
+        // own effects by the same rule the writer guards its cache merge —
+        // otherwise a write that is applied on the server but stale on this
+        // screen would still post a message, latch a skip token or adopt a
+        // generated handle.
+        var resultSeq = 0
+        var resultGeneration = coordinator.identityGeneration
+        let outcome = await coordinator.submit(kind: .profileEdit,
+                                               owner: owner,
+                                               payloadKeys: Set(payload.keys)) { [weak self] seq, capturedGeneration in
+            resultSeq = seq
+            resultGeneration = capturedGeneration
+            guard let self else { return .superseded }
+            return await self.performProfileWrite(uid: uid, owner: owner, payload: payload,
+                                                  seq: seq, capturedGeneration: capturedGeneration)
+        }
+        return DirectoryWriteResult(outcome: outcome, seq: resultSeq, generation: resultGeneration)
+    }
+
+    /// PATCH, then create, then at most one bounded probe. Local effects are
+    /// applied on `.applied` ALONE.
+    @MainActor
+    private func performProfileWrite(uid: String,
+                                     owner: String,
+                                     payload: [String: Any],
+                                     seq: Int,
+                                     capturedGeneration: Int) async -> DirectoryWriteOutcome {
+        let coordinator = DirectoryWriteCoordinator.shared
+        guard let binding = coordinator.binding(owner: owner, capturedGeneration: capturedGeneration) else {
+            return .supersededIdentity
+        }
+
+        let patchQuery = [URLQueryItem(name: "user_id", value: "eq.\(owner)"),
+                          URLQueryItem(name: "select", value: Self.writeSelect)]
+
+        var outcome = await sendDirectoryWrite(method: "PATCH", query: patchQuery,
+                                               payload: payload, owner: owner, binding: binding)
+
+        if case .noRowMatched = outcome {
+            // No row matched: create one. Still gated, still band-checked.
+            var creationPayload = payload
+            creationPayload["user_id"] = owner
+            let postQuery = [URLQueryItem(name: "on_conflict", value: "user_id"),
+                             URLQueryItem(name: "select", value: Self.writeSelect)]
+            let created = await sendDirectoryWrite(method: "POST", query: postQuery,
+                                                   payload: creationPayload, owner: owner, binding: binding)
+
+            switch created {
+            case .refusedByPolicy, .rowConflict:
+                // ONE bounded attempt at the existing-owner path, and it PROBES
+                // rather than proves: a refusal does NOT establish that a row
+                // now exists. If this PATCH also matches nothing, the write
+                // stays unconfirmed and the refusal we actually observed is
+                // what is reported.
+                //
+                // Not a loop, no auth refresh of its own (boundRequest owns the
+                // 401 rule and never refreshes a 403), and ambiguous transport
+                // is never probed — an unknown outcome must not be replayed.
+                let probe = await sendDirectoryWrite(method: "PATCH", query: patchQuery,
+                                                     payload: payload, owner: owner, binding: binding)
+                if case .noRowMatched = probe {
+                    outcome = created
+                } else {
+                    outcome = probe
+                }
+            default:
+                outcome = created
+            }
+        }
+
+        // MERGED ONLY WHEN EVIDENCED. A `.notEvidenced` receipt is a row we
+        // cannot account for, and the shared identity cache is the last place
+        // an unaccounted-for value belongs.
+        if case .applied(let receipt) = outcome {
+            await applyReceiptToCaches(receipt, cacheKey: uid, owner: owner,
+                                       capturedGeneration: capturedGeneration, epoch: seq)
+        }
+        return outcome
     }
 
     /// Best-effort auto-generation/backfill for a missing account_id.
     /// Returns the generated account_id on success, or nil when generation is skipped/failed.
     @discardableResult
-    public func autoGenerateAccountIDIfMissing(userID: String, displayName: String, localAccountID: String?, location: String? = nil, instruments: [String]? = nil) async -> String? {
+    @MainActor
+    public func autoGenerateAccountIDIfMissing(userID: String,
+                                               displayName: String,
+                                               localAccountID: String?,
+                                               location: String? = nil,
+                                               instruments: [String]? = nil) async -> String? {
         let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !uid.isEmpty else { return nil }
 
@@ -503,8 +774,18 @@ public final class AccountDirectoryService {
         // uppercase UUID strings from restored/profile state. UUID identity is
         // case-insensitive; normalize both sides so valid owners do not skip generation.
         guard BackendEnvironment.shared.isConnected else { return nil }
-        guard let canonicalUID = await AuthManager.canonicalBackendUserID()?.trimmingCharacters(in: .whitespacesAndNewlines),
+        guard let canonicalUID = AuthManager.canonicalBackendUserID()?.trimmingCharacters(in: .whitespacesAndNewlines),
               canonicalUID.caseInsensitiveCompare(uid) == .orderedSame else { return nil }
+
+        // C-70. THE EPOCH IS CAPTURED BEFORE THE FIRST AWAIT, and carried
+        // through every attempt. `fetchSelfRow` below is a suspension, and an
+        // A→B→A switch across it would leave the owner and the token subject
+        // both equal to A again — so a claim minted AFTER the fetch would look
+        // current while resting on a row read in a session that has since been
+        // torn down and rehydrated. Capturing first makes that claim stale by
+        // construction.
+        let generationCoordinator = DirectoryWriteCoordinator.shared
+        let capturedGeneration = generationCoordinator.identityGeneration
 
         // Never overwrite a local/manual value.
         guard trimmedNonEmpty(localAccountID) == nil else { return nil }
@@ -530,27 +811,35 @@ public final class AccountDirectoryService {
         guard let effectiveDisplayName = trimmedNonEmpty(currentRow.displayName) else { return nil }
         guard let base = autoAccountIDBase(from: effectiveDisplayName) else { return nil }
 
-        let effectiveLocation = currentRow.location ?? location
-        let effectiveInstruments = currentRow.instruments ?? instruments
+        let owner = uid.lowercased()
+        let coordinator = generationCoordinator
+        guard coordinator.identityGeneration == capturedGeneration else { return nil }
 
         for attempt in 1...10 {
             let candidate = autoAccountIDCandidate(base: base, attempt: attempt)
-            let result = await upsertSelfRowOnce(
-                userID: uid,
-                displayName: effectiveDisplayName,
-                accountIDToWrite: candidate,
-                includeAccountID: true,
-                location: effectiveLocation,
-                instruments: effectiveInstruments
-            )
+            guard let sanitized = sanitizedAccountID(candidate) else { return nil }
+            let payload: [String: Any] = ["account_id": sanitized]
 
-            switch result {
-            case .success:
-                return candidate
-            case .failure(let error):
-                if isUniqueAccountIDViolation(error) {
-                    continue
-                }
+            let outcome = await coordinator.submit(kind: .generation,
+                                                   owner: owner,
+                                                   payloadKeys: Set(payload.keys),
+                                                   capturedGeneration: capturedGeneration) { [weak self] seq, generation in
+                guard let self else { return .superseded }
+                return await self.performGenerationWrite(uid: uid, owner: owner, payload: payload,
+                                                         seq: seq, capturedGeneration: generation)
+            }
+
+            switch outcome {
+            case .applied:
+                return sanitized
+            case .accountIDTaken:
+                continue
+            default:
+                // Includes `.noRowMatched`, which is an OBSERVATION and not a
+                // diagnosis: the filter matched nothing, which means EITHER the
+                // row is absent OR the handle is already populated. Both mean
+                // "do not generate", so nothing is inferred, logged as a cause,
+                // or retried.
                 return nil
             }
         }
@@ -558,61 +847,42 @@ public final class AccountDirectoryService {
         return nil
     }
 
-    private func upsertSelfRowOnce(userID: String, displayName: String, accountIDToWrite: String?, includeAccountID: Bool, location: String?, instruments: [String]?) async -> Result<Void, Error> {
-        // CP-3: the two privacy columns are NOT sent. They are dead in the
-        // directory (CP-2 stopped reading them) and authoritative in
-        // account_privacy. Omitting them is what makes "profile publishing does
-        // not mutate a privacy preference" structural rather than remembered.
-        var payload: [String: Any] = [
-            "user_id": userID,
-            "display_name": displayName,
-            "location": sanitizedLocation(location) ?? NSNull()
-        ]
-
-        if includeAccountID, let accountIDToWrite = sanitizedAccountID(accountIDToWrite) {
-            payload["account_id"] = accountIDToWrite
+    /// Generation writes `account_id` and nothing else.
+    ///
+    /// **Two changes, and both close races structurally rather than by
+    /// ordering discipline.** The old path re-sent `display_name`, `location`
+    /// and `instruments` read from the row it had fetched, so an edit landing
+    /// between the fetch and the write was reverted — it can no longer revert a
+    /// field it does not send. And the "do not overwrite an existing handle"
+    /// rule was evaluated at FETCH time; `account_id=is.null` moves it into the
+    /// database at WRITE time.
+    ///
+    /// `is.null` exhausts the missing-handle contract: `account_id_format`
+    /// admits only NULL or 3-24 characters of `[a-z0-9_]`, so no empty or
+    /// whitespace handle can exist in the table.
+    @MainActor
+    private func performGenerationWrite(uid: String,
+                                        owner: String,
+                                        payload: [String: Any],
+                                        seq: Int,
+                                        capturedGeneration: Int) async -> DirectoryWriteOutcome {
+        let coordinator = DirectoryWriteCoordinator.shared
+        guard let binding = coordinator.binding(owner: owner, capturedGeneration: capturedGeneration) else {
+            return .supersededIdentity
         }
 
-        if let instruments = instruments {
-            payload["instruments"] = instruments
-        }
+        let query = [URLQueryItem(name: "user_id", value: "eq.\(owner)"),
+                     URLQueryItem(name: "account_id", value: "is.null"),
+                     URLQueryItem(name: "select", value: Self.writeSelect)]
 
-        let body: Data
-        do {
-            body = try JSONSerialization.data(withJSONObject: payload, options: [])
-        } catch {
-            return .failure(error)
+        let outcome = await sendDirectoryWrite(method: "PATCH", query: query,
+                                               payload: payload, owner: owner, binding: binding)
+        if case .applied(let receipt) = outcome {
+            await applyReceiptToCaches(receipt, cacheKey: uid, owner: owner,
+                                       capturedGeneration: capturedGeneration, epoch: seq)
         }
-
-        // PostgREST upsert: merge on PK/unique constraint.
-        let path = "rest/v1/account_directory?on_conflict=user_id"
-        let headers = [
-            "Prefer": "resolution=merge-duplicates,return=minimal"
-        ]
-
-        let result = await NetworkManager.shared.request(path: path, method: "POST", query: nil, jsonBody: body, headers: headers)
-        switch result {
-        case .success:
-            // Live identity cache update: immediately merge the new identity values.
-            let existing = await cache.getMany([userID])[userID]
-            let merged = DirectoryAccount(userID: userID,
-                                          accountID: includeAccountID ? sanitizedAccountID(accountIDToWrite) : existing?.accountID,
-                                          displayName: displayName,
-                                          location: sanitizedLocation(location),
-                                          avatarKey: existing?.avatarKey,
-                                          instruments: instruments ?? existing?.instruments,
-                                          // Profile edits do not touch avatar_key, so the server does not
-                                          // re-stamp; carrying the value forward keeps this merge from
-                                          // inventing an invalidation.
-                                          avatarVersion: existing?.avatarVersion)
-            await cache.setMany([merged])
-            await BackendFeedStore.shared.mergeDirectoryAccounts([userID: merged])
-            return .success(())
-        case .failure(let error):
-            return .failure(error)
-        }
+        return outcome
     }
-
 
 
     // MARK: - Phase 15 Step 3A (Avatars) — update self avatar_key

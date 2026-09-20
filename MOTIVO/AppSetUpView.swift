@@ -339,6 +339,10 @@ struct AppSetUpView: View {
                     a.localizedCaseInsensitiveCompare(b) == .orderedAscending
                 }
 
+            // C-70. Captured BEFORE the first await, and honoured through every
+            // one after it.
+            let capturedGeneration = DirectoryWriteCoordinator.shared.identityGeneration
+
             let result = await AccountDirectoryService.shared.upsertSelfRow(
                 userID: backendID,
                 displayName: trimmedName,
@@ -347,20 +351,48 @@ struct AppSetUpView: View {
                 instruments: instrumentsSorted
             )
 
-            switch result {
-            case .success:
-                if let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
-                    userID: backendID,
-                    displayName: trimmedName,
-                    localAccountID: ProfileStore.accountID(for: backendID),
-                    location: nil,
-                    instruments: instrumentsSorted
-                ) {
-                    ProfileStore.setAccountID(generated, for: backendID)
-                }
-            case .failure:
+            // C-70. Setup proceeds only on EVIDENCED success that is STILL THIS
+            // SESSION'S. Without the freshness half, an `.applied` returning
+            // after an identity transition would run generation, write a handle
+            // into ProfileStore and call `onComplete()` for the session that
+            // REPLACED the one that asked -- and a stale failure would post its
+            // message to that replacement's screen.
+            let isFresh = DirectoryWriteCoordinator.shared.mayApplyEffects(
+                owner: backendID,
+                capturedGeneration: result.generation,
+                seq: result.seq)
+
+            switch ConnectedSetupDecision.next(outcome: result.outcome, isFresh: isFresh) {
+            case .abandonSilently:
+                return
+            case .reportFailure:
                 statusMessage = "Couldn’t finish setup right now. Please try again."
                 return
+            case .completeSetup:
+                break
+            }
+
+            let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
+                userID: backendID,
+                displayName: trimmedName,
+                localAccountID: ProfileStore.accountID(for: backendID),
+                location: nil,
+                instruments: instrumentsSorted
+            )
+
+            // GUARDED AGAIN, because generation is another await. Generation
+            // reports only `String?`, so a nil it returns because it was stale
+            // is indistinguishable from a nil it returns because there was
+            // nothing to do -- and neither may be read as "setup finished for
+            // whoever is signed in now". Freshness is therefore established
+            // here rather than inferred from the return value.
+            guard DirectoryWriteCoordinator.shared.identityGeneration == capturedGeneration,
+                  auth.backendUserID?.caseInsensitiveCompare(backendID) == .orderedSame else { return }
+
+            if let generated,
+               ProfileStore.accountID(for: backendID).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // A handle typed manually while generation was in flight wins.
+                ProfileStore.setAccountID(generated, for: backendID)
             }
         }
 

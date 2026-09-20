@@ -125,7 +125,23 @@ final class AuthManager: NSObject, ObservableObject {
 
     @Published private(set) var currentUserID: String?
     @Published private(set) var displayName: String?
-    @Published private(set) var backendUserID: String?
+    /// C-70. EVERY assignment is an identity transition, and the write
+    /// coordinator's clock is advanced HERE rather than at each of the eight
+    /// assignment sites -- one of which is exactly what a future change would
+    /// forget. A `didSet` cannot be bypassed by a new site, which is the
+    /// property being bought.
+    ///
+    /// Only a real CHANGE counts: re-asserting the same identity is not a
+    /// transition and must not invalidate writes that are legitimately in
+    /// flight.
+    @Published private(set) var backendUserID: String? {
+        didSet {
+            let before = oldValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let after = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard before != after else { return }
+            DirectoryWriteCoordinator.shared.noteIdentityTransition()
+        }
+    }
     @Published private(set) var backendAvatarKey: String?
     /// P5-I / C-34 R2: bumped whenever this device's copy of the owner's avatar
     /// is replaced or removed to follow the backend, so the Profile redraws —
@@ -822,7 +838,7 @@ final class AuthManager: NSObject, ObservableObject {
             .filter { !$0.isEmpty }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
 
-        let result = await AccountDirectoryService.shared.upsertSelfRow(
+        let outcome = await AccountDirectoryService.shared.upsertSelfRow(
             userID: userID,
             displayName: displayNameToPublish,
             accountID: accountIDOrNil,
@@ -830,14 +846,19 @@ final class AuthManager: NSObject, ObservableObject {
             instruments: instrumentsToPublish
         )
 
-        switch result {
-        case .success:
+        // C-70. This is the BACKGROUND snapshot publish and it has no UI of its
+        // own, so a non-success is logged and nothing else -- deliberately
+        // unchanged. What DID change is that "success" now means the server
+        // returned this owner's row carrying the values that were sent, rather
+        // than merely that the request did not throw.
+        switch outcome.outcome {
+        case .applied:
             #if DEBUG
             NSLog("[Auth] published local profile snapshot user=%@ reason=%@ instruments=%d", userID, reason, instrumentsToPublish.count)
             #endif
-        case .failure(let error):
+        default:
             #if DEBUG
-            NSLog("[Auth] local profile snapshot publish failed user=%@ reason=%@ err=%@", userID, reason, String(describing: error))
+            NSLog("[Auth] local profile snapshot publish unconfirmed user=%@ reason=%@ outcome=%@", userID, reason, String(describing: outcome))
             #endif
         }
     }

@@ -23,19 +23,44 @@ final class DirectorySyncFailureTests: XCTestCase {
 
     // MARK: - The server attributed it
 
-    func testUniqueViolationCodeIsACollision() {
-        XCTAssertTrue(DirectorySyncFailure.isAccountIDCollision(
-            http(409, #"{"code":"23505","message":"duplicate key value"}"#)))
-    }
-
     func testNamedUniqueConstraintIsACollision() {
         XCTAssertTrue(DirectorySyncFailure.isAccountIDCollision(
             http(409, "duplicate key value violates unique constraint \"account_directory_account_id_key\"")))
     }
 
+    func testNamedAccountIDColumnIsACollision() {
+        XCTAssertTrue(DirectorySyncFailure.isAccountIDCollision(
+            http(409, #"{"code":"23505","details":"Key (account_id)=(ada) already exists."}"#)))
+    }
+
     func testCollisionKeepsItsOwnCopy() {
-        XCTAssertEqual(DirectorySyncFailure.message(for: http(409, #"{"code":"23505"}"#)),
+        XCTAssertEqual(DirectorySyncFailure.message(
+            for: http(409, #"{"code":"23505","message":"violates unique constraint \"account_directory_account_id_key\""}"#)),
                        DirectorySyncFailure.accountIDTakenMessage)
+    }
+
+    // MARK: - C-70: the code alone is not the evidence
+
+    /// **RE-EXPRESSED, AND STRICTLY STRONGER.** This used to assert that a BARE
+    /// `23505` was a handle collision. `account_directory` carries TWO unique
+    /// constraints — `account_directory_account_id_key` on `account_id` and
+    /// `account_directory_pkey` on `user_id` — and both raise `23505`, so the
+    /// old reading blamed the Account ID for a primary-key conflict. That is
+    /// this file's own rule broken inside its own classifier. The assertion is
+    /// not weakened to pass: it now discriminates a case it could not see
+    /// before.
+    func testABareUniqueViolationCodeIsNotEnough() {
+        XCTAssertFalse(DirectorySyncFailure.isAccountIDCollision(
+            http(409, #"{"code":"23505","message":"duplicate key value"}"#)),
+            "23505 names SOME constraint; this table has two")
+        XCTAssertEqual(DirectorySyncFailure.message(for: http(409, #"{"code":"23505"}"#)),
+                       DirectorySyncFailure.genericMessage)
+    }
+
+    func testAPrimaryKeyViolationNeverBlamesTheAccountID() {
+        let pk = http(409, #"{"code":"23505","message":"duplicate key value violates unique constraint \"account_directory_pkey\""}"#)
+        XCTAssertFalse(DirectorySyncFailure.isAccountIDCollision(pk))
+        XCTAssertEqual(DirectorySyncFailure.message(for: pk), DirectorySyncFailure.genericMessage)
     }
 
     // MARK: - The server did NOT attribute it

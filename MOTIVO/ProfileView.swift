@@ -261,7 +261,9 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     @State private var directorySyncIsError: Bool = false
 
     @State private var directorySyncDebounceTask: Task<Void, Never>? = nil
-    @State private var lastDirectorySyncFingerprint: String? = nil
+    /// C-70. Not a bare fingerprint: see `DirectorySyncLatch` for the A→B→A
+    /// revert this shape exists to stop losing.
+    @State private var directorySyncLatch = DirectorySyncLatch()
     @State private var lastAccountIDSubmitAt: Date? = nil
     @State private var accountIDAutoGenerationInFlight: Bool = false
     @State private var accountIDAutoGenerationAttemptedBackendID: String? = nil
@@ -1479,16 +1481,19 @@ private var sessionSetupSection: some View {
     }
 
     // Phase 12C — Owner-only directory upsert/disable. No profile sync; only minimal identity surface.
-     @MainActor
-     private func syncDirectoryFromCurrentState() async {
-        // Phase 14.3H (B2) — Never attempt account_directory upsert unless we have a valid Supabase bearer token.
-        // Prevents unauthenticated upsert attempts during the sign-in transition (which can leave ProfileView in an empty limbo on first sign-in).
-        let auth = _auth.wrappedValue
-        guard appModeManager.canShowConnectedAccountManagement else { return }
-        guard BackendEnvironment.shared.isConnected else { return }
-        guard auth.hasSupabaseAccessToken else { return }
+    /// Everything one directory publish needs, derived from the live screen
+    /// state in one place so the SAME derivation can be taken again afterwards.
+    private struct DirectorySyncSnapshot {
+        let backendID: String
+        let display: String
+        let accountID: String?
+        let location: String?
+        let instruments: [String]
+        let fingerprint: String
+    }
 
-         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
+    @MainActor
+    private func currentDirectorySnapshot(backendID: String) -> DirectorySyncSnapshot {
          let display = name.trimmingCharacters(in: .whitespacesAndNewlines)
          // Connected discovery is always enabled. Relationship privacy is handled by explicit follow approval.
          let acct = accountIDText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1505,35 +1510,82 @@ private var sessionSetupSection: some View {
          let instrumentsSorted = instrumentsClean.sorted { a, b in
              a.localizedCaseInsensitiveCompare(b) == .orderedAscending
          }
-
          let instrumentsFP = instrumentsSorted.joined(separator: ",")
          let fingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|\(acctOrNil ?? "nil")|connectedDiscovery:1|fr:1|i:\(instrumentsFP)"
-         if fingerprint == lastDirectorySyncFingerprint { return }
+         return DirectorySyncSnapshot(backendID: backendID,
+                                      display: display,
+                                      accountID: acctOrNil,
+                                      location: locOrNil,
+                                      instruments: instrumentsSorted,
+                                      fingerprint: fingerprint)
+    }
+
+     @MainActor
+     private func syncDirectoryFromCurrentState() async {
+        // Phase 14.3H (B2) — Never attempt account_directory upsert unless we have a valid Supabase bearer token.
+        // Prevents unauthenticated upsert attempts during the sign-in transition (which can leave ProfileView in an empty limbo on first sign-in).
+        let auth = _auth.wrappedValue
+        guard appModeManager.canShowConnectedAccountManagement else { return }
+        guard BackendEnvironment.shared.isConnected else { return }
+        guard auth.hasSupabaseAccessToken else { return }
+
+         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
+         let snapshot = currentDirectorySnapshot(backendID: backendID)
+         // Submitting a DIFFERENT value invalidates the token here, before the
+         // request goes out -- so a revert to the previously-confirmed value
+         // while this write is in flight is re-published rather than skipped.
+         guard directorySyncLatch.shouldSubmit(snapshot.fingerprint) else { return }
+
          let result = await AccountDirectoryService.shared.upsertSelfRow(
              userID: backendID,
-             displayName: display,
-             accountID: acctOrNil,
-             location: locOrNil,
-             instruments: instrumentsSorted
+             displayName: snapshot.display,
+             accountID: snapshot.accountID,
+             location: snapshot.location,
+             instruments: snapshot.instruments
          )
-         switch result {
-case .success:
-    lastDirectorySyncFingerprint = fingerprint
-    directorySyncMessage = nil
-    directorySyncIsError = false
-    await attemptAccountIDAutoGenerationIfNeeded(
-        backendID: backendID,
-        displayName: display,
-        location: locOrNil,
-        instruments: instrumentsSorted
-    )
-case .failure(let error):
-    // C-70(a): the message names a field only when the SERVER attributed the
-    // failure to that field. This row also carries display name, location and
-    // instruments, and three of the five triggers never touch the Account ID.
-    directorySyncMessage = DirectorySyncFailure.message(for: error)
-    directorySyncIsError = true
-}
+
+         // C-70. EVERY UI EFFECT IS GUARDED HERE -- the message as much as the
+         // latch. There are TWO kinds of staleness and neither subsumes the
+         // other:
+         //
+         //   * the identity changed, or a newer write was SUBMITTED, which the
+         //     coordinator's tokens see;
+         //   * a newer edit is already ON SCREEN but has not been submitted yet,
+         //     which is the ordinary case during the 650 ms debounce and which
+         //     no server-side token can possibly see.
+         //
+         // An error posted for either is an error about a value the member has
+         // already moved on from, and the pending attempt will report the real
+         // one. THE LATCH is the effect that can outlive its own mistake: it is
+         // a SKIP token, so the next identical attempt returns at the guard
+         // above and never reaches the server at all.
+         guard DirectoryWriteCoordinator.shared.mayApplyEffects(owner: backendID,
+                                                                capturedGeneration: result.generation,
+                                                                seq: result.seq) else { return }
+         guard currentDirectorySnapshot(backendID: backendID).fingerprint == snapshot.fingerprint else { return }
+
+         switch result.outcome {
+         case .applied:
+             directorySyncLatch.confirm(snapshot.fingerprint)
+             directorySyncMessage = nil
+             directorySyncIsError = false
+             await attemptAccountIDAutoGenerationIfNeeded(
+                 backendID: backendID,
+                 displayName: snapshot.display,
+                 location: snapshot.location,
+                 instruments: snapshot.instruments
+             )
+         case .superseded, .supersededIdentity:
+             // A newer intent, or a different identity, owns the screen. Report
+             // nothing about a write whose result is not this member's business.
+             break
+         default:
+             // C-70(a): the message names a field only when the SERVER attributed the
+             // failure to that field. This row also carries display name, location and
+             // instruments, and three of the five triggers never touch the Account ID.
+             directorySyncMessage = DirectorySyncFailure.message(for: result.outcome)
+             directorySyncIsError = (directorySyncMessage != nil)
+         }
      }
 
     @MainActor
@@ -1564,6 +1616,11 @@ case .failure(let error):
         accountIDAutoGenerationAttemptedBackendID = trimmedBackendID
         defer { accountIDAutoGenerationInFlight = false }
 
+        // Captured BEFORE the await, and checked after it: adoption is a UI
+        // effect like any other and must not land on an identity that replaced
+        // the one generation ran for.
+        let capturedGeneration = DirectoryWriteCoordinator.shared.identityGeneration
+
         let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
             userID: trimmedBackendID,
             displayName: trimmedDisplayName,
@@ -1573,9 +1630,22 @@ case .failure(let error):
         )
 
         guard let generated, !generated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        // C-70. ADOPTION IS RE-CHECKED AGAINST LOCAL INTENT, not just against
+        // the state generation started from. Generation began because the
+        // stored handle was empty; the member may have typed one while the
+        // write was in flight, and taking the generated value then would
+        // overwrite a manual choice with a derived one. The generated handle is
+        // already the server's -- this only decides whether this device adopts
+        // it as the displayed value.
+        let storedNow = ProfileStore.accountID(for: trimmedBackendID).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard storedNow.isEmpty else { return }
+        guard auth.backendUserID?.caseInsensitiveCompare(trimmedBackendID) == .orderedSame else { return }
+        guard DirectoryWriteCoordinator.shared.identityGeneration == capturedGeneration else { return }
+
         ProfileStore.setAccountID(generated, for: trimmedBackendID)
         accountIDText = generated
-        lastDirectorySyncFingerprint = nil
+        directorySyncLatch.invalidate()
     }
 
 
