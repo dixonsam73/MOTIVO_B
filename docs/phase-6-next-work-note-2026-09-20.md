@@ -58,10 +58,14 @@ written.
 - **Codex's acceptance was explicitly LOCAL ONLY**, and carried no phase-closure or push
   authority.
 - **Phase 6 remains OPEN.** This closes neither the phase nor its carried obligations.
-- **No push is asserted here.** Samuel retains pushing, and no push evidence exists for
-  `8b54ba6` at the time of writing. (The earlier clean-up commit `e5b3b08` is separately
-  recorded as pushed per Samuel, with the locally recorded origin ref agreeing — that dated
-  report stands and is unaffected.)
+- **Push status, corrected 20 September 2026.** An earlier revision of this note said "no push
+  evidence exists for `8b54ba6`". **That overstated the absence and is withdrawn.** The
+  **locally recorded** `origin/feature/solo-connected` is **`8b54ba6`**, and the local reflog
+  records that ref moving to it by push. **No `git fetch` and no independent live-remote
+  verification were performed**, so what is evidenced is the state of this clone's remote-
+  tracking ref, not a confirmed observation of the remote itself. **Samuel retains pushing.**
+  (The earlier clean-up commit `e5b3b08` is separately recorded as pushed per Samuel on the
+  same basis; that dated report stands and is unaffected.)
 - No production, device, credential or purchase action was taken.
 
 Record: `docs/phase-6-c70-remaining-gaps-scope-2026-09-20.md`.
