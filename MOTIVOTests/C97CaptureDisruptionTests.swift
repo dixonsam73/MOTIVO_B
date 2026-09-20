@@ -73,11 +73,30 @@ final class C97CaptureDisruptionTests: XCTestCase {
     }
 
     /// Pending-start cancellation was removed: it would race writer setup on another queue.
-    func testPendingStartTouchesNoWriterStateAndIsNotTornDown() {
+    /// SUPERSEDED BY C-97's pending-start cancellation, and re-expressed rather than
+    /// weakened. It used to assert that a reset during a pending start produced only a
+    /// message, and an interruption nothing at all -- the behaviour of the unit that
+    /// deliberately left the start running on unusable capture.
+    ///
+    /// Both now REQUEST A CANCELLATION and decide nothing at the event, because the
+    /// answer depends on a race this type cannot see: the start may already have
+    /// committed. What follows is asserted by the resolution paths below and, on the real
+    /// controller, by C97PendingStartWiringTests.
+    func testPendingStartRequestsCancellationAndDecidesNothingAtTheEvent() {
         var reset = T()
-        XCTAssertEqual(reset.handle(.audioServicesReset, snap(.startPending)), [.showMessage(T.reopenMessage)])
+        XCTAssertEqual(reset.handle(.audioServicesReset, snap(.startPending)), [.requestPendingStartCancel])
+        XCTAssertFalse(reset.takeDisrupted)
+        XCTAssertFalse(reset.tearDownAfterFinish)
+
         var interrupted = T()
-        XCTAssertEqual(interrupted.handle(.captureInterruptionBegan, snap(.startPending)), [])
+        XCTAssertEqual(interrupted.handle(.captureInterruptionBegan, snap(.startPending)),
+                       [.requestPendingStartCancel])
+
+        // The cancellation winning tears capture down for a reset...
+        XCTAssertEqual(reset.pendingStartCancelled(),
+                       [.inhibitPlaybackResume, .tearDownCapture, .showMessage(T.reopenMessage)])
+        // ...and says nothing for an interruption, which does not kill capture.
+        XCTAssertEqual(interrupted.pendingStartCancelled(), [])
     }
 
     // MARK: - Execution-time eligibility (queued actions)

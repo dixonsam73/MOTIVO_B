@@ -667,3 +667,69 @@ untouched and must not be included accidentally in a later selective commit.
 **Evidence:** session scratchpad
 `/private/tmp/claude-501/-Users-samueldixon-Documents-Xcode-projects-MOTIVO-B-MOTIVO/d9d4fc7d-cd76-4fdf-a378-c352abfe0694/scratchpad/`:
 `s1-full.xcresult`, `s1-rel.log`, `s2b-focus.xcresult`, `s2b-full.xcresult`, `s2b-rel.log`.
+
+---
+
+## C-97 PENDING-START CANCELLATION — ACCEPTED 2026-09-20. BOUNDED, AND PHASE 6 IS NOT CLOSED
+
+**Accepted after independent review. Committed; not pushed, not deployed.** It closes ONE named
+sub-gap of C-97 part (2) and nothing else; the register row `C-97` carries the full statement.
+
+### What it changes
+
+The earlier part-2 unit left this gap in its own words: *a pending start (armed, before its first
+frame) during a reset or interruption gets no writer mutation and no tear-down; it proceeds on
+possibly unusable capture; safe cancellation needs a writer-setup audit.*
+
+**That audit found "pending" spans SIX stages, not one**, with `state == .idle` throughout: arm on
+main; writer creation on `writerQueue`, **which creates the output file**; the cadence gate; a
+`startSession` that **blocks off-queue holding its own writer**; its continuation; and a queued
+main transition to `.recording`. So cancellation could not be a flag: it is a **claim raced and
+resolved on `writerQueue`**, the queue that owns the writer, finalising by stage —
+
+- **armed** → no file effect at all;
+- **writer created / session ready** → `cancelWriting`, then delete **only the claim's own
+  immutable url**;
+- **session starting** → **deferred to the continuation**, which is a mandatory participant
+  because nothing can stop a blocked `startSession`;
+- **committed** → **startup already won**: hand off to the ordinary stop path, and the tracker
+  **adopts** the disruption so the take is stopped, torn down and explained rather than stopped in
+  silence.
+
+`pendingStartRecordingToken` was **vestigial** — declared, nil'd once, never assigned — and is
+deleted. It is what made an earlier scope propose a cancellation path that did not exist.
+
+### Defects found by building it, each fixed
+
+A pre-arm sample buffer cleared main's arm flags and killed a start about to be armed; Writer
+writer state was reset on **main** while `writerQueue` owns it; `newRecordingURL()` was
+second-resolution, so two starts in one second could name the same file; a rapid dismiss-reopen let
+a new start inherit a pending url that an old continuation would later delete; identity guards
+failed **open** on absence; a retired `sessionStarting` claim left `isStartingWriterSession` true,
+which the cadence gate returns on for every frame, so the next start could never progress.
+
+### RESIDUALS — NOT CLOSED, AND NOT TO BE READ AS CLOSED
+
+1. **A permanently blocked `startSession` is unhandled.** `sessionStartQueue` is serial: if one
+   never returns, the queue is occupied for the controller's life and **no later start's writer
+   session can begin.** The pipeline reset only prevents a **stale flag** deadlocking the next
+   start. **No watchdog, timeout or recovery is added or promised.**
+2. **The pre-existing unsynchronised `isArmedToRecord` cross-queue race is untouched**; the claim
+   is additive beside it.
+3. **No test drives a real `CMSampleBuffer` or a genuinely blocking AVFoundation call.** Hardware
+   timing is uncovered, and whether a disruption can land in this window on a device is **unknown**.
+4. The review-player limitation, the missing-audio watchdog, and the
+   `automaticallyConfiguresApplicationAudioSession` question are all **unchanged and open**.
+
+### Evidence
+
+- **Independently verified:** 868 passed, 0 failed, 9 skipped, 877 total; Release BUILD SUCCEEDED;
+  skip set unchanged against the B-37 baseline; `git diff --check` clean.
+- **Device QA 2026-09-20 — USER-REPORTED PASS of the requested sequence ONLY:** record, stop,
+  preview, save; close and reopen the recorder; repeat; both saved takes replay with picture and
+  sound. **It exercises the arm path and NOT any cancellation path.** **No source-to-device
+  attestation or install time was provided**, and the hard-coded `1.0 (131)` version label cannot
+  supply one — so this is accepted as reported, not as attested.
+
+**The six broader sharing/deletion blockers, the B-37 deployment gate and Phase 6 itself all remain
+open. This unit closes one sub-gap.**

@@ -32,6 +32,9 @@ struct CaptureDisruptionTracker: Equatable {
     }
 
     enum Action: Equatable {
+        /// C-97: ask `writerQueue` to race the in-flight start. Its resolution comes back
+        /// through `pendingStartCancelled` or `adoptDisruptedStartedTake`.
+        case requestPendingStartCancel
         case stopActiveTake
         case tearDownCapture
         /// Pause review playback and clear any automatic playback resume (Apple: no
@@ -65,9 +68,13 @@ struct CaptureDisruptionTracker: Equatable {
                 tearDownAfterFinish = true
                 return []
             case .startPending:
-                // No writer mutation and no tear-down while a start is in flight: the
-                // writer is set up on another queue and cannot be cancelled safely here.
-                return [.showMessage(Self.reopenMessage)]
+                // C-97: the start is now CANCELLED through PendingStartCoordinator, on
+                // writerQueue, which owns the writer. Nothing is decided here, because
+                // the answer depends on a race this type cannot see: the start may have
+                // already committed. No message and no tear-down yet -- both are ordered
+                // AFTER the resolution, by `pendingStartCancelled` or
+                // `adoptDisruptedStartedTake` below.
+                return [.requestPendingStartCancel]
             case .underReview:
                 return [.inhibitPlaybackResume, .tearDownCapture, .showMessage(Self.reviewReopenMessage)]
             case .none:
@@ -79,12 +86,44 @@ struct CaptureDisruptionTracker: Equatable {
             case .recording:
                 takeDisrupted = true
                 return [.stopActiveTake]
-            case .startPending, .finishing, .underReview, .none:
+            case .startPending:
+                return [.requestPendingStartCancel]
+            case .finishing, .underReview, .none:
                 return []
             }
         case .captureInterruptionEnded:
             // No automatic capture restart (narrowed): recovery is close and reopen.
             isInterrupted = false
+            return []
+        }
+    }
+
+    /// C-97, the cancellation WON: the start never became a take. Capture is dead, so
+    /// this produces the tear-down and message the `.none` branch would have produced --
+    /// but only now, after the resolution, never before it.
+    mutating func pendingStartCancelled() -> [Action] {
+        guard awaitingReopen else { return [] }   // an interruption cancelled it, not a reset
+        return [.inhibitPlaybackResume, .tearDownCapture, .showMessage(Self.reopenMessage)]
+    }
+
+    /// C-97, STARTUP WON: by the time the cancellation reached `writerQueue` the start had
+    /// already committed, so there is a real take. Adopt exactly the state this tracker
+    /// would hold had the event arrived one moment later, with `take == .recording` --
+    /// otherwise `writerFinished` produces neither the tear-down nor the kept message,
+    /// and the take is stopped with no explanation.
+    ///
+    /// The ORIGINATING EVENT decides, because a reset tears capture down afterwards and an
+    /// interruption does not.
+    mutating func adoptDisruptedStartedTake(from event: Event) -> [Action] {
+        switch event {
+        case .captureRuntimeError, .audioServicesReset:
+            takeDisrupted = true
+            tearDownAfterFinish = true
+            return [.stopActiveTake]
+        case .captureInterruptionBegan:
+            takeDisrupted = true
+            return [.stopActiveTake]
+        case .captureInterruptionEnded:
             return []
         }
     }
@@ -126,7 +165,7 @@ struct CaptureDisruptionTracker: Equatable {
         switch action {
         case .tearDownCapture:
             return s.take == .none || s.take == .underReview
-        case .stopActiveTake, .inhibitPlaybackResume, .showMessage:
+        case .stopActiveTake, .inhibitPlaybackResume, .showMessage, .requestPendingStartCancel:
             return true
         }
     }

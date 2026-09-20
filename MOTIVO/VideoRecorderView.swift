@@ -345,9 +345,18 @@ final class VideoRecorderController: NSObject,
     @Published var state: RecordingState = .idle
     @Published private(set) var isFinishingRecording = false
     @Published var recordingError: String?
-    private var presentationID = UUID()
+    var presentationID = UUID()                         // C-97: internal for wiring tests
     /// C-97 part (2). Main-thread only.
-    private var disruption = CaptureDisruptionTracker()
+    var disruption = CaptureDisruptionTracker()         // C-97: internal for wiring tests
+    /// C-97. writerQueue-owned. Never read or written from main.
+    var startCoordinator = PendingStartCoordinator()   // C-97: internal for wiring tests
+    /// C-97. Injectable so file PRESERVATION can be tested on real files.
+    var fileEffects = RecordingFileEffects()
+    /// C-97. MAIN-owned mirror of the token main minted for the current start. A
+    /// cancellation names THIS claim, so a start armed after the disrupting event -- which
+    /// an interruption permits, since it does not set `awaitingReopen` -- is never
+    /// cancelled by an older event's request.
+    var currentStartToken: UUID?                        // C-97: internal for wiring tests
     /// Advanced on every appear and disappear, so queued disruption work from an earlier
     /// presentation is dropped. Main-thread only.
     private var disruptionGeneration = 0
@@ -383,8 +392,8 @@ final class VideoRecorderController: NSObject,
     private var hasPreactivatedRecordingAudioSession: Bool = false
     private var isPreactivatingRecordingAudioSession: Bool = false
 
-    private var isArmedToRecord: Bool = false
-    private var isRecordStartInProgress: Bool = false
+    var isArmedToRecord: Bool = false                   // C-97: internal for wiring tests
+    var isRecordStartInProgress: Bool = false           // C-97: internal for wiring tests
 
     // Poster thumbnail image
     @Published var previewImage: UIImage? = nil
@@ -434,7 +443,7 @@ final class VideoRecorderController: NSObject,
 
     private var recordingStartTime: CMTime?
     private var sessionStartPTS: CMTime? // PTS used for writer.startSession; set at first accepted video frame (Solution A)
-    private var writerSessionReady: Bool = false // startSession(atSourceTime:) has returned; commit on next video frame
+    var writerSessionReady: Bool = false                // C-97: internal for wiring tests // startSession(atSourceTime:) has returned; commit on next video frame
     private var retimeBasePTS: CMTime? = nil // first frame PTS used to retime output so playback starts when UI shows recording
     // --- Monotonic/session guards (injected) ---
     private var lastVideoPTS: CMTime?
@@ -442,9 +451,10 @@ final class VideoRecorderController: NSObject,
 
     private let captureVideoQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.captureVideoQueue")
     private let captureAudioQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.captureAudioQueue")
-    private let writerQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.writerQueue")
+    // C-97: internal for wiring tests.
+    let writerQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.writerQueue")
     private let sessionStartQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.sessionStartQueue")
-    private var isStartingWriterSession: Bool = false
+    var isStartingWriterSession: Bool = false           // C-97: internal for wiring tests
     private var isStoppingRecording: Bool = false
     private var pendingFirstAcceptedVideoBuffer: CMSampleBuffer?
     // Buffers accumulated while startSession(atSourceTime:) is blocking off-queue.
@@ -459,7 +469,6 @@ final class VideoRecorderController: NSObject,
     private var shouldResumeAfterInterruption = false
     private var shouldResumeAfterResignActive = false
     private var captureSessionBecameRunningAt: Date?
-    private var pendingStartRecordingToken: UUID?
 
     // DEBUG timing (single-line print once per app launch)
     private var debugRecordTapMonotonic: CFTimeInterval?
@@ -518,6 +527,13 @@ final class VideoRecorderController: NSObject,
         presentationID = UUID()
         disruptionGeneration += 1
         disruption.reset()
+        // C-97. A claim from the previous presentation is RETIRED, not dropped: its
+        // startSession may still be blocked, and its continuation must clean up its own
+        // writer and file exactly once without touching this presentation's claim.
+        writerQueue.async { [weak self] in
+            self?.startCoordinator.retireForPresentationChange()
+        }
+
         installNotifications()
         DispatchQueue.main.async {
             self.isShowingLivePreview = true
@@ -540,6 +556,7 @@ final class VideoRecorderController: NSObject,
 
     func onDisappear() {
         stopTimer()
+        let wasArmedAtDisappear = isArmedToRecord
         disruptionGeneration += 1
         removeNotifications()
         // C-68 — release the review player explicitly rather than relying on
@@ -552,14 +569,55 @@ final class VideoRecorderController: NSObject,
         let closingPresentation = presentationID
         isArmedToRecord = false
         state = .idle
+
+        // C-97. Detach a PENDING start's url from main SYNCHRONOUSLY, here at the
+        // lifecycle boundary, before any queue hop.
+        //
+        // Otherwise: this teardown's main cleanup is queued behind a presentation guard;
+        // a quick reopen changes `presentationID` so that cleanup is SKIPPED; the next
+        // Record finds `recordingURL` still non-nil, REUSES it and deletes it; and the
+        // old continuation later deletes what is by then the new take's output. A unique
+        // name cannot prevent that, because the url is inherited rather than minted.
+        let pendingStartURL: URL? = isRecordStartInProgress || wasArmedAtDisappear ? recordingURL : nil
+        if pendingStartURL != nil {
+            recordingURL = nil
+            isReadyToSave = false
+        }
+        isRecordStartInProgress = false
+        currentStartToken = nil
         writerQueue.async {
             self.audioDelivery?.cancel()
             self.audioDelivery = nil
-            if self.assetWriter?.status == .writing { self.assetWriter?.cancelWriting() }
+            // C-97. Retire the claim FIRST, on the queue that owns it. If its
+            // `startSession` is still blocked off-queue, the continuation owns that
+            // writer and that file and will clean both up exactly once -- so this
+            // teardown must not cancel the writer or delete the file underneath it. Two
+            // cancellations racing a live startSession is exactly what the retired path
+            // exists to avoid.
+            let ownedByContinuation = self.startCoordinator.retireForPresentationChange()
+            if ownedByContinuation == nil,
+               self.assetWriter?.status == .writing {
+                self.assetWriter?.cancelWriting()
+            }
+            // A pending start's file is deleted HERE, from the url latched on main, and
+            // never by re-reading `recordingURL` later. If a continuation owns it, it is
+            // left alone: that continuation cleans up exactly once.
+            if let pendingStartURL, ownedByContinuation == nil {
+                self.fileEffects.removeFile(pendingStartURL)
+            }
             DispatchQueue.main.async {
+                // Detaching a pointer to a file a CONTINUATION owns is done whatever the
+                // presentation, and only when it is still exactly that url: leaving it
+                // behind is how a later start inherits it and the continuation then
+                // deletes the new take. Nothing is deleted here.
+                if let owned = ownedByContinuation, self.recordingURL == owned {
+                    self.recordingURL = nil
+                    self.isReadyToSave = false
+                }
                 guard self.presentationID == closingPresentation else { return }
-                self.cleanupRecordingFile()
                 self.isFinishingRecording = false
+                guard pendingStartURL == nil, ownedByContinuation == nil else { return }
+                self.cleanupRecordingFile()      // a reviewable take, as before
             }
         }
         sessionQueue.async { self.stopCaptureSession() }
@@ -1058,14 +1116,24 @@ final class VideoRecorderController: NSObject,
         isStartingWriterSession = true
         pendingFirstAcceptedVideoBuffer = firstVideoBuffer
 
+        // C-97. From here the start CANNOT be stopped: startSession blocks off-queue
+        // holding its own strong `writer`. The continuation below is therefore a
+        // mandatory participant in cancellation, and carries the claim's token so it can
+        // tell "mine", "mine but cancelled" and "retired" apart.
+        let token = startCoordinator.currentToken
+        let claimPresentation = startCoordinator.claim?.presentation
+        if let token { startCoordinator.advance(token, to: .sessionStarting) }
+
         // Kick startSession on a separate queue so we never block writerQueue (sample processing).
         sessionStartQueue.async { [weak self] in
             guard let self = self else { return }
-            self.startWriterSessionBlocking(startPTS: pts, writer: writer)
+            self.startWriterSessionBlocking(startPTS: pts, writer: writer, token: token,
+                                            claimPresentation: claimPresentation)
         }
     }
 
-    private func startWriterSessionBlocking(startPTS pts: CMTime, writer: AVAssetWriter) {
+    private func startWriterSessionBlocking(startPTS pts: CMTime, writer: AVAssetWriter, token: UUID?,
+                                            claimPresentation: UUID?) {
         // Runs on sessionStartQueue. This call may block inside AVAssetWriter.startSession(...)
         // so it MUST NOT run on writerQueue (which also processes capture samples).
         // All state mutations remain on writerQueue.
@@ -1084,6 +1152,12 @@ final class VideoRecorderController: NSObject,
         // Now that startSession has returned, commit start state and append the first buffer.
         writerQueue.async { [weak self] in
             guard let self = self else { return }
+
+            // C-97. Resolve ownership BEFORE touching any shared state. A stale
+            // continuation that merely returned would leak this writer and leave its file
+            // on disk; one that fell through would corrupt a NEWER claim's state.
+            guard self.handleSessionStartReturn(token: token, writer: writer,
+                                                claimPresentation: claimPresentation) else { return }
 
             // startSession(atSourceTime:) has returned. Do NOT commit recordingStartTime yet.
             // We commit on the *next* video frame so output begins exactly where UI shows recording.
@@ -1160,6 +1234,9 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
 
     // MARK: - Recording Control
 
+    /// C-97: internal entry so the real arm path can be driven by the wiring tests.
+    func startRecordingForTesting() { startRecording() }
+
     private func startRecording() {
         guard state == .idle || state == .pausedRecording else { return }
         // C-97 (2): after a reset, Record does not rebuild capture; close and reopen does.
@@ -1196,7 +1273,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         
         
         isReadyToSave = false
-        
+
         // Create URL now, but do NOT create writer or start writing here - will be deferred to first accepted frame
         if recordingURL == nil {
             let url = newRecordingURL()
@@ -1206,17 +1283,41 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             try? FileManager.default.removeItem(at: url)
         }
 
-        // Clear any prior writer in case
-        assetWriter = nil
-        videoInput = nil
-        audioInput = nil
-        recordingStartTime = nil
-        lastVideoPTS = nil
-        lastAppendedVideoPTS = nil
+        // C-97. The claim this start is cancellable by. The url is latched HERE and is
+        // immutable for the claim's life; every later file effect acts on that value and
+        // never re-reads `recordingURL`, which main may have moved on by then.
+        let startToken = UUID()
+        currentStartToken = startToken
+        let startPresentation = presentationID
+        // C-97. `recordingURL` is REUSED when non-nil, so minting a unique name is not on
+        // its own enough to give each claim a fresh url. A cancelled start clears it (see
+        // completePendingStartCancellation) precisely so the next claim cannot inherit the
+        // path whose file was just deleted.
+        let claimURL = recordingURL
 
         // Initialize cadence gate for Solution A (discard early frames until cadence is stable).
         writerQueue.async { [weak self] in
             guard let self = self else { return }
+            // C-97. These four were reset on MAIN, while writerQueue owns them and reads
+            // them for every sample buffer. Moved here so the start path's writer state
+            // is mutated on its owning queue; the block is enqueued before any frame of
+            // this take can be processed, so the ordering is unchanged.
+            self.assetWriter = nil
+            self.videoInput = nil
+            self.audioInput = nil
+            self.recordingStartTime = nil
+            self.lastVideoPTS = nil
+            self.lastAppendedVideoPTS = nil
+            if let claimURL {
+                // A previous claim that left a partial file and has no continuation to
+                // clean it up would otherwise leak it into Documents.
+                if let abandoned = self.startCoordinator.arm(token: startToken,
+                                                             presentation: startPresentation,
+                                                             url: claimURL),
+                   abandoned != claimURL {
+                    self.fileEffects.removeFile(abandoned)
+                }
+            }
             self.isRecordingArmed = true
             self.cadenceStableCount = 0
             self.cadenceLastPTS = nil
@@ -1225,6 +1326,24 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             self.writerSessionReady = false
             self.retimeBasePTS = nil
             self.droppedAudioBeforeSessionCount = 0
+
+            // C-97. Reset the rest of the per-start pipeline HERE, at the claim
+            // boundary. A claim retired while `startSession` was blocked leaves
+            // `isStartingWriterSession` TRUE, and the cadence gate returns on that flag
+            // for every frame -- so the next start could never progress. The retired
+            // continuation cannot release it either, because it deliberately touches no
+            // shared state. Its own captured writer is NOT touched here; only this
+            // recorder's pipeline is.
+            self.isStartingWriterSession = false
+            self.pendingFirstAcceptedVideoBuffer = nil
+            self.pendingSessionStartPTS = nil
+            self.pendingVideoBuffers.removeAll(keepingCapacity: true)
+            self.pendingVideoDuringSessionStart.removeAll(keepingCapacity: true)
+            self.pendingAudioDuringSessionStart.removeAll(keepingCapacity: true)
+            // An audio delivery belonging to a previous start is finished with; leaving
+            // it attached would feed the new writer from the old take's buffer.
+            self.audioDelivery?.cancel()
+            self.audioDelivery = nil
         }
 
         // Remove immediate UI/timer start semantics on tap:
@@ -1240,7 +1359,6 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         isFinishingRecording = true
         isReadyToSave = false
         let presentation = presentationID
-        pendingStartRecordingToken = nil
         stopTimer()
         recordingWallClockStart = nil
         isArmedToRecord = false
@@ -1369,6 +1487,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             self.audioDelivery?.cancel()
             self.audioDelivery = nil
             self.isRecordingArmed = false
+            if let t = self.startCoordinator.currentToken { self.startCoordinator.settle(t) }
             self.isStartingWriterSession = false
             self.pendingSessionStartPTS = nil
             self.writerSessionReady = false
@@ -1430,6 +1549,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             self.audioDelivery?.cancel()
             self.audioDelivery = nil
             self.isRecordingArmed = false
+            if let t = self.startCoordinator.currentToken { self.startCoordinator.settle(t) }
             self.isStartingWriterSession = false
             self.pendingSessionStartPTS = nil
             self.writerSessionReady = false
@@ -1464,6 +1584,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             self.audioDelivery?.cancel()
             self.audioDelivery = nil
             self.isRecordingArmed = false
+            if let t = self.startCoordinator.currentToken { self.startCoordinator.settle(t) }
             self.isStartingWriterSession = false
             self.pendingSessionStartPTS = nil
             self.writerSessionReady = false
@@ -1778,7 +1899,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
     private func handleDisruptionOnMain(_ event: CaptureDisruptionTracker.Event, source: AnyObject?, generation: Int?) {
         if let generation, generation != disruptionGeneration { return }
         let isCurrent = source.map { $0 === captureSession } ?? true
-        perform(disruption.handle(event, disruptionSnapshot(isCurrentSession: isCurrent)))
+        perform(disruption.handle(event, disruptionSnapshot(isCurrentSession: isCurrent)), for: event)
     }
 
     private func disruptionSnapshot(isCurrentSession: Bool) -> CaptureDisruptionTracker.Snapshot {
@@ -1801,9 +1922,12 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
 
     /// Main thread. Every capture change is re-checked on `sessionQueue` against the
     /// session identity it was decided for.
-    private func perform(_ actions: [CaptureDisruptionTracker.Action]) {
+    private func perform(_ actions: [CaptureDisruptionTracker.Action],
+                         for event: CaptureDisruptionTracker.Event? = nil) {
         for action in actions {
             switch action {
+            case .requestPendingStartCancel:
+                requestPendingStartCancellation(for: event)
             case .stopActiveTake:
                 stopRecording()                       // the existing finalise path
             case .inhibitPlaybackResume:
@@ -1833,8 +1957,153 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         }
     }
 
+    // MARK: - C-97: cancelling a start that is in flight
+
+    /// writerQueue. THE decision a sample buffer makes before any writer exists.
+    ///
+    /// A buffer enqueued just before the Record tap runs here BEFORE the arm block,
+    /// because main sets its arm flags and only then enqueues the arm. Such a frame must
+    /// decide NOTHING: no writer, and above all no mutation of main's arm state, which
+    /// would kill a start that is about to be armed.
+    func preWriterDecisionForFrame() -> PendingStartCoordinator.FrameDisposition {
+        startCoordinator.frameDisposition
+    }
+
+    /// writerQueue. Resolves who owns a returning `startSession` before any shared state
+    /// is touched. Returns true when the caller should continue with the ordinary
+    /// session-ready path.
+    @discardableResult
+    func handleSessionStartReturn(token: UUID?, writer: AVAssetWriter?,
+                                  claimPresentation: UUID?) -> Bool {
+        // ABSENCE IS A REFUSAL, as at S5: a continuation that cannot name its claim must
+        // not mutate shared pipeline state, which may now belong to a newer start.
+        guard let token else {
+            if let writer { fileEffects.cancelWriting(writer) }
+            return false
+        }
+        switch startCoordinator.sessionStartReturned(token) {
+        case .proceed:
+            startCoordinator.advance(token, to: .sessionReady)
+            return true
+        case .finaliseCancelled(let url):
+            if let writer { fileEffects.cancelWriting(writer) }
+            fileEffects.removeFile(url)
+            isStartingWriterSession = false
+            writerSessionReady = false
+            pendingFirstAcceptedVideoBuffer = nil
+            isRecordingArmed = false
+            isArmedToRecord = false
+            if let claimPresentation {
+                DispatchQueue.main.async { [weak self] in
+                    self?.completePendingStartCancellation(token: token,
+                                                           presentation: claimPresentation,
+                                                           generation: nil)
+                }
+            }
+            return false
+        case .cleanUpRetired(let url):
+            // A claim from an earlier presentation, or superseded. Clean up ITS writer
+            // and ITS file, exactly once, and touch nothing shared: a newer claim may be
+            // live on this very queue.
+            if let writer { fileEffects.cancelWriting(writer) }
+            fileEffects.removeFile(url)
+            return false
+        case .alreadySettled:
+            if let writer { fileEffects.cancelWriting(writer) }
+            return false
+        }
+    }
+
+    /// Main thread. Publishes a cancellation to `writerQueue`, which owns the writer and
+    /// is the only place that can say whether the cancellation won or the start already
+    /// did. Nothing is decided here.
+    func requestPendingStartCancellation(for event: CaptureDisruptionTracker.Event?) {
+        let generation = disruptionGeneration
+        let presentation = presentationID
+        // The claim THIS event is about, named on main at request time. Taking whichever
+        // token happens to be live when the queue gets round to it would cancel a start
+        // the member began after the event.
+        guard let token = currentStartToken else { return }
+        writerQueue.async { [weak self] in
+            guard let self else { return }
+            switch self.startCoordinator.requestCancel(token: token) {
+            case .noClaim:
+                return
+
+            case .cancelledBeforeWriter:
+                // Nothing was written; there is no file to remove.
+                self.isRecordingArmed = false
+                self.isArmedToRecord = false
+                DispatchQueue.main.async { [weak self] in
+                    self?.completePendingStartCancellation(token: token, presentation: presentation,
+                                                           generation: generation)
+                }
+
+            case .cancelledWithWriter(let url):
+                if let writer = self.assetWriter { self.fileEffects.cancelWriting(writer) }
+                self.fileEffects.removeFile(url)
+                self.assetWriter = nil
+                self.videoInput = nil
+                self.audioInput = nil
+                self.isRecordingArmed = false
+                self.isArmedToRecord = false
+                self.writerSessionReady = false
+                DispatchQueue.main.async { [weak self] in
+                    self?.completePendingStartCancellation(token: token, presentation: presentation,
+                                                           generation: generation)
+                }
+
+            case .deferredUntilSessionReturns:
+                // startSession is blocked off-queue. Its continuation finalises.
+                return
+
+            case .startupAlreadyWon:
+                // The start committed before this reached the queue, so there IS a take.
+                // This main hop is enqueued AFTER the `state = .recording` transition
+                // that S5 dispatched, so `stopRecording()` sees `.recording`.
+                DispatchQueue.main.async { [weak self] in
+                    self?.adoptDisruptedStartedTake(for: event, token: token,
+                                                    presentation: presentation, generation: generation)
+                }
+            }
+        }
+    }
+
+    /// Main thread. The cancellation WON: the start never became a take, so capture is
+    /// torn down and the reopen message given -- in that order, and only now.
+    func completePendingStartCancellation(token: UUID,
+                                                  presentation: UUID,
+                                                  generation: Int? = nil) {
+        // Main-owned identity, validated HERE and not only where the work was decided: a
+        // reopened recorder must not be mutated by a completion from the old one.
+        guard presentation == presentationID, token == currentStartToken else { return }
+        if let generation, generation != disruptionGeneration { return }
+        isArmedToRecord = false
+        isRecordStartInProgress = false
+        currentStartToken = nil
+        // The start never became a take, so its url must not be inherited by the next
+        // claim -- its file has just been deleted.
+        recordingURL = nil
+        isReadyToSave = false
+        perform(disruption.pendingStartCancelled())
+    }
+
+    /// Main thread. STARTUP WON. The tracker never saw a `.recording` take for this
+    /// event, so it holds neither `takeDisrupted` nor `tearDownAfterFinish` and
+    /// `writerFinished` would produce neither the tear-down nor the kept message. Adopt
+    /// the state it would have held, then stop the take through the ordinary path.
+    func adoptDisruptedStartedTake(for event: CaptureDisruptionTracker.Event?,
+                                           token: UUID,
+                                           presentation: UUID,
+                                           generation: Int?) {
+        guard presentation == presentationID, token == currentStartToken else { return }
+        if let generation, generation != disruptionGeneration { return }
+        guard let event else { return }
+        perform(disruption.adoptDisruptedStartedTake(from: event), for: event)
+    }
+
     /// The existing stop path has finished with the writer (or found none).
-    private func disruptionWriterFinished(succeeded: Bool, url: URL?, strongerMessage: String?) {
+    func disruptionWriterFinished(succeeded: Bool, url: URL?, strongerMessage: String?) {
         let kept = url.map { FileManager.default.fileExists(atPath: $0.path) && recordingURL == $0 } ?? false
         perform(disruption.writerFinished(succeeded: succeeded, keptFileExists: kept, existingMessage: strongerMessage))
     }
@@ -1848,7 +2117,13 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
     private func newRecordingURL() -> URL {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd_HHmmss"
-        let filename = "motivo_vid_\(formatter.string(from: Date())).mov"
+        // C-97: a full UUID suffix, because the claim that a cancellation cannot reach a
+        // reviewed or newer take DEPENDS on urls being distinct. Second resolution alone
+        // is not distinct: two starts inside one second produced the SAME path, so a
+        // cancelled claim could delete a newer take's file. Both consumers of this name
+        // match on the `motivo_vid_` PREFIX only (BackupReconciliation:57,
+        // VideoRecorderView:494), so the suffix is free.
+        let filename = "motivo_vid_\(formatter.string(from: Date()))_\(UUID().uuidString).mov"
         // Backup policy is applied in `handleRecordingFinishedSuccessfully(url:)`, not
         // here — this URL names a file that does not exist yet, and setting a resource
         // value on a non-existent path fails.
@@ -1939,20 +2214,38 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         }
 
         if assetWriter == nil {
-            guard let url = recordingURL else {
-                isArmedToRecord = false
-                DispatchQueue.main.async { [weak self] in
-                    self?.isRecordStartInProgress = false
-                }
+            // C-97. Gate on the writerQueue-owned CLAIM, and on nothing else, through
+            // the same method the wiring tests drive.
+            //
+            // A sample buffer enqueued just before the Record tap can run here BEFORE the
+            // arm block, because main sets `isArmedToRecord = true` and only then
+            // enqueues the arm. Such a frame used to fall into the no-url branch and
+            // clear main's arm flags, killing a start that was about to be armed. It now
+            // decides NOTHING: no writer, no main mutation, no disarm.
+            guard case .proceed(let token, let url) = preWriterDecisionForFrame() else {
                 return
             }
+            let claimPresentationForFailure = startCoordinator.claim?.presentation
             do {
+                // Advanced BEFORE the throwing call: AVAssetWriter can create the output
+                // file and then fail, so from this point a partial file may exist and the
+                // claim must own it.
+                startCoordinator.advance(token, to: .writerCreated)
                 try setupWriter(for: url)
             } catch {
                 dbg("setupWriter failed: \(error)")
+                // C-97. The start failed on its own. Retire the claim and remove whatever
+                // partial file it may have created -- by the claim's url.
+                if let orphan = startCoordinator.failed(token) { fileEffects.removeFile(orphan) }
                 isArmedToRecord = false
+                let failedPresentation = claimPresentationForFailure
                 DispatchQueue.main.async { [weak self] in
-                    self?.isRecordStartInProgress = false
+                    guard let self else { return }
+                    // A stale failure must not clear a NEWER start's in-progress flag.
+                    guard self.currentStartToken == token,
+                          self.presentationID == failedPresentation else { return }
+                    self.isRecordStartInProgress = false
+                    self.currentStartToken = nil
                 }
                 return
             }
@@ -1990,8 +2283,25 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
                     recordVideoAppend(.zero)
                 }
 
+                // C-97. The claim is `committed` BEFORE the main transition is
+                // enqueued, so a cancellation arriving after this point resolves as
+                // `startupAlreadyWon` and its own main hop is enqueued AFTER this one --
+                // which is what makes `stopRecording()` find `state == .recording`
+                // rather than no-op against `.idle`.
+                let committedToken = startCoordinator.currentToken
+                let committedPresentation = startCoordinator.claim?.presentation
+                if let committedToken {
+                    startCoordinator.advance(committedToken, to: .committed)
+                }
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
+                    // C-97. A transition from a claim that is no longer main's current
+                    // start must not move a reopened recorder into `.recording`.
+                    // ABSENCE IS A REFUSAL: an unidentifiable transition on a path that
+                    // claims identity is exactly the case that must not fall through.
+                    guard let committedToken, let committedPresentation,
+                          committedToken == self.currentStartToken,
+                          committedPresentation == self.presentationID else { return }
                     if self.state != .recording { self.state = .recording }
                     self.recordingWallClockStart = Date()
                     self.startTimer()
