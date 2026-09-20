@@ -530,4 +530,14 @@ stamping trigger, so a real `avatar_key` change still re-stamps.
   baseline faithful.
 - **Rollback is prepared and unused.** **No production behavioural fixture, and nothing deleted.**
 
+**Behavioural evidence is LOCAL ONLY. No production fixture was created, nothing was deleted, and
+no production behavioural observation is claimed.**
+
+**STILL OUTSTANDING, unchanged by any of today's work — device QA (Release):**
+- a journal swipe-delete while Connected, and one in Solo (U1–U3, committed but **not** device-
+  verified);
+- **C-97's remainder only** — effective-route enforcement and the drone unplug discriminator.
+  **QA7 and QA1–8 stay green and are not re-requested;**
+- **F-3** media sizing.
+
 **Full record:** `supabase/sql/README-b38-avatar-version-guard.md`.

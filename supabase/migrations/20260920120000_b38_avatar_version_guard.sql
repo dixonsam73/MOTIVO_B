@@ -1,10 +1,11 @@
 -- B-38 — server-derive public.account_directory.avatar_version.
 --
 -- REPLAY OF A PRODUCTION CHANGE, so a rebuilt local baseline reproduces it and the
--- B-23 gate stays meaningful. Production itself is changed by the guarded script
--- supabase/sql/2026-09-20-b38-avatar-version-guard.sql, whose executable body this
--- mirrors exactly; the guards and assertions live there. This project does not use
--- `supabase db push`.
+-- B-23 gate stays meaningful. Production itself was changed by the guarded script
+-- supabase/sql/2026-09-20-b38-avatar-version-guard.sql. This file mirrors the OBJECT
+-- DEFINITIONS it creates, not that script verbatim: the pre/post guards live there,
+-- and this replay uses `create or replace` plus `drop trigger if exists` so it is
+-- idempotent on a local rebuild. This project does not use `supabase db push`.
 --
 -- A client-supplied avatar_version is discarded on every INSERT and UPDATE, for
 -- EVERY role. This trigger fires BEFORE tg_directory_avatar_version (same-timing
