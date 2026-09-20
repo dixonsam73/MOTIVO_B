@@ -17,6 +17,11 @@
   {
     "rls_enabled": true,
     "rls_forced": false,
+    "table_name": "directory_search_budget"
+  },
+  {
+    "rls_enabled": true,
+    "rls_forced": false,
     "table_name": "follows"
   },
   {

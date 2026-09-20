@@ -108,6 +108,18 @@
     "table_name": "connected_attachments"
   },
   {
+    "conname": "directory_search_budget_pkey",
+    "contype": "p",
+    "definition": "PRIMARY KEY (user_id)",
+    "table_name": "directory_search_budget"
+  },
+  {
+    "conname": "directory_search_budget_user_id_fkey",
+    "contype": "f",
+    "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE",
+    "table_name": "directory_search_budget"
+  },
+  {
     "conname": "follows_followed_user_id_fkey",
     "contype": "f",
     "definition": "FOREIGN KEY (followed_user_id) REFERENCES auth.users(id) ON DELETE CASCADE",

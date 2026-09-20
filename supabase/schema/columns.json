@@ -273,6 +273,54 @@
   },
   {
     "column_default": null,
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "ordinal_position": 1,
+    "table_name": "directory_search_budget"
+  },
+  {
+    "column_default": null,
+    "column_name": "burst_started_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 2,
+    "table_name": "directory_search_budget"
+  },
+  {
+    "column_default": null,
+    "column_name": "burst_count",
+    "data_type": "integer",
+    "is_nullable": "NO",
+    "ordinal_position": 3,
+    "table_name": "directory_search_budget"
+  },
+  {
+    "column_default": null,
+    "column_name": "window_started_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 4,
+    "table_name": "directory_search_budget"
+  },
+  {
+    "column_default": null,
+    "column_name": "window_count",
+    "data_type": "integer",
+    "is_nullable": "NO",
+    "ordinal_position": 5,
+    "table_name": "directory_search_budget"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 6,
+    "table_name": "directory_search_budget"
+  },
+  {
+    "column_default": null,
     "column_name": "follower_user_id",
     "data_type": "uuid",
     "is_nullable": "NO",
