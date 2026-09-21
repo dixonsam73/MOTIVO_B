@@ -391,7 +391,7 @@ private struct ConnectedAttachmentShareFlow: View {
             PeopleUserRow(
                 userID: userID,
                 overrideDisplayName: account?.displayName ?? "Connected musician",
-                overrideSubtitle: account?.accountID.map { "@\($0)" },
+                overrideSubtitle: DirectorySubtitle.text(for: account),
                 overrideAvatarKey: account?.avatarKey,
                 overrideAvatarVersion: account?.avatarVersion
             ) {

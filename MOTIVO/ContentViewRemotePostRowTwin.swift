@@ -515,7 +515,6 @@ struct RemotePostRowTwin: View {
             ProfilePeekView(
                 ownerID: ownerForPeek,
                 directoryDisplayName: acct?.displayName,
-                directoryAccountID: acct?.accountID,
                 directoryLocation: acct?.location,
                 directoryAvatarKey: acct?.avatarKey,
                 directoryAvatarVersion: acct?.avatarVersion,

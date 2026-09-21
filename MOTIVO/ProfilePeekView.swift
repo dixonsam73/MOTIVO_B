@@ -53,7 +53,6 @@ struct ProfilePeekView: View {
 
     let ownerID: String
     let directoryDisplayName: String?
-    let directoryAccountID: String?
     let directoryLocation: String?
     let directoryAvatarKey: String?
     /// C-34: `account_directory.avatar_version`.
@@ -104,10 +103,9 @@ struct ProfilePeekView: View {
     @FetchRequest private var ownerSessions: FetchedResults<Session>
     @FetchRequest private var ownerInstruments: FetchedResults<UserInstrument>
 
-    init(ownerID: String, directoryDisplayName: String? = nil, directoryAccountID: String? = nil, directoryLocation: String? = nil, directoryAvatarKey: String? = nil, directoryAvatarVersion: String? = nil, directoryInstruments: [String]? = nil) {
+    init(ownerID: String, directoryDisplayName: String? = nil, directoryLocation: String? = nil, directoryAvatarKey: String? = nil, directoryAvatarVersion: String? = nil, directoryInstruments: [String]? = nil) {
         self.ownerID = ownerID
         self.directoryDisplayName = directoryDisplayName
-        self.directoryAccountID = directoryAccountID
         self.directoryLocation = directoryLocation
         self.directoryAvatarKey = directoryAvatarKey
         self.directoryAvatarVersion = directoryAvatarVersion
@@ -157,11 +155,6 @@ struct ProfilePeekView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(displayName(ownerID))
                                     .font(.headline)
-                                if let handle = directoryAccountID?.trimmingCharacters(in: .whitespacesAndNewlines), !handle.isEmpty {
-                                    Text("@\(handle)")
-                                        .font(Theme.Text.meta)
-                                        .foregroundStyle(Theme.Colors.secondaryText)
-                                }
                             }
                             let loc: String = {
                                 if isOwner {
@@ -200,11 +193,6 @@ struct ProfilePeekView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(displayName(ownerID))
                                         .font(.headline)
-                                    if let handle = directoryAccountID?.trimmingCharacters(in: .whitespacesAndNewlines), !handle.isEmpty {
-                                        Text("@\(handle)")
-                                            .font(Theme.Text.meta)
-                                            .foregroundStyle(Theme.Colors.secondaryText)
-                                    }
                                 }
                                 let loc: String = {
                                     if isOwner {
@@ -332,13 +320,6 @@ struct ProfilePeekView: View {
                     VStack(spacing: 4) {
                         Text(displayName(ownerID))
                             .font(.title3.weight(.semibold))
-
-                        if let handle = directoryAccountID?.trimmingCharacters(in: .whitespacesAndNewlines),
-                           !handle.isEmpty {
-                            Text("@\(handle)")
-                                .font(Theme.Text.body)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
 
                         if let location = directoryLocation?.trimmingCharacters(in: .whitespacesAndNewlines),
                            !location.isEmpty {

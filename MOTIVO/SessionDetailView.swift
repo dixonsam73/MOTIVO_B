@@ -2188,15 +2188,17 @@ fileprivate struct ShareToFollowerSheet_SDV: View {
         s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
     }
 
-    private func sortTuple(for userID: String) -> (String, String, String) {
+    private func sortTuple(for userID: String) -> (String, String) {
         let acct = directory[userID]
         let displayName = acct?.displayName ?? ""
-        let handle = acct?.accountID ?? ""
         // Locked fallback order:
         // 1) display name
-        // 2) handle
-        // 3) stable internal ID (never rendered)
-        return (foldedKey(displayName), foldedKey(handle), foldedKey(userID))
+        // 2) stable internal ID (never rendered)
+        //
+        // The handle tier between them is gone with the feature; the UUID tier
+        // that always broke the remaining ties is unchanged, so the order stays
+        // total and stable.
+        return (foldedKey(displayName), foldedKey(userID))
     }
 
     private var sortedFollowerIDs: [String] {
@@ -2204,8 +2206,7 @@ fileprivate struct ShareToFollowerSheet_SDV: View {
             let ka = sortTuple(for: a)
             let kb = sortTuple(for: b)
             if ka.0 != kb.0 { return ka.0 < kb.0 }
-            if ka.1 != kb.1 { return ka.1 < kb.1 }
-            return ka.2 < kb.2
+            return ka.1 < kb.1
         }
     }
 
@@ -2245,7 +2246,7 @@ fileprivate struct ShareToFollowerSheet_SDV: View {
                         PeopleUserRow(
                             userID: followerID,
                             overrideDisplayName: acct?.displayName ?? "User",
-                            overrideSubtitle: acct?.accountID.map { "@\($0)" },
+                            overrideSubtitle: DirectorySubtitle.text(for: acct),
                             overrideAvatarKey: acct?.avatarKey,
                             overrideAvatarVersion: acct?.avatarVersion
                         ) {

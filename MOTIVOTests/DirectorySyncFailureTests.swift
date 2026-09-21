@@ -33,10 +33,25 @@ final class DirectorySyncFailureTests: XCTestCase {
             http(409, #"{"code":"23505","details":"Key (account_id)=(ada) already exists."}"#)))
     }
 
-    func testCollisionKeepsItsOwnCopy() {
-        XCTAssertEqual(DirectorySyncFailure.message(
-            for: http(409, #"{"code":"23505","message":"violates unique constraint \"account_directory_account_id_key\""}"#)),
-                       DirectorySyncFailure.accountIDTakenMessage)
+    /// **RE-EXPRESSED when the handle was removed: the CLASSIFICATION is kept
+    /// and the COPY is not.**
+    ///
+    /// `isAccountIDCollision` above still proves the server attributed the
+    /// failure to `account_id` — that half of C-70(a)'s rule is untouched. What
+    /// went is the other half: a member with no Account ID field cannot act on
+    /// being told one is taken, so naming it would be the same false attribution
+    /// pointing the other way.
+    ///
+    /// Asserted against `genericMessage` DIRECTLY rather than through
+    /// `accountIDTakenMessage`, so this still fails if the alias is ever pointed
+    /// back at a field-naming string.
+    func testACollisionIsStillClassifiedButItsCopyNamesNoField() {
+        let err = http(409, #"{"code":"23505","message":"violates unique constraint \"account_directory_account_id_key\""}"#)
+        XCTAssertTrue(DirectorySyncFailure.isAccountIDCollision(err),
+                      "the server named the constraint; that classification is still established")
+        XCTAssertEqual(DirectorySyncFailure.message(for: err),
+                       DirectorySyncFailure.genericMessage,
+                       "but a member with no Account ID field must not be told one is taken")
     }
 
     // MARK: - C-70: the code alone is not the evidence
@@ -95,11 +110,18 @@ final class DirectorySyncFailureTests: XCTestCase {
 
     // MARK: - THE DEFECT ITSELF
 
-    /// **C-70(a).** Three of the five triggers — a `name` edit, a `location`
-    /// edit and the instrument manager closing — never touch the Account ID.
-    /// No message produced for them may name it.
-    func testNoNonCollisionFailureNamesTheAccountID() {
+    /// **STRENGTHENED: now NO failure names the Account ID, collision included.**
+    ///
+    /// C-70(a) filed this because three of the five triggers — a `name` edit, a
+    /// `location` edit and the instrument manager closing — never touched the
+    /// Account ID, yet every one of them could render a message blaming it. With
+    /// the field removed there is no trigger left that could act on such a
+    /// message, so the collision case joins the list rather than being excepted
+    /// from it.
+    func testNoFailureAtAllNamesTheAccountID() {
         let nonCollisions: [Error] = [
+            // The collision itself, now held to the same rule as the rest.
+            http(409, #"{"code":"23505","message":"violates unique constraint \"account_directory_account_id_key\""}"#),
             http(401, "unauthorised"),
             http(403, "new row violates row-level security policy"),
             http(400, "age band must be declared before a directory row is created"),

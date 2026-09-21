@@ -54,7 +54,6 @@ public struct CommentsView: View {
     @State private var initialAutoScrollKey: String? = nil
     @State private var didInitialAutoScroll: Bool = false
     @State private var userHasManuallyScrolled: Bool = false
-    @State private var tappedMention: String? = nil
     
     @State private var replyTargetUserID: String? = nil
     @State private var replyTargetDisplayName: String? = nil
@@ -291,54 +290,12 @@ public struct CommentsView: View {
 
 
 
-    // MARK: - Mentions tokenization & helpers
-    private struct MentionSpan: Identifiable {
-        let id = UUID()
-        let text: String
-        let isMention: Bool
-    }
-    
-    private func tokenizeMentions(_ s: String) -> [MentionSpan] {
-        // Regex: (?<!\w)@[A-Za-z0-9_\.]+
-        // Keep allocation-light: if no matches, return single non-mention span
-        let pattern = "(?<!\\w)@[A-Za-z0-9_\\.]+"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return [MentionSpan(text: s, isMention: false)]
-        }
-        let ns = s as NSString
-        let fullRange = NSRange(location: 0, length: ns.length)
-        let matches = regex.matches(in: s, options: [], range: fullRange)
-        if matches.isEmpty {
-            return [MentionSpan(text: s, isMention: false)]
-        }
-        var spans: [MentionSpan] = []
-        var cursor = 0
-        for m in matches {
-            let range = m.range
-            if range.location > cursor {
-                let before = ns.substring(with: NSRange(location: cursor, length: range.location - cursor))
-                if !before.isEmpty { spans.append(MentionSpan(text: before, isMention: false)) }
-            }
-            let handle = ns.substring(with: range)
-            spans.append(MentionSpan(text: handle, isMention: true))
-            cursor = range.location + range.length
-        }
-        if cursor < ns.length {
-            let tail = ns.substring(from: cursor)
-            if !tail.isEmpty { spans.append(MentionSpan(text: tail, isMention: false)) }
-        }
-        return spans
-    }
-    
-    private func mentions(in s: String) -> [String] {
-        tokenizeMentions(s).filter { $0.isMention }.map { $0.text }
-    }
-    
-    private func accessibleLabel(for s: String) -> String {
-        // Keep existing text as the accessible label
-        return s
-    }
-    
+    // The placeholder @mention affordance was removed with the user-facing
+    // handle. **Comment TEXT is untouched** — a comment containing "@someone"
+    // still displays exactly as written, as plain text. What is gone is the
+    // styling, the chip row and a tap that only ever opened an alert reading
+    // "Future: open profile or start reply with …".
+
     // MARK: - Header title (match feed title used in ContentView)
     private func headerTitleForSession() -> String {
         if postID != nil { return "Comments" }
@@ -410,44 +367,6 @@ public struct CommentsView: View {
         // Use the stable session id directly
         if let sid = sessionID { return FeedInteractionStore.likeCount(sid) }
         return 0
-    }
-    
-    @ViewBuilder
-    private func mentionStyledText(_ s: String, onTap: @escaping (String) -> Void) -> some View {
-        // Render inline mentions with accent text and a subtle rounded background for better contrast in dark mode
-        let spans = tokenizeMentions(s)
-        // Use a flow-like HStack; preserves reading order and line wrapping via Text concatenation fragments
-        // We'll assemble using AttributedString-like pieces by combining Texts inside a single Text view where possible.
-        // To keep background on mentions only, we compose via HStack with baseline alignment.
-        // Note: This keeps accessibility label as the original string.
-        let _ = spans // silence if unused in preview
-        VStack(alignment: .leading, spacing: 0) {
-            // Use a text-building approach that keeps wrapping, by interleaving Texts.
-            // SwiftUI doesn't support background per-substring within a single Text without AttributedString styling,
-            // so we approximate using a wrapping container with alignment guides.
-            // For simplicity and reliability across iOS versions, we join into a multi-Text Group.
-            Group {
-                // Render as multiple Text views; SwiftUI will wrap them inline when placed in a Text container.
-                // Since Text doesn't host children, we use a wrapping container with alignment to allow line wraps.
-                // A simple approach: convert spans to a single Text by concatenation, but apply background only to mentions using overlay.
-                spans.reduce(Text("")) { acc, span in
-                    let base = Text(span.text)
-                    if span.isMention {
-                        let mentionText = base
-                            .foregroundStyle(Theme.Colors.accent)
-                            .fontWeight(.semibold)
-                        // Add thin spaces around mention to create breathing room without breaking Text concatenation type
-                        let padded = Text("\u{2009}") + mentionText + Text("\u{2009}")
-                        return acc + padded
-                    } else {
-                        return acc + base.foregroundStyle(Color.primary.opacity(0.9))
-                    }
-                }
-            }
-            .font(Theme.Text.body)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityLabel(accessibleLabel(for: s))
     }
     
     // MARK: - Relative time formatting
@@ -544,11 +463,6 @@ public struct CommentsView: View {
                             .accessibilityLabel("Close")
                         }
                     }
-                }
-                .alert(tappedMention ?? "", isPresented: Binding(get: { tappedMention != nil }, set: { if !$0 { tappedMention = nil } })) {
-                    Button("OK", role: .cancel) { tappedMention = nil }
-                } message: {
-                    Text("Mention tapped. Future: open profile or start reply with \(tappedMention ?? "")")
                 }
                 .appBackground()
                 .onAppear {
@@ -1170,25 +1084,6 @@ return AnyView(
                 }
                 .padding(.top, 2)
             }
-
-            let _handles = mentions(in: comment.text)
-            if !_handles.isEmpty {
-                HStack(spacing: Theme.Spacing.s) {
-                    ForEach(_handles, id: \.self) { handle in
-                        Button(action: { tappedMention = handle }) {
-                            Text(handle)
-                                .font(.footnote)
-                                .foregroundStyle(Color.primary).fontWeight(.bold)
-                                .padding(.vertical, 2)
-                                .padding(.horizontal, 6)
-                                .background(Theme.Colors.surface(scheme).opacity(0.35), in: Capsule())
-                        }
-                        .accessibilityLabel("Mention \(handle)")
-                    }
-                    Spacer(minLength: 0)
-                }
-                .accessibilitySortPriority(1)
-            }
         }
         .padding(.vertical, Theme.Spacing.s)
         .accessibilityElement(children: .combine)
@@ -1288,25 +1183,6 @@ private func commentRowBackend(row: BackendPostComment, postID: UUID, ownerUserI
                     .layoutPriority(0)
                 }
                 .padding(.top, 2)
-            }
-
-            let _handles = mentions(in: row.body)
-            if !_handles.isEmpty {
-                HStack(spacing: Theme.Spacing.s) {
-                    ForEach(_handles, id: \.self) { handle in
-                        Button(action: { tappedMention = handle }) {
-                            Text(handle)
-                                .font(.footnote)
-                                .foregroundStyle(Color.primary).fontWeight(.bold)
-                                .padding(.vertical, 2)
-                                .padding(.horizontal, 6)
-                                .background(Theme.Colors.surface(scheme).opacity(0.35), in: Capsule())
-                        }
-                        .accessibilityLabel("Mention \(handle)")
-                    }
-                    Spacer(minLength: 0)
-                }
-                .accessibilitySortPriority(1)
             }
         }
         .padding(.vertical, Theme.Spacing.s)

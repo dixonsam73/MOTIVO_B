@@ -349,10 +349,24 @@ final class C70ProfileViewEffectGuardTests: XCTestCase {
             .joined(separator: "\n")
     }
 
+    /// **RE-ANCHORED when the handle was removed, and the re-anchoring is the
+    /// risk this comment exists to flag.**
+    ///
+    /// The end marker used to be `attemptAccountIDAutoGenerationIfNeeded`, the
+    /// function that immediately followed. Removing the handle removed that
+    /// function, at which point this returned `""` and the three tests below
+    /// failed — **and the danger was never the red test, it was the careless
+    /// repair.** Widening the extract, or deleting a guard to make the red go
+    /// away, would leave all three passing vacuously over the wrong text.
+    ///
+    /// The marker is now the next function in the file. `XCTAssertFalse(body
+    /// .isEmpty)` in each caller is what keeps a future rename loud rather than
+    /// silent, and each of the three was demonstrated failing with its own guard
+    /// removed from `ProfileView` before this was accepted.
     private func syncBody() -> String {
         let s = source()
         guard let start = s.range(of: "private func syncDirectoryFromCurrentState() async {"),
-              let end = s.range(of: "private func attemptAccountIDAutoGenerationIfNeeded") else { return "" }
+              let end = s.range(of: "private func persistAvatarToBackendIfPossible") else { return "" }
         return String(s[start.lowerBound..<end.lowerBound])
     }
 
@@ -403,19 +417,20 @@ final class C70ProfileViewEffectGuardTests: XCTestCase {
                        "the bare-String token is gone; it could not express an outstanding write")
     }
 
-    /// Adoption is a UI effect and carries its own captured epoch.
-    func testHandleAdoptionIsGuardedAgainstNewerIntentAndIdentity() {
+    /// **RETIRED with the handle.** `testHandleAdoptionIsGuardedAgainstNewerIntent
+    /// AndIdentity` inspected `attemptAccountIDAutoGenerationIfNeeded`, which no
+    /// longer exists. The GENERIC protection it was one instance of — every UI
+    /// effect behind both freshness guards — is held by
+    /// `testEveryUIEffectSitsBehindBothFreshnessGuards` above, which reads the
+    /// re-anchored `syncBody()` and was demonstrated non-vacuous in the same run.
+    /// Nothing else is claimed: the adoption-specific assertions are gone because
+    /// adoption is gone.
+    func testNoHandleAdoptionSurvivesToBeGuarded() {
         let s = source()
-        guard let start = s.range(of: "private func attemptAccountIDAutoGenerationIfNeeded") else {
-            return XCTFail("not found")
-        }
-        let body = String(s[start.lowerBound...].prefix(3000))
-        XCTAssertTrue(body.contains("let capturedGeneration = DirectoryWriteCoordinator.shared.identityGeneration"),
-                      "the epoch must be captured before the await")
-        XCTAssertTrue(body.contains("DirectoryWriteCoordinator.shared.identityGeneration == capturedGeneration"),
-                      "and checked after it")
-        XCTAssertTrue(body.contains("guard storedNow.isEmpty else { return }"),
-                      "a manual handle typed while generation was in flight must win")
+        XCTAssertFalse(s.contains("attemptAccountIDAutoGenerationIfNeeded"),
+                       "handle generation was removed; a reintroduced trigger needs its own guards and its own test")
+        XCTAssertFalse(s.contains("ProfileStore.setAccountID"),
+                       "nothing may write the local handle store")
     }
 }
 

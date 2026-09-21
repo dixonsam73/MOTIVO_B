@@ -48,8 +48,28 @@ import Foundation
 
 enum DirectorySyncFailure {
 
-    /// Shown when the server itself attributed the failure to `account_id`.
-    static let accountIDTakenMessage = "That account ID is already taken."
+    /// **NO LONGER A DISTINCT MESSAGE, and the classification is why it is not
+    /// simply deleted.**
+    ///
+    /// C-70(a)'s rule has two halves: a message names a field only when the
+    /// SERVER attributed it there, AND the member can act on what it names.
+    /// **The first half still holds and is exactly what `isAccountIDCollision`
+    /// establishes** — the server named the `account_id` constraint. It is the
+    /// SECOND half that has gone: the user-facing handle is removed, so there is
+    /// no Account ID field on screen and nothing the member could do about it.
+    /// Naming a field they do not have would be the same false attribution in a
+    /// new direction, so a collision reads as the generic line.
+    ///
+    /// The COLLISION ITSELF stays classified (`.accountIDTaken`): the column,
+    /// its UNIQUE constraint and the existing values are all still deployed, and
+    /// an older installed client still writes the column — so a 23505 naming
+    /// that constraint remains a real, distinguishable server answer. Keeping
+    /// the classifier means it is still told apart from a primary-key conflict
+    /// instead of degrading to an untyped failure.
+    /// Deliberately NOT marked deprecated: an attribute here would warn at its
+    /// own use sites inside this file and in the tests that pin the behaviour,
+    /// and a warning is not what "this is now the same line" means.
+    static var accountIDTakenMessage: String { genericMessage }
 
     /// Shown for every failure the server did NOT attribute to a field.
     /// It names no field, because naming one would be a guess — and it claims
@@ -75,6 +95,11 @@ enum DirectorySyncFailure {
     }
 
     /// The single decision this type exists to make.
+    ///
+    /// Both arms now return the same line. The BRANCH is kept rather than
+    /// collapsed because `isAccountIDCollision` is still a meaningful server
+    /// answer (see `accountIDTakenMessage`), and a caller that needs to tell the
+    /// two apart asks the classifier, not the copy.
     static func message(for error: Error) -> String {
         isAccountIDCollision(error) ? accountIDTakenMessage : genericMessage
     }
@@ -97,6 +122,7 @@ enum DirectorySyncFailure {
         case .supersededIdentity, .superseded:
             return nil
         case .accountIDTaken:
+            // Classified, but NOT attributed to a field the member cannot see.
             return accountIDTakenMessage
         case .notEvidenced, .noRowMatched, .refusedByPolicy, .rowConflict, .ambiguous, .failed:
             return genericMessage

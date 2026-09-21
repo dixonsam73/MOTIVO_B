@@ -271,7 +271,6 @@ struct BackendSessionDetailView: View {
     ProfilePeekView(
         ownerID: ownerUserID,
         directoryDisplayName: directoryAccount?.displayName,
-        directoryAccountID: directoryAccount?.accountID,
         directoryLocation: directoryAccount?.location,
         directoryAvatarKey: directoryAccount?.avatarKey,
         directoryInstruments: directoryAccount?.instruments

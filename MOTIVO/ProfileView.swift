@@ -156,7 +156,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .none:     return "Lookup off"
-        case .search:   return "Allow handle lookup"
+        case .search:   return "Allow people to find me"
         case .contacts: return "Email invites"
         }
     }
@@ -199,13 +199,149 @@ enum ProfileMaintenancePolicy {
     /// **Narrower than general Connected account management on purpose.** It must
     /// not unlock the feed, access, or the rest of the Connected section.
     ///
-    /// **NOT gated on the handle text being non-empty**: the text can become empty
-    /// mid-edit, and a field that vanishes while being typed into is worse than
-    /// one that stays. Filling an existing row's empty handle by hand is owner
-    /// maintenance; it is NOT automatic generation, which stays Connected-only.
+    /// **It now gates the maintenance FEEDBACK surface rather than a field.** The
+    /// Account ID field this was written for is gone with the handle; what
+    /// remains behind this policy is the directory-sync message, and the reason
+    /// it must not fold in `AppMode` is unchanged — a lapsed member maintaining
+    /// an existing Connected profile has to be able to see whether the publish
+    /// failed. Gate on IDENTITY and CONFIGURATION, never on `AppMode` (C-35).
     static func mayShowMaintenanceSurface(hasConnectedIdentity: Bool,
                                           isBackendConfigured: Bool) -> Bool {
         hasConnectedIdentity && isBackendConfigured
+    }
+}
+
+/// **F2. Whether a refused directory write should be attempted once more.**
+///
+/// Pure, and outside the view, for the same reason `ProfileMaintenancePolicy` and
+/// `ConnectedSetupDecision` are: a decision inside a `View` can only be tested by
+/// rendering one, and nothing in this target renders.
+///
+/// **Consulted at BOTH events, because either can arrive first.** Keying only on
+/// the arrival of an establishing completion misses the SUCCESS-BEFORE-FAILURE
+/// order: the completion lands while nothing is outstanding, correctly writes
+/// nothing, and the already-dispatched write's refusal then arrives with no
+/// further completion to retrigger anything. So the failure side asks too.
+///
+/// **The completion is a HINT, never authority.** A true answer schedules one
+/// ordinary directory write, which the server judges exactly as it judges every
+/// other. Nothing here grants entitlement, and nothing here decides the message:
+/// the WRITE sets and clears that, so a still-refused retry tells the member so
+/// again, truthfully.
+enum DirectoryReconciliationPolicy {
+
+    /// True only when ALL SIX hold. Each is load-bearing:
+    ///
+    /// 1. a completion exists;
+    /// 2. it ESTABLISHES membership — `pending` is propagation, not success, and
+    ///    a reconciliation on it would write straight into the same refusal;
+    /// 3. the owner matches;
+    /// 4. the DIRECTORY GENERATION matches — this is what proves ownership, and
+    ///    why an owner check alone is insufficient: an A→B→A cycle leaves the
+    ///    owner equal to A again while the completion belongs to the previous A;
+    /// 5. this completion has not already been consumed — the boundedness rule;
+    ///
+    /// and then EITHER a directory failure is outstanding (the repair path) OR
+    /// this session has scoped evidence that the row is absent and none that it
+    /// has been written (the initial-publication path).
+    ///
+    /// **CORRECTED FOR F3.** An earlier revision made an outstanding failure a
+    /// precondition of all six, on the reasoning that "with none, there is
+    /// nothing to reconcile". **That is exactly false for a fresh join**, which
+    /// leaves no message to repair, and it is the defect F3 exists to fix. What
+    /// the old rule was protecting — `alreadyEstablished` on every foreground
+    /// costing nothing — is now carried by the absence evidence instead, which a
+    /// member whose row already exists does not have.
+    /// A write already evidenced by this screen, scoped so it cannot be mistaken
+    /// for a different session's success.
+    struct AppliedEvidence: Equatable {
+        let owner: String
+        let directoryGeneration: Int
+    }
+
+    static func shouldReconcile(completion: MembershipAttestationCoordinator.AttestationCompletion?,
+                                hasOutstandingFailure: Bool,
+                                rowAbsence: AuthManager.DirectoryRowAbsence?,
+                                appliedEvidence: AppliedEvidence?,
+                                currentOwner: String?,
+                                currentDirectoryGeneration: Int,
+                                lastConsumedSequence: Int?) -> Bool {
+        guard let completion else { return false }
+        guard completion.establishesMembership else { return false }
+        guard let owner = currentOwner?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !owner.isEmpty,
+              owner == completion.owner else { return false }
+        guard completion.directoryGeneration == currentDirectoryGeneration else { return false }
+        guard completion.sequence != lastConsumedSequence else { return false }
+
+        // The REPAIR path, unchanged: a refusal this screen showed.
+        if hasOutstandingFailure { return true }
+
+        // **F3 — INITIAL PUBLICATION WITH NO FOREGROUND ERROR.** A fresh join can
+        // leave no message to repair at all.
+        //
+        // The SUPPORTED account is that with the join flow now kept on screen
+        // (F1), the fields this screen syncs on were already assigned before the
+        // identity arrived, so nothing changed and nothing was scheduled. **That
+        // is read from source, not from captured device history** — no
+        // request-level trace exists for the run that failed, and a silent
+        // screen is also consistent with a superseded or not-permitted path.
+        // What is measured is that the row was absent while Profile stayed open.
+        //
+        // Both scopes must describe THIS session. An absence from a previous
+        // generation authorises nothing, and applied evidence from a previous
+        // one does not suppress. Neither is a permission: the server judges the
+        // resulting write exactly as it judges any other, and its band and
+        // membership refusals are reported unchanged.
+        let absenceIsCurrent = rowAbsence.map {
+            $0.owner == owner && $0.directoryGeneration == currentDirectoryGeneration
+        } ?? false
+        let alreadyWritten = appliedEvidence.map {
+            $0.owner == owner && $0.directoryGeneration == currentDirectoryGeneration
+        } ?? false
+        return absenceIsCurrent && !alreadyWritten
+    }
+}
+
+/// **F3. The per-screen state the four triggers share, and the code the VIEW
+/// ITSELF runs** — so a test can drive the production evaluation rather than a
+/// reimplementation of it.
+///
+/// **It does NOT prove the observers are wired.** That is a separate, structural
+/// assertion; a test driving this type would pass even if every `onChange` were
+/// deleted, which is exactly why both exist.
+@MainActor
+final class DirectoryReconciliationEvaluator {
+    private(set) var lastConsumedSequence: Int?
+    private(set) var appliedEvidence: DirectoryReconciliationPolicy.AppliedEvidence?
+
+    /// Ask, and CONSUME on a true answer — before the caller schedules anything,
+    /// so a retry that is refused again cannot find the completion unspent.
+    func evaluateAndConsume(completion: MembershipAttestationCoordinator.AttestationCompletion?,
+                            hasOutstandingFailure: Bool,
+                            rowAbsence: AuthManager.DirectoryRowAbsence?,
+                            currentOwner: String?,
+                            currentDirectoryGeneration: Int) -> Bool {
+        guard DirectoryReconciliationPolicy.shouldReconcile(
+                completion: completion,
+                hasOutstandingFailure: hasOutstandingFailure,
+                rowAbsence: rowAbsence,
+                appliedEvidence: appliedEvidence,
+                currentOwner: currentOwner,
+                currentDirectoryGeneration: currentDirectoryGeneration,
+                lastConsumedSequence: lastConsumedSequence)
+        else { return false }
+        lastConsumedSequence = completion?.sequence
+        return true
+    }
+
+    /// Recorded ONLY from an accepted write's own result, never re-read from the
+    /// coordinator afterwards: `result.generation` is the epoch the writer bound,
+    /// and the acceptance guards have already passed by the time this is called.
+    func noteApplied(owner: String?, generation: Int) {
+        guard let owner = owner?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !owner.isEmpty else { return }
+        appliedEvidence = .init(owner: owner, directoryGeneration: generation)
     }
 }
 
@@ -302,6 +438,20 @@ struct ProfileNameDraftState: Equatable {
      @Environment(\.managedObjectContext) private var ctx
      @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appModeManager: AppModeManager
+    /// F2. Read for its COMPLETION HINT only. Never consulted for entitlement,
+    /// mode or access — those resolve exactly where they always did.
+    @EnvironmentObject private var attestation: MembershipAttestationCoordinator
+    /// F2/F3. The per-screen reconciliation state: the spent completion and the
+    /// write this screen has evidenced. **Boundedness**: a still-refused retry
+    /// cannot re-trigger itself, because the completion that authorised it is
+    /// spent.
+    ///
+    /// **`@State`, so it RESETS ON REMOUNT — stated rather than glossed.** This
+    /// scope therefore does NOT promise zero writes across arbitrary reopens of
+    /// Profile while absence evidence is still standing: each fresh mount may
+    /// publish once more. That is bounded by a deliberate user action, never by
+    /// a timer, and it stops entirely once a write is evidenced within a mount.
+    @State private var reconciliation = DirectoryReconciliationEvaluator()
     @Environment(\.colorScheme) private var colorScheme
  
      // Close-first strategy
@@ -335,14 +485,12 @@ struct ProfileNameDraftState: Equatable {
 
 @FocusState private var isNameFocused: Bool
 @FocusState private var isLocationFocused: Bool
-@FocusState private var isAccountIDFocused: Bool
  
      @State private var showInstrumentManager: Bool = false
 
     private func clearNameFieldFocus() {
         isNameFocused = false
         isLocationFocused = false
-        isAccountIDFocused = false
     }
 
      @State private var showActivityManager: Bool = false
@@ -390,7 +538,6 @@ struct ProfileNameDraftState: Equatable {
     @AppStorage("followRequestMode_v1") private var followRequestModeRaw: Int = FollowRequestMode.manual.rawValue
     @AppStorage("allowDiscovery_v1") private var allowDiscoveryLegacyRaw: Int = DiscoveryMode.none.rawValue
     @State private var discoveryModeRawPerUser: Int = DiscoveryMode.none.rawValue
-    @State private var accountIDText: String = ""
 
     // Phase 13A — Account ID collision UX (shipping)
     @State private var directorySyncMessage: String? = nil
@@ -416,9 +563,6 @@ struct ProfileNameDraftState: Equatable {
     /// which concerns the REMOTE write — conflating them would re-create exactly
     /// the false attribution C-70(a) removed.
     @State private var localSaveMessage: String? = nil
-    @State private var lastAccountIDSubmitAt: Date? = nil
-    @State private var accountIDAutoGenerationInFlight: Bool = false
-    @State private var accountIDAutoGenerationAttemptedBackendID: String? = nil
     private var followRequestMode: FollowRequestMode {
         get {
             let mode = FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual
@@ -763,55 +907,6 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                          quietDivider()
                      }
 
-                     if mayShowMaintenanceSurface {
-                         HStack(spacing: 10) {
-                             if !accountIDText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                 Text("@")
-                                     .font(Theme.Text.meta)
-                                     .foregroundStyle(Theme.Colors.secondaryText)
-                             }
-    
-                             TextField("Account ID : How people find you.", text: $accountIDText)
-                                 .textInputAutocapitalization(.never)
-                                 .autocorrectionDisabled(true)
-                                 .keyboardType(.asciiCapable)
-                                 .onChange(of: accountIDText) { _, newValue in
-                                     // C-70. No resurrection: the reset path clears
-                                     // `accountIDText` programmatically, which fires
-                                     // this handler — and an unguarded write here
-                                     // would persist that value straight back into
-                                     // `ProfileStore` for the erased identity.
-                                     guard localStorageIsUsable else { return }
-                                     let normalized = normalizeAccountID(newValue)
-                                     if normalized != newValue { accountIDText = normalized }
-                                     // Clear any prior sync feedback as the user edits.
-                                     directorySyncMessage = nil
-                                     directorySyncIsError = false
-                                     ProfileStore.setAccountID(accountIDText, for: auth.backendUserID)
-                                 }
-                                 .focused($isAccountIDFocused)
-                                 .onChange(of: isAccountIDFocused) { oldValue, newValue in
-                                     // Commit-only: on blur, sync once with the latest sanitized state.
-                                     // Guard: Return/Done often triggers both onSubmit and a blur; avoid double-posting.
-                                     if oldValue == true && newValue == false {
-                                         if let t = lastAccountIDSubmitAt, Date().timeIntervalSince(t) < 0.35 {
-                                             return
-                                         }
-                                         submitDirectorySyncNow()
-                                     }
-                                 }
-                                 .onSubmit {
-                                     // Commit-only: on Return/Done, sync once.
-                                     lastAccountIDSubmitAt = Date()
-                                     submitDirectorySyncNow()
-                                     isAccountIDFocused = false
-                                 }
-                                 .font(Theme.Text.meta)
-                                 .foregroundStyle(Color.primary)
-                         }
-                         .padding(.vertical, Theme.Spacing.s)
-                         .frame(minHeight: 44, alignment: .center)
-                     }
                  }
                  .cardSurface(padding: profileInnerCardPadding)
 
@@ -1029,7 +1124,7 @@ private var sessionSetupSection: some View {
                          // Neutral and factual: what each position does, and what
                          // does NOT change either way. No recommendation and no
                          // nudge in either direction.
-                         Text("When this is on, other members can find you by searching your name, account ID or instrument. When it’s off, you won’t appear in search. People you already share with can still see your name on anything you’ve shared.")
+                         Text("When this is on, other members can find you by searching your name or instrument. When it’s off, you won’t appear in search. People you already share with can still see your name on anything you’ve shared.")
                             .font(.footnote)
                             .foregroundStyle(Theme.Colors.secondaryText)
                      }
@@ -1288,8 +1383,16 @@ private var sessionSetupSection: some View {
          // CP-3: discovery is server-authoritative. AuthManager hydrates the
          // EFFECTIVE value from account_privacy; this no longer forces it on.
          discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
-         accountIDText = ProfileStore.accountID(for: auth.backendUserID)
          hydrateDiscoverabilityControl()
+
+         // F3, EVENT 4 — a REMOUNT, where both earlier events have already
+         // passed and this screen's state started empty.
+         //
+         // **LAST IN THIS FUNCTION, DELIBERATELY.** The snapshot a publish sends
+         // is read from the live screen, so evaluating before `load()` and the
+         // location rehydration above would publish the initial empty defaults
+         // over the member's real profile.
+         reconcileDirectoryIfAttestationAllows()
      }
 
      /// Writes the discoverability preference through the ONLY client writer of
@@ -1361,7 +1464,6 @@ private var sessionSetupSection: some View {
          defaultPrivacy = false
          avatarImage = nil
          locationText = ""
-         accountIDText = ""
          discoveryModeRawPerUser = DiscoveryMode.none.rawValue
 
          userActivities = []
@@ -1714,17 +1816,6 @@ private var sessionSetupSection: some View {
          }
      }
  
-     // Phase 12C — Handle normalization (client-side). Server enforces strict rules; this keeps UI deterministic.
-     private func normalizeAccountID(_ raw: String) -> String {
-         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-         if s.hasPrefix("@") { s = String(s.dropFirst()) }
-         // Allowed: a–z, 0–9, underscore
-         s = String(s.filter { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "_" })
-         // Max length 24
-         if s.count > 24 { s = String(s.prefix(24)) }
-         return s
-     }
-
  
     // Phase 12C hygiene: avoid directory upserts on every keystroke.
     /// C-70. Submit immediately, capturing owner and generation **before** the
@@ -1773,7 +1864,6 @@ private var sessionSetupSection: some View {
     private struct DirectorySyncSnapshot {
         let backendID: String
         let display: String
-        let accountID: String?
         let location: String?
         let instruments: [String]
         let fingerprint: String
@@ -1783,12 +1873,6 @@ private var sessionSetupSection: some View {
     private func currentDirectorySnapshot(backendID: String) -> DirectorySyncSnapshot {
          let display = name.trimmingCharacters(in: .whitespacesAndNewlines)
          // Connected discovery is always enabled. Relationship privacy is handled by explicit follow approval.
-         let acct = accountIDText.trimmingCharacters(in: .whitespacesAndNewlines)
-         let storedAccountID = ProfileStore.accountID(for: backendID).trimmingCharacters(in: .whitespacesAndNewlines)
-         // Account ID is user-scoped. During sign-out/delete/recreate transitions, accountIDText can briefly
-         // contain the previous user's handle. Only send an explicit account_id when it matches the value stored
-         // for the current backend user; otherwise omit it so auto-generation can safely derive from this user's name.
-         let acctOrNil: String? = (acct.count >= 3 && !storedAccountID.isEmpty && acct == storedAccountID) ? acct : nil
          let locTrim = locationText.trimmingCharacters(in: .whitespacesAndNewlines)
          let locOrNil: String? = locTrim.isEmpty ? nil : locTrim
          let instrumentsClean = instrumentsArray
@@ -1798,10 +1882,19 @@ private var sessionSetupSection: some View {
              a.localizedCaseInsensitiveCompare(b) == .orderedAscending
          }
          let instrumentsFP = instrumentsSorted.joined(separator: ",")
-         let fingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|\(acctOrNil ?? "nil")|connectedDiscovery:1|fr:1|i:\(instrumentsFP)"
+         // **CORRECTED. An earlier revision kept a literal "nil" segment here and
+         // justified it as upgrade compatibility with existing latch values.
+         // That premise was false and is withdrawn:** `directorySyncLatch` is
+         // `@State`, so it is view-lifetime and starts empty on every mount —
+         // there is no persisted fingerprint for a new shape to disagree with,
+         // and nothing to be compatible across.
+         //
+         // The fingerprint describes PRESENT screen state, and the handle is no
+         // longer part of it, so the segment is gone rather than kept as a
+         // placeholder that would have to be explained again later.
+         let fingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|connectedDiscovery:1|fr:1|i:\(instrumentsFP)"
          return DirectorySyncSnapshot(backendID: backendID,
                                       display: display,
-                                      accountID: acctOrNil,
                                       location: locOrNil,
                                       instruments: instrumentsSorted,
                                       fingerprint: fingerprint)
@@ -1900,7 +1993,6 @@ private var sessionSetupSection: some View {
          let result = await AccountDirectoryService.shared.upsertSelfRow(
              userID: backendID,
              displayName: snapshot.display,
-             accountID: snapshot.accountID,
              location: snapshot.location,
              instruments: snapshot.instruments,
              // C-70. Owner maintenance is the ONE path that must be able to
@@ -1939,12 +2031,11 @@ private var sessionSetupSection: some View {
              directorySyncLatch.confirm(snapshot.fingerprint)
              directorySyncMessage = nil
              directorySyncIsError = false
-             await attemptAccountIDAutoGenerationIfNeeded(
-                 backendID: backendID,
-                 displayName: snapshot.display,
-                 location: snapshot.location,
-                 instruments: snapshot.instruments
-             )
+             // F3. Recorded HERE and nowhere else: both freshness guards above
+             // have already passed, so this row is evidenced for the identity
+             // and epoch the WRITE bound. `result.generation`, never a fresh
+             // read of the coordinator.
+             reconciliation.noteApplied(owner: backendID, generation: result.generation)
          case .superseded, .supersededIdentity:
              // A newer intent, or a different identity, owns the screen. Report
              // nothing about a write whose result is not this member's business.
@@ -1955,73 +2046,52 @@ private var sessionSetupSection: some View {
              // instruments, and three of the five triggers never touch the Account ID.
              directorySyncMessage = DirectorySyncFailure.message(for: result.outcome)
              directorySyncIsError = (directorySyncMessage != nil)
+             // F2, EVENT 2 — SUCCESS BEFORE FAILURE.
+             //
+             // The establishing completion may already have arrived while nothing
+             // was outstanding, in which case it correctly wrote nothing and NO
+             // further completion will land to retrigger anything. Asking here is
+             // what closes that order; asking only on the completion misses it.
+             reconcileDirectoryIfAttestationAllows()
          }
      }
 
-    @MainActor
-    private func attemptAccountIDAutoGenerationIfNeeded(
-        backendID: String,
-        displayName: String,
-        location: String?,
-        instruments: [String]
-    ) async {
-        guard BackendEnvironment.shared.isConnected else { return }
-        let auth = _auth.wrappedValue
-        guard auth.hasSupabaseAccessToken else { return }
+     /// F2. Ask the policy, and — only on a true answer — consume the completion
+     /// and schedule one ordinary write.
+     ///
+     /// **Consumption happens BEFORE scheduling**, so a write that is refused
+     /// again cannot find the same completion still unspent and loop. The write
+     /// itself goes through `syncDirectoryFromCurrentState` unchanged, so the
+     /// identity binding, the generation epoch, the screen-fingerprint guard and
+     /// every effect guard apply to it exactly as to a member's own edit.
+     /// The two asynchronously-arriving inputs, as one observable value.
+     private struct ReconciliationInputs: Equatable {
+         let completion: MembershipAttestationCoordinator.AttestationCompletion?
+         let absence: AuthManager.DirectoryRowAbsence?
+     }
 
-        let trimmedBackendID = backendID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedBackendID.isEmpty else { return }
-        guard auth.backendUserID?.caseInsensitiveCompare(trimmedBackendID) == .orderedSame else { return }
+     private var reconciliationInputs: ReconciliationInputs {
+         ReconciliationInputs(completion: attestation.lastCompletion,
+                              absence: auth.directoryRowAbsence)
+     }
 
-        let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDisplayName.isEmpty else { return }
+     @MainActor
+     private func reconcileDirectoryIfAttestationAllows() {
+         guard reconciliation.evaluateAndConsume(
+                 completion: attestation.lastCompletion,
+                 hasOutstandingFailure: directorySyncMessage != nil,
+                 rowAbsence: auth.directoryRowAbsence,
+                 currentOwner: auth.backendUserID,
+                 currentDirectoryGeneration: DirectoryWriteCoordinator.shared.identityGeneration)
+         else { return }
 
-        let storedAccountID = ProfileStore.accountID(for: trimmedBackendID).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard storedAccountID.isEmpty else { return }
-
-        guard accountIDAutoGenerationInFlight == false else { return }
-        guard accountIDAutoGenerationAttemptedBackendID?.caseInsensitiveCompare(trimmedBackendID) != .orderedSame else { return }
-
-        accountIDAutoGenerationInFlight = true
-        accountIDAutoGenerationAttemptedBackendID = trimmedBackendID
-        defer { accountIDAutoGenerationInFlight = false }
-
-        // Captured BEFORE the await, and checked after it: adoption is a UI
-        // effect like any other and must not land on an identity that replaced
-        // the one generation ran for.
-        let capturedGeneration = DirectoryWriteCoordinator.shared.identityGeneration
-
-        let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
-            userID: trimmedBackendID,
-            displayName: trimmedDisplayName,
-            localAccountID: storedAccountID,
-            location: location,
-            instruments: instruments
-        )
-
-        guard let generated, !generated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-
-        // C-70. ADOPTION IS RE-CHECKED AGAINST LOCAL INTENT, not just against
-        // the state generation started from. Generation began because the
-        // stored handle was empty; the member may have typed one while the
-        // write was in flight, and taking the generated value then would
-        // overwrite a manual choice with a derived one. The generated handle is
-        // already the server's -- this only decides whether this device adopts
-        // it as the displayed value.
-        let storedNow = ProfileStore.accountID(for: trimmedBackendID).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard storedNow.isEmpty else { return }
-        guard auth.backendUserID?.caseInsensitiveCompare(trimmedBackendID) == .orderedSame else { return }
-        guard DirectoryWriteCoordinator.shared.identityGeneration == capturedGeneration else { return }
-
-        ProfileStore.setAccountID(generated, for: trimmedBackendID)
-        accountIDText = generated
-        directorySyncLatch.invalidate()
-    }
-
-
-
-
-     
+         // The latch is a SKIP token keyed on the fingerprint, and the previous
+         // attempt latched nothing because it failed -- but an identical earlier
+         // SUCCESS could have. Invalidating makes this retry actually reach the
+         // server rather than being skipped as unchanged.
+         directorySyncLatch.invalidate()
+         scheduleDirectorySyncDebounced()
+     }
 
      // MARK: - Avatar (backend identity)
 
@@ -2277,7 +2347,6 @@ private var sessionSetupSection: some View {
                  localSaveMessage = nil
                  name = ""
                  locationText = ""
-                 accountIDText = ""
                 await LocalFactoryReset.perform(reason: "erase-all-etudes-data-local", auth: auth)
                  dismissProfileAfterSuccessfulErase()
              }
@@ -2363,7 +2432,6 @@ private var sessionSetupSection: some View {
              localSaveMessage = nil
              name = ""
              locationText = ""
-             accountIDText = ""
                 await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
              dismissProfileAfterSuccessfulErase()
 
@@ -2437,6 +2505,31 @@ private func initials(from string: String) -> String {
                 // Signed-out gate flow:
                 // after a successful Sign in with Apple from the gate-presented ProfileView,
                 // dismiss the gate and reveal PracticeTimerView directly.
+                // F1. THE JOIN PURPOSE IS TESTED FIRST, and clearing the flag is
+                // part of the fix rather than tidying.
+                //
+                // `signedOutGateView` has ONE render site and the sheet has THREE
+                // openers, all of which set `connectedSignInIntent` — so the
+                // intent is a complete discriminator, while
+                // `signedOutGateWasVisible` is set unconditionally by a view that
+                // cannot know why it is on screen. Testing the flag first
+                // consumed the event and returned, so the `.join` branch below —
+                // which exists precisely to keep a joining member in the flow they
+                // just authenticated to continue — was unreachable, and `onClose`
+                // (non-nil in BOTH presentations) dismissed Profile entirely.
+                //
+                // The flag must also be CLEARED, not merely bypassed:
+                // `shouldSuppressSignedInProfileAfterGateSignIn` renders
+                // `Color.clear` while it is set, so continuing into the join
+                // without clearing it would leave a blank Profile underneath the
+                // membership screen.
+                if connectedSignInIntent == .join {
+                    signedOutGateWasVisible = false
+                    showConnectedSignInSheet = false
+                    showMembershipSelection = true
+                    return
+                }
+
                 if signedOutGateWasVisible {
                     showConnectedSignInSheet = false
 
@@ -2451,17 +2544,12 @@ private func initials(from string: String) -> String {
                     return
                 }
 
-                // U5f — THE ORDER INVERTED, SO THIS BRANCHED.
-                //
-                // Authentication used to be the LAST step of joining, so any
-                // success here unwound the whole stack. Under B-24 it is the
-                // FIRST step, and unwinding a joining member would drop them out
-                // of the flow they just authenticated in order to continue.
-                if connectedSignInIntent == .join {
-                    showConnectedSignInSheet = false
-                    showMembershipSelection = true
-                    return
-                }
+                // U5f's `.join` branch MOVED ABOVE the gate branch — see F1.
+                // Its reasoning is unchanged and now reachable: authentication
+                // used to be the LAST step of joining, so any success here
+                // unwound the whole stack; under B-24 it is the FIRST step, and
+                // unwinding a joining member drops them out of the flow they just
+                // authenticated in order to continue.
 
                 // Returning member: signing in IS the whole errand. Unwind, as
                 // before. Entitlement resolves from local StoreKit and the server
@@ -2536,12 +2624,10 @@ private func initials(from string: String) -> String {
                 directorySyncLatch.invalidate()
                 // Phase 12C: user-scoped lookup state (per backend identity)
                 if newValue == nil {
-                    accountIDText = ""
                     discoveryModeRawPerUser = DiscoveryMode.search.rawValue
                     locationText = ProfileStore.location(for: nil)
                 } else {
                     discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
-                    accountIDText = ProfileStore.accountID(for: auth.backendUserID)
                     locationText = ProfileStore.presentedLocation(for: auth.backendUserID) // C-36
                 }
             }
@@ -2572,6 +2658,21 @@ private func initials(from string: String) -> String {
              .onChange(of: locationText) { _, _ in
                  // C-70. Same reasoning as `name` above: no untracked outer Task.
                  scheduleDirectorySyncDebounced()
+             }
+             // EVENTS 1 AND 3, in ONE observer over BOTH asynchronous inputs.
+             //
+             // 1 — failure before success: the completion that makes a refused
+             //     write worth retrying.
+             // 3 — completion before absence: row absence arrives on its own
+             //     schedule, so a completion landing while it is still unknown
+             //     is missed by events 1 and 2 alike.
+             //
+             // One `onChange` rather than two because either input changing asks
+             // the same question, and because this body is already at the
+             // type-checker's limit — two separate modifiers here failed to
+             // compile in reasonable time.
+             .onChange(of: reconciliationInputs) { _, _ in
+                 reconcileDirectoryIfAttestationAllows()
              }
              .alert("Primary Activity reset", isPresented: $showPrimaryFallbackAlert) {
                  Button("OK", role: .cancel) {}

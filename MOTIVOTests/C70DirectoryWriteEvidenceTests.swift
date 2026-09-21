@@ -156,15 +156,23 @@ final class C70DirectoryWriteEvidenceTests: XCTestCase {
         XCTAssertFalse(DirectoryWriteEvidence.matches(e, receipt(instruments: ["piano", "cello"])))
     }
 
-    /// Generation sends `account_id` ALONE, so only that key is expected of it —
-    /// it must not be held to a display name it never submitted.
-    func testGenerationExpectsOnlyTheHandle() {
-        let payload: [String: Any] = ["account_id": "ada2"]
+    /// **REPLACES `testGenerationExpectsOnlyTheHandle`, which is retired with
+    /// the feature.** That test built the generation payload — `account_id`
+    /// alone — and there is no longer a writer that produces one.
+    ///
+    /// What it depended on, and what still matters, is that a receipt carrying
+    /// `account_id` is NOT held against a payload that never sent it. That is
+    /// now the ordinary case rather than a special one: the server still returns
+    /// the column on every write, and no client payload ever carries it, so
+    /// every real write in the app now takes this path.
+    func testAReceiptCarryingAHandleIsNotHeldAgainstAPayloadThatNeverSentOne() {
+        let payload: [String: Any] = ["display_name": "Ada"]
         let e = DirectoryWriteEvidence.expectation(from: payload)
-        XCTAssertEqual(e, [.accountID("ada2")])
-        XCTAssertTrue(DirectoryWriteEvidence.matches(e, receipt(displayName: "anything",
-                                                                accountID: "ada2",
-                                                                location: "anywhere")))
+        XCTAssertEqual(e, [.displayName("Ada")],
+                       "no account_id expectation can be derived from a payload without the key")
+        XCTAssertTrue(DirectoryWriteEvidence.matches(e, receipt(displayName: "Ada",
+                                                                accountID: "a_handle_we_did_not_send")),
+                      "a server-returned handle must not fail a write that did not touch it")
     }
 
     func testUserIDIsNeverAValueExpectation() {
@@ -225,13 +233,20 @@ final class C70DirectoryWriteEvidenceTests: XCTestCase {
 
     // MARK: copy
 
-    func testOnlyAnEvidencedWriteSaysNothingAndOnlyACollisionNamesTheField() {
+    /// **CONVERTED: no outcome names a field any more.** A collision is still
+    /// CLASSIFIED `.accountIDTaken` — the server named the constraint and that
+    /// remains established — but with the handle removed the member has no
+    /// Account ID field, so naming one would be C-70(a)'s defect pointing the
+    /// other way. Asserted against `genericMessage` directly rather than through
+    /// the alias, so this fails if the alias is ever pointed back at a
+    /// field-naming string.
+    func testNoOutcomeNamesAFieldAndOnlyAnEvidencedWriteSaysNothing() {
         let r = receipt()
         XCTAssertNil(DirectorySyncFailure.message(for: .applied(r)))
         XCTAssertNil(DirectorySyncFailure.message(for: .superseded))
         XCTAssertNil(DirectorySyncFailure.message(for: .supersededIdentity))
         XCTAssertEqual(DirectorySyncFailure.message(for: .accountIDTaken),
-                       DirectorySyncFailure.accountIDTakenMessage)
+                       DirectorySyncFailure.genericMessage)
         for outcome: DirectoryWriteOutcome in [.notEvidenced(r), .noRowMatched, .refusedByPolicy,
                                                .rowConflict,
                                                .ambiguous(NetworkManager.NetworkError.transportError("x")),

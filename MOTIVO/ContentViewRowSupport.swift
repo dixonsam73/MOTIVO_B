@@ -634,17 +634,20 @@ struct ShareToFollowerSheet: View {
 
     /// A–Z by display name (case/diacritic insensitive), with fallback:
     /// 1) displayName
-    /// 2) handle (accountID)
-    /// 3) stable internal ID (never rendered)
-    private func sortKey(for userID: String) -> (String, String, String) {
+    /// 2) stable internal ID (never rendered)
+    ///
+    /// The handle used to sit between the two. It is gone with the feature, and
+    /// the UUID tier that always decided ties underneath it is unchanged — so
+    /// the order stays total and stable, it simply no longer consults a value
+    /// nobody can see.
+    private func sortKey(for userID: String) -> (String, String) {
         if let acct = directory[userID] {
             let name = normalized(acct.displayName)
-            let handle = normalized(acct.accountID ?? "")
-            let primary = !name.isEmpty ? name : (!handle.isEmpty ? handle : normalized(userID))
-            return (primary, handle, normalized(userID))
+            let primary = !name.isEmpty ? name : normalized(userID)
+            return (primary, normalized(userID))
         } else {
             // Directory missing: keep stable ordering but never render raw IDs.
-            return ("", "", normalized(userID))
+            return ("", normalized(userID))
         }
     }
 
@@ -653,8 +656,7 @@ struct ShareToFollowerSheet: View {
             let ka = sortKey(for: a)
             let kb = sortKey(for: b)
             if ka.0 != kb.0 { return ka.0 < kb.0 }
-            if ka.1 != kb.1 { return ka.1 < kb.1 }
-            return ka.2 < kb.2
+            return ka.1 < kb.1
         }
     }
 
@@ -727,7 +729,7 @@ struct ShareToFollowerSheet: View {
                                 PeopleUserRow(
                                     userID: followerID,
                                     overrideDisplayName: acct?.displayName ?? "User",
-                                    overrideSubtitle: acct?.accountID.map { "@\($0)" },
+                                    overrideSubtitle: DirectorySubtitle.text(for: acct),
                                     overrideAvatarKey: acct?.avatarKey,
                                     overrideAvatarVersion: acct?.avatarVersion
                                 ) {

@@ -20,6 +20,60 @@
 
 import SwiftUI
 
+/// The second line of a people row, composed from what the directory ALREADY
+/// returned for that account.
+///
+/// **It invents nothing.** It consumes only `instruments` and `location` as they
+/// arrive on `DirectoryAccount`, and it has no access to a fetch, a discovery
+/// gate, a search, or the viewer's own local profile — so it can never present
+/// one person's location as another's. When both are absent the result is the
+/// empty string and the row renders no second line, which is already what the
+/// three directory rows carrying no handle did before this existed.
+///
+/// **It replaced `@handle`, which was occupying this slot.** A name-derived
+/// handle with a numeric suffix distinguished two rows without helping anyone
+/// choose between them; the instrument and the town do.
+public enum DirectorySubtitle {
+
+    /// At most this many instruments are named; the rest become `+N`.
+    ///
+    /// A bound rather than a truncation: a row that ends `"+3"` is honest about
+    /// how much it is not showing, where an elided list is not.
+    public static let namedInstrumentLimit = 2
+
+    public static func text(instruments: [String]?, location: String?) -> String {
+        let named = (instruments ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var parts: [String] = []
+
+        if !named.isEmpty {
+            let shown = named.prefix(namedInstrumentLimit).joined(separator: ", ")
+            let remainder = named.count - min(named.count, namedInstrumentLimit)
+            parts.append(remainder > 0 ? "\(shown) +\(remainder)" : shown)
+        }
+
+        if let place = location?.trimmingCharacters(in: .whitespacesAndNewlines), !place.isEmpty {
+            parts.append(place)
+        }
+
+        return parts.joined(separator: " · ")
+    }
+
+    /// Convenience for the eight call sites that hold a whole row.
+    ///
+    /// Returns `nil` rather than `""` when there is nothing to say, so a caller
+    /// passing it to `overrideSubtitle` expresses "no override" rather than
+    /// "override with a blank" — the two are distinguishable at the call site
+    /// and only one of them is truthful.
+    public static func text(for account: DirectoryAccount?) -> String? {
+        guard let account else { return nil }
+        let t = text(instruments: account.instruments, location: account.location)
+        return t.isEmpty ? nil : t
+    }
+}
+
 /// Shared row for People hub:
 /// used by Requests, Lookup result, and Following list.
 /// Shows avatar + lightweight identity summary and opens ProfilePeek on tap.
@@ -90,12 +144,18 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
         return "User • \(String(userID.suffix(6)))"
     }
 
+    /// **No fallback, deliberately.** This used to fall back to
+    /// `ProfileStore.location(for: userID)`, which is a LOCAL store written only
+    /// for the owner's own backend id (`ProfileStore.setLocation` has no other
+    /// caller shape) — so for every other member it resolved to `""` and the
+    /// branch was dead. Callers now pass `DirectorySubtitle.text(for:)`, which
+    /// uses that member's OWN returned values; reinstating a local fallback here
+    /// would risk presenting the viewer's own location under someone else's name.
     private var subtitle: String {
-        if let s = overrideSubtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
-            return s
+        guard let s = overrideSubtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else {
+            return ""
         }
-        let loc = ProfileStore.location(for: userID)
-        return loc.isEmpty ? "" : loc
+        return s
     }
 
     private func initials(from name: String) -> String {

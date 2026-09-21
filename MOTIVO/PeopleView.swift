@@ -449,14 +449,13 @@ struct PeopleView: View {
                 PeopleUserRow(
                     userID: userID,
                     overrideDisplayName: acct?.displayName,
-                    overrideSubtitle: acct?.accountID.map { "@\($0)" },
+                    overrideSubtitle: DirectorySubtitle.text(for: acct),
                     overrideAvatarKey: acct?.avatarKey,
                     overrideAvatarVersion: acct?.avatarVersion
                 ) {
                     ProfilePeekView(
                         ownerID: userID,
                         directoryDisplayName: acct?.displayName,
-                        directoryAccountID: acct?.accountID,
                         directoryLocation: acct?.location,
                         directoryAvatarKey: acct?.avatarKey,
                         directoryAvatarVersion: acct?.avatarVersion,
@@ -564,14 +563,13 @@ struct PeopleView: View {
                     PeopleUserRow(
                         userID: acct.userID,
                         overrideDisplayName: acct.displayName,
-                        overrideSubtitle: acct.accountID.map { "@\($0)" },
+                        overrideSubtitle: DirectorySubtitle.text(for: acct),
                         overrideAvatarKey: acct.avatarKey,
                         overrideAvatarVersion: acct.avatarVersion
                     ) {
                         ProfilePeekView(
                             ownerID: acct.userID,
                             directoryDisplayName: acct.displayName,
-                            directoryAccountID: acct.accountID,
                             directoryLocation: acct.location,
                             directoryAvatarKey: acct.avatarKey,
                             directoryAvatarVersion: acct.avatarVersion,

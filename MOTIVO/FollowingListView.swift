@@ -133,14 +133,13 @@ struct FollowingListView: View {
         return PeopleUserRow(
             userID: userID,
             overrideDisplayName: account?.displayName,
-            overrideSubtitle: account?.accountID.map { "@\($0)" },
+            overrideSubtitle: DirectorySubtitle.text(for: account),
             overrideAvatarKey: account?.avatarKey,
             overrideAvatarVersion: account?.avatarVersion
         ) {
             ProfilePeekView(
                 ownerID: userID,
                 directoryDisplayName: account?.displayName,
-                directoryAccountID: account?.accountID,
                 directoryLocation: account?.location,
                 directoryAvatarKey: account?.avatarKey,
                 directoryAvatarVersion: account?.avatarVersion,
@@ -446,7 +445,7 @@ private struct EnsembleEditorView: View {
             PeopleUserRow(
                 userID: userID,
                 overrideDisplayName: account?.displayName,
-                overrideSubtitle: account?.accountID.map { "@\($0)" },
+                overrideSubtitle: DirectorySubtitle.text(for: account),
                 overrideAvatarKey: account?.avatarKey,
                 overrideAvatarVersion: account?.avatarVersion
             ) {

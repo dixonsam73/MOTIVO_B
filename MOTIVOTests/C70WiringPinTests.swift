@@ -89,18 +89,30 @@ final class C70WiringPinTests: XCTestCase {
                        "backendMode_v1 is AppMode laundered through UserDefaults — C-35")
     }
 
-    /// **PIN 2 — the blast radius of the new refresh seam stays at zero.**
+    /// **PIN 2 — the blast radius of the C-70 refresh seam stays at zero.**
     ///
-    /// Unreachable by a value test: it asserts that two things OTHER callers
-    /// depend on are unchanged. The global challenge must remain forced, and
-    /// automatic handle generation must remain Connected-only, which is the
-    /// boundary that keeps this unit off the generation gates.
-    func testTheGlobalChallengeAndGenerationGateAreUnchanged() throws {
+    /// Unreachable by a value test: it asserts that something OTHER callers
+    /// depend on is unchanged. The global challenge must remain forced.
+    ///
+    /// **CONVERTED when the handle was removed, and this file was NOT in the
+    /// reviewed test boundary — it was found by the full suite, which is the
+    /// honest way round.** A second assertion here required
+    /// `guard BackendEnvironment.shared.isConnected else { return nil }` in
+    /// `AccountDirectoryService`, pinning that automatic handle generation
+    /// stayed Connected-only. That guard lived inside
+    /// `autoGenerateAccountIDIfMissing`, so it went with the function.
+    ///
+    /// **The boundary it protected is now stronger, not weaker, and is stated
+    /// as what it is:** there is no automatic handle generation left to gate,
+    /// anywhere, which `AccountIDRemovalStructureTests` asserts across the whole
+    /// source tree. Restated here in this file's own terms so a reader of PIN 2
+    /// is not left with a dangling reference to a gate that no longer exists.
+    func testTheGlobalChallengeIsUnchangedAndNoGenerationGateRemainsToPin() throws {
         XCTAssertTrue(try source("AuthManager.swift")
             .contains("self.ensureValidSession(reason: \"network-auth-challenge\", force: true)"),
             "the global onAuthChallenge must remain exactly as it was, and forced")
-        XCTAssertTrue(try source("AccountDirectoryService.swift")
-            .contains("guard BackendEnvironment.shared.isConnected else { return nil }"),
-            "automatic handle generation stays Connected-only")
+        XCTAssertFalse(try source("AccountDirectoryService.swift")
+            .contains("autoGenerateAccountIDIfMissing"),
+            "there is no automatic handle generation left for a Connected-only gate to cover")
     }
 }

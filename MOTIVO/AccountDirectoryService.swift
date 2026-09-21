@@ -154,44 +154,14 @@ public struct SelfDirectoryRow: Decodable, Hashable {
 }
 
 public final class AccountDirectoryService {
-    // Phase 12C hygiene: never POST invalid account_id values.
-    // Rule: accept only [a-z0-9_] and length 3–24. Blank/invalid account_id values are omitted from writes.
     private func sanitizedLocation(_ raw: String?) -> String? {
         guard let s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
         return s
     }
 
-    private func sanitizedAccountID(_ raw: String?) -> String? {
-        guard var s = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-              !s.isEmpty else { return nil }
-        if s.hasPrefix("@") { s = String(s.dropFirst()) }
-        let filtered = s.filter { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "_" }
-        guard filtered.count >= 3, filtered.count <= 24 else { return nil }
-        return String(filtered)
-    }
-
     private func trimmedNonEmpty(_ raw: String?) -> String? {
         guard let s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
         return s
-    }
-
-    private func autoAccountIDBase(from displayName: String) -> String? {
-        let folded = displayName
-            .folding(options: [.diacriticInsensitive, .widthInsensitive], locale: .current)
-            .lowercased()
-
-        let filtered = folded.filter { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "_" }
-        let capped = String(filtered.prefix(24))
-        guard capped.count >= 3 else { return nil }
-        return capped
-    }
-
-    private func autoAccountIDCandidate(base: String, attempt: Int) -> String {
-        guard attempt > 1 else { return String(base.prefix(24)) }
-
-        let suffix = String(attempt)
-        let prefixLimit = max(0, 24 - suffix.count)
-        return String(base.prefix(prefixLimit)) + suffix
     }
 
     private func isUniqueAccountIDViolation(_ error: Error) -> Bool {
@@ -511,9 +481,12 @@ public final class AccountDirectoryService {
     /// filter and by the policy's `with_check`, and not sending it means this
     /// path cannot reassign a row's owner even though the column grant would
     /// permit it.
+    /// **`account_id` is NEVER sent.** The handle was removed from the product;
+    /// the column, its UNIQUE constraint and both CHECKs remain deployed, and an
+    /// existing value is preserved precisely BECAUSE this payload omits the key —
+    /// PostgREST leaves an unsent column untouched. A client that wrote the
+    /// column could clear or clobber a value this app no longer lets anyone see.
     private func directoryPayload(displayName: String,
-                                  accountIDToWrite: String?,
-                                  includeAccountID: Bool,
                                   location: String?,
                                   instruments: [String]?) -> [String: Any] {
         // CP-3: the two privacy columns are NOT sent. They are dead in the
@@ -523,9 +496,6 @@ public final class AccountDirectoryService {
             "display_name": displayName,
             "location": sanitizedLocation(location) ?? NSNull()
         ]
-        if includeAccountID, let accountIDToWrite = sanitizedAccountID(accountIDToWrite) {
-            payload["account_id"] = accountIDToWrite
-        }
         if let instruments = instruments {
             payload["instruments"] = instruments
         }
@@ -662,7 +632,6 @@ public final class AccountDirectoryService {
     ///   and hydration — passes nothing and keeps the global handler unchanged.
     public func upsertSelfRow(userID: String,
                               displayName: String,
-                              accountID: String?,
                               location: String? = nil,
                               instruments: [String]? = nil,
                               authChallenge: (() async -> Bool)? = nil) async -> DirectoryWriteResult {
@@ -674,12 +643,7 @@ public final class AccountDirectoryService {
         }
         let owner = uid.lowercased()
 
-        // Blank/invalid account_id values are intentionally omitted. This preserves any existing
-        // generated/backend account_id instead of clearing it back to NULL.
-        let explicit = sanitizedAccountID(accountID)
         let payload = directoryPayload(displayName: displayName,
-                                       accountIDToWrite: explicit,
-                                       includeAccountID: explicit != nil,
                                        location: location,
                                        instruments: instruments)
 
@@ -687,8 +651,7 @@ public final class AccountDirectoryService {
         // The tokens travel back with the outcome so the CALLER can guard its
         // own effects by the same rule the writer guards its cache merge —
         // otherwise a write that is applied on the server but stale on this
-        // screen would still post a message, latch a skip token or adopt a
-        // generated handle.
+        // screen would still post a message or latch a skip token.
         var resultSeq = 0
         var resultGeneration = coordinator.identityGeneration
         let outcome = await coordinator.submit(kind: .profileEdit,
@@ -768,134 +731,6 @@ public final class AccountDirectoryService {
         }
         return outcome
     }
-
-    /// Best-effort auto-generation/backfill for a missing account_id.
-    /// Returns the generated account_id on success, or nil when generation is skipped/failed.
-    @discardableResult
-    @MainActor
-    public func autoGenerateAccountIDIfMissing(userID: String,
-                                               displayName: String,
-                                               localAccountID: String?,
-                                               location: String? = nil,
-                                               instruments: [String]? = nil) async -> String? {
-        let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !uid.isEmpty else { return nil }
-
-        // Connected + authenticated owner only.
-        // AuthManager.canonicalBackendUserID() is lowercased, while some callers pass
-        // uppercase UUID strings from restored/profile state. UUID identity is
-        // case-insensitive; normalize both sides so valid owners do not skip generation.
-        guard BackendEnvironment.shared.isConnected else { return nil }
-        guard let canonicalUID = AuthManager.canonicalBackendUserID()?.trimmingCharacters(in: .whitespacesAndNewlines),
-              canonicalUID.caseInsensitiveCompare(uid) == .orderedSame else { return nil }
-
-        // C-70. THE EPOCH IS CAPTURED BEFORE THE FIRST AWAIT, and carried
-        // through every attempt. `fetchSelfRow` below is a suspension, and an
-        // A→B→A switch across it would leave the owner and the token subject
-        // both equal to A again — so a claim minted AFTER the fetch would look
-        // current while resting on a row read in a session that has since been
-        // torn down and rehydrated. Capturing first makes that claim stale by
-        // construction.
-        let generationCoordinator = DirectoryWriteCoordinator.shared
-        let capturedGeneration = generationCoordinator.identityGeneration
-
-        // Never overwrite a local/manual value.
-        guard trimmedNonEmpty(localAccountID) == nil else { return nil }
-
-        let currentRowResult = await fetchSelfRow(userID: uid)
-        let currentRow: SelfDirectoryRow?
-        switch currentRowResult {
-        case .failure:
-            return nil
-        case .success(let row):
-            currentRow = row
-        }
-
-        // Generation must be based on the per-user backend directory row.
-        // If no row exists yet, onboarding/profile sync has not written the current user's
-        // display name. Do not fall back to AuthManager/ProfileStore here, because those
-        // values can be stale during sign-out/delete/recreate transitions.
-        guard let currentRow else { return nil }
-
-        // Never overwrite an existing backend value.
-        guard trimmedNonEmpty(currentRow.accountID) == nil else { return nil }
-
-        guard let effectiveDisplayName = trimmedNonEmpty(currentRow.displayName) else { return nil }
-        guard let base = autoAccountIDBase(from: effectiveDisplayName) else { return nil }
-
-        let owner = uid.lowercased()
-        let coordinator = generationCoordinator
-        guard coordinator.identityGeneration == capturedGeneration else { return nil }
-
-        for attempt in 1...10 {
-            let candidate = autoAccountIDCandidate(base: base, attempt: attempt)
-            guard let sanitized = sanitizedAccountID(candidate) else { return nil }
-            let payload: [String: Any] = ["account_id": sanitized]
-
-            let outcome = await coordinator.submit(kind: .generation,
-                                                   owner: owner,
-                                                   payloadKeys: Set(payload.keys),
-                                                   capturedGeneration: capturedGeneration) { [weak self] seq, generation in
-                guard let self else { return .superseded }
-                return await self.performGenerationWrite(uid: uid, owner: owner, payload: payload,
-                                                         seq: seq, capturedGeneration: generation)
-            }
-
-            switch outcome {
-            case .applied:
-                return sanitized
-            case .accountIDTaken:
-                continue
-            default:
-                // Includes `.noRowMatched`, which is an OBSERVATION and not a
-                // diagnosis: the filter matched nothing, which means EITHER the
-                // row is absent OR the handle is already populated. Both mean
-                // "do not generate", so nothing is inferred, logged as a cause,
-                // or retried.
-                return nil
-            }
-        }
-
-        return nil
-    }
-
-    /// Generation writes `account_id` and nothing else.
-    ///
-    /// **Two changes, and both close races structurally rather than by
-    /// ordering discipline.** The old path re-sent `display_name`, `location`
-    /// and `instruments` read from the row it had fetched, so an edit landing
-    /// between the fetch and the write was reverted — it can no longer revert a
-    /// field it does not send. And the "do not overwrite an existing handle"
-    /// rule was evaluated at FETCH time; `account_id=is.null` moves it into the
-    /// database at WRITE time.
-    ///
-    /// `is.null` exhausts the missing-handle contract: `account_id_format`
-    /// admits only NULL or 3-24 characters of `[a-z0-9_]`, so no empty or
-    /// whitespace handle can exist in the table.
-    @MainActor
-    private func performGenerationWrite(uid: String,
-                                        owner: String,
-                                        payload: [String: Any],
-                                        seq: Int,
-                                        capturedGeneration: Int) async -> DirectoryWriteOutcome {
-        let coordinator = DirectoryWriteCoordinator.shared
-        guard let binding = coordinator.binding(owner: owner, capturedGeneration: capturedGeneration) else {
-            return .supersededIdentity
-        }
-
-        let query = [URLQueryItem(name: "user_id", value: "eq.\(owner)"),
-                     URLQueryItem(name: "account_id", value: "is.null"),
-                     URLQueryItem(name: "select", value: Self.writeSelect)]
-
-        let outcome = await sendDirectoryWrite(method: "PATCH", query: query,
-                                               payload: payload, owner: owner, binding: binding)
-        if case .applied(let receipt) = outcome {
-            await applyReceiptToCaches(receipt, cacheKey: uid, owner: owner,
-                                       capturedGeneration: capturedGeneration, epoch: seq)
-        }
-        return outcome
-    }
-
 
     // MARK: - Phase 15 Step 3A (Avatars) — update self avatar_key
 

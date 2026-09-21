@@ -107,6 +107,9 @@ struct ProfileStore {
     // MARK: - Phase 12C (Per-backend-user Lookup Keys)
     private static let legacyAllowDiscoveryKey = "allowDiscovery_v1"
     private static func discoveryModeKey(for backendUserID: String) -> String { "profile.\(backendUserID).discoveryMode_v1" }
+    /// **LEGACY.** The user-facing handle is removed; nothing reads or writes
+    /// this value any more. The key is kept solely so `purge` still clears what
+    /// an upgraded device is carrying — deleting the helper would strand it.
     private static func accountIDKey(for backendUserID: String) -> String { "profile.\(backendUserID).account_id_v1" }
 
     // MARK: - Phase 12C (Per-backend-user Lookup Settings)
@@ -145,23 +148,6 @@ struct ProfileStore {
     static func setDiscoveryModeRaw(_ raw: Int, for backendUserID: String?) {
         guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
         UserDefaults.standard.set(raw, forKey: discoveryModeKey(for: bid))
-    }
-
-    /// Per-backend-user handle/account_id (stored lowercase). Empty/whitespace clears the stored value.
-    static func accountID(for backendUserID: String?) -> String {
-        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return "" }
-        return UserDefaults.standard.string(forKey: accountIDKey(for: bid)) ?? ""
-    }
-
-    static func setAccountID(_ value: String, for backendUserID: String?) {
-        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let key = accountIDKey(for: bid)
-        if trimmed.isEmpty {
-            UserDefaults.standard.removeObject(forKey: key)
-        } else {
-            UserDefaults.standard.set(trimmed, forKey: key)
-        }
     }
 
     // MARK: - Public API (Location)
@@ -368,6 +354,7 @@ struct ProfileStore {
         if let uid = backendUserID, !uid.isEmpty {
             defaults.removeObject(forKey: locationKey(for: uid))
             defaults.removeObject(forKey: discoveryModeKey(for: uid))
+            // Legacy handle key: unread since the handle was removed, still purged.
             defaults.removeObject(forKey: accountIDKey(for: uid))
         } else {
             // If caller cannot provide a user id, purge any per-user profile.* keys.

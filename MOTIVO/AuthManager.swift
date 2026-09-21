@@ -150,6 +150,29 @@ final class AuthManager: NSObject, ObservableObject {
     @Published private(set) var isSigningIn: Bool = false
     @Published private(set) var backendBootstrapState: BackendBootstrapState = .unknown
 
+    /// **F3. Narrowly scoped evidence that a directory row was ABSENT, and for
+    /// WHOM.**
+    ///
+    /// `backendBootstrapState` cannot answer this. Its owner guard runs BEFORE
+    /// `await fetchSelfRow` and `.newAccount` is set after it with no fresh
+    /// check, so its value can describe a fetch whose identity has since been
+    /// replaced. It is therefore not proof about the current identity, it is not
+    /// changed by F3, and four other consumers keep reading it unaffected.
+    ///
+    /// This value carries the owner and the directory generation the fetch was
+    /// STARTED under, and is published only when both still hold when it
+    /// returns — so a stale fetch neither asserts an absence nor clears one.
+    ///
+    /// **A RETRY HINT, NEVER A PERMISSION.** It says the row was missing, not
+    /// that writing one is allowed; the server decides that on the request, and
+    /// its band and membership refusals are reported exactly as before.
+    @Published private(set) var directoryRowAbsence: DirectoryRowAbsence?
+
+    struct DirectoryRowAbsence: Equatable {
+        let owner: String
+        let directoryGeneration: Int
+    }
+
     // MARK: - CP-3 · age band and privacy state
 
     /// The band Apple returned, held BEFORE Sign in with Apple runs.
@@ -252,11 +275,6 @@ final class AuthManager: NSObject, ObservableObject {
     /// re-entrant schedule used to cancel the running hydration and start
     /// another, which both spun and produced the "Already Used" collisions.
     private var directoryHydrationInFlightUserID: String?
-
-    // Account ID auto-generation backfill (session-liveness anchored, best-effort).
-    private var accountIDBackfillTask: Task<Void, Never>?
-    private var accountIDBackfillAttemptedUserIDs = Set<String>()
-    private var accountIDBackfillInFlightUserIDs = Set<String>()
 
 
 
@@ -636,48 +654,17 @@ final class AuthManager: NSObject, ObservableObject {
         }
     }
 
-    private func scheduleAccountIDBackfillIfNeeded(reason: String) {
-        #if DEBUG
-        if UnitTestHost.isActive && Self.unitTestSuppressesPostSessionScheduling { return }   // C-98 test-only
-        #endif
-        // Account ID generation is only meaningful for an authenticated Connected backend user.
-        guard !LocalFactoryReset.isInProgress else { return }
-        guard BackendEnvironment.shared.isConnected else { return }
-        guard BackendConfig.isConfigured else { return }
-        guard self.currentUserID != nil else { return }
-        guard self.hasSupabaseAccessToken else { return }
-
-        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
-        guard accountIDBackfillAttemptedUserIDs.contains(bid) == false else { return }
-        guard accountIDBackfillInFlightUserIDs.contains(bid) == false else { return }
-
-        accountIDBackfillAttemptedUserIDs.insert(bid)
-        accountIDBackfillInFlightUserIDs.insert(bid)
-
-        accountIDBackfillTask?.cancel()
-        accountIDBackfillTask = Task { [weak self] in
-            guard let self else { return }
-            defer {
-                Task { @MainActor [weak self] in
-                    self?.accountIDBackfillInFlightUserIDs.remove(bid)
-                }
-            }
-
-            let localAccountID = ProfileStore.accountID(for: bid)
-
-            guard let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
-                userID: bid,
-                displayName: self.displayName ?? "",
-                localAccountID: localAccountID,
-                location: nil,
-                instruments: nil
-            ) else { return }
-
-            ProfileStore.setAccountID(generated, for: bid)
-            #if DEBUG
-            NSLog("[Auth] account_id backfill generated user=%@ reason=%@ account_id=%@", bid, reason, generated)
-            #endif
-        }
+    /// F3. The ONE place `directoryRowAbsence` is written from a fetch result.
+    ///
+    /// The fetch's own scope must still be current in BOTH respects. A stale
+    /// result is dropped entirely: it neither asserts an absence for an identity
+    /// it does not describe, nor clears one that a newer identity established.
+    func applyDirectoryRowAbsence(_ scope: DirectoryRowAbsence, absent: Bool) {
+        let current = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard current == scope.owner,
+              DirectoryWriteCoordinator.shared.identityGeneration == scope.directoryGeneration
+        else { return }
+        directoryRowAbsence = absent ? scope : nil
     }
 
     private func hydrateDirectoryStateFromBackend(userID: String, reason: String) async {
@@ -701,6 +688,13 @@ final class AuthManager: NSObject, ObservableObject {
         // Avoid spamming on repeated refreshes.
         guard lastHydratedDirectoryUserID != userID else { return }
 
+        // F3. CAPTURED BEFORE THE FETCH. The guard above runs before this
+        // suspension, so re-reading afterwards would prove nothing: an A→B→A
+        // transition across the fetch leaves `backendUserID` equal to A again.
+        let absenceScope = DirectoryRowAbsence(
+            owner: userID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            directoryGeneration: DirectoryWriteCoordinator.shared.identityGeneration)
+
         let result = await AccountDirectoryService.shared.fetchSelfRow(userID: userID)
         switch result {
         case .failure(let error):
@@ -712,6 +706,9 @@ final class AuthManager: NSObject, ObservableObject {
             guard let row else {
                 self.backendBootstrapState = .newAccount
                 self.backendAvatarKey = nil
+                // F3. Published only if the session that started the fetch is
+                // still the current one.
+                self.applyDirectoryRowAbsence(absenceScope, absent: true)
                 // CP-3 ORDERING INVARIANT. The FIRST account_directory INSERT
                 // happens here -- before binding, before purchase, before
                 // AppSetUpView. CP-1's trigger refuses it when no account_privacy
@@ -745,9 +742,6 @@ final class AuthManager: NSObject, ObservableObject {
                 ProfileStore.setLastKnownAgeBand(nil)
             }
 
-            // Store handle/account_id (lowercased); empty clears.
-            ProfileStore.setAccountID(row.accountID ?? "", for: userID)
-
             self.backendAvatarKey = row.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines)
             // P5-I / C-34 R2: follow a replacement made on another device.
             Task { await self.syncOwnAvatarFromBackend(avatarKey: row.avatarKey, avatarVersion: row.avatarVersion) }
@@ -763,6 +757,9 @@ final class AuthManager: NSObject, ObservableObject {
 
             lastHydratedDirectoryUserID = userID
             self.backendBootstrapState = .existingAccount
+            // F3. A STALE row-found must not clear a NEWER identity's absence
+            // evidence — the same guard, in the other direction.
+            self.applyDirectoryRowAbsence(absenceScope, absent: false)
             // An existing directory row is not blocked by CP-1's trigger (it
             // fires BEFORE INSERT only, and an upsert onto an existing row is an
             // update in effect), so publishing may proceed. The band is still
@@ -770,8 +767,8 @@ final class AuthManager: NSObject, ObservableObject {
             _ = await ensureAgeBandEstablished(reason: reason)
             await publishLocalProfileSnapshotToDirectoryIfPossible(userID: userID, reason: reason)
             #if DEBUG
-            NSLog("[Auth] directory hydration applied user=%@ reason=%@ lookup=%@ account_id=%@",
-                  userID, reason, row.lookupEnabled ? "1" : "0", row.accountID ?? "nil")
+            NSLog("[Auth] directory hydration applied user=%@ reason=%@ lookup=%@",
+                  userID, reason, row.lookupEnabled ? "1" : "0")
             #endif
         }
     }
@@ -830,9 +827,6 @@ final class AuthManager: NSObject, ObservableObject {
             ProfileStore.setLocation(localLocation, for: userID)
         }
 
-        let accountID = ProfileStore.accountID(for: userID).trimmingCharacters(in: .whitespacesAndNewlines)
-        let accountIDOrNil: String? = accountID.count >= 3 ? accountID : nil
-
         let instrumentsToPublish = localInstruments
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -841,7 +835,6 @@ final class AuthManager: NSObject, ObservableObject {
         let outcome = await AccountDirectoryService.shared.upsertSelfRow(
             userID: userID,
             displayName: displayNameToPublish,
-            accountID: accountIDOrNil,
             location: locationOrNil,
             instruments: instrumentsToPublish
         )
@@ -1010,7 +1003,6 @@ final class AuthManager: NSObject, ObservableObject {
             if SessionRefreshPolicy.schedulesDirectoryHydration(after: .alreadyValid) {
                 await MainActor.run {
                     self.scheduleDirectoryHydrationIfNeeded(reason: "\(reason)-alreadyValid")
-                    self.scheduleAccountIDBackfillIfNeeded(reason: "\(reason)-alreadyValid")
                 }
             }
 
@@ -1067,7 +1059,6 @@ final class AuthManager: NSObject, ObservableObject {
             self.backendUserID = supaUserID
             self.backendAvatarKey = nil
             self.scheduleDirectoryHydrationIfNeeded(reason: "refreshSupabaseSession")
-            self.scheduleAccountIDBackfillIfNeeded(reason: "refreshSupabaseSession")
 
             #if DEBUG
             NSLog("[Auth] refreshSupabaseSession OK user=%@ reason=%@", supaUserID, reason)
@@ -1124,7 +1115,6 @@ final class AuthManager: NSObject, ObservableObject {
                 // Same rule as the early return: a usable session schedules.
                 if SessionRefreshPolicy.schedulesDirectoryHydration(after: .recoveredNewerSession) {
                     self.scheduleDirectoryHydrationIfNeeded(reason: "\(reason)-recovered")
-                    self.scheduleAccountIDBackfillIfNeeded(reason: "\(reason)-recovered")
                 }
                 #if DEBUG
                 NSLog("[Auth] refreshSupabaseSession: superseded token; adopted newer session. reason=%@", reason)
@@ -1335,10 +1325,6 @@ final class AuthManager: NSObject, ObservableObject {
         directoryHydrationTask = nil
         directoryHydrationInFlightUserID = nil
         lastHydratedDirectoryUserID = nil
-        accountIDBackfillTask?.cancel()
-        accountIDBackfillTask = nil
-        accountIDBackfillAttemptedUserIDs.removeAll()
-        accountIDBackfillInFlightUserIDs.removeAll()
 
         Keychain.delete("appleUserID")
         Keychain.delete("displayName")
@@ -1354,6 +1340,7 @@ final class AuthManager: NSObject, ObservableObject {
         self.backendAvatarKey = nil
         self.isSigningIn = false
         self.backendBootstrapState = .unknown
+        self.directoryRowAbsence = nil
     }
 
     // Configure SwiftUI Sign in with Apple button
@@ -1392,10 +1379,6 @@ final class AuthManager: NSObject, ObservableObject {
         directoryHydrationTask = nil
         directoryHydrationInFlightUserID = nil
         lastHydratedDirectoryUserID = nil
-        accountIDBackfillTask?.cancel()
-        accountIDBackfillTask = nil
-        accountIDBackfillAttemptedUserIDs.removeAll()
-        accountIDBackfillInFlightUserIDs.removeAll()
 
         // C-47 — attachment titles are NOT removed here. They describe local
         // Journal attachments, and leaving Connected is not leaving Études.
@@ -1419,6 +1402,7 @@ final class AuthManager: NSObject, ObservableObject {
         self.backendAvatarKey = nil
         self.isSigningIn = false
         self.backendBootstrapState = .unknown
+        self.directoryRowAbsence = nil
     }
 
     // MARK: - Internal processing
@@ -1564,7 +1548,6 @@ final class AuthManager: NSObject, ObservableObject {
                 self.backendUserID = supaUserID
                 self.backendAvatarKey = nil
                 self.scheduleDirectoryHydrationIfNeeded(reason: "supabaseSignIn")
-                self.scheduleAccountIDBackfillIfNeeded(reason: "supabaseSignIn")
             }
 
             #if DEBUG

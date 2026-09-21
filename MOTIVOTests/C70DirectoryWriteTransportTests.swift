@@ -157,24 +157,22 @@ final class C70DirectoryWriteTransportTests: XCTestCase {
              + "\"account_id\":\(acct),\"location\":\(loc),\"instruments\":\(inst)}]"
     }
 
-    /// `fetchSelfRow` decodes `SelfDirectoryRow`, whose `lookup_enabled` and
-    /// `follow_requests_enabled` are NON-OPTIONAL — a fixture without them
-    /// fails to decode and generation returns nil before writing anything.
-    private func selfRow(_ userID: String, displayName: String, accountID: String?) -> String {
-        let acct = accountID.map { "\"\($0)\"" } ?? "null"
-        return "[{\"user_id\":\"\(userID)\",\"display_name\":\"\(displayName)\","
-             + "\"account_id\":\(acct),\"location\":\"London\",\"instruments\":[\"piano\"],"
-             + "\"lookup_enabled\":true,\"follow_requests_enabled\":true,\"avatar_key\":null,\"avatar_version\":null}]"
-    }
+    // `selfRow(...)` was removed with the generation tests that were its only
+    // callers. It built a `SelfDirectoryRow` fixture for `fetchSelfRow`, which
+    // generation called before deriving a handle; nothing in this suite reads
+    // the self row any more.
 
+    /// **FIXTURE-HELPER EDIT, not a retired test.** `accountID:` is gone here
+    /// because `upsertSelfRow` no longer accepts one. `row(...)` KEEPS its
+    /// `accountID:` parameter deliberately — it models the SERVER's response,
+    /// which still carries the column, and several tests rely on a response
+    /// carrying a handle still decoding cleanly.
     private func write(displayName: String = "Ada",
-                       accountID: String? = nil,
                        location: String? = "London",
                        instruments: [String]? = ["piano"],
                        authChallenge: (() async -> Bool)? = nil) async -> DirectoryWriteResult {
         await AccountDirectoryService.shared.upsertSelfRow(userID: owner,
                                                            displayName: displayName,
-                                                           accountID: accountID,
                                                            location: location,
                                                            instruments: instruments,
                                                            authChallenge: authChallenge)
@@ -206,6 +204,13 @@ final class C70DirectoryWriteTransportTests: XCTestCase {
         XCTAssertEqual(reqs[0].prefer, "return=representation")
         XCTAssertNil(reqs[0].body["user_id"],
                      "a PATCH must not carry user_id: this path cannot reassign a row's owner")
+        // The handle is removed from the product but the COLUMN is still
+        // deployed, with its UNIQUE constraint and its existing values. Sending
+        // it is how a client would clear or clobber a value nobody can see any
+        // more; omitting it is what leaves an existing value untouched, because
+        // PostgREST does not write a column a payload does not carry.
+        XCTAssertNil(reqs[0].body["account_id"],
+                     "no directory write may carry account_id")
         XCTAssertTrue(result.isApplied)
     }
 
@@ -237,6 +242,11 @@ final class C70DirectoryWriteTransportTests: XCTestCase {
         XCTAssertEqual(reqs[1].prefer, "resolution=merge-duplicates,return=representation")
         XCTAssertEqual(reqs[1].body["user_id"] as? String, owner,
                        "creation carries the owner; the policy's with_check pins it")
+        // The creation fallback is a SECOND payload built by a different branch,
+        // so asserting the PATCH alone would leave half the writer unchecked —
+        // a first Connected establishment goes down exactly this path.
+        XCTAssertNil(reqs[1].body["account_id"],
+                     "the missing-row creation must not carry account_id either")
         XCTAssertTrue(result.isApplied)
     }
 
@@ -380,13 +390,29 @@ final class C70DirectoryWriteTransportTests: XCTestCase {
         guard case .ambiguous = result.outcome else { return XCTFail("got \(result.outcome)") }
     }
 
-    func testANamedHandleCollisionIsTypedAndKeepsItsOwnCopy() async {
+    /// **CONVERTED when the handle was removed. The CLASSIFICATION is the point
+    /// now, and the copy deliberately is not.**
+    ///
+    /// The new client never writes `account_id`, so it cannot provoke this
+    /// itself — but the column, its UNIQUE constraint and every existing value
+    /// are still deployed, and an older installed client still writes it. A
+    /// 23505 naming that constraint therefore remains a real server answer that
+    /// must be told apart from a primary-key conflict rather than degrading to
+    /// an untyped failure.
+    ///
+    /// What changed is the COPY: with no Account ID field on screen, naming one
+    /// would break C-70(a)'s own rule, so a collision now reads as the generic
+    /// line. Asserted against `genericMessage` directly, not via the alias, so
+    /// this still fails if the alias is ever pointed back at a field-naming
+    /// string.
+    func testANamedHandleCollisionIsStillTypedButNoLongerNamesAField() async {
         C70DirectoryStub.reset([.init(status: 409, body:
             #"{"code":"23505","message":"duplicate key value violates unique constraint \"account_directory_account_id_key\""}"#)])
-        let result = await write(accountID: "ada")
+        let result = await write()
         guard case .accountIDTaken = result.outcome else { return XCTFail("got \(result.outcome)") }
         XCTAssertEqual(DirectorySyncFailure.message(for: result.outcome),
-                       DirectorySyncFailure.accountIDTakenMessage)
+                       DirectorySyncFailure.genericMessage,
+                       "a member with no Account ID field must not be told one is taken")
     }
 
     // MARK: - No false success reaches the shared identity
@@ -504,59 +530,311 @@ final class C70DirectoryWriteTransportTests: XCTestCase {
                      "but a receipt stale against local intent is not published")
     }
 
-    // MARK: - Generation
+    // MARK: - F2 — the reconciliation, driving the POLICY and the REAL WRITER
+    //
+    // These do not assert that a view is wired. They run the production decision
+    // (`DirectoryReconciliationPolicy`) against the production writer
+    // (`upsertSelfRow`) in the order the app would, so what is measured is the
+    // SEQUENCE of real requests.
 
-    /// Generation sends the handle ALONE and filters on `account_id=is.null`.
+    private typealias Completion = MembershipAttestationCoordinator.AttestationCompletion
+
+    /// The loop ProfileView runs, driving **the production evaluator itself** —
+    /// `DirectoryReconciliationEvaluator`, the same instance type the view holds
+    /// — rather than a reimplementation of its rules.
     ///
-    /// The old path re-sent display name, location and instruments read from
-    /// the row it had fetched, so an edit landing between the fetch and the
-    /// write was reverted; it cannot revert a field it does not send. And the
-    /// "do not overwrite an existing handle" rule moved from FETCH time into
-    /// the database at WRITE time.
-    func testGenerationWritesOnlyTheHandleAndOnlyWhileItIsAbsent() async {
-        C70DirectoryStub.reset([
-            .init(status: 200, body: selfRow(owner, displayName: "Ada Lovelace", accountID: nil)),
-            .init(status: 200, body: row(owner, displayName: "Ada Lovelace", accountID: "adalovelace"))
-        ])
+    /// **It does NOT establish that the view's observers are wired.** That is a
+    /// separate structural assertion in `FreshJoinContinuationStructureTests`;
+    /// this driver would keep passing with every `onChange` deleted, which is
+    /// exactly why both exist.
+    @MainActor
+    private final class ReconcileDriver {
+        let evaluator = DirectoryReconciliationEvaluator()
+        var outstandingFailure = false
+        var rowAbsence: AuthManager.DirectoryRowAbsence?
+        private(set) var reconciliations = 0
 
-        let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
-            userID: owner, displayName: "Ada Lovelace", localAccountID: nil)
+        /// One production event: ask, and on a true answer write.
+        func attempt(completion: Completion?, owner: String, generation: Int,
+                     write: () async -> DirectoryWriteResult) async {
+            guard evaluator.evaluateAndConsume(completion: completion,
+                                               hasOutstandingFailure: outstandingFailure,
+                                               rowAbsence: rowAbsence,
+                                               currentOwner: owner,
+                                               currentDirectoryGeneration: generation)
+            else { return }
+            reconciliations += 1
+            record(await write(), owner: owner)
+        }
 
-        let reqs = C70DirectoryStub.requests
-        XCTAssertEqual(reqs.count, 2, "one read, one write")
-        XCTAssertEqual(reqs[0].method, "GET")
-        XCTAssertEqual(reqs[1].method, "PATCH")
-        XCTAssertEqual(query(reqs[1].url)["account_id"], "is.null",
-                       "the missing-handle rule is a database predicate, not a client memory")
-        XCTAssertEqual(query(reqs[1].url)["user_id"], "eq.\(owner)")
-        XCTAssertEqual(Set(reqs[1].body.keys), ["account_id"],
-                       "generation must not rewrite fields it did not read for")
-        XCTAssertEqual(generated, "adalovelace")
+        /// The message is set and cleared by the WRITE, exactly as in the view,
+        /// and applied evidence is recorded only from an accepted result.
+        func record(_ result: DirectoryWriteResult, owner: String) {
+            outstandingFailure = DirectorySyncFailure.message(for: result.outcome) != nil
+            if case .applied = result.outcome {
+                evaluator.noteApplied(owner: owner, generation: result.generation)
+            }
+        }
     }
 
-    /// Zero matched rows is an OBSERVATION — the row is absent OR the handle is
-    /// already populated. Both mean "do not generate", so nothing is inferred
-    /// and nothing is retried.
-    func testGenerationStopsSilentlyWhenTheFilterMatchesNothing() async {
+    private func completion(_ sequence: Int, owner: String, generation: Int,
+                            establishes: Bool = true) -> Completion {
+        Completion(sequence: sequence, owner: owner,
+                   directoryGeneration: generation, establishesMembership: establishes)
+    }
+
+    private var currentGeneration: Int { DirectoryWriteCoordinator.shared.identityGeneration }
+
+    /// **T4 — FAILURE THEN SUCCESS.** The create is refused while membership is
+    /// absent; the establishing completion then arrives and one further REAL
+    /// write succeeds.
+    func testARefusedCreateIsRetriedOnceTheAttestationEstablishesMembership() async {
         C70DirectoryStub.reset([
-            .init(status: 200, body: selfRow(owner, displayName: "Ada Lovelace", accountID: nil)),
+            .init(status: 200, body: "[]"),
+            .init(status: 403, body: #"{"code":"42501","message":"new row violates row-level security policy"}"#),
+            .init(status: 200, body: "[]"),
+            // the reconciliation
+            .init(status: 200, body: "[]"),
+            .init(status: 201, body: row(owner))
+        ])
+        let driver = ReconcileDriver()
+        driver.record(await write(), owner: owner)
+        XCTAssertTrue(driver.outstandingFailure, "a refused create is a truthful failure")
+
+        await driver.attempt(completion: completion(1, owner: owner, generation: currentGeneration),
+                             owner: owner, generation: currentGeneration) { await self.write() }
+
+        XCTAssertEqual(driver.reconciliations, 1)
+        XCTAssertFalse(driver.outstandingFailure, "an evidenced write clears the message")
+        XCTAssertEqual(C70DirectoryStub.requests.map(\.method), ["PATCH", "POST", "PATCH", "PATCH", "POST"],
+                       "one refused attempt with its probe, then one full retry")
+    }
+
+    /// **T5 — SUCCESS THEN FAILURE.** The order revision 2 of the scope missed:
+    /// the completion lands while nothing is outstanding, correctly writes
+    /// nothing, and the refusal arrives afterwards with NO further completion.
+    func testAnEstablishingCompletionThatArrivesBeforeTheFailureStillReconciles() async {
+        let c = completion(1, owner: owner, generation: currentGeneration)
+        let driver = ReconcileDriver()
+
+        // The completion arrives first. Nothing is outstanding, so nothing is
+        // written -- and, critically, the completion is NOT consumed.
+        C70DirectoryStub.reset([])
+        await driver.attempt(completion: c, owner: owner, generation: currentGeneration) {
+            XCTFail("no write may be made with nothing outstanding")
+            return await self.write()
+        }
+        XCTAssertEqual(driver.reconciliations, 0)
+        XCTAssertNil(driver.evaluator.lastConsumedSequence, "an unused completion must stay unspent")
+
+        // Now the already-dispatched write's refusal lands.
+        C70DirectoryStub.reset([
+            .init(status: 200, body: "[]"),
+            .init(status: 403, body: #"{"code":"42501","message":"rls"}"#),
+            .init(status: 200, body: "[]"),
+            .init(status: 200, body: "[]"),
+            .init(status: 201, body: row(owner))
+        ])
+        driver.record(await write(), owner: owner)
+        XCTAssertTrue(driver.outstandingFailure)
+
+        // The SAME completion is still eligible, which is what closes this order.
+        await driver.attempt(completion: c, owner: owner, generation: currentGeneration) { await self.write() }
+        XCTAssertEqual(driver.reconciliations, 1)
+        XCTAssertFalse(driver.outstandingFailure)
+    }
+
+    /// **T6 — BOUNDEDNESS.** A retry that is refused again cannot re-trigger
+    /// itself: the completion that authorised it is spent.
+    func testAPersistentlyRefusedCreateIsRetriedExactlyOnce() async {
+        let refusal: [C70DirectoryStub.Reply] = [
+            .init(status: 200, body: "[]"),
+            .init(status: 403, body: #"{"code":"42501","message":"rls"}"#),
+            .init(status: 200, body: "[]")
+        ]
+        C70DirectoryStub.reset(refusal + refusal)
+        let driver = ReconcileDriver()
+        let c = completion(1, owner: owner, generation: currentGeneration)
+
+        driver.record(await write(), owner: owner)
+        await driver.attempt(completion: c, owner: owner, generation: currentGeneration) { await self.write() }
+        // The retry failed too. Asking again must change nothing.
+        await driver.attempt(completion: c, owner: owner, generation: currentGeneration) {
+            XCTFail("a spent completion must not authorise a third write")
+            return await self.write()
+        }
+
+        XCTAssertEqual(driver.reconciliations, 1)
+        XCTAssertTrue(driver.outstandingFailure, "and the member is still told, truthfully")
+        XCTAssertEqual(C70DirectoryStub.requests.count, 6, "two attempts of three requests, and no more")
+    }
+
+    /// **T9 — NO OUTSTANDING FAILURE, NO WRITE.** This is what stops
+    /// `alreadyEstablished` on every foreground from costing anything.
+    func testAnEstablishingCompletionWritesNothingWhenNoFailureIsOutstanding() async {
+        C70DirectoryStub.reset([])
+        let driver = ReconcileDriver()
+        await driver.attempt(completion: completion(1, owner: owner, generation: currentGeneration),
+                             owner: owner, generation: currentGeneration) {
+            XCTFail("no write")
+            return await self.write()
+        }
+        XCTAssertEqual(driver.reconciliations, 0)
+        XCTAssertTrue(C70DirectoryStub.requests.isEmpty, "zero requests")
+    }
+
+    /// **T11 — IDENTITY.** A completion from a superseded generation authorises
+    /// nothing, even though the owner still matches.
+    func testACompletionFromASupersededGenerationAuthorisesNoWrite() async {
+        C70DirectoryStub.reset([])
+        let driver = ReconcileDriver()
+        driver.outstandingFailure = true
+        // Captured BEFORE the transition, which is what makes it stale after it.
+        let stale = completion(1, owner: owner, generation: currentGeneration)
+        DirectoryWriteCoordinator.shared.noteIdentityTransition()
+        XCTAssertNotEqual(stale.directoryGeneration, currentGeneration,
+                          "the transition must actually advance the generation")
+
+        await driver.attempt(completion: stale, owner: owner, generation: currentGeneration) {
+            XCTFail("a stale-generation completion must authorise nothing")
+            return await self.write()
+        }
+        XCTAssertEqual(driver.reconciliations, 0)
+        XCTAssertTrue(C70DirectoryStub.requests.isEmpty)
+    }
+
+    /// **T12 — the two refusals of the fresh-join investigation.** Both render
+    /// the same generic copy, and the suite can still tell them apart.
+    func testTheTwoCreateRefusalsAreDistinguishableEvenThoughTheCopyIsShared() async {
+        C70DirectoryStub.reset([
+            .init(status: 200, body: "[]"),
+            .init(status: 403, body: #"{"code":"42501","message":"new row violates row-level security policy"}"#),
             .init(status: 200, body: "[]")
         ])
-        let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
-            userID: owner, displayName: "Ada Lovelace", localAccountID: nil)
-        XCTAssertNil(generated)
-        XCTAssertEqual(C70DirectoryStub.requests.count, 2, "no retry on an unmatched filter")
+        let rls = await write()
+        guard case .refusedByPolicy = rls.outcome else { return XCTFail("got \(rls.outcome)") }
+
+        C70DirectoryStub.reset([
+            .init(status: 200, body: "[]"),
+            .init(status: 400, body: #"{"code":"23514","message":"age band must be declared before a directory row is created"}"#),
+            .init(status: 200, body: "[]")
+        ])
+        let band = await write()
+        if case .refusedByPolicy = band.outcome {
+            XCTFail("a 400/23514 is not an RLS refusal")
+        }
+
+        XCTAssertEqual(DirectorySyncFailure.message(for: rls.outcome), DirectorySyncFailure.genericMessage)
+        XCTAssertEqual(DirectorySyncFailure.message(for: band.outcome), DirectorySyncFailure.genericMessage)
     }
 
-    func testGenerationRetriesOnlyOnAnEvidencedHandleCollision() async {
-        C70DirectoryStub.reset([
-            .init(status: 200, body: selfRow(owner, displayName: "Ada", accountID: nil)),
-            .init(status: 409, body: #"{"code":"23505","details":"Key (account_id)=(ada) already exists."}"#),
-            .init(status: 200, body: row(owner, displayName: "Ada", accountID: "ada2"))
-        ])
-        let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
-            userID: owner, displayName: "Ada", localAccountID: nil)
-        XCTAssertEqual(generated, "ada2")
-        XCTAssertEqual(C70DirectoryStub.requests.count, 3)
+    // MARK: - F3 — initial publication with NO foreground error
+
+    private func absence(_ owner: String, _ generation: Int) -> AuthManager.DirectoryRowAbsence {
+        .init(owner: owner, directoryGeneration: generation)
     }
+
+    /// **F3-1a — ABSENCE KNOWN, THEN COMPLETION.** The device failure: a fresh
+    /// join with no error at all, so nothing is outstanding and the repair path
+    /// cannot reach it.
+    func testAFreshJoinWithNoForegroundErrorPublishesOnceWhenAbsenceIsKnownFirst() async {
+        C70DirectoryStub.reset([.init(status: 200, body: "[]"),
+                                .init(status: 201, body: row(owner))])
+        let driver = ReconcileDriver()
+        XCTAssertFalse(driver.outstandingFailure, "no error was ever shown -- this is the point")
+        driver.rowAbsence = absence(owner, currentGeneration)
+
+        await driver.attempt(completion: completion(1, owner: owner, generation: currentGeneration),
+                             owner: owner, generation: currentGeneration) { await self.write() }
+
+        XCTAssertEqual(driver.reconciliations, 1)
+        XCTAssertEqual(C70DirectoryStub.requests.map(\.method), ["PATCH", "POST"],
+                       "one real write, creating the row")
+        XCTAssertFalse(driver.outstandingFailure)
+    }
+
+    /// **F3-1b — COMPLETION, THEN ABSENCE.** The completion arrives while absence
+    /// is still unknown; nothing is authorised yet, and the completion must stay
+    /// UNSPENT so the later absence event can use it.
+    func testAFreshJoinPublishesWhenTheCompletionArrivesBeforeAbsenceIsKnown() async {
+        let c = completion(1, owner: owner, generation: currentGeneration)
+        let driver = ReconcileDriver()
+
+        C70DirectoryStub.reset([])
+        await driver.attempt(completion: c, owner: owner, generation: currentGeneration) {
+            XCTFail("absence is unknown; nothing may be written")
+            return await self.write()
+        }
+        XCTAssertEqual(driver.reconciliations, 0)
+        XCTAssertNil(driver.evaluator.lastConsumedSequence, "an unused completion must stay unspent")
+
+        // Absence now arrives. In the app this is the same observer firing again.
+        C70DirectoryStub.reset([.init(status: 200, body: "[]"),
+                                .init(status: 201, body: row(owner))])
+        driver.rowAbsence = absence(owner, currentGeneration)
+        await driver.attempt(completion: c, owner: owner, generation: currentGeneration) { await self.write() }
+
+        XCTAssertEqual(driver.reconciliations, 1)
+        XCTAssertEqual(C70DirectoryStub.requests.map(\.method), ["PATCH", "POST"])
+    }
+
+    /// **F3-2.** Once a write is evidenced, later completions write nothing —
+    /// even though absence evidence is still standing, because AuthManager never
+    /// clears it on a successful publish.
+    func testNoSecondWriteOnceTheRowHasBeenEvidenced() async {
+        C70DirectoryStub.reset([.init(status: 200, body: "[]"),
+                                .init(status: 201, body: row(owner))])
+        let driver = ReconcileDriver()
+        driver.rowAbsence = absence(owner, currentGeneration)
+        await driver.attempt(completion: completion(1, owner: owner, generation: currentGeneration),
+                             owner: owner, generation: currentGeneration) { await self.write() }
+        XCTAssertEqual(driver.reconciliations, 1)
+
+        C70DirectoryStub.reset([])
+        for seq in [2, 3, 4] {
+            await driver.attempt(completion: completion(seq, owner: owner, generation: currentGeneration),
+                                 owner: owner, generation: currentGeneration) {
+                XCTFail("the row is evidenced; nothing more may be written")
+                return await self.write()
+            }
+        }
+        XCTAssertEqual(driver.reconciliations, 1)
+        XCTAssertTrue(C70DirectoryStub.requests.isEmpty)
+    }
+
+    /// **F3-3 — THE RETURNING MEMBER.** No absence evidence and no failure, so
+    /// repeated foreground attestations cost ZERO requests.
+    func testAReturningMemberWritesNothingAcrossRepeatedCompletions() async {
+        C70DirectoryStub.reset([])
+        let driver = ReconcileDriver()
+        driver.rowAbsence = nil
+
+        for seq in 1...5 {
+            await driver.attempt(completion: completion(seq, owner: owner, generation: currentGeneration),
+                                 owner: owner, generation: currentGeneration) {
+                XCTFail("a member whose row exists must not be written on foreground")
+                return await self.write()
+            }
+        }
+        XCTAssertEqual(driver.reconciliations, 0)
+        XCTAssertTrue(C70DirectoryStub.requests.isEmpty, "zero requests")
+    }
+
+    // MARK: - Generation — RETIRED WITH THE FEATURE
+    //
+    // Three tests lived here: `testGenerationWritesOnlyTheHandleAndOnlyWhile
+    // ItIsAbsent`, `testGenerationStopsSilentlyWhenTheFilterMatchesNothing` and
+    // `testGenerationRetriesOnlyOnAnEvidencedHandleCollision`. They exercised
+    // `autoGenerateAccountIDIfMissing` over a stubbed transport.
+    //
+    // **Their coverage is genuinely REMOVED, not relocated, and that is stated
+    // rather than absorbed into a total.** They tested a network-shaped
+    // behaviour — read the self row, PATCH under `account_id=is.null`, retry on
+    // an evidenced collision — that no longer exists anywhere in the client. No
+    // surviving test covers it, because there is nothing left to cover.
+    //
+    // What replaces them is narrower and differently shaped: a structural
+    // assertion in `AccountIDRemovalTests` that no generation entry point
+    // survives at all.
+
 }

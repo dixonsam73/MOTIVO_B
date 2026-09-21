@@ -125,39 +125,105 @@ final class C70SetupCallerStructureTests: XCTestCase {
             (try? String(contentsOf: root.appendingPathComponent("MOTIVO/AppSetUpView.swift"), encoding: .utf8)) ?? "")
     }
 
+    /// **CONVERTED — one assertion dropped, and it is the opposite of the one
+    /// kept, so saying why matters.**
+    ///
+    /// This used to require `let capturedGeneration = …` in the source: the
+    /// pre-write epoch capture that the SECOND await, handle generation, was
+    /// re-checked against. That await is gone, and with it the only reader of
+    /// that variable — `mayApplyEffects` consumes `result.generation` and
+    /// `result.seq`, which the WRITE returned, not the pre-write capture. An
+    /// unused `capturedGeneration` would warn.
+    ///
+    /// **The freshness protection itself is untouched** and is what the two
+    /// surviving assertions pin. `testSetupPerformsNoSuspensionBetweenThe
+    /// FreshnessDecisionAndCompletion` below asserts the absence of the removed
+    /// DECLARATION and the presence of the retained parameter label, so this
+    /// file states the same fact from both sides and cannot drift into
+    /// contradicting itself.
     func testTheSetupTailConsumesFreshnessAndNotJustTheOutcome() {
         let s = source()
-        XCTAssertTrue(s.contains("let capturedGeneration = DirectoryWriteCoordinator.shared.identityGeneration"),
-                      "the epoch must be captured before the first await")
         XCTAssertTrue(s.contains("ConnectedSetupDecision.next(outcome: result.outcome, isFresh: isFresh)"),
                       "the decision must consume freshness, not the outcome alone")
         XCTAssertTrue(s.contains("mayApplyEffects("),
                       "freshness comes from the coordinator's own tokens")
     }
 
-    /// Generation is a second await, so the first guard does not cover it.
-    func testHandleAdoptionAfterGenerationIsGuardedAgain() {
+    /// **REPLACES `testHandleAdoptionAfterGenerationIsGuardedAgain`, retired with
+    /// the feature.** That test pinned an ORDER — decision, generation, re-guard,
+    /// adoption — across a second `await` that setup no longer performs.
+    ///
+    /// The protection it enforced was "no second suspension may reach an effect
+    /// unguarded". With generation gone there is exactly ONE await on this path,
+    /// so the way to keep that protection true is to assert the absence rather
+    /// than the ordering: if a second suspension is ever reintroduced here, this
+    /// fails and whoever adds it has to guard it and say so.
+    /// **CORRECTED TWICE, and both corrections narrow an overclaim.**
+    ///
+    /// (1) An earlier revision asserted `capturedGeneration` appeared NOWHERE.
+    /// That is false and would have been a wrong assertion passing for a wrong
+    /// reason: what was removed is the LOCAL DECLARATION `let capturedGeneration
+    /// = …`, while `mayApplyEffects(owner:capturedGeneration:seq:)` keeps it as
+    /// a PARAMETER LABEL and must keep it — the label is the surviving guard's
+    /// own argument, and deleting it would weaken setup rather than tidy it.
+    ///
+    /// (2) An earlier revision counted `await AccountDirectoryService.shared.`
+    /// and called one occurrence proof of no later suspension. It is not: a
+    /// suspension into any OTHER service or helper would escape that count
+    /// entirely. The real question is whether anything suspends between the
+    /// freshness decision and completion, so that is what is now inspected —
+    /// the code TAIL from `ConnectedSetupDecision.next(` to `onComplete()`.
+    ///
+    /// **No stronger claim is made than that tail.** An `await` earlier in the
+    /// function is fine and expected; one after the decision is what would need
+    /// its own guard.
+    func testSetupPerformsNoSuspensionBetweenTheFreshnessDecisionAndCompletion() {
         let s = source()
+        XCTAssertFalse(s.contains("autoGenerateAccountIDIfMissing("),
+                       "handle generation is removed from setup")
+        XCTAssertFalse(s.contains("ProfileStore.setAccountID"),
+                       "setup adopts no handle")
+
+        // The removed LOCAL DECLARATION, not the retained parameter label.
+        XCTAssertFalse(s.contains("let capturedGeneration"),
+                       "the pre-write capture had no reader left once the second await went")
+        XCTAssertTrue(s.contains("capturedGeneration: result.generation"),
+                      "the surviving guard's own argument label must NOT be removed")
+
         guard let decision = s.range(of: "ConnectedSetupDecision.next("),
-              let generation = s.range(of: "autoGenerateAccountIDIfMissing("),
-              let reguard = s.range(of: "DirectoryWriteCoordinator.shared.identityGeneration == capturedGeneration"),
-              let adopt = s.range(of: "ProfileStore.setAccountID(generated, for: backendID)") else {
-            return XCTFail("expected a second guard between generation and adoption")
+              let complete = s.range(of: "onComplete()") else {
+            return XCTFail("setup tail not found")
         }
-        XCTAssertLessThan(decision.lowerBound, generation.lowerBound)
-        XCTAssertLessThan(generation.lowerBound, reguard.lowerBound)
-        XCTAssertLessThan(reguard.lowerBound, adopt.lowerBound)
-        XCTAssertTrue(s.contains("ProfileStore.accountID(for: backendID).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty"),
-                      "a handle typed while generation was in flight must win")
+        XCTAssertLessThan(decision.lowerBound, complete.lowerBound)
+        let tail = String(s[decision.upperBound..<complete.lowerBound])
+        XCTAssertFalse(tail.contains("await"),
+                       "nothing may suspend between the freshness decision and completion; "
+                       + "a new await there needs its own guard and its own test")
     }
 
+    /// **CONVERTED, NOT RETIRED, and the distinction is the point.** The
+    /// protection — setup must not complete for a session that replaced the one
+    /// that asked — is unchanged and still enforced. What changed is the guard
+    /// that expresses it: this used to anchor on the explicit
+    /// `identityGeneration == capturedGeneration` comparison that sat between
+    /// generation and `onComplete()`. That comparison existed to re-establish
+    /// freshness across the generation await, and both are gone together.
+    ///
+    /// `mayApplyEffects` now carries it alone, which is sufficient because only
+    /// one await remains — pinned by
+    /// `testSetupPerformsNoSuspensionBetweenTheFreshnessDecisionAndCompletion`
+    /// above, so the two assertions together say what the single ordering
+    /// assertion used to.
     func testOnCompleteIsReachedOnlyPastTheGuards() {
         let s = source()
         let completes = s.components(separatedBy: "onComplete()").count - 1
         XCTAssertEqual(completes, 1, "exactly one completion site")
-        guard let reguard = s.range(of: "DirectoryWriteCoordinator.shared.identityGeneration == capturedGeneration"),
+        guard let freshness = s.range(of: "mayApplyEffects("),
+              let decision = s.range(of: "ConnectedSetupDecision.next("),
               let complete = s.range(of: "onComplete()") else { return XCTFail("not found") }
-        XCTAssertLessThan(reguard.lowerBound, complete.lowerBound,
+        XCTAssertLessThan(freshness.lowerBound, decision.lowerBound,
+                          "freshness must be established before the outcome is dispositioned")
+        XCTAssertLessThan(decision.lowerBound, complete.lowerBound,
                           "setup must not complete for a session that replaced the one that asked")
     }
 }
