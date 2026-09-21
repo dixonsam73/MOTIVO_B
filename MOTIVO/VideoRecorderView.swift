@@ -1701,6 +1701,13 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
                 if didPreactivate {
                     self.hasPreactivatedRecordingAudioSession = true
                 }
+                // C-97 R1. Observation only. Already on main, so it is taken
+                // here rather than through `observeRecordingRoute`, which would
+                // hop again and read a later moment. Runs whatever
+                // `didPreactivate` was: a failed preactivation is exactly when
+                // the route is worth knowing.
+                RecordingRouteObservation.observe(SystemRecordingInputSession(),
+                                                  stage: .preactivationDeferred)
             }
         }
     }
@@ -1709,12 +1716,27 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         let session = AVAudioSession.sharedInstance()
         let inputs = session.availableInputs ?? []
 
+        // The branches are ALTERNATIVES, not two verification points. The old
+        // `return` after the USB branch is what a single exit removes: with an
+        // observation at the end, that return would have skipped it on the USB
+        // path -- the one most worth observing. Selection behaviour is
+        // unchanged.
         if let usb = inputs.first(where: { $0.portType == .usbAudio }) {
             try? session.setPreferredInput(usb)
-            return
-        }
-        if let builtIn = inputs.first(where: { $0.portType == .builtInMic }) {
+        } else if let builtIn = inputs.first(where: { $0.portType == .builtInMic }) {
             try? session.setPreferredInput(builtIn)
+        }
+
+        // C-97 R1. Observation only, deferred like the other path.
+        observeRecordingRoute(stage: .preferenceAppliedDeferred)
+    }
+
+    /// C-97 R1. Observe the route on main. Read-only, never a decision, and
+    /// non-blocking: a blocking hop would add a wait to capture setup to buy an
+    /// atomicity this diagnostic does not claim.
+    private func observeRecordingRoute(stage: RecordingRouteObservation.Stage) {
+        DispatchQueue.main.async {
+            RecordingRouteObservation.observe(SystemRecordingInputSession(), stage: stage)
         }
     }
 
