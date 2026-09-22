@@ -441,6 +441,9 @@ struct ProfileNameDraftState: Equatable {
     /// F2. Read for its COMPLETION HINT only. Never consulted for entitlement,
     /// mode or access — those resolve exactly where they always did.
     @EnvironmentObject private var attestation: MembershipAttestationCoordinator
+    /// Already injected app-wide — `MembershipSelectionView`, presented from this
+    /// screen, resolves the same object.
+    @EnvironmentObject private var membershipStore: ConnectedMembershipStore
     /// F2/F3. The per-screen reconciliation state: the spent completion and the
     /// write this screen has evidenced. **Boundedness**: a still-refused retry
     /// cannot re-trigger itself, because the completion that authorised it is
@@ -1176,10 +1179,50 @@ private var sessionSetupSection: some View {
          }
      }
 
+     /// The renewal summary, and the near-expiry notice when it applies.
+     @ViewBuilder
+     private var membershipPeriodRows: some View {
+         let summary = ConnectedRenewalPresentation.periodEndSummary(
+             periodEnd: membershipStore.currentPeriodEndDate,
+             isFreeTrial: membershipStore.isInFreeTrialPeriod)
+         let notice = ConnectedRenewalPresentation.notice(
+             periodEnd: membershipStore.currentPeriodEndDate,
+             isFreeTrial: membershipStore.isInFreeTrialPeriod)
+
+         if summary != nil || notice != .none {
+             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                 if let summary {
+                     Text(summary)
+                         .font(Theme.Text.body)
+                         .foregroundStyle(.primary)
+                 }
+                 switch notice {
+                 case .none:
+                     EmptyView()
+                 case let .periodEnding(text):
+                     Text(text)
+                         .font(Theme.Text.meta)
+                         .foregroundStyle(Theme.Colors.secondaryText)
+                         .fixedSize(horizontal: false, vertical: true)
+                 }
+             }
+             .frame(maxWidth: .infinity, alignment: .leading)
+             .padding(.vertical, Theme.Spacing.s)
+             .overlay(alignment: .bottom) { quietDivider() }
+         }
+     }
+
      @ViewBuilder
      private var appSettingsSection: some View {
          Section(header: Text("Account").sectionHeader()) {
              VStack(spacing: 0) {
+                 // FOUNDING 500. The end date is always answerable, and in the
+                 // last month it says plainly that payment follows. In-app rather
+                 // than a notification: the app schedules none, and promising a
+                 // delivery we cannot make would be worse than showing it where
+                 // the member already manages their membership.
+                 membershipPeriodRows
+
                  Button {
                      Task {
                          await openManageMembership()

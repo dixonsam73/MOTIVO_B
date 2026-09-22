@@ -315,6 +315,7 @@ enum ContentViewKeyboardDismiss {
 import CoreData
 import Combine
 import CryptoKit
+import StoreKit
 
 // CHANGE-ID: 20260317_150900_FeedTopTapGapOnly_a1d7
 // SCOPE: Use the existing gap between Feed Filter and feed card as the tap target for animated scroll-to-top; no visual or list-structure changes.
@@ -519,6 +520,65 @@ fileprivate struct SessionsRootView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appRoute: AppRouteStore
     @EnvironmentObject private var appModeManager: AppModeManager
+    @EnvironmentObject private var membershipStore: ConnectedMembershipStore
+
+    /// FOUNDING 500. Held in view state so a dismissal takes effect immediately;
+    /// the durable record is `ConnectedTrialReminder`'s, re-read on appear.
+    @State private var dismissedTrialIdentities: [String] = ConnectedTrialReminder.dismissedIdentities()
+    @State private var manageSubscriptionFailed = false
+
+    /// FOUNDING 500. The reminder, or nothing at all.
+    @ViewBuilder
+    private var connectedTrialReminder: some View {
+        if ConnectedTrialReminder.shouldShow(
+            trialIdentity: membershipStore.freeTrialIdentity,
+            periodEnd: membershipStore.currentPeriodEndDate,
+            dismissedIdentities: dismissedTrialIdentities),
+           let periodEnd = membershipStore.currentPeriodEndDate {
+            ConnectedTrialReminderCard(
+                periodEnd: periodEnd,
+                onManage: { Task { await openManageSubscription() } },
+                onDismiss: {
+                    guard let identity = membershipStore.freeTrialIdentity else { return }
+                    ConnectedTrialReminder.recordDismissal(trialIdentity: identity)
+                    dismissedTrialIdentities = ConnectedTrialReminder.dismissedIdentities()
+                }
+            )
+            .alert(
+                ConnectedTrialReminder.manageFailureTitle,
+                isPresented: $manageSubscriptionFailed
+            ) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(ConnectedTrialReminder.manageFailureMessage)
+            }
+        }
+    }
+
+    /// Apple's own management sheet — the only place a subscription can be
+    /// cancelled or switched.
+    ///
+    /// **Failures are shown, not swallowed.** A `try?` here would leave the
+    /// member tapping a button that does nothing, on the one screen whose whole
+    /// purpose is letting them act before they are charged. Profile's equivalent
+    /// only logs; this path tells them where to go instead.
+    @MainActor
+    private func openManageSubscription() async {
+        // The FOREGROUND scene, not merely the first: presenting into a
+        // background scene silently fails.
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        guard let scene else {
+            manageSubscriptionFailed = true
+            return
+        }
+        do {
+            try await AppStore.showManageSubscriptions(in: scene)
+        } catch {
+            manageSubscriptionFailed = true
+        }
+    }
 
     @State private var showPublishSkipOversizeAlert = false
     @State private var journalDeleteRefusal: JournalDeleteRefusal?
@@ -1024,6 +1084,11 @@ fileprivate struct SessionsRootView: View {
                 }
 
                 PracticeInsightCard(store: practiceInsightStore)
+
+                // FOUNDING 500. The near-expiry reminder, in the final 30 days of
+                // an active free trial only, dismissible, and dismissed per trial
+                // rather than per device.
+                connectedTrialReminder
 // ---------- Sessions List ----------
                 ScrollViewReader { proxy in
                     let topID = "feed-top-anchor"

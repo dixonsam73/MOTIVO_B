@@ -13,6 +13,7 @@ struct MembershipSelectionView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var attestation: MembershipAttestationCoordinator
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     let onAuthenticationRequired: () -> Void
     let onJoinComplete: () -> Void
@@ -61,6 +62,19 @@ struct MembershipSelectionView: View {
             // keeps a network round trip off the purchase path -- C-13's hazard
             // is exactly a purchase that stalls behind something else.
             Task { await loadBindingToken() }
+
+            // FOUNDING 500. Offers and eligibility are re-asked every time this
+            // screen opens. Apple's answer changes when the customer subscribes,
+            // and a cached `true` promises a free year to somebody who will be
+            // charged -- so it is refreshed here rather than trusted from launch.
+            Task { await membershipStore.refreshOffers() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // And on return to the foreground, since a subscription can be
+            // started elsewhere -- the App Store page, Settings, another device --
+            // while this screen sits open behind them.
+            guard phase == .active else { return }
+            Task { await membershipStore.refreshOffers() }
         }
         .onChange(of: membershipStore.products.map(\.id)) { _, _ in
             selectDefaultProductIfNeeded()
@@ -158,14 +172,45 @@ struct MembershipSelectionView: View {
                         .accessibilityHidden(true)
                 }
 
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text(product.displayPrice)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(.primary)
+                // FOUNDING 500. Apple's introductory offer, described honestly:
+                // a free period is never shown without the price, cadence,
+                // renewal and cancellation that follow it.
+                switch ConnectedOfferPresentation.copy(
+                    for: product,
+                    isEligible: membershipStore.isEligibleForIntroOffer,
+                    cadence: cadence
+                ) {
+                case let .standard(price, cadence):
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text(price)
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.primary)
 
-                    Text(cadence)
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                        Text(cadence)
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+
+                case let .freeTrial(duration, thenPrice, cadence, renewalNotice, cancellationNotice):
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("Free for \(duration)")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.primary)
+
+                        Text("then \(thenPrice) \(cadence)")
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+
+                        Text(renewalNotice)
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text(cancellationNotice)
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -221,12 +266,19 @@ struct MembershipSelectionView: View {
                 )
             }
             .buttonStyle(.plain)
+            // `isLoadingProducts` joins the condition deliberately: during a
+            // reload the prices and eligibility on screen are the OLD ones, and
+            // eligibility has already been invalidated to false. Letting a
+            // purchase start there would charge against copy that is mid-flight.
             .disabled(
                 selectedProduct == nil
                 || membershipStore.isPurchasing
                 || membershipStore.isRestoringPurchases
+                || membershipStore.isLoadingProducts
             )
-            .opacity(selectedProduct == nil ? 0.55 : 1)
+            .opacity(
+                selectedProduct == nil || membershipStore.isLoadingProducts ? 0.55 : 1
+            )
 
             Button {
                 restorePurchases()

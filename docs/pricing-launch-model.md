@@ -1,6 +1,73 @@
-# Pricing and launch model — PLANNED, NOT IMPLEMENTED
+# Pricing and launch model
 
-**Recorded 2026-09-03 as a product/pricing decision note.**
+## SUPERSEDED IN MECHANISM, 21 September 2026 — READ THIS FIRST
+
+**The Founding 500 is delivered as Apple's own one-year introductory free trial on
+the Connected subscriptions, monitored by Samuel and withdrawn around 500. THE
+CUSTOM-GRANT DIRECTION IS RETIRED AND MUST NOT BE IMPLEMENTED.**
+
+Retired outright: the `founding_place` ledger, the serialised allocation protocol,
+the second entitlement source in `connected_member()`, the grant arm of
+`membership_entitled_until()`, grant-derived visibility propagation, and the
+grant-only quarantine and cleanup path. **No grant ledger, no new entitlement
+authority, and no grant-only cleanup system is to be built.**
+
+What that buys, and it is the reason for the change: **no second grant authority**.
+A trial subscription is an ordinary Apple subscription, so `membership`,
+`connected_member()`, `membership_entitled_until()`, enforcement, visibility,
+quarantine and U7 all apply unchanged. **Ownership binding is preserved in full** —
+the purchase still runs through `MembershipSelectionView` → `purchase(_:appAccountToken:)`,
+so `binding_method = 'purchase'` and no settled rule is reopened.
+
+**What changes in the product promise, and it must be said rather than assumed:**
+
+- The count is **new production Connected trial starts** across monthly and annual —
+  never Solo downloads, never Sandbox or TestFlight.
+- **The cap is manual.** Samuel monitors uptake and removes the offers around 500;
+  **modest overshoot is accepted**. There is no exact allocation machinery and none
+  is wanted.
+- **Automatic paid renewal is accepted**, conditional on clear upfront terms at the
+  point of purchase and notice near expiry. **Both are now implemented.** The upfront
+  terms appear on the paywall. The near-expiry notice appears in **two** places, after
+  Samuel's 21 September decision: a **dismissible card in the journal feed** in the
+  final 30 days of an active free trial, and the Profile summary. **It remains in-app
+  and therefore not *assured* notice** — a member who opens neither in those 30 days
+  sees nothing — which is stated rather than resolved. See §2 of
+  `founding-500-launch-checklist-2026-09-21.md`.
+
+**Also open, and not to be read as done:**
+
+- ~~**The three new unit test files have never been compiled or run.**~~ **CLOSED
+  21 September** — `ConnectedOfferPresentationTests`,
+  `ConnectedRenewalPresentationTests` and `ConnectedTrialReminderTests` were run by
+  Samuel in Xcode and **all three pass**. Simulator only; device behaviour is still
+  unverified.
+- **Device QA has not run**, including whether switching plan mid-trial preserves the
+  free period, which Apple does not document.
+- **App Store Connect is now configured by Samuel** (21 September evening): a
+  **Free for the first year** introductory offer on both Connected products, no end
+  date, 175 territories, both products at level 1 in group 22252441, UK prices
+  £4.99 / £49.99, products still *Prepare for Submission*. **This supersedes the
+  earlier "not inspected" statement.** It establishes configuration only — **not**
+  StoreKit propagation and not device behaviour. The **new-subscribers eligibility
+  field is still unconfirmed**. See §0 of `founding-500-launch-checklist-2026-09-21.md`.
+
+**Sections 2–4 below record the 3 September direction and remain accurate as history.
+FM-1 and FM-2 described a grant that is not being built. Do not read them as active
+requirements.** The design, F1 evidence and probe-plan documents of 21 September are
+likewise historical: `founding-500-design-2026-09-21.md` (custom grant, superseded),
+`founding-500-f1-evidence-2026-09-21.md` and `founding-500-f1-probe-plan-2026-09-21.md`
+(admission evidence, needed only by the retired route — **the F1 device session is no
+longer required**). `founding-500-offer-codes-assessment-2026-09-21.md` is the
+comparison that led here.
+
+**Still open and outside this change:** adult assurance and server trust (parked
+pending Apple Developer Support), and the ASC configuration itself (§ the launch
+checklist, `founding-500-launch-checklist-2026-09-21.md`).
+
+---
+
+## HISTORICAL — recorded 2026-09-03 as a product/pricing decision note.
 
 **NOTHING IN THIS DOCUMENT IS BUILT.** No code, schema, migration, Edge Function,
 entitlement, cleanup, activation flow or App Store Connect configuration was

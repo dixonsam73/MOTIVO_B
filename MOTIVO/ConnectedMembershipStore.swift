@@ -74,6 +74,37 @@ final class ConnectedMembershipStore: ObservableObject {
     @Published private(set) var isLoadingProducts = false
     @Published private(set) var productLoadError: Error?
 
+    /// Whether Apple would apply an introductory offer for this customer in the
+    /// Connected subscription group.
+    ///
+    /// **Apple's answer, never ours, and it defaults to `false`.** Showing trial
+    /// copy to somebody Apple will then charge is the failure that matters, so an
+    /// unknown or failed read must fall back to ordinary pricing rather than to a
+    /// promise. It is refreshed with the products, since both change together
+    /// when the storefront or the account does.
+    @Published private(set) var isEligibleForIntroOffer = false
+
+    /// When the current paid or free period ends — Apple's own date, read from
+    /// the verified transaction that decided entitlement.
+    @Published private(set) var currentPeriodEndDate: Date?
+
+    /// Whether the current period is a **free trial**.
+    ///
+    /// **NOT `offer?.type == .introductory`.** An introductory offer may be
+    /// pay-up-front or pay-as-you-go — a discount, not free — so testing the
+    /// type would call a discounted period "free". The payment mode is the only
+    /// term that means free.
+    @Published private(set) var isInFreeTrialPeriod = false
+
+    /// Identifies THIS free trial, so a dismissal cannot carry to a different
+    /// one.
+    ///
+    /// `originalID` alone would persist across a lapse and a later resubscription
+    /// — a second trial would arrive already dismissed. Pairing it with the
+    /// period end distinguishes them, and `nil` outside a free trial means the
+    /// reminder has nothing to key on and cannot be shown.
+    @Published private(set) var freeTrialIdentity: String?
+
     @Published private(set) var isPurchasing = false
     @Published private(set) var purchaseOutcome: PurchaseOutcome?
 
@@ -170,6 +201,10 @@ final class ConnectedMembershipStore: ObservableObject {
                 case .verified(let transaction):
                     await transaction.finish()
                     await refreshEntitlement(forceAfterCurrent: true)
+                    // This customer has just subscribed, so Apple will no longer
+                    // grant the introductory offer. Re-ask rather than leave a
+                    // `true` that would promise a free year on the next screen.
+                    await refreshIntroOfferEligibility()
 
                     // F10. **A VERIFIED TRANSACTION IS A COMPLETED PURCHASE**, and
                     // this used to report `.failed` when the entitlement had not
@@ -241,6 +276,9 @@ final class ConnectedMembershipStore: ObservableObject {
         do {
             try await AppStore.sync()
             await refreshEntitlement(forceAfterCurrent: true)
+            // A restore can surface a subscription this device did not know
+            // about, which changes Apple's eligibility answer.
+            await refreshIntroOfferEligibility()
 
         } catch {
             restoreError = error
@@ -267,6 +305,9 @@ final class ConnectedMembershipStore: ObservableObject {
 
                 await transaction.finish()
                 await refreshEntitlement(forceAfterCurrent: true)
+                // Covers a subscription started outside this screen — the App
+                // Store page, Settings, or another device.
+                await refreshIntroOfferEligibility()
             }
         }
     }
@@ -309,6 +350,9 @@ final class ConnectedMembershipStore: ObservableObject {
 
         let refreshTask = Task { @MainActor in
             var resolvedState: MembershipState = .notEntitled
+            var foundPeriodEnd: Date?
+            var foundFreeTrial = false
+            var foundTrialIdentity: String?
 
             for await verificationResult in Transaction.currentEntitlements {
                 guard case .verified(let transaction) = verificationResult else {
@@ -323,8 +367,26 @@ final class ConnectedMembershipStore: ObservableObject {
                 }
 
                 resolvedState = .entitled
+                // Read from the SAME verified transaction that decided
+                // entitlement, so the date on screen and the access it describes
+                // cannot come from different reads.
+                // `expirationDate` is when THIS PERIOD ENDS. It is not a renewal
+                // date: after a cancellation it is when access stops. Nothing
+                // here may describe it as a renewal (see ConnectedRenewalPresentation).
+                foundPeriodEnd = transaction.expirationDate
+                foundFreeTrial = transaction.offer?.paymentMode == .freeTrial
+                if foundFreeTrial, let end = foundPeriodEnd {
+                    foundTrialIdentity = "\(transaction.originalID)-\(Int(end.timeIntervalSince1970))"
+                }
                 break
             }
+
+            // Cleared together with the state they belong to: a stale period end
+            // outliving its entitlement would be a date for access the member no
+            // longer has.
+            self.currentPeriodEndDate = foundPeriodEnd
+            self.isInFreeTrialPeriod = foundFreeTrial
+            self.freeTrialIdentity = foundTrialIdentity
 
             return resolvedState
         }
@@ -341,11 +403,45 @@ final class ConnectedMembershipStore: ObservableObject {
         membershipState = resolvedState
     }
 
+    /// Asks Apple whether this customer is eligible for an introductory offer in
+    /// the Connected group.
+    ///
+    /// The group id is read from a loaded product rather than hardcoded, so it
+    /// cannot drift from App Store Connect. Both Connected products are in one
+    /// group, so one answer covers monthly and annual.
+    private func refreshIntroOfferEligibility() async {
+        guard let groupID = products.compactMap({ $0.subscription?.subscriptionGroupID }).first else {
+            isEligibleForIntroOffer = false
+            return
+        }
+        isEligibleForIntroOffer = await Product.SubscriptionInfo.isEligibleForIntroOffer(for: groupID)
+    }
+
+    /// Reloads products AND eligibility together.
+    ///
+    /// **ELIGIBILITY GOES STALE IN THE DANGEROUS DIRECTION.** Once a customer
+    /// subscribes, Apple stops granting the introductory offer — but a cached
+    /// `true` would keep promising a free year to somebody who will be charged.
+    /// So it is refreshed whenever the paywall appears or the app returns to the
+    /// foreground, and after any purchase or restore, not only at launch and on a
+    /// storefront change.
+    func refreshOffers() async {
+        await loadProducts()
+    }
+
     private func loadProducts() async {
         guard !isLoadingProducts else { return }
 
         isLoadingProducts = true
         productLoadError = nil
+
+        // INVALIDATE BEFORE, NOT AFTER. The refresh below sits inside the `do`,
+        // so a thrown load would otherwise leave the previous answer standing —
+        // and the previous answer is exactly the one that says "free year" to
+        // somebody who has since subscribed. Clearing first means every failure
+        // path, including a throw and the early return above, falls back to
+        // ordinary pricing rather than to a promise.
+        isEligibleForIntroOffer = false
 
         defer {
             isLoadingProducts = false
@@ -364,6 +460,8 @@ final class ConnectedMembershipStore: ObservableObject {
                     return lhs.id < rhs.id
                 }
             }
+
+            await refreshIntroOfferEligibility()
 
         } catch {
             productLoadError = error
