@@ -25,6 +25,12 @@ struct AboutEtudesView<ConnectedDestination: View>: View {
                     .padding(.vertical, Theme.Spacing.xxl)
 
                 connectedSection
+
+                Text(AppBuildInfo.label())
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .textSelection(.enabled)
+                    .padding(.top, Theme.Spacing.xxl)
             }
             .frame(maxWidth: 600, alignment: .leading)
             .padding(.horizontal, Theme.Spacing.l)
@@ -218,5 +224,18 @@ private extension View {
         font(Theme.Text.body)
             .foregroundStyle(Theme.Colors.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// "Version 1.0 (1750 · 8cbcd8e)". The build number and commit are stamped
+/// into Info.plist at build time by the "Stamp Build Number" script phase.
+enum AppBuildInfo {
+    static func label(info: [String: Any]? = Bundle.main.infoDictionary) -> String {
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        if let commit = info?["EtudesGitCommit"] as? String, !commit.isEmpty {
+            return "Version \(version) (\(build) · \(commit))"
+        }
+        return "Version \(version) (\(build))"
     }
 }

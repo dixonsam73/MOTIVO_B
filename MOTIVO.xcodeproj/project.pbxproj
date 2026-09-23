@@ -143,6 +143,7 @@
 				1CA2DFB72E704AF800F23C97 /* Sources */,
 				1CA2DFB82E704AF800F23C97 /* Frameworks */,
 				1CA2DFB92E704AF800F23C97 /* Resources */,
+				1CB0A0012EA0000000000001 /* Stamp Build Number */,
 			);
 			buildRules = (
 			);
@@ -282,6 +283,30 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		1CB0A0012EA0000000000001 /* Stamp Build Number */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "Stamp Build Number";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Stamp the build with the git commit it came from, so any install\n# (TestFlight or straight from Xcode) is identifiable.\n# CFBundleVersion = commit count on this branch (always increasing);\n# EtudesGitCommit = short hash, with -dirty if app source had uncommitted changes.\nset -e\nplist=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nif ! count=$(git -C \"${SRCROOT}\" rev-list --count HEAD 2>/dev/null); then\n  echo \"warning: git unavailable; build number left at ${CURRENT_PROJECT_VERSION}\"\n  exit 0\nfi\nsha=$(git -C \"${SRCROOT}\" rev-parse --short HEAD)\nif [ -n \"$(git -C \"${SRCROOT}\" status --porcelain -- MOTIVO MOTIVO.xcodeproj)\" ]; then\n  sha=\"${sha}-dirty\"\nfi\n/usr/libexec/PlistBuddy -c \"Set :CFBundleVersion ${count}\" \"${plist}\"\n/usr/libexec/PlistBuddy -c \"Delete :EtudesGitCommit\" \"${plist}\" 2>/dev/null || true\n/usr/libexec/PlistBuddy -c \"Add :EtudesGitCommit string ${sha}\" \"${plist}\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1CA2DFB72E704AF800F23C97 /* Sources */ = {
@@ -454,6 +479,7 @@
 				CURRENT_PROJECT_VERSION = 131;
 				DEVELOPMENT_TEAM = K352DG4UJA;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MOTIVO/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Études Dev";
@@ -493,6 +519,7 @@
 				CURRENT_PROJECT_VERSION = 131;
 				DEVELOPMENT_TEAM = K352DG4UJA;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MOTIVO/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Études";

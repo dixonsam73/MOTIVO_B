@@ -129,8 +129,9 @@ xcodebuild test -project MOTIVO.xcodeproj -scheme MOTIVO -only-testing:MOTIVOTes
   has been silently reverted twice.
 - `Etudes.storekit` is opt-in only (Run → Options), and never ships.
 - Always check Release as well as Debug; there are many `#if DEBUG` blocks.
-- Every build reports `1.0 (131)`, so the version can't tell you which commit a
-  build came from. Fix before release (see `RELEASE.md`).
+- The build number is the git commit count, and About Études shows it with the
+  short commit hash (`-dirty` if app source was uncommitted). Set by the "Stamp
+  Build Number" script phase.
 - Release-readable logging: `os.Logger` with `privacy: .public`. Xcode's console
   shows it live.
 

@@ -30,7 +30,7 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 
 ## B. Build (agent)
 
-- [x] **A — Guideline 1.2, all four parts, proportionate.** Built 2026-09-22 (`MOTIVO/Moderation.swift`); needs device QA (§D). See
+- [x] **A — Guideline 1.2, all four parts, proportionate.** Built 2026-09-22 (`MOTIVO/Moderation.swift`). Device QA passed 2026-09-23 on Release installs A + B (report, both filters, block, offline block/retry, unblock). Badge fix `8cbcd8e` device-checked. Support mailbox set up and receiving. See
   [Apple Guideline 1.2](https://developer.apple.com/app-store/review/guidelines/#user-generated-content).
   - Filtering: a small objectionable-word filter on posts and comments.
   - Report: an action on posts, comments and profiles. Reports open a
@@ -50,11 +50,13 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] **A — R1-a:** don't acknowledge an unsent simulated withdrawal
   (`SessionSyncQueue.swift`, client-only, small). Cheap insurance, not a
   blocker.
-- [ ] **A — Real build numbers.** Every build reports `1.0 (131)`. Increment
-  `CURRENT_PROJECT_VERSION` per upload so a tested build is identifiable.
-- [ ] **A — Code coverage in Release.** A Release build made with the scheme
-  contained an `__LLVM_COV` segment (~1 MB). Confirm whether Archive includes it,
-  and turn it off if so.
+- [x] **A — Real build numbers.** A "Stamp Build Number" script sets the build
+  number to the git commit count and records the short hash. Both show at the
+  bottom of About Études, e.g. `Version 1.0 (1747 · abc1234)`. When uploading,
+  leave Xcode's "Manage Version and Build Number" option unticked so the number
+  stays tied to the commit.
+- [x] **A — Code coverage in Release.** Not an issue: an Archive has no coverage
+  instrumentation. Only plain `xcodebuild build` runs added it.
 - [ ] **A — Any copy changes** from the legal decision and the 1.2 work (About,
   Explore Connected, refusal text).
 
