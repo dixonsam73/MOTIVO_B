@@ -10,8 +10,9 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   section with the support auto-reply. To finish: confirm the ratings; review
   both drafts; turn on the auto-reply; publish the terms section; **register
   SD Songs Ltd on the NCA's CSEA Industry Reporting Portal** (mandatory for all
-  services, and required before a first report); test hiding a post, and ban
-  and un-ban a test account in Supabase Auth to prove suspension works; mention in
+  services, and required before a first report); ~~test hiding a post and
+  banning a test account~~ **both passed 2026-09-23** on Simon/Steve test
+  accounts (commands in `supabase/README.md`); mention in
   the privacy policy that we may view reported content; record the approval
   date. Run Ofcom's
   [Regulation Checker](https://www.ofcom.org.uk/os-toolkit/regulation-checker/regulation-checker),
@@ -137,6 +138,8 @@ the join.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
+- A suspended member lands in Solo with no explanation. Optional: a short
+  "account suspended, contact support" message.
 - Block is per device. "Reply to all commenters" still fans out server-side to
   a blocked commenter. It's rare, and they can no longer see the post.
 - Test hygiene: 3–7 order-dependent "ownerless/signed-out" tests

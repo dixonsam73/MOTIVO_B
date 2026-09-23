@@ -611,6 +611,57 @@ statements as separate round trips will not roll it back at all. Where a
 runtime proof is needed, it goes through the QA plan against real accounts —
 see E8/E8b for the B-6 example.
 
+## Moderation actions (tested 2026-09-23)
+
+The takedown and suspension steps in the online safety policy, as run and
+verified on test accounts on 2026-09-23. Replace `<POST>`, `<OWNER>` and
+`<USER>` with full UUIDs. Each is one submission with its guard inside the
+transaction and a final `SELECT`, per the standing rule below.
+
+**Hide a post** (removes it from every follower at once; the owner keeps it):
+
+```sql
+begin; do $$ declare n int; begin
+  update public.posts set is_public = false
+   where id = '<POST>' and owner_user_id = '<OWNER>' and is_public = true;
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'guard: expected 1 row, got %', n; end if;
+end $$; commit;
+select id, is_public from public.posts where id = '<POST>';
+```
+
+Restore after a successful appeal: the same with `is_public = true` and
+`and is_public = false`. The owner can re-share by editing, which the policy
+treats as a repeat breach.
+
+**Suspend an account** (sign-in is refused; the app falls back to Solo with
+no message):
+
+```sql
+begin; do $$ declare n int; begin
+  update auth.users set banned_until = now() + interval '100 years'
+   where id = '<USER>' and banned_until is null;
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'guard: expected 1 row, got %', n; end if;
+end $$; commit;
+select id, banned_until from auth.users where id = '<USER>';
+```
+
+Lift it with `banned_until = null ... and banned_until is not null`. A ban does
+not hide the member's posts, so hide those too. An already-open session keeps
+working until its access token expires (about an hour).
+
+**Check what a member can see**, using their own permissions rather than
+admin access (`db query --linked` bypasses RLS on its own):
+
+```sql
+begin; set local role authenticated;
+select set_config('request.jwt.claims',
+  '{"sub":"<USER>","role":"authenticated"}', true);
+select count(*) from public.posts where owner_user_id = '<OWNER>';
+rollback;
+```
+
 ## STANDING RULE — a production mutation's guard must be enforced by Postgres
 
 **Never pair an unconditional `COMMIT` with an instruction to inspect the result
