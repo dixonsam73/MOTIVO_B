@@ -5,20 +5,13 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 
 ## A. Decisions (Samuel)
 
-- [ ] **S — Online Safety Act scope and risk assessment.** Drafted 2026-09-23
-  (Desktop): risk assessment v2, online safety policy, and the terms safety
-  section with the support auto-reply. To finish: confirm the ratings; review
-  both drafts; turn on the auto-reply; publish the terms section; **register
-  SD Songs Ltd on the NCA's CSEA Industry Reporting Portal** (mandatory for all
-  services, and required before a first report); ~~test hiding a post and
-  banning a test account~~ **both passed 2026-09-23** on Simon/Steve test
-  accounts (commands in `supabase/README.md`); mention in
-  the privacy policy that we may view reported content; record the approval
-  date. Run Ofcom's
-  [Regulation Checker](https://www.ofcom.org.uk/os-toolkit/regulation-checker/regulation-checker),
-  then complete the illegal-content risk assessment with the
-  [Online Safety Assessment Tool](https://www.ofcom.org.uk/os-toolkit/assessment-tool).
-  A can draft it for S to check. It's required whatever the age decision is.
+- [ ] **S — Online safety paperwork.** Drafted 2026-09-23 (Desktop): risk
+  assessment v2, online safety policy, Terms of Use, privacy policy, and the
+  legitimate-interests assessment. Remaining: send the solicitor pack; confirm
+  the risk ratings; approve and date each document; turn on the support
+  auto-reply; **register SD Songs Limited on the NCA's CSEA Industry Reporting
+  Portal**. Done: takedown and suspension tests passed 2026-09-23 (commands in
+  `supabase/README.md`).
 - [ ] **S — Adult-access adequacy: one hour with a UK online-safety/privacy
   solicitor.** Connected launches 18+ only (settled). The question: is Apple's
   Declared Age Range (including the confirmed adult signal on iOS 26.5)
@@ -102,7 +95,10 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] **Then** publish the ASC privacy labels. Nine types are entered and saved;
   mapping in `docs/app-store-privacy-disclosures.md`. Policy first, labels
   second.
-- [ ] Terms of use, support URL and contact email live.
+- [x] Privacy Policy URL (`https://etudes.app/privacy`) entered in App Store
+  Connect, 2026-09-23 (holding page for now).
+- [ ] Support URL in App Store Connect, and a Terms of Use link in the app
+  description.
 - [ ] Age rating set to match the legal decision.
 - [ ] Supabase Data Processing Agreement accepted.
 - [ ] **ICO data protection fee:** SD Songs Limited, Tier 1, £52/year. No
