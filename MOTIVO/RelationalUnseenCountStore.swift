@@ -20,18 +20,23 @@ final class RelationalUnseenCountStore: ObservableObject {
     private let followStore = FollowStore.shared
     private let unreadCommentsStore = UnreadCommentsStore.shared
     private let receivedAttachmentStore = ReceivedConnectedAttachmentStore.shared
+    private let blockList = BlockList.shared
 
     private var cancellables: Set<AnyCancellable> = []
 
+    // Blocked accounts are excluded, matching what People shows: a hidden
+    // request or send must not light the badge.
     var incomingFollowRequestCount: Int {
-        followStore.requests.subtracting(followStore.outgoingRequests).count
+        followStore.requests.subtracting(followStore.outgoingRequests)
+            .filter { !blockList.isBlocked($0) }
+            .count
     }
 
     var relationalUnseenCount: Int {
         incomingFollowRequestCount
-        + sharedWithYouStore.unreadShares.count
+        + sharedWithYouStore.unreadShares.filter { !blockList.isBlocked($0.ownerUserID) }.count
         + unreadCommentsStore.unreadGroups.count
-        + receivedAttachmentStore.unreadCount
+        + receivedAttachmentStore.unreadItems.filter { !blockList.isBlocked($0.senderUserID) }.count
     }
 
     private init() {
@@ -56,6 +61,12 @@ final class RelationalUnseenCountStore: ObservableObject {
             .store(in: &cancellables)
 
         receivedAttachmentStore.objectWillChange
+            .sink { [weak self] _ in
+                self?.refreshTick += 1
+            }
+            .store(in: &cancellables)
+
+        blockList.objectWillChange
             .sink { [weak self] _ in
                 self?.refreshTick += 1
             }
