@@ -104,6 +104,10 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] Terms of use, support URL and contact email live.
 - [ ] Age rating set to match the legal decision.
 - [ ] Supabase Data Processing Agreement accepted.
+- [ ] **ICO data protection fee:** SD Songs Limited, Tier 1, £52/year. No
+  exemption covers running Connected, and beta test accounts already count,
+  so pay now. Check the ICO register first in case the company is already
+  listed.
 - [ ] App Review notes. Explain follow approval (strangers can't see content),
   how to reach Connected, and the report/block locations.
 
