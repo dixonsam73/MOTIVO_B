@@ -63,12 +63,12 @@ in place; don't add a "CORRECTED" paragraph on top of it.
    authoritative server evidence.**
 4. **Personal durability follows Apple's normal backup model**, independent of
    Connected.
-5. **Age.** Solo has no Études-imposed age restriction. Connected's age policy
-   is **pending a legal decision** (see `RELEASE.md`). The shipped code and
-   production implement a 13+ design with 13–17 protections (age band, B-40,
-   `tg_directory_requires_band`). These stay in force until a decision is made.
-   An 18+ direction was recorded on 2026-09-18 and is not implemented. Age
-   eligibility must never gate account deletion.
+5. **Age.** Solo has no Études-imposed age restriction. **Connected launches
+   18+ only** (decided 2026-09-18). Open: whether Apple's age signal is adequate
+   to enforce that (see `RELEASE.md`). The current code and production still
+   implement the superseded 13+ design with 13–17 protections (age band, B-40,
+   `tg_directory_requires_band`). These stay in force until the adult-only gate
+   replaces them. Age eligibility must never gate account deletion.
 
 ## Settled behaviour — don't change without Samuel
 

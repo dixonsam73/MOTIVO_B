@@ -5,18 +5,20 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 
 ## A. Decisions (Samuel)
 
-- [ ] **S — Online Safety Act scope and risk assessment.** Run Ofcom's
+- [ ] **S — Online Safety Act scope and risk assessment.** v2 drafted
+  2026-09-23 (Desktop). To finish: confirm ratings, write the short safety
+  policy, support auto-reply, terms safety section, approval date. Run Ofcom's
   [Regulation Checker](https://www.ofcom.org.uk/os-toolkit/regulation-checker/regulation-checker),
   then complete the illegal-content risk assessment with the
   [Online Safety Assessment Tool](https://www.ofcom.org.uk/os-toolkit/assessment-tool).
   A can draft it for S to check. It's required whatever the age decision is.
-- [ ] **S — Connected age policy: one hour with a UK online-safety/privacy
-  solicitor.** The question: can a low-risk musicians' journal with follow
-  approval let 13+ use Connected with a proportionate children's-access/risk
-  assessment and the existing 13–17 protections? Or must it be 18+, and if so,
-  is Apple's Declared Age Range enough? Take the risk assessment, not the old
-  13+ legal packet. Note: an "18+" line in the terms does not by itself settle
-  whether children can access the service.
+- [ ] **S — Adult-access adequacy: one hour with a UK online-safety/privacy
+  solicitor.** Connected launches 18+ only (settled). The question: is Apple's
+  Declared Age Range (including the confirmed adult signal on iOS 26.5)
+  adequate to conclude children cannot access Connected? If not, what is the
+  minimum that is? Take the risk assessment
+  (`Etudes-Ofcom-Risk-Assessment-v2-DRAFT-2026-09-23.docx`), not the old 13+
+  legal packet. An "18+" line in the terms does not by itself settle it.
 - [ ] **S — Fallback.** If the legal answer stalls, would you ship Solo first and
   add Connected in an update? (Solo has no user-to-user content.)
 - [ ] **S — Sharing withdrawal guarantee.** Is "once withdrawn, no earlier
@@ -45,8 +47,9 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
     and receiving, 2026-09-23).
   - Check whether App Review expects users to accept terms that forbid
     objectionable content. If so, add a one-time acceptance on joining Connected.
-- [ ] **A — Age implementation to match the legal decision.** Nothing to build if
-  13+ with the current protections is accepted, beyond copy and age rating.
+- [ ] **A — Adult-only gate for Connected**, replacing the 13–17 pathway, using
+  whatever mechanism the legal answer says is adequate. Then finalise the
+  provisional grooming rating in the risk assessment.
 - [ ] **A — R1-a:** don't acknowledge an unsent simulated withdrawal
   (`SessionSyncQueue.swift`, client-only, small). Cheap insurance, not a
   blocker.
@@ -101,7 +104,7 @@ the join.
 - B-34 (shadow telemetry blind to denied writes). Observability only.
 - Invitations, iPad (with Pencil markup and sketchpad), recorder R1 diagnostics.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
-  `.creation`; the age-band code if the 18+ route is chosen.
+  `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
 - Block is per device. "Reply to all commenters" still fans out server-side to
   a blocked commenter. It's rare, and they can no longer see the post.
