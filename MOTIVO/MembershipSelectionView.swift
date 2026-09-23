@@ -300,6 +300,8 @@ struct MembershipSelectionView: View {
                 membershipStore.isPurchasing
                 || membershipStore.isRestoringPurchases
             )
+
+            LegalLinksFooter()
         }
     }
 

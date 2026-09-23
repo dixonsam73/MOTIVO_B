@@ -1199,6 +1199,8 @@ private var sessionSetupSection: some View {
                      quietDivider()
                  }
 
+                 legalLinkRows
+
                  eraseAllEtudesDataButton
              }
              .cardSurface(padding: profileInnerCardPadding)
@@ -1305,6 +1307,8 @@ private var sessionSetupSection: some View {
                      quietDivider()
                  }
 
+                 legalLinkRows
+
                  Button {
                      auth.signOut()
                  } label: {
@@ -1325,6 +1329,24 @@ private var sessionSetupSection: some View {
              .cardSurface(padding: profileInnerCardPadding)
              .listRowSeparator(.hidden)
                 .padding(.vertical, profileSectionSpacing / 2)
+         }
+     }
+
+     /// Privacy Policy and Terms of Use (Apple 5.1.1 / 3.1.2), opened in Safari.
+     @ViewBuilder
+     private var legalLinkRows: some View {
+         ForEach([("Privacy Policy", LegalLinks.privacyPolicy),
+                  ("Terms of Use", LegalLinks.termsOfUse)], id: \.0) { title, url in
+             Link(destination: url) {
+                 navigationRow(title: title)
+             }
+             .buttonStyle(.plain)
+             .contentShape(Rectangle())
+             .frame(minHeight: 44, alignment: .center)
+             .font(Theme.Text.body)
+             .overlay(alignment: .bottom) {
+                 quietDivider()
+             }
          }
      }
 

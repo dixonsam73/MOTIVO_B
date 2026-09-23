@@ -5,9 +5,15 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 
 ## A. Decisions (Samuel)
 
-- [ ] **S — Online Safety Act scope and risk assessment.** v2 drafted
-  2026-09-23 (Desktop). To finish: confirm ratings, write the short safety
-  policy, support auto-reply, terms safety section, approval date. Run Ofcom's
+- [ ] **S — Online Safety Act scope and risk assessment.** Drafted 2026-09-23
+  (Desktop): risk assessment v2, online safety policy, and the terms safety
+  section with the support auto-reply. To finish: confirm the ratings; review
+  both drafts; turn on the auto-reply; publish the terms section; **register
+  SD Songs Ltd on the NCA's CSEA Industry Reporting Portal** (mandatory for all
+  services, and required before a first report); test hiding a post, and ban
+  and un-ban a test account in Supabase Auth to prove suspension works; mention in
+  the privacy policy that we may view reported content; record the approval
+  date. Run Ofcom's
   [Regulation Checker](https://www.ofcom.org.uk/os-toolkit/regulation-checker/regulation-checker),
   then complete the illegal-content risk assessment with the
   [Online Safety Assessment Tool](https://www.ofcom.org.uk/os-toolkit/assessment-tool).
@@ -58,6 +64,10 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   foot of the Profile page, e.g. `Version 1.0 (1747 · abc1234)`. When uploading,
   leave Xcode's "Manage Version and Build Number" option unticked so the number
   stays tied to the commit.
+- [x] **A — Privacy Policy and Terms of Use links in the app** (Apple 5.1.1,
+  3.1.2): Profile's Account card and the membership screen, pointing at
+  `etudes.app/privacy` and `etudes.app/terms`. They work once those pages are
+  live. Also add both URLs in App Store Connect.
 - [x] **A — Code coverage in Release.** Not an issue: an Archive has no coverage
   instrumentation. Only plain `xcodebuild build` runs added it.
 - [ ] **A — Any copy changes** from the legal decision and the 1.2 work (About,
@@ -69,8 +79,17 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   date (seen in ASC 2026-09-21). Remove manually at ~500.
 - [ ] Production App Store Server Notifications URL. Keep Sandbox as it is.
 - [ ] Production Billing Grace (C-31).
-- [ ] Privacy policy published at `etudes.app/privacy`. The draft has an open
-  `[AGE]`. Add a backup-retention line from Supabase's published docs.
+- [ ] Privacy policy published at `etudes.app/privacy`. Drafted 2026-09-23
+  (Desktop). Its backup line ("up to 7 days") is true on Free and Pro. Before
+  publishing: confirm the provisional age row once the adult-only gate exists, add
+  the date, then publish. Keep a short internal legitimate-interests assessment
+  (LIA) alongside it, for the safety, age-check and support uses.
+- [ ] **Supabase: Free through beta, Pro at launch** (decided 2026-09-23). Free
+  has no backups, 1 GB file storage, 5 GB/month downloads, and pauses after a
+  week of inactivity, so open the app now and then during beta. Upgrade to Pro
+  (about $25/month, daily backups kept 7 days, spend cap on) on launch day.
+- [ ] `etudes.app/terms` published, holding your terms including the safety
+  section. The app links to it, and to `/privacy`.
 - [ ] **Then** publish the ASC privacy labels. Nine types are entered and saved;
   mapping in `docs/app-store-privacy-disclosures.md`. Policy first, labels
   second.
