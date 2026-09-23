@@ -41,8 +41,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   - Process (S): act on reports promptly (App Review usually expects about 24
     hours; check the current wording). Hide content or suspend accounts from
     the Supabase dashboard. No moderation tooling.
-  - Contact: reports and Contact Support go to `support@etudes.app`. **S: make
-    sure that mailbox exists and you receive it** before submission.
+  - Contact: reports and Contact Support go to `support@etudes.app` (set up
+    and receiving, 2026-09-23).
   - Check whether App Review expects users to accept terms that forbid
     objectionable content. If so, add a one-time acceptance on joining Connected.
 - [ ] **A — Age implementation to match the legal decision.** Nothing to build if
@@ -52,7 +52,7 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   blocker.
 - [x] **A — Real build numbers.** A "Stamp Build Number" script sets the build
   number to the git commit count and records the short hash. Both show at the
-  bottom of About Études, e.g. `Version 1.0 (1747 · abc1234)`. When uploading,
+  foot of the Profile page, e.g. `Version 1.0 (1747 · abc1234)`. When uploading,
   leave Xcode's "Manage Version and Build Number" option unticked so the number
   stays tied to the commit.
 - [x] **A — Code coverage in Release.** Not an issue: an Archive has no coverage

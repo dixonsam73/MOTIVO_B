@@ -25,12 +25,6 @@ struct AboutEtudesView<ConnectedDestination: View>: View {
                     .padding(.vertical, Theme.Spacing.xxl)
 
                 connectedSection
-
-                Text(AppBuildInfo.label())
-                    .font(Theme.Text.meta)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .textSelection(.enabled)
-                    .padding(.top, Theme.Spacing.xxl)
             }
             .frame(maxWidth: 600, alignment: .leading)
             .padding(.horizontal, Theme.Spacing.l)

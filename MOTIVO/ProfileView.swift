@@ -533,6 +533,7 @@ struct ProfileNameDraftState: Equatable {
      // Stage 2: one-time notice flag (set in ActivityListView on fallback)
      @AppStorage("primaryActivityFallbackNoticeNeeded") private var primaryFallbackNoticeNeeded: Bool = false
      @State private var showPrimaryFallbackAlert: Bool = false
+     @State private var showSupportMailFallback: Bool = false
  
      
     // Privacy & Discovery (local-first; future-sync to backend)
@@ -668,6 +669,7 @@ struct ProfileNameDraftState: Equatable {
                              connectedPromoSection
                          }
                      }
+                     buildInfoFooter
                         }
                         .background(KeyboardDismissFormTapCatcher(onDismiss: {
                             clearNameFieldFocus()
@@ -1171,19 +1173,30 @@ private var sessionSetupSection: some View {
                      quietDivider()
                  }
 
-                 // Guideline 1.2: published contact details. The address is shown
-                 // so it is usable even without a mail app.
-                 if let supportURL = ModerationMail.supportURL {
-                     Link(destination: supportURL) {
-                         navigationRow(title: "Contact Support", value: Moderation.supportEmail)
+                 // Guideline 1.2: published contact details. With no mail app,
+                 // the address is copied and shown instead.
+                 Button {
+                     Task {
+                         if !(await ModerationMail.open(ModerationMail.supportURL)) {
+                             ModerationMail.copySupportAddress()
+                             showSupportMailFallback = true
+                         }
                      }
-                     .buttonStyle(.plain)
-                     .contentShape(Rectangle())
-                     .frame(minHeight: 44, alignment: .center)
-                     .font(Theme.Text.body)
-                     .overlay(alignment: .bottom) {
-                         quietDivider()
-                     }
+                 } label: {
+                     navigationRow(title: "Contact Support")
+                 }
+                 .alert("Contact Support", isPresented: $showSupportMailFallback) {
+                     Button("OK", role: .cancel) {}
+                 } message: {
+                     Text(ModerationMail.noMailMessage)
+                 }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     quietDivider()
                  }
 
                  eraseAllEtudesDataButton
@@ -1266,19 +1279,30 @@ private var sessionSetupSection: some View {
                      quietDivider()
                  }
 
-                 // Guideline 1.2: published contact details. The address is shown
-                 // so it is usable even without a mail app.
-                 if let supportURL = ModerationMail.supportURL {
-                     Link(destination: supportURL) {
-                         navigationRow(title: "Contact Support", value: Moderation.supportEmail)
+                 // Guideline 1.2: published contact details. With no mail app,
+                 // the address is copied and shown instead.
+                 Button {
+                     Task {
+                         if !(await ModerationMail.open(ModerationMail.supportURL)) {
+                             ModerationMail.copySupportAddress()
+                             showSupportMailFallback = true
+                         }
                      }
-                     .buttonStyle(.plain)
-                     .contentShape(Rectangle())
-                     .frame(minHeight: 44, alignment: .center)
-                     .font(Theme.Text.body)
-                     .overlay(alignment: .bottom) {
-                         quietDivider()
-                     }
+                 } label: {
+                     navigationRow(title: "Contact Support")
+                 }
+                 .alert("Contact Support", isPresented: $showSupportMailFallback) {
+                     Button("OK", role: .cancel) {}
+                 } message: {
+                     Text(ModerationMail.noMailMessage)
+                 }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     quietDivider()
                  }
 
                  Button {
@@ -1302,6 +1326,19 @@ private var sessionSetupSection: some View {
              .listRowSeparator(.hidden)
                 .padding(.vertical, profileSectionSpacing / 2)
          }
+     }
+
+     /// Version, build number and commit, quietly at the foot of Profile.
+     private var buildInfoFooter: some View {
+         Section {
+             Text(AppBuildInfo.label())
+                 .font(Theme.Text.meta)
+                 .foregroundStyle(Theme.Colors.secondaryText)
+                 .textSelection(.enabled)
+                 .frame(maxWidth: .infinity, alignment: .center)
+         }
+         .listRowBackground(Color.clear)
+         .listRowSeparator(.hidden)
      }
 
      // C-35: every user-facing string below and the operation itself switch on the
