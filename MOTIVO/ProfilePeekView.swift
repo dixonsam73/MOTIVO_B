@@ -45,6 +45,8 @@ struct ProfilePeekView: View {
     @Environment(\.managedObjectContext) private var ctx
     @EnvironmentObject var auth: AuthManager
 @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var blockList = BlockList.shared
+    @StateObject private var moderation = ModerationActions()
 
     @State private var revealSelfName = false
     @State private var showUnfollowConfirm = false
@@ -343,6 +345,7 @@ struct ProfilePeekView: View {
             .presentationDetents([.medium])
         }
 
+        .moderationAlerts(moderation)
         .alert("Follow request", isPresented: Binding(
             get: { followStore.followActionMessage != nil },
             set: { newValue in
@@ -360,6 +363,14 @@ struct ProfilePeekView: View {
     private var followActionRow: some View {
         let state = FollowStore.shared.state(for: ownerID)
         return HStack {
+            if blockList.isBlocked(ownerID) {
+                Button {
+                    blockList.unblock(ownerID)
+                } label: {
+                    FollowActionPill(title: "Unblock", isEnabled: true)
+                }
+                .buttonStyle(.plain)
+            } else {
             switch state {
             case .none:
                 Button {
@@ -378,8 +389,38 @@ struct ProfilePeekView: View {
                 }
                 .buttonStyle(.plain)
             }
+            }
             Spacer(minLength: 0)
+            moderationMenu
         }
+    }
+
+    private var moderationMenu: some View {
+        Menu {
+            Button {
+                moderation.report(ModerationReport(
+                    kind: .account,
+                    reportedUserID: ownerID,
+                    reportedDisplayName: directoryDisplayName,
+                    reporterUserID: viewerID))
+            } label: {
+                Label("Report", systemImage: "flag")
+            }
+            if !blockList.isBlocked(ownerID) {
+                Button(role: .destructive) {
+                    moderation.confirmBlock(userID: ownerID, displayName: directoryDisplayName)
+                } label: {
+                    Label("Block", systemImage: "hand.raised")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("More actions")
     }
 
     // MARK: Helpers

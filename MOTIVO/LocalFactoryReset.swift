@@ -76,6 +76,9 @@ enum LocalFactoryReset {
         }
         #endif
 
+        // The defaults wipe removed the block list; drop the in-memory copy too.
+        BlockList.shared.reloadFromDefaults()
+
         // Wipe local profile identity artifacts (UserDefaults profile.* keys + local avatar files).
         // We intentionally do not rely on a user id here; ProfileStore will purge any profile.* keys.
         ProfileStore.wipeLocalIdentityForFactoryReset(backendUserID: nil)

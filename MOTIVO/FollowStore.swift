@@ -310,6 +310,41 @@ public final class FollowStore: ObservableObject {
         return false
     }
 
+    /// C-104. Block: removes BOTH follow rows between me and `userID` and waits
+    /// for the server, so the caller learns whether access was really revoked.
+    /// Both deletes are attempted whatever the local sets say, because those can
+    /// be stale. A row that is already gone counts as removed.
+    public func severRelationships(with userID: String) async -> Bool {
+        let id = userID.lowercased()
+        guard isBackendHTTPActive else {
+            following.remove(id)
+            followers.remove(id)
+            requests.remove(id)
+            outgoingRequests.remove(id)
+            save()
+            return true
+        }
+        let ok = await Self.severRelationships(with: id, using: BackendEnvironment.shared.follow)
+        await refreshFromBackendIfPossible()
+        return ok
+    }
+
+    static func severRelationships(with id: String, using service: BackendFollowService) async -> Bool {
+        let mine = await service.unfollow(id)          // me → them (following or requested)
+        let theirs = await service.removeFollower(id)  // them → me (approved or requested)
+        return isRemoved(mine) && isRemoved(theirs)
+    }
+
+    private static func isRemoved(_ result: Result<Void, Error>) -> Bool {
+        switch result {
+        case .success:
+            return true
+        case .failure(let error):
+            if case FollowRelationshipError.notFound = error { return true }
+            return false
+        }
+    }
+
     @discardableResult
     public func unfollow(_ targetUserID: String) -> FollowState {
         if isBackendHTTPActive {

@@ -30,16 +30,19 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 
 ## B. Build (agent)
 
-- [ ] **A — Guideline 1.2, all four parts, proportionate.** See
+- [x] **A — Guideline 1.2, all four parts, proportionate.** Built 2026-09-22 (`MOTIVO/Moderation.swift`); needs device QA (§D). See
   [Apple Guideline 1.2](https://developer.apple.com/app-store/review/guidelines/#user-generated-content).
   - Filtering: a small objectionable-word filter on posts and comments.
-  - Report: an action on posts, comments and profiles. Reports go to S (email
-    or a table S checks).
-  - Block: removes the follow in both directions and stops new requests.
+  - Report: an action on posts, comments and profiles. Reports open a
+    prefilled email to support.
+  - Block (on this device): removes the follow in both directions, then hides
+    the person's requests, comments, posts and sends.
   - Published contact details: a support email in the app and on the web.
   - Process (S): act on reports promptly (App Review usually expects about 24
     hours; check the current wording). Hide content or suspend accounts from
     the Supabase dashboard. No moderation tooling.
+  - Contact: reports and Contact Support go to `support@etudes.app`. **S: make
+    sure that mailbox exists and you receive it** before submission.
   - Check whether App Review expects users to accept terms that forbid
     objectionable content. If so, add a one-time acceptance on joining Connected.
 - [ ] **A — Age implementation to match the legal decision.** Nothing to build if
@@ -98,3 +101,8 @@ the join.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code if the 18+ route is chosen.
 - Deprecation and warning sweeps.
+- Block is per device. "Reply to all commenters" still fans out server-side to
+  a blocked commenter. It's rare, and they can no longer see the post.
+- Test hygiene: 3–7 order-dependent "ownerless/signed-out" tests
+  (`P6I02…`, `P6I03…`, `JournalDeleteQueuedPublishTests`) fail in full-suite
+  runs at `5c77beb` and pass when run alone.

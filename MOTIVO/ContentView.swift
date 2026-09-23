@@ -792,6 +792,7 @@ fileprivate struct SessionsRootView: View {
 
     // Step 8C (backend preview): render backend-backed feed when Backend Preview mode is enabled
     @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
+    @ObservedObject private var blockList = BlockList.shared
     @ObservedObject private var commentPresence = CommentPresenceStore.shared
     @State private var isAwaitingFeedFetchStart: Bool = false
 
@@ -1120,7 +1121,10 @@ fileprivate struct SessionsRootView: View {
                             // Connected-mode remote posts (do not materialize into Core Data)
                             let remotePostsRaw: [BackendPost] = {
                                 guard useBackendFeed else { return [] }
-                                return (selectedScope == .mine) ? backendFeedStore.minePosts : backendFeedStore.allPosts
+                                let posts = (selectedScope == .mine) ? backendFeedStore.minePosts : backendFeedStore.allPosts
+                                // Guideline 1.2: a blocked account's posts are hidden at once,
+                                // before the next refresh drops them server-side.
+                                return posts.filter { !blockList.isBlocked($0.ownerUserID) }
                             }()
 
                             // Dedupe: if a backend post corresponds to a local session on this device, prefer the local row.

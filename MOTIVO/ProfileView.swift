@@ -1171,6 +1171,21 @@ private var sessionSetupSection: some View {
                      quietDivider()
                  }
 
+                 // Guideline 1.2: published contact details. The address is shown
+                 // so it is usable even without a mail app.
+                 if let supportURL = ModerationMail.supportURL {
+                     Link(destination: supportURL) {
+                         navigationRow(title: "Contact Support", value: Moderation.supportEmail)
+                     }
+                     .buttonStyle(.plain)
+                     .contentShape(Rectangle())
+                     .frame(minHeight: 44, alignment: .center)
+                     .font(Theme.Text.body)
+                     .overlay(alignment: .bottom) {
+                         quietDivider()
+                     }
+                 }
+
                  eraseAllEtudesDataButton
              }
              .cardSurface(padding: profileInnerCardPadding)
@@ -1249,6 +1264,21 @@ private var sessionSetupSection: some View {
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
                      quietDivider()
+                 }
+
+                 // Guideline 1.2: published contact details. The address is shown
+                 // so it is usable even without a mail app.
+                 if let supportURL = ModerationMail.supportURL {
+                     Link(destination: supportURL) {
+                         navigationRow(title: "Contact Support", value: Moderation.supportEmail)
+                     }
+                     .buttonStyle(.plain)
+                     .contentShape(Rectangle())
+                     .frame(minHeight: 44, alignment: .center)
+                     .font(Theme.Text.body)
+                     .overlay(alignment: .bottom) {
+                         quietDivider()
+                     }
                  }
 
                  Button {

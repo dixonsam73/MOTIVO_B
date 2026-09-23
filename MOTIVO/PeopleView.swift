@@ -76,6 +76,7 @@ import SwiftUI
 struct PeopleView: View {
 
     @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var blockList = BlockList.shared
     @ObservedObject private var unreadCommentsStore = UnreadCommentsStore.shared
 
 
@@ -128,6 +129,11 @@ struct PeopleView: View {
 
                 // Connections
                 connectionsSection
+
+                // Blocked accounts (only when there are any)
+                if !blockList.blocked.isEmpty {
+                    blockedSection
+                }
             }
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
@@ -157,6 +163,8 @@ struct PeopleView: View {
         .task {
             // In Backend Preview, this keeps requests/following fresh when opening People.
             await followStore.refreshFromBackendIfPossible()
+            // C-104: finish any block whose follow removal the server never confirmed.
+            await blockList.retryUnconfirmed()
         }
         .task {
             await unreadCommentsStore.refresh(force: true)
@@ -262,7 +270,9 @@ struct PeopleView: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Shared with you").sectionHeader()
 
-            ForEach(receivedAttachmentStore.items.sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { attachment in
+            ForEach(receivedAttachmentStore.items
+                .filter { !blockList.isBlocked($0.senderUserID) }
+                .sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { attachment in
                 let senderID = attachment.senderUserID.lowercased()
                 let acct = attachmentSenderDirectory[senderID]
 
@@ -294,7 +304,9 @@ struct PeopleView: View {
                 }
             }
 
-            ForEach(sharedWithYouStore.unreadShares.sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { share in
+            ForEach(sharedWithYouStore.unreadShares
+                .filter { !blockList.isBlocked($0.ownerUserID) }
+                .sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { share in
                 let acct = shareOwnerDirectory[share.ownerUserID]
 
                 PeopleUserRow(
@@ -436,7 +448,7 @@ struct PeopleView: View {
     private var incomingRequestIDs: [String] {
         Array(followStore.requests.subtracting(followStore.outgoingRequests))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+            .filter { !$0.isEmpty && !blockList.isBlocked($0) }
             .sorted()
     }
 
@@ -601,6 +613,48 @@ struct PeopleView: View {
         .cardSurface()
     }
 
+    private var blockedSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Blocked").sectionHeader()
+
+            ForEach(blockList.blocked.sorted(by: { $0.value.localizedCaseInsensitiveCompare($1.value) == .orderedAscending }), id: \.key) { entry in
+                HStack {
+                    Text(entry.value)
+                        .font(Theme.Text.body)
+                        .lineLimit(1)
+                    Spacer()
+                    // C-104: the server has not confirmed the follow removal yet.
+                    if blockList.isUnconfirmed(entry.key) {
+                        Button("Retry") {
+                            Task { await blockList.confirmRemoval(of: entry.key) }
+                        }
+                        .font(Theme.Text.meta.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Not finished. They may still see your shared sessions.")
+                    }
+                    Button("Unblock") {
+                        blockList.unblock(entry.key)
+                    }
+                    .font(Theme.Text.meta.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .buttonStyle(.plain)
+                }
+                .frame(minHeight: 44)
+            }
+
+            if !blockList.unconfirmed.isEmpty {
+                Text("Retry means blocking isn’t finished: we couldn’t remove them from your followers yet, so they may still see your shared sessions.")
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+
+            Text("Blocked accounts can’t see your shared sessions, and you won’t see their posts, comments or requests. Unblocking doesn’t restore a follow.")
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+        .cardSurface()
+    }
+
     // MARK: - Helpers
 
     private func performLookup() async {
@@ -618,8 +672,9 @@ struct PeopleView: View {
         let result = await AccountDirectoryService.shared.search(query: q)
         switch result {
         case .success(let rows):
-            searchResults = rows
-            searchError = rows.isEmpty ? "No results." : nil
+            let visible = rows.filter { !blockList.isBlocked($0.userID) }
+            searchResults = visible
+            searchError = visible.isEmpty ? "No results." : nil
         case .failure(let error):
             // B-37. A budget refusal and a fault are DIFFERENT outcomes and must
             // not share copy: an empty list reading as "nobody matched" is a

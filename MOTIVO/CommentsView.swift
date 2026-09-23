@@ -45,6 +45,8 @@ public enum CommentsViewMode: Equatable {
 
 public struct CommentsView: View {
     @ObservedObject private var store = CommentsStore.shared
+    @ObservedObject private var blockList = BlockList.shared
+    @StateObject private var moderation = ModerationActions()
     @StateObject private var backendStore: BackendCommentsStore
     @State private var draft: String = ""
     @FocusState private var composerFocused: Bool
@@ -497,6 +499,7 @@ public struct CommentsView: View {
                 .scrollContentBackground(.hidden)
         }
         .appBackground()
+        .moderationAlerts(moderation)
     }
     
     @ViewBuilder
@@ -606,7 +609,10 @@ return AnyView(
             )
             
         case .connectedPost(let pid, let ownerUserID, let viewerUserID, _):
-            let sorted = backendStore.comments.sorted(by: { $0.createdAt < $1.createdAt })
+            // Guideline 1.2: never show a blocked account's comments.
+            let sorted = backendStore.comments
+                .filter { !blockList.isBlocked($0.authorUserID) }
+                .sorted(by: { $0.createdAt < $1.createdAt })
             let isOwnerViewer = (viewerUserID == ownerUserID)
             let rows: [BackendPostComment] = {
                 if isOwnerViewer {
@@ -1188,6 +1194,27 @@ private func commentRowBackend(row: BackendPostComment, postID: UUID, ownerUserI
         .padding(.vertical, Theme.Spacing.s)
         .accessibilityElement(children: .combine)
         .accessibilityHint("Comment")
+        .contextMenu {
+            if !authorID.isEmpty && authorID != viewerUserID.lowercased() {
+                Button {
+                    moderation.report(ModerationReport(
+                        kind: .comment,
+                        reportedUserID: authorID,
+                        reportedDisplayName: dir?.displayName,
+                        reporterUserID: viewerUserID,
+                        postID: postID,
+                        commentID: row.id,
+                        excerpt: row.body))
+                } label: {
+                    Label("Report Comment", systemImage: "flag")
+                }
+                Button(role: .destructive) {
+                    moderation.confirmBlock(userID: authorID, displayName: dir?.displayName)
+                } label: {
+                    Label("Block", systemImage: "hand.raised")
+                }
+            }
+        }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             // Delete allowed if viewer is owner or author (enforced by RLS; fail-closed UI).
             let canDelete = (!viewerUserID.isEmpty && (viewerUserID == ownerUserID || viewerUserID == authorID))
@@ -1592,6 +1619,12 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
 
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        // Guideline 1.2: comments are always read by someone else.
+        guard SharedTextFilter.isAllowed(trimmed) else {
+            moderation.messageTitle = "Couldn’t Post"
+            moderation.message = "This contains language that can’t be posted. Please edit it and try again."
+            return
+        }
         
         let ownerID = ownerUserIDForSession()
         let viewerID = viewerUserID()

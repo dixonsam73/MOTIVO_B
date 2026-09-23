@@ -1962,6 +1962,13 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
     /// chooses. No other access changed.
     func save() {
         if isThoughtMode && !canSaveThought { return }
+        // Guideline 1.2: shared text is read by other members. Private text is never checked.
+        if SharedTextFilter.refusesSave(sharingAvailable: appModeManager.canShareWithFollowers,
+                                       isShared: isPublic,
+                                       texts: [activityDetail, areNotesPrivate_edit ? nil : notes]) {
+            attachmentSaveErrorMessage = SharedTextFilter.refusalMessage
+            return
+        }
         let shouldGeneratePracticeInsight = (session == nil && isThoughtMode == false)
         // P6-I-01 — THE ATTEMPT BOUNDARY OPENS HERE, BEFORE THE FIRST MUTATION,
         // so it covers the session insert or edit, every scalar write, the

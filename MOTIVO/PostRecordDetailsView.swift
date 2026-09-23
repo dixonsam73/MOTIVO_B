@@ -1848,6 +1848,13 @@ var body: some View {
     /// saved, otherwise what happened to its sharing choice (`.saved` when none
     /// was made). The callback and the dismissal are the caller's, via the gate.
     private func saveToCoreData(visibility: Bool) -> SharingChoiceSaveResult? {
+        // Guideline 1.2: shared text is read by other members. Private text is never checked.
+        if SharedTextFilter.refusesSave(sharingAvailable: appModeManager.canShareWithFollowers,
+                                       isShared: visibility,
+                                       texts: [activityDetail, areNotesPrivate ? nil : notes]) {
+            attachmentSaveErrorMessage = SharedTextFilter.refusalMessage
+            return nil
+        }
         // P6-I-01 — THE ATTEMPT BOUNDARY OPENS HERE, BEFORE THE FIRST MUTATION.
         //
         // It must precede `Session(context:)` below: a group opened later cannot

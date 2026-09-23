@@ -78,6 +78,8 @@ struct BackendSessionDetailView: View {
 
     @ObservedObject private var commentsStore = CommentsStore.shared
     @ObservedObject private var commentPresence = CommentPresenceStore.shared
+    @StateObject private var moderation = ModerationActions()
+    @Environment(\.dismiss) private var dismiss
 
     // Phase 14 directory (display-name only; no avatar until Phase 15)
     @State private var directoryAccount: DirectoryAccount? = nil
@@ -291,6 +293,7 @@ struct BackendSessionDetailView: View {
                 canShare: false
             )
         }
+        .moderationAlerts(moderation, onBlocked: { dismiss() })
         .appBackground()
         .onDisappear {
             resetViewerState()
@@ -928,6 +931,35 @@ struct BackendSessionDetailView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open comments")
+
+            if !viewerIsOwner {
+                Menu {
+                    Button {
+                        moderation.report(ModerationReport(
+                            kind: .post,
+                            reportedUserID: ownerUserID,
+                            reportedDisplayName: directoryAccount?.displayName,
+                            reporterUserID: effectiveViewerUserID,
+                            postID: model.id,
+                            excerpt: [headerTitle, model.notes ?? ""]
+                                .filter { !$0.isEmpty }.joined(separator: " — ")))
+                    } label: {
+                        Label("Report Post", systemImage: "flag")
+                    }
+                    Button(role: .destructive) {
+                        moderation.confirmBlock(userID: ownerUserID, displayName: directoryAccount?.displayName)
+                    } label: {
+                        Label("Block", systemImage: "hand.raised")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("More actions")
+            }
 
             if viewerIsOwner {
                 ShareLink(item: shareText()) {
