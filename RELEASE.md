@@ -66,8 +66,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   stays tied to the commit.
 - [x] **A — Privacy Policy and Terms of Use links in the app** (Apple 5.1.1,
   3.1.2): Profile's Account card and the membership screen, pointing at
-  `etudes.app/privacy` and `etudes.app/terms`. They work once those pages are
-  live. Also add both URLs in App Store Connect.
+  `etudes.app/privacy` and `etudes.app/terms`. Device-checked 2026-09-23. They
+  work once those pages are live. Also add both URLs in App Store Connect.
 - [x] **A — Code coverage in Release.** Not an issue: an Archive has no coverage
   instrumentation. Only plain `xcodebuild build` runs added it.
 - [ ] **A — Any copy changes** from the legal decision and the 1.2 work (About,
@@ -89,7 +89,14 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   week of inactivity, so open the app now and then during beta. Upgrade to Pro
   (about $25/month, daily backups kept 7 days, spend cap on) on launch day.
 - [ ] `etudes.app/terms` published, holding your terms including the safety
-  section. The app links to it, and to `/privacy`.
+  section. The app links to it, and to `/privacy`. Full Terms of Use drafted
+  2026-09-23 (Desktop), including the safety section and relying on Apple's
+  standard EULA for the app licence. Until published, holding pages at both
+  addresses are fine for test builds.
+- [ ] **Launch-day privacy policy check:** re-read it against the launch
+  build. Finalise the provisional age row for the adult-only gate, set the
+  "Last updated" date, and confirm nothing else has changed. The Supabase
+  upgrade to Pro needs no change (backups are worded "up to 7 days").
 - [ ] **Then** publish the ASC privacy labels. Nine types are entered and saved;
   mapping in `docs/app-store-privacy-disclosures.md`. Policy first, labels
   second.
