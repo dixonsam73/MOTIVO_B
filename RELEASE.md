@@ -8,10 +8,10 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] **S — Online safety paperwork.** Drafted 2026-09-23 (Desktop): risk
   assessment v2, online safety policy, Terms of Use, privacy policy, and the
   legitimate-interests assessment. Remaining: send the solicitor pack; confirm
-  the risk ratings; approve and date each document; turn on the support
-  auto-reply; **register SD Songs Limited on the NCA's CSEA Industry Reporting
-  Portal**. Done: takedown and suspension tests passed 2026-09-23 (commands in
-  `supabase/README.md`).
+  the risk ratings; approve and date each document; **register SD Songs
+  Limited on the NCA's CSEA Industry Reporting Portal**. Done: takedown and
+  suspension tests passed, and the support auto-reply is live (both
+  2026-09-23; commands in `supabase/README.md`).
 - [ ] **S — Adult-access adequacy: one hour with a UK online-safety/privacy
   solicitor.** Connected launches 18+ only (settled). The question: is Apple's
   Declared Age Range (including the confirmed adult signal on iOS 26.5)
