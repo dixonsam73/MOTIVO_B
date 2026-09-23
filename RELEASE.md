@@ -93,8 +93,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] `etudes.app/terms` published, holding your terms including the safety
   section. The app links to it, and to `/privacy`. Full Terms of Use drafted
   2026-09-23 (Desktop), including the safety section and relying on Apple's
-  standard EULA for the app licence. Until published, holding pages at both
-  addresses are fine for test builds.
+  standard EULA for the app licence. Holding pages live at both addresses
+  (checked 2026-09-23); replace them with the final text before App Review.
 - [ ] **Launch-day privacy policy check:** re-read it against the launch
   build. Finalise the provisional age row for the adult-only gate, set the
   "Last updated" date, and confirm nothing else has changed. The Supabase
