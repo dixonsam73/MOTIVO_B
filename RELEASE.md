@@ -21,14 +21,17 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   legal packet. An "18+" line in the terms does not by itself settle it.
 - [ ] **S — Fallback.** If the legal answer stalls, would you ship Solo first and
   add Connected in an update? (Solo has no user-to-user content.)
-- [ ] **S — Sharing withdrawal guarantee.** Is "once withdrawn, no earlier
-  in-flight request can bring a post back" a product promise? Recommendation:
-  **no** for launch. Accept the rare late-commit race as a known limitation with
-  honest wording (option S1-X), and don't build S1-Y/S1-Z. Background:
-  `docs/phase-6-sharing-repairs-scope-2026-09-22.md`.
-- [ ] **S — C-97 / C-99** (video capture route/interruption handling; concurrent
-  `StagingStore` writes). Accept as known limitations for launch unless they
-  appear in final QA? Recommendation: accept.
+- [x] **S — Sharing withdrawal guarantee: accepted as a known limitation**
+  (2026-09-23). Not a product promise. In rare cases a share that reaches the
+  server after a withdrawal can bring a post back for followers. The owner's
+  own feed keeps showing it as unshared, so they wouldn't notice. Any later
+  save with Share off sends a fresh withdrawal and removes it. S1-Y/S1-Z are
+  not built. Background: `docs/phase-6-sharing-repairs-scope-2026-09-22.md`.
+- [x] **S — C-97 / C-99 accepted as known limitations** (2026-09-23). C-97: rare
+  wrong or missing audio in video if an external mic drops or iOS resets
+  audio mid-take (interruption handling itself is fixed and device-tested).
+  C-99: a very fast burst of attachments could in theory lose track of one
+  before saving. Revisit only if seen in testing.
 
 ## B. Build (agent)
 
