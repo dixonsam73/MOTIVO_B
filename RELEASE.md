@@ -82,8 +82,9 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] Privacy policy published at `etudes.app/privacy`. Drafted 2026-09-23
   (Desktop). Its backup line ("up to 7 days") is true on Free and Pro. Before
   publishing: confirm the provisional age row once the adult-only gate exists, add
-  the date, then publish. Keep a short internal legitimate-interests assessment
-  (LIA) alongside it, for the safety, age-check and support uses.
+  the date, then publish. The internal legitimate-interests assessment (LIA)
+  for the safety, age-check and support uses was drafted 2026-09-23 (Desktop).
+  Approve it alongside the policy.
 - [ ] **Supabase: Free through beta, Pro at launch** (decided 2026-09-23). Free
   has no backups, 1 GB file storage, 5 GB/month downloads, and pauses after a
   week of inactivity, so open the app now and then during beta. Upgrade to Pro
