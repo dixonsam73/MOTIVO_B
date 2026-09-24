@@ -8,14 +8,14 @@ change. Reopening one requires genuine new evidence, not a preferred design.
 **Product principles** — guide judgement where the answer isn't obvious. Stable
 in direction, but applied case by case.
 
-**Designed future work** (Threads, Playback rate) — the design is agreed; the
-implementation and timing may still evolve. Treat the reasoning as binding and
+**Designed future work** (iPad and private sync, Threads, Playback rate) — the
+design is agreed; the implementation and timing may still evolve. Treat the reasoning as binding and
 the details as revisable.
 
 ---
 
 Four domains. The boundaries are permanent; the engine for Domain 2 is deferred
-to M14.
+to M14, which ships with the iPad release (M13).
 
 Governing test: **if nobody else can see it, it does not belong on Supabase.**
 
@@ -34,15 +34,25 @@ account, no network and no membership.
 
 **On membership expiry:** untouched. Permanently. The strongest invariant.
 
-**Roadmap:** M14 will sync this domain. Decisions taken early so it is not
-foreclosed — per-record modification timestamps, a sync-tolerant shape for the
-Scores library, stable attachment identity rather than path-as-identity.
+**Roadmap:** M14 will sync this domain. The foundation it needs (Scores and
+the other UserDefaults-held library data in Core Data, stable asset identity
+instead of absolute paths, visibility independent of identity) ships first as an
+iPhone update. See *iPad and private sync* below.
+
+**Visibility is not identity.** Which records appear in the journal must not
+depend on Connected sign-in, the Apple subject, subscription state or install
+ID. Today it does: Solo sessions are ownerless, custom instruments and
+activities carry a per-install `local:<UUID>`, and Connected sign-in re-owns
+ownerless sessions (`adoptOwnerlessLocalSessionsIfNeeded`). Stage 1 removes
+owner filtering from the local library and stops the re-owning.
 
 ---
 
 ## Domain 2 — Personal cloud (future optional iCloud sync, M14)
 
-**Contains:** a user-controlled mirror of Domain 1, opt-in.
+**Contains:** a mirror of Domain 1 in the user's private iCloud database, on
+by default, media included. Device-local state stays out of it (see
+*iPad and private sync*, below).
 
 **Why:** continuity across the user's own devices. Not a sharing mechanism.
 
@@ -52,8 +62,9 @@ Scores library, stable attachment identity rather than path-as-identity.
 **On membership expiry:** entirely unaffected. No relationship to Connected. A
 user who never pays can use it. Durability is never gated on monetisation.
 
-**Roadmap:** M14, after M13. iPad creates the need for multi-device continuity;
-sync satisfies it.
+**Roadmap:** M14 is released together with M13 (iPad). iPhone and iPad must
+present one coherent journal from the first public iPad release; a
+separate-device journal is not an acceptable product.
 
 **Durability model — three layers, not one. Settled in Phase 2.**
 
@@ -111,7 +122,7 @@ lifecycle policies; see the Phase 3 retention matrix in `CLAUDE.md`.
 | Comments on others' posts | **Retained** — part of someone else's history | Deleted (`author_user_id` alone) |
 | Attachments sent to others | **Retained** while live recipient references exist | Deleted |
 | Comments by others, merely addressed to them | Retained | Retained (B-19) |
-| All local data | Untouched | Erased, because the user asked |
+| All local data | Untouched | **Target (Stage 1): untouched**, with deleting the private journal offered as a separate optional step. **Today:** the single "Delete Account & All Études Data" action erases the device, because after sign-out the journal filters would hide sessions re-owned to the deleted identity |
 
 **Two rows are new rather than changed**, and they were always implied by the
 others: the identity must survive expiry, because the table already retained
@@ -245,9 +256,15 @@ Apple's backup daemon copies** — only QA F1/F2 settle that.
 `Session.threadLabel` is a free-text string. A thread exists exactly as long as
 some session carries that string; `ThreadPickerView` offers previously-used
 labels as suggestions. There is no Thread record, no identity, no lifecycle.
-Thoughts are Sessions, so they already carry `threadLabel` structurally — which
-means manuscript pages, if they land as Thoughts in M13, inherit thread
-membership at no cost.
+Thoughts are Sessions, so they already carry `threadLabel` structurally.
+Handwritten pages do **not** land as Thoughts: they are Sketches, a separate
+object (see *iPad and private sync*).
+
+**Not part of the iPad/sync release.** A thread string on a Session syncs
+without a reconciliation problem, because it is just an attribute of a synced
+record. Colour no longer needs an entity either: it is derived
+deterministically from the normalised name (see *iPad and private sync*). The
+entity conversion below waits until rename/merge is actually built.
 
 ## Why Threads become first-class entities
 
@@ -261,12 +278,12 @@ and getting it right. Referential consistency remains a meaningful secondary
 benefit: one identity, one rename, one colour and one relationship rather than
 duplicated strings spread across multiple domains.
 
-**Secondary:** Scores, manuscript Thoughts and eventually Task Sets would all
+**Secondary:** Scores, Sketches and eventually Task Sets would all
 reference the same thread. Each holding its own copy of a string makes rename
 an N-way update and lets a typo silently fork one thread into two.
 
-**Latent benefit:** the tint system already resolves colour by thread. With an
-entity, thread colour could be chosen rather than derived.
+**Latent benefit:** with an entity, thread colour could be chosen rather than
+derived. Until then colour is a deterministic function of the normalised name.
 
 ## Design principle
 
@@ -353,7 +370,7 @@ session finishes and `PostRecordDetailsView` opens, that Thread is already
 selected.
 
 The interaction itself is the contract. The underlying model may evolve from a
-string to a Thread entity with Scores, manuscript pages, Task Sets and resume
+string to a Thread entity with Scores, Sketches, Task Sets and resume
 state, but none of those architectural changes should be visible to the
 musician. The implementation changes; the feeling of the interaction does not.
 
@@ -410,12 +427,314 @@ derived. Note that Tasks are currently per-session plus reusable saved sets with
 no thread dimension — this is the only item in the convergence picture that adds
 a relationship rather than reading one that already exists.
 
-## Why M13
+## Timing
 
-Entity conversion, manuscript-pages-as-Thoughts and the sync groundwork are one
-coherent piece of foundation work rather than three. Together they mean one
-migration, one set of lifecycle decisions, and M14 inheriting a model designed
-to sync rather than adapted to it.
+Originally bundled into M13 with manuscript-pages-as-Thoughts and the sync
+groundwork. That bundle is superseded: sync groundwork is Stage 1 of the
+iPad/sync plan, manuscript pages are Sketches, and the entity conversion is not
+needed for sync. Scores ↔ Threads can use a normalised thread string on the
+Score, per *Sequencing* above.
+
+---
+
+# iPad and private sync — agreed plan (M13 + M14)
+
+**Status: design agreed 2026-09-24 (Samuel, with Claude and Codex reviews).
+Not started, and no iPad work before the iPhone release.** The object model,
+sequencing and product decisions below are settled. The CloudKit media route
+is preferred, but it's conditional on the Stage 0 proof.
+
+## Principle
+
+On iPhone, Études is in your pocket and is mostly about starting and capturing
+a session. **On iPad it sits on the music stand:** the score is often the main
+thing on screen and the app recedes around it. The iPad gets its value from
+making existing Études concepts better for real musical work, not from new
+product categories.
+
+**Out of scope:** notation editing or recognition, playback of notation, a DAW,
+repertoire management, generic productivity features, and new social features.
+
+## Navigation
+
+- **Wide windows:** a sidebar with **Practice · Journal · Scores · Insights ·
+  Feed**, and Settings/Profile at the foot. Profile stops being an overlay.
+- **Narrow windows** (Split View, Slide Over, narrow Stage Manager): fall back
+  to today's iPhone layout (the `appRoute` switch).
+- **Opening the app** goes straight to Practice.
+- **Scores** is a top-level area and contains a **Sketches** section.
+- **People is not a top-level destination.** It is reached from a Feed toolbar
+  button, profiles and search. The request badge moves onto the Feed item.
+- **Journal:** a list with the selected session shown beside it. Filters move
+  into the toolbar or list header. When nothing is selected, the summary is
+  shown. No inspectors or extra hierarchy.
+- **Connected on iPad works fully at launch:** comments sit beside the post
+  rather than in a sheet, profile peeks become popovers, and it uses native
+  iPad presentation. It is adapted, not redesigned.
+
+## Practice
+
+- **The score is the page and the practice controls sit over it.** This
+  reverses today's arrangement, where `PDFScoreView` is a full-screen cover
+  over the timer.
+- **Two layouts, chosen by available width** (not orientation, and there is no
+  mode switch):
+  - **Music stand:** the score dominates, with a minimal controls bar showing
+    elapsed time, thread or piece, record, thought/sketch, metronome, tuner,
+    add attachment and end session.
+  - **Workspace:** the score, with Sketch, Thought or session tools beside it.
+- **Bluetooth page turners** are in v1. Pedals send arrow or page keys to the
+  existing single-page `PDFView`. Keyboard shortcuts come last.
+- **`PracticeSessionController`** is a narrow extraction from
+  `PracticeTimerView`. It covers start, pause and resume; elapsed time; the
+  active draft; recovery; staged attachment references; task state; which
+  scores and pages were used; staging of ink and Sketch links; finish to
+  review; and confirmed discard. Views keep layout, sheets, animation and the
+  iPhone-vs-iPad presentation. This is not a rewrite of the audio or video
+  recorders. It passes only if the T1–T7 behaviours in the QA plan feel the
+  same.
+
+## Apple Pencil: rules
+
+- **Markup mode.** Scores are read-only until Markup is entered, by a Pencil
+  tap or a Markup button. A finger always turns pages; only the Pencil draws.
+  Leaving Markup asks **Save / Don't Save / Cancel**. The Sketch editor works
+  the same way.
+- **Only explicit saves persist.** Creative edits don't survive just because a
+  session was running. Each Save creates a new immutable revision and advances
+  the live layer.
+- **Editable present plus immutable history.** The live layer stays fully
+  editable: new ink adds to what's there, and marks from earlier sessions can
+  be erased. A session's snapshot keeps the **full** state of the page at its
+  last save in that session, not just the strokes added.
+- **Snapshots are written only when the session is committed.** Each page
+  saved during the session gets one snapshot, pointing at its last saved
+  revision. A save made outside any session creates no snapshot.
+- **Discarding a session** drops its staged snapshots and Sketch links. Saved
+  Score ink and saved Sketches remain. The timer never owns creative work.
+- **Crash recovery.** If the app crashes or is killed mid-edit, the unsaved ink
+  is kept on the device only and offered back as "Restore unsaved markings?". A
+  crash is not a decision to discard.
+- **iPhone in the first iPad release** shows ink and Sketches read-only. There
+  is no iPhone editing in v1.
+- **Sketch paper in v1** is manuscript/staff or blank only. No tablature, chord
+  grids or instrument templates.
+- **Nothing is flattened into a PDF** and the source PDF is never modified.
+  Associating a Sketch with a Score does not insert pages into its PDF.
+
+## Object model
+
+All of this lives in Core Data. The **Cloud** configuration syncs through
+`NSPersistentCloudKitContainer`; the **Local** configuration never syncs.
+Relationships cannot cross the two stores, so local records refer to cloud
+records by UUID.
+
+| Entity | Store | Notes |
+|---|---|---|
+| Session | Cloud | Existing entity. Gains explicit `kind` (practice or thought), which replaces the `isThought` guess. `isPublic` stays as sharing *intent*. `ownerUserID` is kept for reconciliation only. `sharingHandoff` moves to the Local store. |
+| Attachment | Cloud | Belongs to one Session and points at an Asset instead of an absolute `fileURL`. Titles, `includeInShare` and cover choice move onto it from UserDefaults and `AttachmentPrivacy.json`. |
+| Asset | Cloud | Metadata for immutable bytes: ID, kind, size, SHA-256, content type. Trimming creates a new Asset. |
+| Score | Cloud | Existing UUID kept. `libraryState` (in library / removed), `pdfAsset`, title, favourite, dates, resume page, cover page, optional primary thread (a normalised string). |
+| SessionScore | Cloud | Session ↔ Score, with selected pages and used pages. Replaces the score-use Attachment rows and `pdfSelectedPages_v1`. |
+| Sketch | Cloud | `libraryState`, template (manuscript or blank), optional title, optional `score` (the piece it is filed with). |
+| InkPage | Cloud | One drawable surface: a Score page (tied to the PDF asset it was drawn on) or a Sketch page. Holds geometry and `currentRevision`. |
+| InkRevision | Cloud | Immutable drawing data, one per Save. Revisions that nothing references are garbage-collected. |
+| InkSnapshot | Cloud | Session + InkPage → InkRevision. Immutable. |
+| SessionSketch | Cloud | Session or Thought ↔ Sketch, with a role (created, edited or attached). |
+| Lists, ensembles, favourites | Cloud | Move from UserDefaults to entities. |
+| Instrument, UserActivity, UserInstrument, Tag, Profile | Cloud | Given CloudKit-safe defaults. Tag's uniqueness constraint is replaced by de-duplication. Seeded rows get deterministic IDs (UUIDv5 of the normalised name) and Profile a fixed ID. |
+| AssetCache | Local | Asset ID, relative path, and state (pending upload, uploaded, downloading, available, evicted), plus the last error. |
+| Sharing handoff, publication mappings, publish queue | Local | Device-specific, as today. |
+| Migration ledger, quarantine, unsaved-ink recovery | Local | |
+
+**Two concurrent saves** (two iPads, before sync catches up): each creates a
+revision, and the most recent save becomes current. Any snapshot keeps the
+other one. This is accepted for v1.
+
+## Scores, Sketches and history
+
+- **One Sketch, several contexts, never duplicated.** Where a Sketch *lives*
+  (`Sketch.score`, or on its own in the Sketches section) is separate from
+  where it *appeared in history* (`SessionSketch`).
+- **A Thought is a Session**, so "add to Thoughts" creates a Session of kind
+  `thought` with a `SessionSketch` link. The Sketch itself is not copied.
+- **The save sheet** offers **This session · Current score · Add to Thoughts**.
+  In a session that uses a score, the first two are selected by default. None
+  is required, because a Sketch can stand alone.
+- **Linking a Sketch to a session or Thought** pins its saved state at that
+  moment. The journal entry shows that state and offers "Open current version".
+- **Example: Monday and Thursday.** On Monday a Sketch is saved to the session
+  and the score. On Thursday it is opened from the score, developed and saved,
+  and Thursday's session gets its own link and snapshot.
+- **Deletion when past sessions reference the object.** The confirmation says
+  how many sessions reference it and offers:
+  - **Remove from library, keep history** (the default). `libraryState`
+    becomes removed; the PDF asset, ink and snapshots are kept; history still
+    renders; and "Add back to library" is available from the session. Removed
+    items still use iCloud storage.
+  - **Delete everywhere, including history.** Removes the object, its
+    SessionScore or SessionSketch rows, ink, snapshots and asset. The sessions
+    themselves remain.
+- **Deletion when nothing references the object** is a normal delete.
+
+## Colours
+
+- **Thread, instrument and activity colours** are deterministic, and the
+  UserDefaults slot maps are no longer used.
+- **Hash:** 64-bit FNV-1a over the same normalised name used for thread
+  matching, with a salt per domain. Never Swift `hashValue`, which is seeded
+  randomly on every launch.
+- **Palette:** about 18 muted tones spread evenly in a perceptual colour space.
+  Lightness and saturation match the slate/green identity, with separate light
+  and dark variants. Current tint colours are reused where they fit, and the
+  palette stays clear of the destructive red and the thought-paper fill.
+- **Collisions** remain possible and are accepted, because a name always
+  appears beside its colour. A one-time colour change for existing users is
+  accepted.
+
+## Sync and media
+
+- **Records:** `NSPersistentCloudKitContainer`, private database, with history
+  tracking on.
+- **Bytes** (Score PDFs, audio, video, images): a separate app-owned zone,
+  with one `CKAsset` record per Asset ID.
+  - **Upload** goes through a durable local queue that survives relaunch.
+  - **Download** is by record ID, on demand. Scores and recent items are
+    fetched ahead of time.
+  - Assets are immutable and referenced from synced records, so the asset zone
+    needs no change feed.
+  - Assets are deleted only as a result of an explicit user deletion. There is
+    no automatic orphan sweep in v1.
+- **Media is app-managed Études content**, not Files documents. iCloud Drive is
+  not used.
+- **Media syncs by default.** There is no silent compression or degradation to
+  make sync succeed.
+  - Each item shows one of: In iCloud, Uploading, **Not in iCloud** (storage
+    full or upload failed, with retry), Downloading, Available.
+  - The original stays on the device until its upload is confirmed.
+- **Clearing downloaded media** only evicts bytes whose upload is confirmed.
+  It never touches records.
+- **Switching iCloud accounts** stops sync and holds local data unsynced. One
+  account's journal is never uploaded into another account.
+- **Without an iCloud account** the journal works locally, and it shows
+  plainly that it isn't syncing. Solo needs no account.
+- **Device backup is unchanged and still the baseline.** Sync is not backup,
+  because deletions sync too.
+
+**What stays local:**
+- live timer, draft and staging state (a session in progress belongs to one
+  device)
+- the publish queue, sharing handoff and publication mappings
+- Connected caches (comments, feed, follows and received attachments are
+  refetched)
+- Keychain tokens (sign in to Connected on each device)
+- per-device display preferences
+- unsaved ink
+- the migration ledger
+
+## Connected isolation
+
+- **Publishing commands are created only by the code handling the user's own
+  action** on that device, never by watching Core Data changes. Changes
+  imported by sync are tagged with the importer's author, and every observer
+  that could reach Connected ignores them.
+- **Sync can never cause** publishing, re-publishing, directory or profile
+  writes, or any other backend effect.
+- **Signing in to Connected** no longer re-owns journal entries. Publication
+  identifiers stay in the Connected domain.
+- **A device not signed in to Connected** can't update a shared post. Its
+  edits save to the journal, and it says "sign in to Connected on this device
+  to update the shared post".
+- **Connected media limits** are unchanged by sync. There is a 50 MiB published
+  limit per file, enforced server-side (B-45). Oversized files are trimmed,
+  replaced or kept private. Any future publishing compression creates a
+  separate derivative and never replaces the private original.
+
+## Destructive and ending actions
+
+Five separate behaviours, never combined into one confirmation. Every
+confirmation states what happens to this device, iCloud, other devices and
+Connected data.
+
+| Action | This device | iCloud | Other devices | Connected/public |
+|---|---|---|---|---|
+| Subscription ends | unchanged | unchanged | unchanged | visibility and expiry rules only |
+| Delete Connected account | journal kept; Connected tokens, caches, queue and mappings cleared; returns to Solo | unchanged | journal unchanged | backend deletion as in the Domain 3 table |
+| Clear downloaded media | uploaded bytes evicted; records kept | unchanged | unchanged | unchanged |
+| Remove from this device | sync stopped, then local wipe (blocked or explicitly warned if anything is Not in iCloud) | unchanged | unchanged | unchanged |
+| Delete my journal everywhere | wiped | both zones deleted | wiped on next contact; never re-uploaded | separate; not implied |
+
+- **Settings offers both** Remove from this device and Delete my journal
+  everywhere.
+- **The Connected deletion flow** ends with a clearly separate, optional
+  "Also delete your private journal?" step. Before sync exists, that step is a
+  local wipe.
+- **`LocalFactoryReset` becomes the local wipe only.** "Delete everywhere" is
+  its own path. The `CLAUDE.md` invariant about its callers is rewritten when
+  Stage 1 lands.
+
+## Migration and first sync
+
+- **Restartable and idempotent**, with a step ledger in the Local store. Old
+  sources (UserDefaults keys and JSON files) stay read-only until a validation
+  pass succeeds (counts, hashes, files present). A copy of the store is kept
+  until then.
+- **Missing or unreadable content** becomes an explicit missing state, never an
+  empty library.
+- **Ownership triage:**
+  - Records with no owner, and records owned by the currently valid Connected
+    identity, join the journal.
+  - Records owned by identities the backend confirms were deleted are treated
+    as dead and join too, with no user-visible ownership state.
+  - Only a genuinely conflicting **surviving** identity is quarantined: kept
+    local-only, never synced, merged or deleted. There is no reconciliation UI
+    in v1 unless testing shows it happens.
+- **A locally empty device is not evidence that there's no journal.**
+  Onboarding asks CloudKit whether the journal zone exists and, if it does,
+  waits for the import ("Bringing in your journal…") without seeding anything.
+  Seeding is effectively irreversible, so it needs server evidence (invariant
+  3).
+- **Deterministic seeded IDs plus a de-duplication pass** handle devices that
+  already have a library, including iPads that ran the iPhone app in
+  compatibility mode.
+
+## Sequencing
+
+0. **Architecture proof.** A disposable CloudKit container on two devices. The
+   test covers:
+   - iCloud account scope and switching accounts
+   - multi-GB video against Apple's size limits (and whether files need
+     splitting into chunks)
+   - uploads in the background and after the app is killed
+   - iCloud storage full, rate limiting, cellular and Low Data Mode
+   - first import and seeding
+   - delete-everywhere while another device is offline
+   - concurrent ink revisions
+   - Connected isolation
+
+   The ink and Sketch record types are included, because the production
+   CloudKit schema only accepts additions once deployed. Nothing reaches
+   production.
+1. **iPhone data foundation**, a public update with no new features:
+   - explicit `kind`
+   - Score, SessionScore and Asset
+   - library data moved out of UserDefaults and JSON files
+   - identity-independent visibility and ownership triage
+   - the Connected-deletion split
+   - deterministic colours
+   - Sketch and ink entities in the model, with no UI yet
+
+   Full rigour and a Codex review. It ships early on purpose, so the migration
+   settles before anything depends on it.
+2. **Practice controller**, as an iPhone update with identical behaviour.
+3. **Sync**, internal and TestFlight only: the complete model, including ink
+   written by an internal iPad build.
+4. **The iPad release, with sync going public:**
+   - adaptive shell, top-level Scores and Sketches, score-first Practice
+   - page turners and Journal list/detail
+   - Markup, Sketches and snapshots, and read-only viewing on iPhone
+5. **Connected adaptations, in the same release:** comments beside posts,
+   People from Feed, popovers, then keyboard shortcuts.
 
 ---
 
@@ -540,6 +859,6 @@ priority order:
 session lifecycle callable from outside `PracticeTimerView`. Note that timer
 *state* is already externalised (`TimerDefaultsKey` in UserDefaults,
 `TimerStateRecovery`, `PracticeTimerStore`), so the extraction may be smaller
-than it appears — or unnecessary. Let the first real consumer prove what shape
-the seam needs rather than designing it in advance. If both are on the horizon,
-letting M13 iPad drive it produces a better-shaped seam than a Shortcut would.
+than it appears — or unnecessary. **The iPad is now the first consumer:** Stage 2
+of the iPad/sync plan extracts a narrow `PracticeSessionController`, which these
+entry points should reuse rather than define their own.

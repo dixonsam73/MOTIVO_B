@@ -53,6 +53,12 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] **A — Adult-only gate for Connected**, replacing the 13–17 pathway, using
   whatever mechanism the legal answer says is adequate. Then finalise the
   provisional grooming rating in the risk assessment.
+- [ ] **A — Align the server upload limit to 50 MiB (B-45).** Decided
+  2026-09-24: 50 MiB per file at launch. Oversized files can't be published
+  (trim, replace or keep private); no automatic video compression in v1. Set
+  the `attachments` bucket's `file_size_limit` from 150 MiB to 52428800, as a
+  migration plus a guarded production statement. Production database change,
+  so one Codex review round.
 - [ ] **A — R1-a:** don't acknowledge an unsent simulated withdrawal
   (`SessionSyncQueue.swift`, client-only, small). Cheap insurance, not a
   blocker.
@@ -133,7 +139,7 @@ the join.
 - G7: first real expiry cleanup, earliest 2026-11-01, happens on its own.
 - Gate 6 part 3: production grant at the first real subscription.
 - B-34 (shadow telemetry blind to denied writes). Observability only.
-- Invitations, iPad (with Pencil markup and sketchpad), recorder R1 diagnostics.
+- Invitations, iPad (with Pencil markup and sketchpad, plus private iCloud sync; agreed plan in `docs/architecture.md`, "iPad and private sync"), recorder R1 diagnostics.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
