@@ -158,6 +158,9 @@ the join.
 - Gate 6 part 3: production grant at the first real subscription.
 - B-34 (shadow telemetry blind to denied writes). Observability only.
 - Invitations, iPad (with Pencil markup and sketchpad, plus private iCloud sync; agreed plan in `docs/architecture.md`, "iPad and private sync"), recorder R1 diagnostics.
+  **When sync or the Connected-deletion split ships, update the privacy
+  policy and terms:** both currently say journal data stays on the iPhone and
+  that deleting a Connected account erases the iPhone's Études data.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
