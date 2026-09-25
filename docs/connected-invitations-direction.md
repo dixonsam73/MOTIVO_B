@@ -1,6 +1,15 @@
 # Connected invitations — agreed direction
 
-**2026-09-17. DIRECTION OF RECORD. NOT SCOPED, NOT APPROVED FOR IMPLEMENTATION, NOT BUILT.**
+**2026-09-17. DIRECTION OF RECORD. SCOPE NOW APPROVED; NOT BUILT.**
+
+**Subsequent approval, same date:** Samuel approved
+`docs/private-connection-invitations-scope-2026-09-17.md`, required existing Études
+visual styling with no default iOS-blue controls, and explicitly confirmed that
+the private invitation asks the recipient to follow the sender, subject to the
+sender's later approval of that account. He confirmed ownership of `etudes.app`
+and suggested distinguishing a general app recommendation from a private
+invitation. The scope's approval note records that proposed refinement. The
+teen-policy/legal gates, protocol/safety review and release split remain separate.
 
 ## The feature
 
@@ -33,16 +42,21 @@ They serve two cases:
 
 ## Status — read this before planning any work
 
-**Samuel has authorised SCOPING in a new Codex window, BEFORE any implementation. No
-implementation is approved.**
+**Original authorisation, superseded by the scope approval above:** Samuel had
+authorised scoping in a new Codex window before implementation. That scoping
+review is now complete; it is no longer a reason to request scope approval again.
+The approved document's remaining legal, protocol/safety and release gates still
+apply. No invitation implementation has been recorded as complete.
 
 **This note does NOT record the feature as legally cleared, and does NOT record it as
 categorically free of legal dependencies.** Neither has been established. **The scoping work
 must itself distinguish what is independently feasible from what carries a legal
 dependency** — that distinction is an output of the scope, not an assumption going into it.
 
-**Unresolved and inherited from the earlier discussion:** invitation **forwarding** and
-**recipient-identity confirmation**, **expiry and reuse**, and **abuse controls**.
+**Previously unresolved in the earlier discussion:** forwarding, recipient-identity
+confirmation, expiry/reuse and abuse controls now have a scoped design in the
+approved document. Its separate protocol/safety review and legal dependencies are
+not discharged merely by approving that scope.
 
 ## 3. This is NOT the teen exception, and neither decides the other
 

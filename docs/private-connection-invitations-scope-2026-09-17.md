@@ -1,6 +1,25 @@
-# Invite someone to Études — proposed first-version scope
+# Invite someone to Études — first-version scope
 
-17 September 2026 · **For Samuel's review. No implementation authorised by this document.**
+17 September 2026 · **Scope approved by Samuel. Not implemented. Legal and release gates remain as recorded below.**
+
+## Approval and follow-up clarification — 17 September 2026
+
+Samuel approved the scope and required visual parity with the existing app: **no default iOS-blue controls in Études-owned UI**. He subsequently explicitly confirmed the private direction: **invite the recipient to follow the sender**, as scoped, rather than ask permission for the sender to follow the recipient. Scope approval does not resolve the separate teen-policy/legal gates, the protocol/safety review, or the still-open release split.
+
+Samuel also confirmed ownership of **etudes.app**, currently a coming-soon holding page with a contact email. Domain ownership is therefore supplied by the owner, no longer an open assumption. Hosting access, path configuration, app association and the eventual public App Store URL still need verification. The web reader could not retrieve the holding page in this session; no claim is made about its current markup, provider or routing capabilities.
+
+**Recommended refinement in response to Samuel's suggestion: two choices within the same invitation sheet**, reached from the existing agreed People and Profile entry points:
+
+| Choice | Meaning and shared destination |
+| --- | --- |
+| **Invite someone to use Études** | An ordinary recommendation of the app, sharing `https://etudes.app`. No invitation token, follow request, expiry or Connected prerequisite. Before public release the message says Études is coming soon; once a public listing exists the page can offer App Store download. The recipient can choose Solo without establishing a Connected relationship. This action can also be available from the Solo Account card. |
+| **Invite someone to follow you** | The approved private flow, sharing an expiring link on `etudes.app` that identifies an invitation, not a public profile. An existing member reviews it in the app; someone without the app reaches a landing page with download instructions and the Connected prerequisite. They reopen the original message after installing. Their request still needs the sender's account-specific approval. |
+
+These are two different intentions, **not a choice based on whether the recipient already has the app**. The sender does not need to know that. Both use the existing native share-sheet wrapper; Études neither selects nor reads the recipient's contacts. Avoid the label “Send a follow request”, which would imply the opposite direction. The private flow retains all limits below; the general app recommendation creates no backend invitation record. The two-choice refinement is a recommendation prompted by Samuel's question, not a claim that he separately approved its final copy or Solo placement.
+
+**Visual acceptance:** reuse `Theme.Text`, the surrounding view's spacing and card treatment, `.appBackground()`, neutral foreground colours and `.buttonStyle(.plain)`. Use the existing restrained `Theme.Colors.primaryAction` treatment where a primary button is needed. Match People and Profile row heights, separators, corner radii, close/back controls and light/dark presentation; do not introduce a new blue link/button style. Check loading, disabled and error states, Dynamic Type and VoiceOver as part of the same surface. Apple's share sheet, Messages, Sign in with Apple and purchase interfaces remain system-owned; do not promise to reskin those applications.
+
+The original scope below remains the detailed private-flow specification. Its initial recommendation/review language is historical where this approval note supersedes it. The general recommendation action and the proposed chooser are the narrowly identified follow-up refinement.
 
 ## 1. Recommendation
 
@@ -122,7 +141,7 @@ New work comprises the invitation state/authorisation layer; restricted identity
 
 **Backend design condition:** the current target-only `follow_requests_open(target)` boolean cannot express “this particular caller is allowed because of this invitation/approved reverse follow”. Add an actor-aware request decision without making the teen's general effective preference true. Cover old direct INSERT/PATCH paths as well as new RPCs; an expired or cancelled invitation must not remain approvable through the old PATCH. Preserve restricted column grants, directional deletes and membership/child-safety boundaries. Do not make the membership kill switch disable child-safety or block checks. Local schema parity and B-23 remain deployment prerequisites.
 
-**Web/app association:** choose and verify an owned HTTPS host, ideally on the existing proposed Études domain; ownership and hosting are not established by this scope. Host the landing page and `/.well-known/apple-app-site-association`; add Associated Domains and the correct app identifier/signing configuration. Restrict routing to invitation paths. Release currently uses `com.sdsongs.etudes`; Debug uses a different bundle ID. Confirm the actual application identifier prefix rather than guessing it. Apple requires the association file over HTTPS without redirects. [Apple: supporting associated domains](https://developer.apple.com/documentation/xcode/supporting-associated-domains).
+**Web/app association:** use Samuel's confirmed domain, `etudes.app`; verify hosting access and support for the required paths. Its existing home/holding page can remain while invitation routes and `/.well-known/apple-app-site-association` are added. Add Associated Domains and the correct app identifier/signing configuration. Restrict app routing to private invitation paths, leaving the general app-recommendation URL as the website. Release currently uses `com.sdsongs.etudes`; Debug uses a different bundle ID. Confirm the actual application identifier prefix rather than guessing it. Apple requires the association file over HTTPS without redirects. [Apple: supporting associated domains](https://developer.apple.com/documentation/xcode/supporting-associated-domains).
 
 The landing page needs a real public App Store destination, an Open in Études route, return-to-message instructions, support/privacy links, generic unavailable states, no account-bearing social previews and no third-party trackers. Configure hosting logs to avoid raw invitation tokens. Neither visiting it nor a messaging crawler may claim a link. Test the hosting/CDN and installed-app behaviour; the app entitlement alone is not proof.
 
@@ -130,7 +149,7 @@ The landing page needs a real public App Store destination, an Open in Études r
 
 ## 8. Bounded stages and acceptance
 
-1. **Review this scope.** Samuel decides direction, defaults and release split below. Record legal and safety dependencies with owners. No implementation starts before this review.
+1. **Scope review — completed 17 September 2026.** Samuel approved the scope and confirmed the private direction. The follow-up note above records his UI requirements and domain ownership, and distinguishes the proposed two-choice refinement. Release split and the separate legal/safety dependencies remain open.
 2. **Approve the protocol and safety unit.** Define states, privileges, actor-aware policy, retention and abuse controls; produce local predictions and meaningful negative tests. Adult core can progress separately; teen changes wait for counsel and product approval.
 3. **Build and verify backend locally.** Invitations, lifecycle operations and restricted previews, with direct API bypass and concurrent claim/approval/cancel tests. Verify old follow behaviours and B-40 remain intact in the adult stage. Rehearse migration and rollback against the actual current baseline.
 4. **Build app and web journeys.** Both entry points, share sheet, request review, cancellation, resume/paste recovery and landing page. Verify Debug and Release, accessibility and signed-out/Solo/member journeys. Integrate the existing purchase coordinator without changing purchase authority or journal storage.
@@ -149,7 +168,7 @@ Minimum behavioural acceptance:
 - Lapse on either side prevents new approval; cancellation, removal, reporting and blocking remain usable. Existing journal history and privacy settings stay unchanged. Existing unrelated directional follows survive decline/removal.
 - Safeguards are enforced through comments/sharing/request APIs, and a submitted report reaches the designated review process. Teen logic test coverage is not restated as real Apple teen-device verification; the existing fixture limitation needs explicit release disposition.
 
-## 9. Decisions requested from Samuel
+## 9. Initial review decisions — read with the approval note above
 
 1. **One-direction invitation with sender confirmation**; following back remains separate. Recommended.
 2. **Seven-day, one-claim links; one unused outgoing link at a time; ten new links/day; seven-day decline/removal cooldown**, with explicit fresh invitation as the narrow cooldown override and blocks always prevailing. These limits bound version one; adjust before implementation if too restrictive.
@@ -157,4 +176,4 @@ Minimum behavioural acceptance:
 4. **Build the standalone adult core first; keep the teen replacement separately gated.** Decide whether to ship adult-to-adult invitations when their own dependencies are met or wait for all-member availability. No release split is assumed approved.
 5. **Accept blocking/reporting and the broader Connected safety assessment as release dependencies**, with Samuel owning operational arrangements and counsel responses. They are new work, not capabilities already supplied by follower removal.
 
-This is a source-reviewed proposal, not implementation, device verification, a legal determination or a production acceptance record. No build/test run was needed for this documentation-only deliverable.
+This is an approved scope with an identified follow-up recommendation, not implementation, device verification, a legal determination or a production acceptance record. No build/test run was needed for the documentation-only deliverable and approval update.
