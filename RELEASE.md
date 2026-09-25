@@ -30,7 +30,7 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   server after a withdrawal can bring a post back for followers. The owner's
   own feed keeps showing it as unshared, so they wouldn't notice. Any later
   save with Share off sends a fresh withdrawal and removes it. S1-Y/S1-Z are
-  not built. Background: `docs/phase-6-sharing-repairs-scope-2026-09-22.md`.
+  not built. Background: `docs/history/phase-6-sharing-repairs-scope-2026-09-22.md`.
 - [x] **S — C-97 / C-99 accepted as known limitations** (2026-09-23). C-97: rare
   wrong or missing audio in video if an external mic drops or iOS resets
   audio mid-take (interruption handling itself is fixed and device-tested).
