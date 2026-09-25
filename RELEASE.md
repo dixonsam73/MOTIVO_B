@@ -21,11 +21,10 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   legal packet. An "18+" line in the terms does not by itself settle it.
 - [ ] **S — Fallback.** If the legal answer stalls, would you ship Solo first and
   add Connected in an update? (Solo has no user-to-user content.)
-- [ ] **S — Aggregate storage abuse (B-46).** The per-file limit doesn't stop
-  someone storing hundreds of 49 MiB files; nothing limits count or total per
-  member. Decide: rely on the spend cap plus a usage check and manual
-  suspension for launch, or build a server-enforced per-member quota before
-  launch? And what quota?
+- [x] **S — Aggregate storage abuse (B-46): decided 2026-09-25.** No
+  per-member quota at launch. Keep the spend cap on, and check usage weekly
+  after launch (query in `supabase/README.md`, downloads in the dashboard).
+  Build an enforced quota only if usage shows a need.
 - [x] **S — Sharing withdrawal guarantee: accepted as a known limitation**
   (2026-09-23). Not a product promise. In rare cases a share that reaches the
   server after a withdrawal can bring a post back for followers. The owner's
@@ -104,7 +103,9 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] **Supabase: Free through beta, Pro at launch** (decided 2026-09-23). Free
   has no backups, 1 GB file storage, 5 GB/month downloads, and pauses after a
   week of inactivity, so open the app now and then during beta. Upgrade to Pro
-  (about $25/month, daily backups kept 7 days, spend cap on) on launch day.
+  (about $25/month, daily backups kept 7 days, **spend cap on**; B-46) on
+  launch day. Keep the cap on until real usage and paying members justify
+  turning it off.
   **At the upgrade, set Storage's project-wide upload limit to at least
   52,428,800 bytes** (B-45). Supabase applies it on top of the bucket limit,
   and Free can't go above 50 MB, which may be less than the app's 50 MiB. If

@@ -662,6 +662,48 @@ select count(*) from public.posts where owner_user_id = '<OWNER>';
 rollback;
 ```
 
+## Connected storage usage (weekly after launch, B-46)
+
+Launch protection against storage and download abuse is the spend cap (on)
+plus this check. There is no per-member quota; build one only if usage shows
+a need. Read-only, one statement, saved as
+`supabase/sql/connected-storage-usage.sql`:
+
+```bash
+supabase db query --linked -f supabase/sql/connected-storage-usage.sql
+```
+
+```sql
+with o as (
+  select lower((storage.foldername(name))[2]) as member,
+         coalesce((metadata->>'size')::bigint, 0) as bytes,
+         created_at
+  from storage.objects
+  where bucket_id = 'attachments'
+), m as (
+  select member, count(*) as files, sum(bytes) as bytes,
+         sum(bytes) filter (where created_at > now() - interval '30 days') as bytes_30d
+  from o group by member
+)
+(select 'ALL MEMBERS' as member, sum(files) as files,
+        round(sum(bytes) / 1e9, 2) as gb, round(coalesce(sum(bytes_30d), 0) / 1e9, 2) as gb_last_30d
+ from m)
+union all
+(select member, files, round(bytes / 1e9, 2), round(coalesce(bytes_30d, 0) / 1e9, 2)
+ from m order by bytes desc limit 10);
+```
+
+The first row is the total; the rest are the ten biggest members by stored
+bytes (the member is the `users/<uid>/` folder). Sizes are in decimal GB, the
+same unit as Supabase's allowance (Pro: 100 GB stored). For a large or fast
+riser, look the UUID up in `account_directory` and use the moderation steps
+above if it's abuse.
+
+**Downloads can't be measured from SQL.** Check them in the dashboard (Usage):
+uncached and cached egress, 250 GB each on Pro. Downloads are the costly
+abuse route (uncached overage is $0.09/GB, against $0.0213/GB for storage), so
+a sudden rise there matters more than stored GB.
+
 ## STANDING RULE — a production mutation's guard must be enforced by Postgres
 
 **Never pair an unconditional `COMMIT` with an instruction to inspect the result
