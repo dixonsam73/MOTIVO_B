@@ -21,6 +21,11 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   legal packet. An "18+" line in the terms does not by itself settle it.
 - [ ] **S — Fallback.** If the legal answer stalls, would you ship Solo first and
   add Connected in an update? (Solo has no user-to-user content.)
+- [ ] **S — Aggregate storage abuse (B-46).** The per-file limit doesn't stop
+  someone storing hundreds of 49 MiB files; nothing limits count or total per
+  member. Decide: rely on the spend cap plus a usage check and manual
+  suspension for launch, or build a server-enforced per-member quota before
+  launch? And what quota?
 - [x] **S — Sharing withdrawal guarantee: accepted as a known limitation**
   (2026-09-23). Not a product promise. In rare cases a share that reaches the
   server after a withdrawal can bring a post back for followers. The owner's
@@ -53,12 +58,20 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] **A — Adult-only gate for Connected**, replacing the 13–17 pathway, using
   whatever mechanism the legal answer says is adequate. Then finalise the
   provisional grooming rating in the risk assessment.
-- [ ] **A — Align the server upload limit to 50 MiB (B-45).** Decided
+- [x] **A — Align the server upload limit to 50 MiB (B-45).** Decided
   2026-09-24: 50 MiB per file at launch. Oversized files can't be published
   (trim, replace or keep private); no automatic video compression in v1. Set
   the `attachments` bucket's `file_size_limit` from 150 MiB to 52428800, as a
   migration plus a guarded production statement. Production database change,
-  so one Codex review round.
+  so one Codex review round. Prepared and rehearsed locally 2026-09-24:
+  `supabase/migrations/20260924120000_b45_attachments_upload_limit.sql`, apply
+  and rollback in `supabase/sql/2026-09-24-b45-upload-limit-*-production.sql`,
+  check `supabase/tests/b45/check-upload-limit.sh` (50 MiB accepted, 50 MiB + 1
+  refused, guards hold; cleanup restores the bucket even if the check fails).
+  Codex review 2026-09-25: no objection, subject to the project-wide limit
+  (section C, Pro upgrade). **Applied to production 2026-09-25** with
+  Samuel's go-ahead; read back `attachments` = 52428800, still private, 14
+  MIME types, 16 objects, `avatars` unchanged.
 - [ ] **A — R1-a:** don't acknowledge an unsent simulated withdrawal
   (`SessionSyncQueue.swift`, client-only, small). Cheap insurance, not a
   blocker.
@@ -92,6 +105,10 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   has no backups, 1 GB file storage, 5 GB/month downloads, and pauses after a
   week of inactivity, so open the app now and then during beta. Upgrade to Pro
   (about $25/month, daily backups kept 7 days, spend cap on) on launch day.
+  **At the upgrade, set Storage's project-wide upload limit to at least
+  52,428,800 bytes** (B-45). Supabase applies it on top of the bucket limit,
+  and Free can't go above 50 MB, which may be less than the app's 50 MiB. If
+  it's lower, some files the app allows would fail to publish.
 - [ ] `etudes.app/terms` published, holding your terms including the safety
   section. The app links to it, and to `/privacy`. Full Terms of Use drafted
   2026-09-23 (Desktop), including the safety section and relying on Apple's
