@@ -88,6 +88,15 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] **A — Any copy changes** from the legal decision and the 1.2 work (About,
   Explore Connected, refusal text).
 
+- [ ] **A + S — iOS 27 compatibility check** (iOS 27 public 2026-09-26).
+  S: update one test device to iOS 27 and run the practice tools, a
+  recording, playback, and a Connected purchase and sign-in on the current
+  TestFlight build. A: trial build with Xcode 27 (Debug, Release, Archive,
+  unit tests) without switching the project over. Needs Xcode 27 installed
+  alongside Xcode 26.6 as `Xcode-27.app`, not over it. Keep shipping
+  TestFlight builds with Xcode 26.6 until the trial is clean. Minimum stays
+  iOS 26.4.
+
 ## C. Configuration (Samuel, in App Store Connect / Supabase / web)
 
 - [x] Founding 500 introductory offer: free first year on both products, no end
