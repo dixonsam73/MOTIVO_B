@@ -104,8 +104,12 @@ enum JournalDeleteBackendStep {
     /// session's media files are removed only after the save succeeded.
     /// The view context learns of the deletion through its ordinary merge.
     static func deleteSessionLocally(objectID: NSManagedObjectID,
-                                     container: NSPersistentContainer = PersistenceController.shared.container) -> Bool {
+                                     container: NSPersistentContainer? = nil) -> Bool {
         guard !objectID.isTemporaryID else { return false }
+        // Resolved here rather than as a default argument: default arguments are
+        // evaluated outside the main actor, and `PersistenceController.shared` is
+        // main-actor isolated (a Swift 6 error).
+        let container = container ?? PersistenceController.shared.container
         let context = container.newBackgroundContext()
         context.name = "journalDelete.local"
         var paths: [String] = []
