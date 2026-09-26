@@ -24,7 +24,15 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   accuracy evidence, server verification, and whether results change. The
   reply only pointed to the App Store age rating, so none of it is answered
   yet. Next: ask for escalation to Developer Technical Support, or post on
-  the Developer Forums. Tell the lawyer either way.
+  the Developer Forums. Tell the lawyer either way. **Apple's docs answer part
+  of it** (AgeRangeDeclaration, checked 2026-09-26): current values are
+  `selfDeclared`, `guardianDeclared` and `confirmed` ("a scrutinized method,
+  like a credit card or government ID"). The granular `paymentChecked`,
+  `governmentIDChecked` and `checkedByOtherMethod` ("unspecified method") are
+  deprecated. So the app can tell self-declared from confirmed, but not which
+  check was used. The forums (~90 threads) have no Apple-engineer answers.
+  Sharpest question for the lawyer: is accepting only `confirmed` 18+ (which
+  would need iOS 26.5 for joining Connected) adequate?
 - [ ] **S — Fallback.** If the legal answer stalls, would you ship Solo first and
   add Connected in an update? (Solo has no user-to-user content.)
 - [x] **S — Aggregate storage abuse (B-46): decided 2026-09-25.** No
