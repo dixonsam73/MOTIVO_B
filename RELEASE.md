@@ -88,7 +88,7 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] **A — Any copy changes** from the legal decision and the 1.2 work (About,
   Explore Connected, refusal text).
 
-- [ ] **A + S — iOS 27 compatibility check** (iOS 27 public 2026-09-26).
+- [x] **A + S — iOS 27 compatibility check** (iOS 27 public 2026-09-26).
   S: update one test device to iOS 27 and run the practice tools, a
   recording, playback, and a Connected purchase and sign-in on the current
   TestFlight build. A: trial build with Xcode 27 (Debug, Release, Archive,
@@ -97,8 +97,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   (42 vs 44 on 26.6); the Archive succeeds and is correctly stamped; unit tests
   on the iOS 27.0 simulator: 1,090 passed, 0 failed, 49 skipped (46 need the
   local Supabase stack, 3 are timing-dependent by design). **S partly done
-  2026-09-26:** on Device B, iOS 27, all recorders and practice tools work.
-  Still to check on iOS 27: playback, and a Connected purchase and sign-in. Needs Xcode 27 installed
+  2026-09-26:** on Device B, iOS 27: all recorders, practice tools, playback,
+  and Connected sign-in and purchase work. **Complete.** Needs Xcode 27 installed
   alongside Xcode 26.6 as `Xcode-27.app`, not over it. Keep shipping
   TestFlight builds with Xcode 26.6 until the trial is clean. Minimum stays
   iOS 26.4.
