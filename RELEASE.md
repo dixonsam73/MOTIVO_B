@@ -92,7 +92,11 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   S: update one test device to iOS 27 and run the practice tools, a
   recording, playback, and a Connected purchase and sign-in on the current
   TestFlight build. A: trial build with Xcode 27 (Debug, Release, Archive,
-  unit tests) without switching the project over. Needs Xcode 27 installed
+  unit tests) without switching the project over. **A done 2026-09-26, clean:**
+  Xcode 27.0 (needs macOS 26.6) builds Debug and Release with no new warnings
+  (42 vs 44 on 26.6); the Archive succeeds and is correctly stamped; unit tests
+  on the iOS 27.0 simulator: 1,090 passed, 0 failed, 49 skipped (46 need the
+  local Supabase stack, 3 are timing-dependent by design). Needs Xcode 27 installed
   alongside Xcode 26.6 as `Xcode-27.app`, not over it. Keep shipping
   TestFlight builds with Xcode 26.6 until the trial is clean. Minimum stays
   iOS 26.4.
