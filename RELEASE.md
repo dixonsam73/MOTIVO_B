@@ -19,6 +19,12 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   minimum that is? Take the risk assessment
   (`Etudes-Ofcom-Risk-Assessment-v2-DRAFT-2026-09-23.docx`), not the old 13+
   legal packet. An "18+" line in the terms does not by itself settle it.
+  **Apple asked directly** (Developer Support case 102970072468): what an 18+
+  result establishes, self-declared versus checked, `checkedByOtherMethod`,
+  accuracy evidence, server verification, and whether results change. The
+  reply only pointed to the App Store age rating, so none of it is answered
+  yet. Next: ask for escalation to Developer Technical Support, or post on
+  the Developer Forums. Tell the lawyer either way.
 - [ ] **S — Fallback.** If the legal answer stalls, would you ship Solo first and
   add Connected in an update? (Solo has no user-to-user content.)
 - [x] **S — Aggregate storage abuse (B-46): decided 2026-09-25.** No
