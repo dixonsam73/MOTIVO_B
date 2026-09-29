@@ -32,7 +32,14 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   deprecated. So the app can tell self-declared from confirmed, but not which
   check was used. The forums (~90 threads) have no Apple-engineer answers.
   Sharpest question for the lawyer: is accepting only `confirmed` 18+ (which
-  would need iOS 26.5 for joining Connected) adequate?
+  would need iOS 26.5 for joining Connected) adequate? **Apple's second reply
+  (2026-09-29):** confirms bracket plus "how set" metadata, and says higher
+  checks (credit card, ID) are routed in regulated regions (Utah, Texas,
+  Louisiana, Brazil, Australia, Singapore). The **UK isn't listed**, so many UK
+  adults may only ever be `selfDeclared`, and "`confirmed` only" could exclude
+  them. No mention of accuracy evidence, server verification or later
+  changes. If the lawyer leans towards "`confirmed` only", measure how often
+  UK accounts come back `confirmed` with a temporary beta readout first.
 - [ ] **S — Fallback.** If the legal answer stalls, would you ship Solo first and
   add Connected in an update? (Solo has no user-to-user content.)
 - [x] **S — Aggregate storage abuse (B-46): decided 2026-09-25.** No
