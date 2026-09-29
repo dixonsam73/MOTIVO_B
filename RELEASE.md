@@ -40,6 +40,10 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   them. No mention of accuracy evidence, server verification or later
   changes. If the lawyer leans towards "`confirmed` only", measure how often
   UK accounts come back `confirmed` with a temporary beta readout first.
+  Apple's overview adds: the data is user-declared and "may be" confirmed;
+  "You are solely responsible for ensuring compliance"; the system may
+  override age gates by region; and the result is on-device only, with no
+  server-verifiable form, so the server must trust the app's report.
 - [ ] **S — Fallback.** If the legal answer stalls, would you ship Solo first and
   add Connected in an update? (Solo has no user-to-user content.)
 - [x] **S — Aggregate storage abuse (B-46): decided 2026-09-25.** No
