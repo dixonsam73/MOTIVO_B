@@ -463,8 +463,27 @@ struct AttachmentStore {
         return url
     }
 
+    /// The stem is often a member-typed audio title, so it must be made safe for
+    /// one path component. A "/" used to reach `data.write` unchanged — a title
+    /// like "Bach 1/2" pointed the write into a directory that does not exist,
+    /// and every save of that session failed. Also strips control characters,
+    /// leading dots (hidden files) and caps the length well under NAME_MAX.
+    static func safeFilenameStem(_ base: String) -> String {
+        var s = String(base.unicodeScalars.map { scalar -> Character in
+            if scalar == "/" || scalar == ":" { return "-" }
+            if CharacterSet.controlCharacters.contains(scalar) { return " " }
+            return Character(scalar)
+        })
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        while s.hasPrefix(".") { s.removeFirst() }
+        // 200 bytes leaves room for "-NNN.ext" inside the 255-byte limit.
+        while s.utf8.count > 200 { s.removeLast() }
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? UUID().uuidString : s
+    }
+
     private static func uniqueFilename(base: String, ext: String, in dir: URL) -> String {
-        let safeBase = base.isEmpty ? UUID().uuidString : base
+        let safeBase = safeFilenameStem(base)
         var candidate = "\(safeBase).\(ext)"
         var idx = 1
         while FileManager.default.fileExists(atPath: dir.appendingPathComponent(candidate).path) {

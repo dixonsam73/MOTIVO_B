@@ -189,6 +189,34 @@ final class P6I01CommitServiceTests: XCTestCase {
         XCTAssertEqual(attachments(of: s), 0)
     }
 
+    // MARK: - A member-typed title is a filename stem
+
+    /// An audio title with "/" made every save of the session fail: the stem
+    /// reached `data.write` unchanged and named a directory that does not exist.
+    func testTitleWithSlashCommitsIntoDocuments() throws {
+        let s = session("T")
+        let audio = staged(.audio), video = staged(.video)
+        let titled = AttachmentCommitService.Inputs(
+            staged: [audio, video], chosenThumbnailID: nil,
+            suggestedName: { $0.kind == .audio ? "Bach 1/2: take 3" : $0.id.uuidString },
+            displayName: { _ in nil })
+        let attempt = try AttachmentCommitService.commit(titled, to: s, ctx: moc)
+        XCTAssertEqual(attempt.committedStagedIDs, [audio.id, video.id])
+        XCTAssertEqual(attachments(of: s), 2)
+        XCTAssertTrue(files.contains { $0.hasPrefix("Bach 1-2- take 3.") }, "\(files)")
+        for url in attempt.stagedToFinalURL.values {
+            XCTAssertEqual(url.deletingLastPathComponent().standardizedFileURL, documentsRoot.standardizedFileURL)
+        }
+    }
+
+    func testSafeFilenameStem() {
+        XCTAssertEqual(AttachmentStore.safeFilenameStem("a/b:c"), "a-b-c")
+        XCTAssertEqual(AttachmentStore.safeFilenameStem("..hidden"), "hidden")
+        XCTAssertEqual(AttachmentStore.safeFilenameStem("line\nbreak"), "line break")
+        XCTAssertLessThanOrEqual(AttachmentStore.safeFilenameStem(String(repeating: "é", count: 300)).utf8.count, 200)
+        XCTAssertNotNil(UUID(uuidString: AttachmentStore.safeFilenameStem(" .. ")))
+    }
+
     // MARK: - A1 · the FIRST attachment fails
 
     func testFirstAttachmentFailureThrowsAndLeavesNothingBehind() throws {

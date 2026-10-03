@@ -27,9 +27,12 @@
 
 import Foundation
 import CoreData
+import os
 
 @MainActor
 enum AttachmentCommitService {
+
+    private static let log = Logger(subsystem: "com.sdsongs.etudes", category: "attachments")
 
     /// Everything the loop needs, supplied by the calling editor.
     struct Inputs {
@@ -99,7 +102,9 @@ enum AttachmentCommitService {
                 // untouched, so a retry has the same inputs the first attempt had.
                 for rollback in rollbacks { rollback() }
                 for row in created { ctx.delete(row) }
-                throw AttachmentCommitFailure(stagedID: att.id, underlying: error)
+                let failure = AttachmentCommitFailure(stagedID: att.id, underlying: error)
+                log.error("\(failure.diagnosticDescription, privacy: .public)")
+                throw failure
             }
         }
 
