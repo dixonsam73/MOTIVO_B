@@ -21,7 +21,16 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   data-protection and consumer-rights review of the policy and terms (to
   decide after the Scope findings). Q3 (risk ratings), Q5 and Q6 not
   instructed. Apple's two support replies and documentation findings were
-  sent with the acceptance. Awaiting their response and timescale.
+  sent with the acceptance. Fee cap of £2,000 + VAT without written approval
+  confirmed. Onboarding: ID, proof of address, two confirmations (beneficial
+  owner per Companies House, checked 2026-10-07; not a PEP), signed
+  engagement letter and £1,000 + VAT on account. Advice expected early to mid
+  the week after onboarding completes.
+  **Data-protection and consumer review of the policy and terms: deferred.**
+  The red-flag review (no redrafting) was quoted at £2,500–£3,000 + VAT,
+  excluding follow-ups. Samuel doesn't want that spend at this stage; revisit
+  after the OSA findings, or after launch revenue. Meanwhile, cross-check the
+  privacy policy against the ICO's free privacy notice generator.
   Connected launches 18+ only (settled). The question: is Apple's
   Declared Age Range (including the confirmed adult signal on iOS 26.5)
   adequate to conclude children cannot access Connected? If not, what is the
