@@ -12,8 +12,17 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   Limited on the NCA's CSEA Industry Reporting Portal**. Done: takedown and
   suspension tests passed, and the support auto-reply is live (both
   2026-09-23; commands in `supabase/README.md`).
-- [ ] **S — Adult-access adequacy: one hour with a UK online-safety/privacy
-  solicitor.** Connected launches 18+ only (settled). The question: is Apple's
+- [ ] **S — Adult-access adequacy: solicitor engaged 2026-10-07.** Scope
+  accepted: short email answers on (1) age assurance, (2) whether Solo is
+  outside the OSA, and (4) the privacy policy and terms **for OSA compliance
+  only**, plus practical steps to comply if Apple's Declared Age Range isn't
+  sufficient. Fee estimate £1,000–£2,000 + VAT; asked them to confirm no more
+  than £2,000 + VAT without approval, and for a separate estimate for a UK
+  data-protection and consumer-rights review of the policy and terms (to
+  decide after the Scope findings). Q3 (risk ratings), Q5 and Q6 not
+  instructed. Apple's two support replies and documentation findings were
+  sent with the acceptance. Awaiting their response and timescale.
+  Connected launches 18+ only (settled). The question: is Apple's
   Declared Age Range (including the confirmed adult signal on iOS 26.5)
   adequate to conclude children cannot access Connected? If not, what is the
   minimum that is? Take the risk assessment
