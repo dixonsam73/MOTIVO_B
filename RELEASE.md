@@ -73,8 +73,9 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   £4.99** (pay once for what runs on the device; subscribe for what runs on
   the servers). Connected stays a subscription, and only works if you own the
   app, which a paid download guarantees with no code. Founding 500 is
-  unchanged. App upgrades (iPad, Pencil sketching) are included for owners;
-  in public copy say "included with your purchase", not "free forever". No
+  unchanged. App upgrades (iPad, Pencil sketching) are included for owners,
+  but launch marketing doesn't mention them (decided 2026-10-09): announce it
+  when an upgrade ships, and never say "free forever". No
   "first N downloads free": give promo codes deliberately instead (beta
   testers, teachers, a few reviewers). Fallback if paid downloads look weak:
   free download, trial, then a one-time unlock (£6.99 considered), which is a
@@ -145,6 +146,21 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   instrumentation. Only plain `xcodebuild build` runs added it.
 - [ ] **A — Any copy changes** from the legal decision and the 1.2 work (About,
   Explore Connected, refusal text).
+- [ ] **A — "Tell someone about Études" share button** (decided 2026-10-09).
+  Client-only: the iOS share sheet with the App Store link and a short
+  message. Keep it out of the way, in Profile's Account card. The message or a
+  hint should say the recipient finds you by name only if "Let other members
+  find you" is on. No contacts access, no backend. With it, change
+  `ConnectedIntroductionView.swift:211` ("you can invite them"), which is
+  false today, to match. Also reword "sketch" in `AboutEtudesView.swift:64`
+  (no drawing tool yet). Private invitations stay post-launch (section E).
+- [ ] **A — "Show streaks and totals" switch** (decided 2026-10-09; optional
+  for launch). One switch in Profile → Settings, **default on** (today's
+  behaviour unchanged). Off hides the Journal summary's total and "n-day
+  streak" (`ContentView.swift`, `summaryBodyContent`) and the timer's
+  "This week • …" line (`PracticeTimerView.swift`, `temporalSummaryLine`).
+  Me keeps all its stats. Same window as the share button. Copy may mention
+  it only once it ships.
 
 - [x] **A + S — iOS 27 compatibility check** (iOS 27 public 2026-09-26).
   S: update one test device to iOS 27 and run the practice tools, a
