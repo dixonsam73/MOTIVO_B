@@ -25,7 +25,12 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   confirmed. Onboarding: ID, proof of address, two confirmations (beneficial
   owner per Companies House, checked 2026-10-07; not a PEP), signed
   engagement letter and £1,000 + VAT on account. Advice expected early to mid
-  the week after onboarding completes.
+  the week after onboarding completes. **Engagement letter received
+  2026-10-08** (Simkins LLP; Stephen Cartwright, supervised by Helena
+  Franklin; client partner Euan Lawson): scope as agreed, fees £1,000–£2,000
+  with the £2,000 + VAT cap in writing (fees only; small charges such as the
+  AML check are extra), £1,200 on account. Liability limited to £3m and 3
+  years (standard). Confirm their bank details by phone before paying.
   **Data-protection and consumer review of the policy and terms: deferred.**
   The red-flag review (no redrafting) was quoted at £2,500–£3,000 + VAT,
   excluding follow-ups. Samuel doesn't want that spend at this stage; revisit
