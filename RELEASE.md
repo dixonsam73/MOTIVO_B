@@ -69,6 +69,16 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   server-verifiable form, so the server must trust the app's report.
 - [ ] **S — Fallback.** If the legal answer stalls, would you ship Solo first and
   add Connected in an update? (Solo has no user-to-user content.)
+- [x] **S — Pricing: decided 2026-10-09.** Études is a **paid download at
+  £4.99** (pay once for what runs on the device; subscribe for what runs on
+  the servers). Connected stays a subscription, and only works if you own the
+  app, which a paid download guarantees with no code. Founding 500 is
+  unchanged. App upgrades (iPad, Pencil sketching) are included for owners;
+  in public copy say "included with your purchase", not "free forever". No
+  "first N downloads free": give promo codes deliberately instead (beta
+  testers, teachers, a few reviewers). Fallback if paid downloads look weak:
+  free download, trial, then a one-time unlock (£6.99 considered), which is a
+  normal update. Listing copy never names other apps.
 - [x] **S — Aggregate storage abuse (B-46): decided 2026-09-25.** No
   per-member quota at launch. Keep the spend cap on, and check usage weekly
   after launch (query in `supabase/README.md`, downloads in the dashboard).
@@ -155,6 +165,15 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 
 - [x] Founding 500 introductory offer: free first year on both products, no end
   date (seen in ASC 2026-09-21). Remove manually at ~500.
+- [ ] **App price £4.99** in App Store Connect (Pricing and Availability),
+  set before submission. Check the Paid Apps agreement, tax and banking are
+  active.
+- [ ] **Promo codes** for beta testers, teachers and a few reviewers at
+  launch (check ASC for current limits).
+- [ ] **Re-read the terms, privacy policy, App Store description and
+  `etudes.app` for "Solo is free"** wording now that the app is paid. (The
+  app's own copy only says "free" about the Connected trial; checked
+  2026-10-09.)
 - [ ] Production App Store Server Notifications URL. Keep Sandbox as it is.
 - [ ] Production Billing Grace (C-31).
 - [ ] Privacy policy published at `etudes.app/privacy`. Drafted 2026-09-23
