@@ -262,6 +262,18 @@ the join.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
+- **Sampled cello drone** (agreed 2026-10-09; a good first update). A second
+  drone sound beside the synth tone, driven by the same pitch, A4 reference
+  and volume controls: a looped, crossfaded sampler in place of
+  `DroneRenderKernel`, nearest recorded note retuned. Record it in-house, and
+  get a short written release from the cellist. Recording spec: one note
+  every 3 semitones from cello C2 upwards (about 13–15 files), 8–15 s
+  steady sustain with the attack, no vibrato, tuned to A=440, WAV 48 kHz
+  24-bit mono, dry or lightly roomy, matched levels, named like
+  `cello_C2.wav`. Open: how to cover A5–A6, above the cello (recorded
+  harmonics, or the option stops at the cello's range). Adds about 2–5 MB.
+  New audio engine, so write a one-page scope first. Loop quality needs
+  listening on a device. Copy mentions it only once it ships.
 - A suspended member lands in Solo with no explanation. Optional: a short
   "account suspended, contact support" message.
 - Block is per device. "Reply to all commenters" still fans out server-side to
