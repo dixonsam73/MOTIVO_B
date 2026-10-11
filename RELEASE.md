@@ -205,6 +205,23 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   Me keeps all its stats. Same window as the share button. Copy may mention
   it only once it ships.
 
+- [ ] **A — iPhone Duo compatibility before launch** (decided 2026-10-11).
+  iPhone Duo (Apple's foldable) goes on sale 23 October 2026 on iOS 27.1.
+  Apps built with the iOS 26 SDK sit centred with empty space on its inner
+  display; from April 2027 every submission must use the iOS 27 SDK and
+  include iPhone Duo screenshots. So switch the launch build to Xcode 27.1
+  (iOS 27.1 SDK; Duo simulator in Device Hub), run Apple's "get my app ready
+  for iPhone Duo" check, and fix the flagged patterns: `UIScreen.main.bounds`
+  in `AddEditSessionView`, `PostRecordDetailsView` and three charts in
+  `MeView`; the phone-idiom check in `MediaTrimView`; review the
+  interface-orientation reads in `CameraCaptureView` and `VideoRecorderView`
+  (capture rotation, probably fine). Make today's iPhone layout sit well on
+  the unfolded screen (capped width, centred, nothing stretched) and check
+  the vertical tab and tool bars the 27.1 SDK brings. Test folding and
+  unfolding with the timer running and during a recording. This is iPhone
+  compatibility, not iPad work: the wide layout is the post-launch item in
+  section E. Apple: [prepare](https://developer.apple.com/iphone-duo/prepare/),
+  [submission news, 5 Oct 2026](https://developer.apple.com/news/?id=kkphp5qo).
 - [x] **A + S — iOS 27 compatibility check** (iOS 27 public 2026-09-26).
   S: update one test device to iOS 27 and run the practice tools, a
   recording, playback, and a Connected purchase and sign-in on the current
@@ -299,6 +316,16 @@ the join.
 - Gate 6 part 3: production grant at the first real subscription.
 - B-34 (shadow telemetry blind to denied writes). Observability only.
 - Invitations, iPad (with Pencil markup and sketchpad, plus private iCloud sync; agreed plan in `docs/architecture.md`, "iPad and private sync"), recorder R1 diagnostics.
+- **One wide layout for iPad and the unfolded iPhone Duo** (agreed
+  2026-10-11). The iPad plan already chooses layouts by available width, with
+  narrow windows falling back to the iPhone layout; the folded Duo is the
+  narrow case and the unfolded Duo the wide one, so build the wide layout
+  once and both get it. Allow for: the unfolded Duo is near-square and
+  smaller than an iPad (breakpoints in points; a full sidebar may not fit);
+  folding mid-session, which the plan's `PracticeSessionController`
+  extraction makes safe and must be tested; and no assumed Pencil on Duo, so
+  ink works by finger. The Duo half needs no new device family, no iPad
+  screenshots and no sync, so it can ship before the iPad and sync release.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
