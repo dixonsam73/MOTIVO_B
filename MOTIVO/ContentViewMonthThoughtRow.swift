@@ -39,17 +39,24 @@ struct MonthThoughtRow: View {
         writtenHeader == nil ? ThoughtMediaSummaryBuilder.summary(for: session) : nil
     }
 
-    /// Nil for a media thought with no name: the kind symbol stands alone.
+    /// A written heading or a member-given recording title; nil for an unnamed
+    /// media thought, which then has no heading at all.
     private var titleText: String? {
         if let writtenHeader { return writtenHeader }
         if let audioSummary { return audioSummary.title }
         return "Thought"
     }
 
+    /// The date line carries the count when there are several attachments.
     private var timestampText: String {
         let stamp = Self.timestampFormatter.string(from: session.timestamp ?? Date())
-        guard let audioSummary else { return stamp }
-        return ([stamp] + [audioSummary.durationText, audioSummary.countText].compactMap { $0 }).joined(separator: " · ")
+        guard let count = audioSummary?.countText else { return stamp }
+        return stamp + " · " + count
+    }
+
+    /// One quiet kind indicator, on the date line, only when there is no heading.
+    private var showsKindIndicator: Bool {
+        titleText == nil
     }
 
     private var threadLabel: String? {
@@ -71,31 +78,30 @@ struct MonthThoughtRow: View {
             .frame(width: 6, height: 44, alignment: .center)
 
             VStack(alignment: .leading, spacing: 3) {
+                if let titleText {
+                    Text(titleText)
+                        .font(Theme.Text.body.weight(.semibold))
+                        .foregroundStyle(Color.primary.opacity(0.75))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .accessibilityIdentifier("monthThought.title")
+                }
+
                 HStack(spacing: 5) {
-                    if let audioSummary {
+                    if showsKindIndicator, let audioSummary {
                         Image(systemName: audioSummary.systemImage)
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
                             .accessibilityHidden(true)
                     }
-                    if let titleText {
-                        Text(titleText)
-                            .font(Theme.Text.body.weight(.semibold))
-                            .foregroundStyle(Color.primary.opacity(0.75))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .accessibilityIdentifier("monthThought.title")
-                    }
+                    Text(timestampText)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.68))
+                        .lineLimit(1)
+                        .accessibilityIdentifier("monthThought.datetime")
                 }
-                .frame(minHeight: 22)
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel(audioSummary.map { s in [s.spokenKind, titleText].compactMap { $0 }.joined(separator: ", ") } ?? (titleText ?? "Thought"))
-
-                Text(timestampText)
-                    .font(.caption2)
-                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.68))
-                    .lineLimit(1)
-                    .accessibilityIdentifier("monthThought.datetime")
+                .accessibilityLabel((showsKindIndicator ? (audioSummary?.spokenKind).map { $0 + ", " } ?? "" : "") + timestampText)
 
                 if let thread = threadLabel, !thread.isEmpty {
                     Button {

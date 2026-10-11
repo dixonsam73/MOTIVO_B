@@ -180,10 +180,12 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   toolbar. A thought made from the timer (Save Thought or Add thought) closes
   back to the timer with a quiet "Thought saved · View" notice; View opens
   the entry in the existing detail view. Other editor entry points keep their
-  navigation. In the journal, a thought with no written heading is named by
-  its first attachment (local title for audio and video, else a readable
-  file stem for audio, else the kind symbol alone) with a kind indicator, the
-  duration and a count (`ThoughtMediaSummary.swift`).
+  navigation. In the journal, a thought with no written heading takes a
+  member-given recording title as its heading; a generated name is not one,
+  and an unnamed thought has no heading. The month card then carries one
+  quiet kind indicator on its date line (with a count when there are
+  several); the week card keeps its date, preview and favourite control
+  (`ThoughtMediaSummary.swift`).
   Tests: `SaveThoughtHandoffTests`, `C84SessionPreservationTests` (updated);
   also corrected the `P6I01SaveOrderingTests` pin that C-107 had left stale.
   Simulator smoke check passed 2026-10-11 (iPhone 17 Pro, iOS 26.5, Debug,

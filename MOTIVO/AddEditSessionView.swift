@@ -767,10 +767,14 @@ struct AddEditSessionView: View {
                 // The one save action for a thought: always reachable, however
                 // many attachments sit above the notes.
                 ToolbarItem(placement: .confirmationAction) {
+                    // Disabled reads as quiet as the dimmed plain-style "Save
+                    // Session": secondary colour, lower opacity, same place.
+                    let saveEnabled = canSaveThought && !sharingSaveGate.isAwaitingDecision && !didCommitLocally
                     Button("Save Thought") { attemptSaveWithConnectedPreflight() }
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.Colors.primaryAction)
-                        .disabled(!canSaveThought || sharingSaveGate.isAwaitingDecision || didCommitLocally)
+                        .font(.body.weight(saveEnabled ? .semibold : .regular))
+                        .foregroundStyle(saveEnabled ? Theme.Colors.primaryAction : Theme.Colors.secondaryText)
+                        .opacity(saveEnabled ? 1.0 : 0.6)
+                        .disabled(!saveEnabled)
                         .accessibilityLabel("Save Thought")
                         .accessibilityIdentifier("button.saveThought")
                 }
@@ -1106,7 +1110,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                     // the attachment controls afterwards; no empty attachments
                     // card above the writing area. The save action is in the
                     // toolbar, reachable without scrolling past the attachments.
-                    if arrivedWithAttachments {
+                    // The attachments card appears only once there is content;
+                    // the import controls are always available below.
+                    if arrivedWithAttachments && !stagedAttachments.isEmpty {
                         attachmentsGridSection
                     }
                     threadRow
@@ -1114,7 +1120,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                     notesCard
                     visibilityRow
                     stateAndScoreSections
-                    if !arrivedWithAttachments {
+                    if !arrivedWithAttachments && !stagedAttachments.isEmpty {
                         attachmentsGridSection
                     }
                     addAttachmentControls

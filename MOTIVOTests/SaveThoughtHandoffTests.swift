@@ -350,40 +350,37 @@ final class SaveThoughtHandoffTests: XCTestCase {
 
     func testThoughtModeOrdersAttachmentsFirstOnlyWhenTheyCameIn() {
         let aesv = code("AddEditSessionView.swift")
-        guard let thought = block(after: "if isThoughtMode {\n                    if arrivedWithAttachments {", in: aesv)
-                ?? block(after: "if arrivedWithAttachments {", in: aesv) else { return XCTFail("thought layout not found") }
-        _ = thought
         let stack = block(after: "private var contentStack: some View", in: aesv) ?? ""
-        let order = ["if arrivedWithAttachments {", "threadRow", "startTimeRow", "notesCard", "visibilityRow", "if !arrivedWithAttachments {", "addAttachmentControls"]
+        let order = ["if arrivedWithAttachments && !stagedAttachments.isEmpty {", "threadRow", "startTimeRow", "notesCard", "visibilityRow",
+                     "if !arrivedWithAttachments && !stagedAttachments.isEmpty {", "addAttachmentControls"]
         var cursor = stack.startIndex
         for token in order {
             guard let r = stack.range(of: token, range: cursor..<stack.endIndex) else { return XCTFail("\(token) out of order or missing") }
             cursor = r.upperBound
         }
         XCTAssertTrue(aesv.contains("private var arrivedWithAttachments: Bool { !prefillAttachments.isEmpty }"), "fixed for the presentation; removing all media does not reflow")
-        XCTAssertTrue(aesv.contains("ToolbarItem(placement: .confirmationAction) {\n                    Button(\"Save Thought\")"), "one save action, in the toolbar")
+        XCTAssertTrue(block(after: "ToolbarItem(placement: .confirmationAction) {", in: aesv)?.contains("Button(\"Save Thought\")") ?? false, "one save action, in the toolbar")
+        XCTAssertTrue(block(after: "ToolbarItem(placement: .confirmationAction) {", in: aesv)?.contains(".opacity(saveEnabled ? 1.0 : 0.6)") ?? false, "disabled is visibly quieter")
         XCTAssertEqual(stack.components(separatedBy: "bottomSaveButton").count - 1, 1, "the bottom save button is sessions only")
     }
 
     // MARK: - Audio-only thoughts are named by their recording
 
     func testAudioSummaryNamingAndFormatting() {
-        XCTAssertEqual(ThoughtMediaSummaryBuilder.readableName(fromStem: "2026oct11_10:35"), "2026oct11_10:35", "the name the member saw")
-        XCTAssertNil(ThoughtMediaSummaryBuilder.readableName(fromStem: UUID().uuidString), "a UUID is a filename, not a name")
-        XCTAssertNil(ThoughtMediaSummaryBuilder.readableName(fromStem: "  "))
-        // No name: the symbol stands alone, no redundant "Video"/"Photo"/"Recording" text.
-        XCTAssertEqual(ThoughtMediaSummary(title: nil, kind: .video, durationText: "0:04", count: 1, uniformKind: true).title, nil)
+        // The timer's generated name is not a heading; a member-given title is.
+        XCTAssertTrue(ThoughtMediaSummaryBuilder.isGeneratedName("2026oct11_15:18"))
+        XCTAssertTrue(ThoughtMediaSummaryBuilder.isGeneratedName("2026JAN05_09:07"))
+        XCTAssertFalse(ThoughtMediaSummaryBuilder.isGeneratedName("Bridge idea"))
+        XCTAssertFalse(ThoughtMediaSummaryBuilder.isGeneratedName("2026oct11_15:18_2"), "a suffixed save-as-new name is a member-kept name")
+        XCTAssertFalse(ThoughtMediaSummaryBuilder.isGeneratedName("2026xyz11_15:18"))
         XCTAssertFalse(code("ThoughtMediaSummary.swift").contains("fallbackTitle"), "no fallback title text; the spoken kind is for VoiceOver only")
-        XCTAssertEqual(ThoughtMediaSummaryBuilder.format(seconds: 11), "0:11")
-        XCTAssertEqual(ThoughtMediaSummaryBuilder.format(seconds: 725), "12:05")
-        XCTAssertEqual(ThoughtMediaSummaryBuilder.format(seconds: 3723), "1:02:03")
-        XCTAssertNil(ThoughtMediaSummary(title: "x", kind: .audio, durationText: nil, count: 1, uniformKind: true).countText)
-        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .audio, durationText: nil, count: 3, uniformKind: true).countText, "3 recordings")
-        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .video, durationText: nil, count: 2, uniformKind: true).countText, "2 videos")
-        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .image, durationText: nil, count: 4, uniformKind: true).countText, "4 photos")
-        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .video, durationText: nil, count: 3, uniformKind: false).countText, "3 attachments")
-        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .video, durationText: nil, count: 1, uniformKind: true).systemImage, "video")
-        XCTAssertNil(ThoughtMediaSummaryBuilder.durationText(for: URL(fileURLWithPath: "/nonexistent/\(UUID().uuidString).m4a")))
+        XCTAssertFalse(code("ThoughtMediaSummary.swift").contains("durationText"), "duration belongs to the player, not the rows")
+        XCTAssertNil(ThoughtMediaSummary(title: "x", kind: .audio, count: 1, uniformKind: true).countText)
+        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .audio, count: 3, uniformKind: true).countText, "3 recordings")
+        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .video, count: 2, uniformKind: true).countText, "2 videos")
+        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .image, count: 4, uniformKind: true).countText, "4 photos")
+        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .video, count: 3, uniformKind: false).countText, "3 attachments")
+        XCTAssertEqual(ThoughtMediaSummary(title: nil, kind: .video, count: 1, uniformKind: true).systemImage, "video")
     }
 
     func testPersistedTitleWinsOverTheStem() {
@@ -397,12 +394,13 @@ final class SaveThoughtHandoffTests: XCTestCase {
     }
 
     func testBothJournalThoughtRowsUseTheSummaryWhenThereIsNoHeading() {
-        for file in ["ContentViewMonthThoughtRow.swift", "ContentViewThoughtRow.swift"] {
-            let s = code(file)
-            XCTAssertTrue(s.contains("ThoughtMediaSummaryBuilder.summary(for: session)"), "\(file)")
-            XCTAssertTrue(s.contains("audioSummary.systemImage"), "\(file): the kind indicator")
-        }
-        XCTAssertTrue(block(after: "private var audioSummary: ThoughtMediaSummary?", in: code("ContentViewMonthThoughtRow.swift"))?.contains("writtenHeader == nil") ?? false,
+        let month = code("ContentViewMonthThoughtRow.swift")
+        let week = code("ContentViewThoughtRow.swift")
+        XCTAssertTrue(month.contains("ThoughtMediaSummaryBuilder.summary(for: session)"))
+        XCTAssertTrue(week.contains("ThoughtMediaSummaryBuilder.summary(for: session)?.title"), "the week card takes only a member-given title")
+        XCTAssertTrue(month.contains("if showsKindIndicator, let audioSummary {"), "the month card's one indicator sits on the date line, only without a heading")
+        XCTAssertFalse(week.contains("systemImage"), "no extra indicator row in the week card")
+        XCTAssertTrue(block(after: "private var audioSummary: ThoughtMediaSummary?", in: month)?.contains("writtenHeader == nil") ?? false,
                       "a written heading always wins")
     }
 

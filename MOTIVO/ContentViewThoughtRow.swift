@@ -73,11 +73,12 @@ struct ThoughtRow: View {
         pickFavoriteAttachment(from: attachments)
     }
 
-    /// With no written heading or body, a media thought is named by its first
-    /// attachment, with a quiet kind indicator, the duration and a count.
-    private var audioSummary: ThoughtMediaSummary? {
+    /// With no written heading or body, a member-given recording title is the
+    /// heading. A generated name is not, and an unnamed thought has none: the
+    /// date, the preview and the favourite control carry the card.
+    private var mediaTitle: String? {
         guard session.thoughtHeader == nil, session.thoughtBodyPreview == nil else { return nil }
-        return ThoughtMediaSummaryBuilder.summary(for: session)
+        return ThoughtMediaSummaryBuilder.summary(for: session)?.title
     }
 
     private var verticalPadding: CGFloat {
@@ -183,33 +184,14 @@ struct ThoughtRow: View {
                     .accessibilityIdentifier("row.subtitle")
             }
 
-            if let audioSummary {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: audioSummary.systemImage)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
-                        .accessibilityHidden(true)
-                    if let title = audioSummary.title {
-                        Text(title)
-                            .font(Theme.Text.body.weight(.semibold))
-                            .foregroundColor(Color.primary.opacity(0.86))
-                            .lineLimit(1)
-                    }
-                    if let duration = audioSummary.durationText {
-                        Text(duration)
-                            .font(.caption)
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(bodyOpacity))
-                    }
-                    if let count = audioSummary.countText {
-                        Text(count)
-                            .font(.caption)
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(bodyOpacity))
-                    }
-                }
-                .padding(.top, headerTopPadding)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel([audioSummary.spokenKind, audioSummary.title, audioSummary.durationText, audioSummary.countText].compactMap { $0 }.joined(separator: ", "))
-                .accessibilityIdentifier("row.audioTitle")
+            if let mediaTitle {
+                Text(mediaTitle)
+                    .font(Theme.Text.body.weight(.semibold))
+                    .foregroundColor(Color.primary.opacity(0.86))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, headerTopPadding)
+                    .accessibilityIdentifier("row.title")
             }
 
             if let favoriteAttachment {
