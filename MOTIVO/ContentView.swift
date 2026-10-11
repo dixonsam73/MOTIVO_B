@@ -486,6 +486,7 @@ struct ContentView: View {
     var body: some View {
         SessionsRootView(userID: auth.currentUserID, backendUserID: auth.backendUserID)
             .id(auth.currentUserID ?? "nil-user")
+            .overlay(alignment: .top) { TransientNoticeView() }
     }
 }
 

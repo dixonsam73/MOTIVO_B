@@ -7,13 +7,20 @@ struct TimerCard: View {
     let elapsedLabel: String
     let elapsedSeconds: Int
     let isRunning: Bool
+    /// The one shared "started since reset" check, owned by the timer. It is
+    /// NOT derived from the label: a Start → Pause inside one second shows
+    /// `00:00` and is still a practice attempt, so it must show paused controls.
+    let hasStarted: Bool
     let onStart: () -> Void
     let onPause: () -> Void
-    let onReset: () -> Void
+    /// Reset — the timer asks what to do (time only, or time and draft) in its
+    /// own card, so this only requests. There is never a second control for it.
+    let onResetTimer: () -> Void
     let onFinish: () -> Void
-    /// C-84 — offer Reset while idle when there is session content to discard.
-    let showsIdleReset: Bool
-    /// C-84 — this Reset will destroy member content, so it must be confirmed.
+    /// True when attachments are staged: Reset opens the card, so it runs
+    /// without the control transition and the controls follow the timer's
+    /// state once something actually happens. Otherwise Reset is immediate and
+    /// fades the controls back to idle.
     let resetRequiresConfirmation: Bool
 
     private enum ControlMode: Equatable {
@@ -28,12 +35,15 @@ struct TimerCard: View {
     @State private var incomingOpacity: Double = 1.0
     @State private var isControlTransitionActive: Bool = false
 
-    private var hasStarted: Bool {
-        elapsedLabel != "00:00"
-    }
-
     private var isPaused: Bool {
         !isRunning && hasStarted
+    }
+
+    /// The elapsed label's own visibility: it fades in with the first digit
+    /// change, exactly as before, and is hidden at `00:00`. Decoupled from
+    /// `hasStarted` so a fade begun at Start does not swallow the first digit.
+    private var showsElapsed: Bool {
+        elapsedLabel != "00:00"
     }
 
     private var currentControlMode: ControlMode {
@@ -53,9 +63,9 @@ struct TimerCard: View {
     private var fadeInAnimation: Animation {
         .easeInOut(duration: 0.52)
     }
-    
+
     private var timerFocusOpacity: Double {
-        guard hasStarted else { return 0.0 }
+        guard showsElapsed else { return 0.0 }
 
         let progress = min(Double(elapsedSeconds) / 1800.0, 1.0)
 
@@ -71,7 +81,7 @@ struct TimerCard: View {
 
         return Color(red: red, green: green, blue: blue)
     }
-    
+
     private func performControlTransition(
         to targetMode: ControlMode,
         action: @escaping () -> Void
@@ -113,12 +123,12 @@ struct TimerCard: View {
                 )
                 .monospacedDigit()
                 .animation(
-                    hasStarted
+                    showsElapsed
                         ? .easeOut(duration: 3.0)
                         : .easeOut(duration: 0.45),
-                    value: hasStarted
+                    value: showsElapsed
                 )
-                .accessibilityHidden(!hasStarted)
+                .accessibilityHidden(!showsElapsed)
                 .frame(maxWidth: .infinity, alignment: .center)
 
             transportControls
@@ -161,27 +171,19 @@ struct TimerCard: View {
             HStack(spacing: Theme.Spacing.m) {
                 Spacer(minLength: 0)
 
+                // "Start Timer", so a timed session reads differently from the
+                // thought-capture state the recorder and Save thought live in.
+                // Nothing else sits on this row: Reset appears once something
+                // has started since the last reset.
                 controlSlot(
-                    title: "Start",
+                    title: "Start Timer",
                     background: Theme.Colors.primaryAction.opacity(0.14),
                     isInteractive: isInteractive,
                     action: {
                         performControlTransition(to: .running, action: onStart)
                     }
                 )
-                .frame(maxWidth: 180)
-
-                // C-84 — Reset is offered whenever there is session content to
-                // discard, even if the timer never started.
-                if showsIdleReset {
-                    controlSlot(
-                        title: "Reset",
-                        background: Color.orange.opacity(0.12),
-                        isInteractive: isInteractive,
-                        action: { requestReset() }
-                    )
-                    .frame(maxWidth: 180)
-                }
+                .frame(maxWidth: 220)
 
                 Spacer(minLength: 0)
             }
@@ -205,6 +207,13 @@ struct TimerCard: View {
                     action: {
                         performControlTransition(to: .paused, action: onFinish)
                     }
+                )
+
+                controlSlot(
+                    title: "Reset",
+                    background: Color.orange.opacity(0.12),
+                    isInteractive: isInteractive,
+                    action: { requestReset() }
                 )
             }
             .frame(maxWidth: 360)
@@ -233,23 +242,21 @@ struct TimerCard: View {
                     title: "Reset",
                     background: Color.orange.opacity(0.12),
                     isInteractive: isInteractive,
-                    action: {
-                        requestReset()
-                    }
+                    action: { requestReset() }
                 )
             }
+            .frame(maxWidth: 360)
         }
     }
 
-    /// C-84 — a Reset that destroys member content is confirmed first, so it
-    /// runs without the control transition: the controls follow the timer's
-    /// state once the discard actually happens, and a Cancel leaves them as
-    /// they were.
+    /// A Reset that opens the card runs without the control transition: the
+    /// controls follow the timer's state once the member chooses, and a Cancel
+    /// leaves them as they were. An immediate Reset fades back to idle.
     private func requestReset() {
         if resetRequiresConfirmation {
-            onReset()
+            onResetTimer()
         } else {
-            performControlTransition(to: .idle, action: onReset)
+            performControlTransition(to: .idle, action: onResetTimer)
         }
     }
 
@@ -259,8 +266,12 @@ struct TimerCard: View {
         isInteractive: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        Button(title) {
+        Button {
             action()
+        } label: {
+            Text(title)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .buttonStyle(.bordered)
         .tint(.clear)
@@ -271,5 +282,31 @@ struct TimerCard: View {
         )
         .foregroundStyle(Color.primary.opacity(0.72))
         .allowsHitTesting(isInteractive)
+    }
+}
+
+/// The Reset card, as a modifier: `PracticeTimerView`'s body is at the
+/// type-checker's limit, and another inline `.alert` does not compile.
+///
+/// Shown only when attachments are staged. It offers the two outcomes in one
+/// place — reset the time and keep the draft, or reset and discard the draft
+/// (named truthfully, C-84) — so there is never a second control on the timer
+/// row. With no attachments, Reset simply resets; the time alone never asks.
+struct TimerResetAlert: ViewModifier {
+    @Binding var isPresented: Bool
+    let summary: SessionDiscardSummary
+    let onResetKeepingDraft: () -> Void
+    let onResetDiscardingDraft: () -> Void
+
+    static let title = "Reset the timer?"
+
+    func body(content: Content) -> some View {
+        content.alert(Self.title, isPresented: $isPresented) {
+            Button(SessionDiscardSummary.keepTitle) { onResetKeepingDraft() }
+            Button(SessionDiscardSummary.confirmTitle, role: .destructive) { onResetDiscardingDraft() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(summary.message ?? "")
+        }
     }
 }

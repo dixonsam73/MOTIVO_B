@@ -509,10 +509,13 @@ extension AddEditSessionView {
                   displayName: { displayNames[$0.id.uuidString] }),
             to: session, ctx: ctx)
 
-        // AESV keys the thumbnail flag on the STAGED id, because an already
-        // persisted attachment can be the chosen thumbnail here.
-        AttachmentCommitService.applyThumbnailFlags(finalThumbnailID: chosenThumbID,
-                                                    to: session, ctx: ctx)
+        // The flag is applied against FINAL ids. An already persisted attachment
+        // keeps its id; a newly staged one (an import, or media carried in from
+        // the timer) is translated through this attempt's map — keyed on the
+        // staged id alone, the row created with `isThumbnail` was cleared again.
+        AttachmentCommitService.applyThumbnailFlags(
+            finalThumbnailID: TimerThoughtHandoffBuilder.finalThumbnailID(chosen: chosenThumbID, attempt: attempt),
+            to: session, ctx: ctx)
 
         // NOTHING STAGED IS CLEARED HERE. `stagedAttachments.removeAll()` used to
         // run on the way out whether or not the loop had failed, and before the
@@ -550,7 +553,13 @@ extension AddEditSessionView {
         pendingScoreFinalisations_AESV.removeAll()
         privacyMap = AttachmentPrivacy.currentMap()
 
+        // Titles, keyed by the final id, through the shared writer (C-47) — the
+        // migration post-record details already had. A renamed clip or a titled
+        // video survives save and reopen.
+        StagedTitleMigration.writeFinalTitles(for: attempt, kind: { stagedByID[$0]?.kind })
+
         UserDefaults.standard.removeObject(forKey: "stagedAudioNames_temp")
+        UserDefaults.standard.removeObject(forKey: StagedTitleMigration.stagedVideoTitlesKey)
         UserDefaults.standard.removeObject(forKey: displayNamesKey)
         stagedAttachments.removeAll()
         existingAttachmentIDs.removeAll()
@@ -1247,7 +1256,10 @@ return isPrivate(id: id, url: url)
                                                     return
                                                 }
 
-                                                stagedAttachments[idx] = StagedAttachment(id: old.id, data: data, kind: old.kind)
+                                                // C-85 — the trim's real container travels with the bytes.
+                                                stagedAttachments[idx] = StagedAttachment(
+                                                    id: old.id, data: data, kind: old.kind,
+                                                    sourceFormat: AttachmentImportPolicy.format(forTrimOutput: newURL, kind: old.kind, previous: old.sourceFormat))
 
                                                 cleanupSurrogateSiblings_tmpOnly_edit(id: old.id, keepExt: ext, kind: old.kind)
                                                 bestEffortDeleteNewURLIfSafe_edit(newURL, surrogateTarget: surrogateTarget, protectedPaths: protectedPaths)
@@ -1317,7 +1329,9 @@ return isPrivate(id: id, url: url)
                                         }
 
 
-let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
+// C-85 — a saved-as-new trim names its real container too.
+let newAtt = StagedAttachment(id: newID, data: data, kind: kind,
+                              sourceFormat: AttachmentImportPolicy.format(forTrimOutput: newURL, kind: kind, previous: nil))
 
                                         #if canImport(UIKit)
                                         if kind == .video {

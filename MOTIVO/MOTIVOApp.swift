@@ -39,6 +39,9 @@ final class AppRouteStore: ObservableObject {
     @Published var route: AppRoute = .timer
     @Published var isProfilePresented: Bool = false
     @Published var pendingContentLaunchScopeOverride: String? = nil
+    /// A brief confirmation to show where the member lands next ("Thought
+    /// saved"). Consumed by `TransientNoticeView` and cleared.
+    @Published var transientNotice: String? = nil
 }
 
 // CHANGE-ID: 20251203_BackendIdentityHandshakeStep5

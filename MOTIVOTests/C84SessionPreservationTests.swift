@@ -24,23 +24,23 @@ import XCTest
 @MainActor
 final class C84SessionPreservationTests: XCTestCase {
 
-    // MARK: - The Reset confirmation copy
+    // MARK: - The Reset card copy
 
-    private let tail = ". This can’t be undone."
+    private func tail(_ p: String) -> String {
+        " for your next attempt, or discard \(p) with the timer. Discarding permanently deletes \(p) and can’t be undone."
+    }
 
     func testDiscardSummaryNamesExactlyWhatIsLost() {
         let all = SessionDiscardSummary(recordings: 2, videos: 1, photos: 3, hasTasks: true)
         XCTAssertTrue(all.needsConfirmation)
-        XCTAssertEqual(all.message,
-                       "This resets the timer and permanently deletes 2 recordings, 1 video, 3 photos and your tasks" + tail)
-        XCTAssertEqual(SessionDiscardSummary(recordings: 1).message,
-                       "This resets the timer and permanently deletes 1 recording" + tail)
-        XCTAssertEqual(SessionDiscardSummary(videos: 2, photos: 1).message,
-                       "This resets the timer and permanently deletes 2 videos and 1 photo" + tail)
-        XCTAssertEqual(SessionDiscardSummary(hasTasks: true).message,
-                       "This resets the timer and permanently deletes your tasks" + tail)
-        XCTAssertEqual(SessionDiscardSummary.title, "Reset session?")
-        XCTAssertEqual(SessionDiscardSummary.confirmTitle, "Delete and Reset")
+        XCTAssertEqual(all.message, "Keep 2 recordings, 1 video, 3 photos and your tasks" + tail("them"))
+        XCTAssertEqual(SessionDiscardSummary(recordings: 1).message, "Keep 1 recording" + tail("it"))
+        XCTAssertEqual(SessionDiscardSummary(photos: 1).message, "Keep 1 photo" + tail("it"))
+        XCTAssertEqual(SessionDiscardSummary(videos: 2, photos: 1).message, "Keep 2 videos and 1 photo" + tail("them"))
+        XCTAssertEqual(SessionDiscardSummary(hasTasks: true).message, "Keep your tasks" + tail("them"))
+        XCTAssertEqual(SessionDiscardSummary.title, "Reset the timer?")
+        XCTAssertEqual(SessionDiscardSummary.keepTitle, "Reset timer")
+        XCTAssertEqual(SessionDiscardSummary.confirmTitle, "Reset and discard draft")
     }
 
     func testNothingToLoseNeedsNoConfirmation() {
@@ -226,10 +226,15 @@ final class C84SessionPreservationTests: XCTestCase {
         XCTAssertFalse(b.contains("removeItem(at: finalURL)"), "never delete the original before the new one is in place")
     }
 
-    func testResetConfirmsAndDiscardsCompletely() {
-        XCTAssertTrue(ptv.contains("onReset: { requestReset() }"))
-        XCTAssertTrue(block(after: "func requestReset(", in: ptv)?.contains("SessionDiscardSummary") ?? false)
-        XCTAssertTrue(ptv.contains("Button(SessionDiscardSummary.confirmTitle, role: .destructive) { discardSessionCompletely() }"))
+    func testDiscardDraftConfirmsAndDiscardsCompletely() {
+        // The whole-draft discard is reached ONLY through the Reset card, as its
+        // destructive, named option — never from a second control on the timer row.
+        XCTAssertTrue(block(after: "func requestResetTimer(", in: ptv)?.contains("currentDiscardSummary()") ?? false)
+        XCTAssertTrue(ptv.contains("onResetDiscardingDraft: { discardSessionCompletely() }"))
+        let card = code("TimerCard.swift")
+        XCTAssertTrue(card.contains("Button(SessionDiscardSummary.confirmTitle, role: .destructive) { onResetDiscardingDraft() }"))
+        XCTAssertTrue(card.contains("Button(SessionDiscardSummary.keepTitle) { onResetKeepingDraft() }"))
+        XCTAssertFalse(ptv.contains("requestDiscardDraft("), "no separate discard entry point")
         guard let b = block(after: "func discardSessionCompletely(", in: ptv) else { return XCTFail("not found") }
         for needed in ["StagingStore.removeMany(", "clearAllStagingStoreRefs()", "reset()",
                        "stagedAudio.removeAll()", "stagedVideos.removeAll()", "stagedImages.removeAll()",
@@ -238,12 +243,70 @@ final class C84SessionPreservationTests: XCTestCase {
         }
     }
 
-    func testTimerCardOffersResetWhileIdleWithContent() {
+    /// Reset timer is time only. It must never reach the whole-draft paths —
+    /// not the discard, not `reset()`, not `resetUIOnly()` (activity and thread),
+    /// not the task reset — and it must clear BOTH start dates and the timing
+    /// identity, so reset time cannot come back through post-record details.
+    func testResetTimerKeepsTheDraft() {
+        XCTAssertTrue(ptv.contains("onResetTimer: { requestResetTimer() }"))
+        guard let request = block(after: "func requestResetTimer(", in: ptv) else { return XCTFail("not found") }
+        XCTAssertTrue(request.contains("if summary.hasAttachments {"), "asks only when attachments are staged, rechecked at the request")
+        XCTAssertFalse(request.contains("trueElapsedSeconds()"), "the time alone never asks")
+        XCTAssertTrue(ptv.contains("TimerResetAlert(isPresented: $showResetTimerConfirmation,"), "the card is the shared modifier")
+        XCTAssertTrue(ptv.contains("onResetKeepingDraft: { resetTimerOnly() }"), "and its keep action is the timer-only reset")
+        XCTAssertTrue(ptv.contains("resetRequiresConfirmation: hasAttachments"), "the card knows when Reset is immediate")
+        XCTAssertEqual(TimerResetAlert.title, "Reset the timer?")
+        XCTAssertTrue(SessionDiscardSummary(hasTasks: true).needsConfirmation)
+        XCTAssertFalse(SessionDiscardSummary(hasTasks: true).hasAttachments, "tasks alone do not open the Reset card")
+        XCTAssertTrue(SessionDiscardSummary(photos: 1).hasAttachments)
+        guard let b = block(after: "func resetTimerOnly(", in: ptv) else { return XCTFail("not found") }
+        for forbidden in ["reset()", "resetUIOnly()", "resetTasksForNewSessionContext()", "discardSessionCompletely()",
+                          "StagingStore.", "clearAllStagingStoreRefs()", "clearPersistedStagedAttachments()",
+                          "clearPersistedTasks()", "stagedAudio", "stagedVideos", "stagedImages",
+                          "audioTitles", "videoTitles", "selectedThumbnailID", "taskLines", "provisionalThreadLabel",
+                          "activity =", "activityDetail ="] {
+            XCTAssertFalse(b.contains(forbidden), "Reset timer must keep the draft — found \(forbidden)")
+        }
+        for needed in ["accumulatedSeconds = 0", "startDate = nil", "finalizedDuration = 0", "finalizedStartDate = nil",
+                       "reviewPrefill = []", "practiceStartedSinceReset = false", "clearTimingIdentity()", "persistTimerState()"] {
+            XCTAssertTrue(b.contains(needed), "Reset timer must clear the time — missing \(needed)")
+        }
+        guard let identity = block(after: "func clearTimingIdentity(", in: ptv) else { return XCTFail("not found") }
+        XCTAssertTrue(identity.contains("perSessionStartTimestampKey(for: sid)"), "the per-session start date goes")
+        XCTAssertTrue(identity.contains("\"PracticeTimer.currentSessionStartTimestamp\""), "and the global fallback finish() reads")
+        XCTAssertTrue(identity.contains("removeObject(forKey: currentSessionIDKey)"), "and the timing identity itself")
+    }
+
+    /// One shared "started since reset" check, and the timer card takes it rather
+    /// than inferring it from the label (a pause under one second shows `00:00`).
+    func testStartedSinceResetIsOneSharedCheck() {
+        guard let check = block(after: "var hasStartedSinceReset: Bool", in: ptv) else { return XCTFail("not found") }
+        XCTAssertTrue(check.contains("practiceStartedSinceReset"), "the persisted marker is part of it")
+        XCTAssertTrue(block(after: "private var isIdleAddEntryAvailable: Bool", in: ptv)?.contains("!hasStartedSinceReset") ?? false)
+        XCTAssertTrue(ptv.contains("hasStarted: hasStartedSinceReset,"), "the timer card is told")
+        XCTAssertTrue(block(after: "func start(", in: ptv)?.contains("practiceStartedSinceReset = true") ?? false, "set after a successful start")
+        XCTAssertTrue(block(after: "func hydrateTimerFromStorage(", in: ptv)?.contains("practiceStartedSinceReset = persistedPracticeStartMarkerExists()") ?? false, "reconciled on restore")
+        let card = code("TimerCard.swift")
+        XCTAssertTrue(card.contains("let hasStarted: Bool"))
+        XCTAssertTrue(block(after: "private var isPaused: Bool", in: card)?.contains("!isRunning && hasStarted") ?? false,
+                      "the transport mode uses the shared check, not the label")
+        XCTAssertTrue(block(after: "private var showsElapsed: Bool", in: card)?.contains("elapsedLabel != \"00:00\"") ?? false,
+                      "the label's own fade keeps its original timing")
+    }
+
+    /// Samuel, 2026-10-11: never an additional control on the timer row. Idle is
+    /// "Start Timer" alone; running and paused carry one "Reset"; keep-or-discard
+    /// lives in the Reset card.
+    func testTimerRowHasNoSecondaryControl() {
         let s = code("TimerCard.swift")
-        XCTAssertTrue(s.contains("let showsIdleReset: Bool"))
-        XCTAssertTrue(s.contains("let resetRequiresConfirmation: Bool"))
-        XCTAssertTrue(block(after: "case .idle:", in: s)?.contains("\"Reset\"") ?? false, "idle offers Reset")
-        XCTAssertTrue(ptv.contains("showsIdleReset:"), "the timer passes it")
+        XCTAssertFalse(s.contains("Menu {"), "no ellipsis menu on the timer row, ever")
+        XCTAssertFalse(s.contains("ellipsis"))
+        guard let idle = block(after: "case .idle:", in: s) else { return XCTFail("not found") }
+        XCTAssertTrue(idle.contains("\"Start Timer\""))
+        XCTAssertFalse(idle.contains("\"Reset\""), "nothing has started, so there is no Reset")
+        XCTAssertTrue(block(after: "case .running:", in: s)?.contains("title: \"Reset\"") ?? false, "running offers Reset")
+        XCTAssertTrue(block(after: "case .paused:", in: s)?.contains("title: \"Reset\"") ?? false, "paused offers Reset")
+        XCTAssertFalse(s.contains("\"Reset timer\""), "the button is labelled Reset; the card explains")
     }
 
     func testHandOffMaterialisesVideoOnce() {
@@ -262,6 +325,9 @@ final class C84SessionPreservationTests: XCTestCase {
             "PracticeTimerView.swift": 9, "PracticeTimerView+Sheets.swift": 1,
             "PracticeTimerView+AudioPlayback.swift": 1, "AttachmentsCard.swift": 2,
             "PostRecordDetailsView.swift": 1,
+            // Save thought: the one consumption of exactly the committed ids,
+            // after the thought's durable local save (SaveThoughtHandoffTests).
+            "PracticeTimerView+SaveThought.swift": 1,
         ]
         let tokens = ["StagingStore.remove(", "StagingStore.removeMany(", "StagingStore.deleteFiles(", "clearAllStagingStoreRefs()"]
         for (file, want) in expected {

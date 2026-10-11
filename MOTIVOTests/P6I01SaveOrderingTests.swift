@@ -49,8 +49,11 @@ final class P6I01SaveOrderingTests: XCTestCase {
                            "\(file): the swallowing `break` must be gone from the commit")
         }
         // The throw itself now lives in the one shared commit.
+        // C-107 (7f80d23) builds the typed failure into a local so it can be
+        // logged before it is thrown; the pin follows the code.
         let service = code("AttachmentCommitService.swift")
-        XCTAssertTrue(service.contains("throw AttachmentCommitFailure("),
+        XCTAssertTrue(service.contains("let failure = AttachmentCommitFailure(stagedID: att.id, underlying: error)")
+                      && service.contains("throw failure"),
                       "the shared commit must rethrow a typed failure")
         for file in commits {
             let s = code(file)

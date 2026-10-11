@@ -154,6 +154,36 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   `ConnectedIntroductionView.swift:211` ("you can invite them"), which is
   false today, to match. Also reword "sketch" in `AboutEtudesView.swift:64`
   (no drawing tool yet). Private invitations stay post-launch (section E).
+- [x] **A — Save spontaneous recordings as a thought** (scoped 2026-10-11,
+  built 2026-10-11, **not device-verified**). Part A: idle shows **Start
+  Timer** alone; running and paused carry one **Reset**, whose card offers
+  "Reset timer" (time only, draft kept) or "Reset and discard draft" (the old
+  confirmed whole-draft discard, named truthfully) when attachments are
+  staged; with none, Reset just resets. Never a second control on the timer
+  row (Samuel, 2026-10-11). One shared "started since reset" check (a persisted start
+  marker plus running/elapsed evidence) drives the "+" actions, Save thought
+  and the timer card, so a pause under one second no longer looks idle. Part
+  B: with media staged and no practice started, a **Save Thought** button opens
+  the thought editor with the media carried in (copy; originals kept); after
+  the durable local save the timer consumes exactly the committed ids, inside
+  the editor's finalisation and independent of the sharing alert. The button
+  is text only, slate blue-grey, last on the page beneath the attachments
+  card. Also fixed
+  on the way: the editor's thumbnail flag for a newly staged photo, trimmed
+  video declared as MOV after a trim in the editor, and id-keyed titles for
+  audio/video saved through the editor (C-108 to C-110). Known boundary:
+  the Core Data save and the staging consumption are not one step (C-111).
+  Tests: `SaveThoughtHandoffTests`, `C84SessionPreservationTests` (updated);
+  also corrected the `P6I01SaveOrderingTests` pin that C-107 had left stale.
+  Simulator smoke check passed 2026-10-11 (iPhone 17 Pro, iOS 26.5, Debug,
+  fresh install): record → Save thought → journal with "Thought saved";
+  clip consumed and stays gone after relaunch; second clip saves as another
+  thought; Start → Reset timer (confirmed) keeps the clip and shows Save
+  thought again. Device QA still to do (Device B, Études Dev, test data only): the
+  verification list in the scope — clips → Save thought (audio, video, mixed,
+  rename, trim, subset, cancel/relaunch), Start → Reset timer while running,
+  paused and within one second, Discard draft before and after Start, the
+  largest supported video, VoiceOver, large text and Reduce Motion.
 - [ ] **A — "Show streaks and totals" switch** (decided 2026-10-09; optional
   for launch). One switch in Profile → Settings, **default on** (today's
   behaviour unchanged). Off hides the Journal summary's total and "n-day
@@ -274,6 +304,19 @@ the join.
   harmonics, or the option stops at the cello's range). Adds about 2–5 MB.
   New audio engine, so write a one-page scope first. Loop quality needs
   listening on a device. Copy mentions it only once it ships.
+- **Manuscript sketch as a Thought** (idea, 2026-10-11; with the iPad and
+  sketch work above). A manuscript/sketch button on the timer page beside the
+  mic, camera and video: open the sketchpad, write a page, and save it as a
+  Thought through the existing Save Thought route, with no timer and no
+  post-record details. A sketch is one more staged attachment kind in the
+  hand-off (`TimerThoughtHandoff.swift`), so the capture-side flow, the
+  started-since-reset gate and the consumption rule already apply. Prefer PDF
+  output (existing kind, viewer, page selection and sharing path; prints and
+  exports cleanly) over an image. Marking up an existing score must save a
+  new attachment that references the score and never write into the score
+  library. No separate sketchbook screen: capture lands in one place. Pushes
+  Études towards a musician's notebook rather than only a practice journal,
+  and towards "pay once for what runs on the device".
 - A suspended member lands in Solo with no explanation. Optional: a short
   "account suspended, contact support" message.
 - Block is per device. "Reply to all commenters" still fans out server-side to

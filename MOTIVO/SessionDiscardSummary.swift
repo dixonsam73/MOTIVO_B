@@ -2,12 +2,13 @@
 //  SessionDiscardSummary.swift
 //  MOTIVO
 //
-//  C-84 — WHAT A CONFIRMED RESET PERMANENTLY DELETES, NAMED TRUTHFULLY.
+//  C-84 — WHAT A CONFIRMED DISCARD PERMANENTLY DELETES, NAMED TRUTHFULLY.
 //
-//  Reset is the one explicit whole-session discard. It asks before destroying
-//  anything the member created — staged recordings, videos, photos, or task
-//  content — and the copy names exactly what will be lost. The timer's value
-//  alone never asks: Reset already means that.
+//  The Reset card is the one place the whole draft can be discarded. When the
+//  draft holds anything the member created — staged recordings, videos, photos,
+//  or task content — Reset offers "keep the draft" and "discard the draft", and
+//  the copy names exactly what the discard would lose. Without such content,
+//  Reset clears the time and that is all.
 //
 
 import Foundation
@@ -18,10 +19,17 @@ struct SessionDiscardSummary: Equatable {
     var photos: Int = 0
     var hasTasks: Bool = false
 
-    static let title = "Reset session?"
-    static let confirmTitle = "Delete and Reset"
+    static let title = "Reset the timer?"
+    /// Time only; everything in the draft is kept.
+    static let keepTitle = "Reset timer"
+    /// Time and draft; permanent, so destructive.
+    static let confirmTitle = "Reset and discard draft"
 
     var needsConfirmation: Bool { recordings + videos + photos > 0 || hasTasks }
+
+    /// Reset opens its card only when attachments are staged (Samuel,
+    /// 2026-10-11). Task content alone does not ask: reset keeps it anyway.
+    var hasAttachments: Bool { recordings + videos + photos > 0 }
 
     var message: String? {
         guard needsConfirmation else { return nil }
@@ -36,7 +44,8 @@ struct SessionDiscardSummary: Equatable {
         let list = parts.count == 1
             ? parts[0]
             : parts.dropLast().joined(separator: ", ") + " and " + parts[parts.count - 1]
-        return "This resets the timer and permanently deletes \(list). This can’t be undone."
+        let pronoun = (recordings + videos + photos > 1 || hasTasks || parts.count > 1) ? "them" : "it"
+        return "Keep \(list) for your next attempt, or discard \(pronoun) with the timer. Discarding permanently deletes \(pronoun) and can’t be undone."
     }
 
     /// Task content counts only if the member made it: a line typed, or edited

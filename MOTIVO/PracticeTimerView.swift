@@ -316,7 +316,7 @@ struct PracticeTimerView: View {
     @State private var longPressControlsHintHeight: CGFloat = 32
     @ScaledMetric(relativeTo: .caption) private var longPressControlsHintWidth: CGFloat = 96
     @State private var isTunerOpen: Bool = false
-    @State private var isAttachmentsVisible: Bool = false
+    @State var isAttachmentsVisible: Bool = false
     @StateObject private var tunerService = TunerService()
     @State private var cachedSessionMetaTint = Theme.ResolvedTint(source: .off, instrumentLabel: nil, activityLabel: nil)
     @State private var provisionalThreadLabel: String? = nil
@@ -355,8 +355,23 @@ struct PracticeTimerView: View {
     // C-84 — the review's attachments, materialised ONCE at Finish. Staged
     // video bytes are read here, at the hand-off, and nowhere on restore.
     @State var reviewPrefill: [StagedAttachment] = []
-    @State private var showResetConfirmation = false
+    @State private var showResetTimerConfirmation = false
     @State private var pendingDiscardSummary = SessionDiscardSummary()
+    /// The persisted half of the "started since reset" check: true once a Start
+    /// has succeeded, until Reset timer, Discard draft or the end of the draft.
+    /// Hydrated from the per-session start timestamp, so it survives a pause
+    /// under one second (which leaves no elapsed time) and a relaunch.
+    @State private var practiceStartedSinceReset = false
+    // Save thought (see PracticeTimerView+SaveThought.swift). One payload per
+    // presentation; released when the sheet closes.
+    @State var thoughtHandoff: TimerThoughtHandoff? = nil
+    @State var saveThoughtErrorMessage: String? = nil
+    /// Staged ids whose `StagingStore` write has not landed yet (audio, video,
+    /// photo, trim). The hand-off is disabled while any are pending.
+    @State var pendingStagingOps: Set<UUID> = []
+    @State var isAudioRecorderRecording = false
+    @State var showSaveThoughtRow = false
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var showManualAddSheet: Bool = false
     @State private var showThoughtEditorSheet: Bool = false
     @State private var showScoresLibrary: Bool = false
@@ -478,7 +493,7 @@ struct PracticeTimerView: View {
 
     // --- Tasks/Notes Pad State (v7.9A) ---
     @State private var showTasksPad: Bool = false
-    @State private var showAddEntryActions: Bool = false
+    @State var showAddEntryActions: Bool = false
     @State var showTaskImportSourceDialog: Bool = false
     @State var showTaskImportReplaceAppendDialog: Bool = false
     @State var showTaskImportPasteSheet: Bool = false
@@ -1986,12 +2001,17 @@ private func loadPracticeDefaultsIfNeeded() {
                     }
             }
         }
-        .alert(SessionDiscardSummary.title, isPresented: $showResetConfirmation) {
-            Button(SessionDiscardSummary.confirmTitle, role: .destructive) { discardSessionCompletely() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(pendingDiscardSummary.message ?? "")
-        }
+        // The Reset card: time only, or time and draft (C-84, confirmed). Cancel
+        // leaves a running timer running and a paused one paused; nothing in
+        // the draft changes either way.
+        .modifier(TimerResetAlert(isPresented: $showResetTimerConfirmation,
+                                  summary: pendingDiscardSummary,
+                                  onResetKeepingDraft: { resetTimerOnly() },
+                                  onResetDiscardingDraft: { discardSessionCompletely() }))
+        .modifier(TimerThoughtHandoffPresentation(handoff: $thoughtHandoff,
+                                                  errorMessage: $saveThoughtErrorMessage,
+                                                  isRecording: $isAudioRecorderRecording,
+                                                  editor: { payload in thoughtHandoffEditor(for: payload) }))
         .onChange(of: showReviewSheet) { oldValue, newValue in
             // C-84 — DISMISSAL WITHOUT EXPLICIT DESTRUCTIVE CONFIRMATION PRESERVES
             // THE SESSION. A swipe-down, "Back to Timer" and a failed Save all come
@@ -2130,6 +2150,13 @@ private func loadPracticeDefaultsIfNeeded() {
             }
             bottomActionSection
             attachmentsSection
+            // Save thought: the last thing on the page, beneath the attachments
+            // card. It stays when that card is collapsed and moves no timer or
+            // recorder control.
+            if showSaveThoughtRow {
+                saveThoughtRow
+                    .transition(.opacity)
+            }
         }
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.top, 0)
@@ -2604,12 +2631,12 @@ private func loadPracticeDefaultsIfNeeded() {
             elapsedLabel: formattedElapsed(elapsedSeconds),
             elapsedSeconds: elapsedSeconds,
             isRunning: isRunning,
+            hasStarted: hasStartedSinceReset,
             onStart: { start() },
             onPause: { pause() },
-            onReset: { requestReset() },
+            onResetTimer: { requestResetTimer() },
             onFinish: { finish() },
-            showsIdleReset: hasDiscardableSessionContent,
-            resetRequiresConfirmation: hasDiscardableSessionContent
+            resetRequiresConfirmation: hasAttachments
         )
     }
 
@@ -2646,12 +2673,22 @@ private func loadPracticeDefaultsIfNeeded() {
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 
-    private var hasAttachments: Bool {
+    var hasAttachments: Bool {
         !stagedImages.isEmpty || !stagedAudio.isEmpty || !stagedVideos.isEmpty
     }
 
+    /// THE ONE SHARED "STARTED SINCE RESET" CHECK. Used by the idle add-actions
+    /// gate, Save thought, and the timer card's transport mode. Running or any
+    /// time on the clock is evidence; so is the persisted start marker, which is
+    /// what survives a pause under one second (elapsed rounds down to zero and
+    /// `pause()` clears `startDate`) and a relaunch. It is separate from how the
+    /// elapsed time is displayed.
+    var hasStartedSinceReset: Bool {
+        isRunning || startDate != nil || accumulatedSeconds > 0 || elapsedSeconds > 0 || practiceStartedSinceReset
+    }
+
     private var isIdleAddEntryAvailable: Bool {
-        !isRunning && elapsedSeconds == 0 && accumulatedSeconds == 0 && startDate == nil
+        !hasStartedSinceReset
     }
     private var shouldRenderIdleAddEntryButton: Bool {
         preserveIdleAddEntryGeometry || (isIdleAddEntryAvailable && !lowerUtilityRowRecentering)
@@ -2907,6 +2944,9 @@ private func loadPracticeDefaultsIfNeeded() {
 
                         Spacer(minLength: 8)
 
+                        // While Save thought is showing, the "+" menu drops its
+                        // thought entry: there is one way to save these as a thought.
+                        if !hasAttachments {
                         Button {
                             showAddEntryActions = false
                             showThoughtEditorSheet = true
@@ -2933,6 +2973,7 @@ private func loadPracticeDefaultsIfNeeded() {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Add thought")
                         .accessibilityHint(showThoughtHint ? "An idea, note, or attachment" : "")
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2976,6 +3017,17 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         .onAppear {
             showOutgoingIdleAddEntry = isIdleAddEntryAvailable
+            // No entrance animation on restore.
+            showSaveThoughtRow = isSaveThoughtAvailable
+        }
+        .onChange(of: isSaveThoughtAvailable) { _, available in
+            // Fade in once when the first recording is ready; hide immediately
+            // on Start. Reduce Motion: no animation either way.
+            if available && !reduceMotion {
+                withAnimation(.easeInOut(duration: 0.22)) { showSaveThoughtRow = true }
+            } else {
+                showSaveThoughtRow = available
+            }
         }
         .onChange(of: isIdleAddEntryAvailable) { _, isAvailable in
             if isAvailable {
@@ -3672,6 +3724,7 @@ private func loadPracticeDefaultsIfNeeded() {
             }
 
             isRunning = true
+            practiceStartedSinceReset = true
             persistTimerState()
         }
         startTicker()
@@ -3705,10 +3758,78 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         resetUIOnly()
         videoTitles.removeAll()
-        UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
+        clearTimingIdentity()
     }
 
-    // MARK: - C-84 Reset: the one explicit, confirmed whole-session discard
+    // MARK: - Reset timer: time only, the draft is kept
+
+    /// The per-session start timestamp `finish()` and post-record details read,
+    /// scoped to the current timing identity.
+    private func perSessionStartTimestampKey(for sid: String) -> String {
+        "PracticeTimer.currentSessionStartTimestamp.\(sid)"
+    }
+
+    /// Whether a Start has succeeded for the current timing identity: the
+    /// persisted evidence behind `hasStartedSinceReset`.
+    private func persistedPracticeStartMarkerExists() -> Bool {
+        let ud = UserDefaults.standard
+        guard let sid = ud.string(forKey: currentSessionIDKey), !sid.isEmpty else { return false }
+        return ud.object(forKey: perSessionStartTimestampKey(for: sid)) != nil
+    }
+
+    /// Ends the current timing identity: its scoped start timestamp, the global
+    /// fallback `finish()` uses, and the session id itself, so the next Start is
+    /// a fresh attempt and time that was reset never comes back — in post-record
+    /// details, a thought, statistics or a restored timer. Media is keyed by its
+    /// own ids, so nothing is re-keyed or deleted here.
+    private func clearTimingIdentity() {
+        let ud = UserDefaults.standard
+        if let sid = ud.string(forKey: currentSessionIDKey), !sid.isEmpty {
+            ud.removeObject(forKey: perSessionStartTimestampKey(for: sid))
+        }
+        ud.removeObject(forKey: "PracticeTimer.currentSessionStartTimestamp")
+        ud.removeObject(forKey: currentSessionIDKey)
+    }
+
+    /// Reset. With attachments staged the card offers keep or discard; with
+    /// none the timer just resets — the time alone never asks. Opening the card
+    /// does not stop the timer or change the draft, and Cancel leaves a running
+    /// timer running.
+    func requestResetTimer() {
+        let summary: SessionDiscardSummary = currentDiscardSummary()
+        pendingDiscardSummary = summary
+        if summary.hasAttachments {
+            showResetTimerConfirmation = true
+        } else {
+            resetTimerOnly()
+        }
+    }
+
+    /// Stops the timer and clears the time — elapsed, accumulated, both start
+    /// dates, any stale finalised duration or review payload — and persists
+    /// that immediately. EVERYTHING ELSE IS KEPT: media with titles, durations,
+    /// posters, privacy and thumbnail; list text and completion; activity;
+    /// instrument; thread; score and viewer state. No journal entry is saved or
+    /// deleted, and staging still in progress finishes into the kept draft.
+    /// Never calls `reset()`, `resetUIOnly()` or `resetTasksForNewSessionContext()`.
+    func resetTimerOnly() {
+        pause()                       // stops the ticker and practice audio
+        isRunning = false
+        startDate = nil
+        accumulatedSeconds = 0
+        elapsedSeconds = 0
+        finalizedDuration = 0
+        finalizedStartDate = nil
+        reviewPrefill = []
+        practiceStartedSinceReset = false
+        clearTimingIdentity()
+        // The next Start is a fresh attempt, so its score bookkeeping starts over.
+        usedScoreIDsThisSession.removeAll()
+        clearMeaningfulScorePageTracking()
+        persistTimerState()
+    }
+
+    // MARK: - C-84 Discard draft: the one explicit, confirmed whole-draft discard
 
     func currentDiscardSummary() -> SessionDiscardSummary {
         SessionDiscardSummary(
@@ -3720,18 +3841,6 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     var hasDiscardableSessionContent: Bool { currentDiscardSummary().needsConfirmation }
-
-    /// A Reset that would destroy nothing the member created stays immediate;
-    /// otherwise it asks, naming exactly what will be lost.
-    func requestReset() {
-        let summary: SessionDiscardSummary = currentDiscardSummary()
-        guard summary.needsConfirmation else {
-            reset()
-            return
-        }
-        pendingDiscardSummary = summary
-        showResetConfirmation = true
-    }
 
     /// C-84 — whole-session staged data is removed ONLY after a successful Save
     /// or HERE, after an explicit confirmed discard. It is complete, so the
@@ -3931,6 +4040,7 @@ private func loadPracticeDefaultsIfNeeded() {
         startDate = started > 0 ? Date(timeIntervalSince1970: started) : nil
         accumulatedSeconds = d.integer(forKey: TimerDefaultsKey.accumulated.rawValue)
         isRunning = d.bool(forKey: TimerDefaultsKey.isRunning.rawValue)
+        practiceStartedSinceReset = persistedPracticeStartMarkerExists()
         let raw = Int16(d.integer(forKey: TimerDefaultsKey.activityRaw.rawValue))
         activity = SessionActivityType(rawValue: raw) ?? .practice
         activityDetail = d.string(forKey: TimerDefaultsKey.activityDetail.rawValue) ?? ""
@@ -4076,6 +4186,7 @@ private func loadPracticeDefaultsIfNeeded() {
         startDate = nil
         accumulatedSeconds = 0
         elapsedSeconds = 0
+        practiceStartedSinceReset = false
         usedScoreIDsThisSession.removeAll()
         clearMeaningfulScorePageTracking()
         showAddEntryActions = false
@@ -4471,6 +4582,8 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
 
             let shouldRevealAttachmentsAfterStaging = !hasAttachments
             stagedAudio.append(StagedAttachment(id: id, data: data, kind: .audio))
+            pendingStagingOps.insert(id)
+            defer { pendingStagingOps.remove(id) }
             if shouldRevealAttachmentsAfterStaging {
                 isAttachmentsVisible = true
             }
@@ -4540,7 +4653,9 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
             posterURL = p
         }
         let duration = AVURLAsset(url: url).duration.seconds
+        pendingStagingOps.insert(id)
         Task {
+            defer { pendingStagingOps.remove(id) }
             do {
                 // The store is given THIS id, so the in-memory item never re-keys.
                 let ref = try await StagingStore.saveNew(from: url, kind: .video, suggestedName: id.uuidString,
@@ -4702,7 +4817,11 @@ private func openAudioViewer(_ id: UUID) {
             try? data.write(to: tmp, options: .atomic)
             // C-89 — the store is given THIS id, so the visible photo, its staged
             // file and its ref agree, and a delete by the visible id finds the ref.
-            Task { _ = try? await StagingStore.saveNew(from: tmp, kind: .image, suggestedName: id.uuidString, duration: nil, poster: nil, id: id) }
+            pendingStagingOps.insert(id)
+            Task {
+                defer { pendingStagingOps.remove(id) }
+                _ = try? await StagingStore.saveNew(from: tmp, kind: .image, suggestedName: id.uuidString, duration: nil, poster: nil, id: id)
+            }
         }
     }
 
@@ -4726,7 +4845,7 @@ private func openAudioViewer(_ id: UUID) {
         return FileManager.default.temporaryDirectory.appendingPathComponent(att.id.uuidString).appendingPathExtension(ext)
     }
     
-    private func commitAudioTitleEditingBuffers() {
+    func commitAudioTitleEditingBuffers() {
         // For all buffered audio titles, commit them to audioTitles dictionary
         for (id, buffer) in audioTitleEditingBuffer {
             let trimmed = buffer.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
@@ -4906,7 +5025,9 @@ private func openAudioViewer(_ id: UUID) {
         let title = audioTitles[newID]
         let duration = audioDurations[newID].map(Double.init)
         let refKind: StagedAttachmentRef.Kind = (kind == .audio) ? .audio : .video
+        pendingStagingOps.insert(newID)
         Task {
+            defer { pendingStagingOps.remove(newID) }
             do {
                 let ref = try await StagingStore.saveNew(from: newURL, kind: refKind, suggestedName: newID.uuidString,
                                                          duration: duration, poster: posterURL, id: newID)
@@ -4929,7 +5050,9 @@ private func openAudioViewer(_ id: UUID) {
             trimItem = nil
             return
         }
+        pendingStagingOps.insert(id)
         Task {
+            defer { pendingStagingOps.remove(id) }
             do {
                 // C-84 — ATOMIC. The original is replaced only once the trim is in
                 // place; a failure deletes nothing but the trimmed temp.

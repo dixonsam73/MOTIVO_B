@@ -274,7 +274,7 @@ extension PracticeTimerView {
     
     // MARK: - Viewer Rename (PTV staged video titles)
     // Video titles are optional metadata only (no defaults). Stored in UserDefaults keyed by UUID string.
-    private static let ptvVideoTitlesDefaultsKey = "PracticeTimer.videoTitles_v1"
+    static let ptvVideoTitlesDefaultsKey = "PracticeTimer.videoTitles_v1"
 
     private func loadPTVVideoTitlesMap() -> [String: String] {
         (UserDefaults.standard.dictionary(forKey: Self.ptvVideoTitlesDefaultsKey) as? [String: String]) ?? [:]

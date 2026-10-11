@@ -180,6 +180,26 @@ struct AddEditSessionView: View {
     var isThoughtMode: Bool = false
     var threadLabelPrefill: String? = nil
 
+    // Save thought from the Practice Timer (TimerThoughtHandoff.swift). All
+    // optional with empty defaults, so every other caller is unaffected.
+    /// Staged media carried in from the timer, seeded ONCE per presentation.
+    var prefillAttachments: [StagedAttachment] = []
+    var prefillAudioTitles: [UUID: String] = [:]
+    var prefillVideoTitles: [UUID: String] = [:]
+    var prefillThumbnailID: UUID? = nil
+    /// The durable-local-commit callback: the committed staged ids, delivered
+    /// inside the save's finalisation — after the Core Data save, before and
+    /// independent of the sharing choice and its alert. `onSuccessfulSave`
+    /// stays for navigation.
+    var onLocalCommit: (([UUID]) -> Void)? = nil
+    /// The staged ids that came from the timer; their removal here is "Remove
+    /// from thought" (the timer keeps them), not a delete.
+    @State var prefilledStagedIDs: Set<UUID> = []
+    @State private var didSeedPrefill = false
+    /// Set once a local save has committed, so a second tap cannot create a
+    /// second thought behind a pending sharing alert or a slow dismissal.
+    @State var didCommitLocally = false
+
     // Form state
     @State var instruments: [Instrument] = []
     @State var instrument: Instrument?
@@ -480,12 +500,22 @@ struct AddEditSessionView: View {
         session: Session? = nil,
         isThoughtMode: Bool = false,
         threadLabelPrefill: String? = nil,
+        prefillAttachments: [StagedAttachment] = [],
+        prefillAudioTitles: [UUID: String] = [:],
+        prefillVideoTitles: [UUID: String] = [:],
+        prefillThumbnailID: UUID? = nil,
+        onLocalCommit: (([UUID]) -> Void)? = nil,
         onSuccessfulSave: (() -> Void)? = nil
     ) {
         self.session = session
         self.onSuccessfulSave = onSuccessfulSave
         self.isThoughtMode = isThoughtMode || (session?.isThought ?? false)
         self.threadLabelPrefill = threadLabelPrefill
+        self.prefillAttachments = prefillAttachments
+        self.prefillAudioTitles = prefillAudioTitles
+        self.prefillVideoTitles = prefillVideoTitles
+        self.prefillThumbnailID = prefillThumbnailID
+        self.onLocalCommit = onLocalCommit
         // Seed time-related fields on edit so they don’t flash empty
         if let s = session {
             if let ts = s.timestamp { _timestamp = State(initialValue: ts) }
@@ -1335,7 +1365,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                                     .background(.ultraThinMaterial, in: Circle())
                                                                             }
                                                                             .buttonStyle(.plain)
-                                                                            .accessibilityLabel("Delete attachment")
+                                                                            .accessibilityLabel(removalAccessibilityLabel(for: att))
                                                                         }
                                                                         .padding(6)
                                                                     }
@@ -1371,7 +1401,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                                 }
                                                                             }
                                                                             removeStagedAttachment(att)
-                                                                        } label: { Text("Remove") }
+                                                                        } label: { Text(removalMenuTitle(for: att)) }
                                                                     }
                                                                     .contentShape(Rectangle())
                                                                     .onTapGesture {
@@ -1603,7 +1633,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                     .font(.system(size: 16, weight: .semibold))
                                             }
                                             .buttonStyle(.plain)
-                                            .accessibilityLabel("Delete attachment")
+                                            .accessibilityLabel(removalAccessibilityLabel(for: att))
                                         }
                                     }
                                     .padding(12)
@@ -1714,7 +1744,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .buttonStyle(.plain)
             .disabled((isThoughtMode ? !canSaveThought : (durationSeconds == 0 || instrument == nil))
-                      || sharingSaveGate.isAwaitingDecision)   // P6-I-02 2d-1: no second save behind the alert
+                      || sharingSaveGate.isAwaitingDecision   // P6-I-02 2d-1: no second save behind the alert
+                      || didCommitLocally)
             .accessibilityLabel(isThoughtMode ? "Save thought" : "Save session")
             .accessibilityIdentifier("button.saveSession")
 
@@ -1908,6 +1939,42 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
         if session != nil, stagedAttachments.isEmpty {
             preloadExistingAttachments()
         }
+
+        seedPrefilledAttachmentsIfNeeded()
+    }
+
+    /// Save thought: the timer's media, seeded ONCE per presentation. A later
+    /// appearance or hydration neither duplicates an item nor brings back one
+    /// the member removed. Notes are not focused; the keyboard stays down.
+    private func seedPrefilledAttachmentsIfNeeded() {
+        guard !didSeedPrefill, session == nil, !prefillAttachments.isEmpty else { return }
+        didSeedPrefill = true
+        let present = Set(stagedAttachments.map(\.id))
+        let incoming = prefillAttachments.filter { !present.contains($0.id) }
+        // A video needs its tmp surrogate so the poster and player resolve a URL,
+        // exactly as `stageData` does for an import.
+        for att in incoming where att.kind == .video {
+            if let url = surrogateURL(for: att), !FileManager.default.fileExists(atPath: url.path) {
+                try? att.data.write(to: url, options: .atomic)
+            }
+        }
+        StagedTitleMigration.seedStagedTitles(audio: prefillAudioTitles, video: prefillVideoTitles)
+        prefilledStagedIDs = Set(incoming.map(\.id))
+        stagedAttachments.append(contentsOf: incoming)
+        if let t = prefillThumbnailID, incoming.contains(where: { $0.id == t && $0.kind == .image }) {
+            selectedThumbnailID = t
+        }
+        attachmentTitlesRefreshTick &+= 1
+    }
+
+    /// "Remove from thought" for media the timer still holds; "Delete attachment"
+    /// for everything else.
+    func removalAccessibilityLabel(for att: StagedAttachment) -> String {
+        prefilledStagedIDs.contains(att.id) ? "Remove from thought" : "Delete attachment"
+    }
+
+    func removalMenuTitle(for att: StagedAttachment) -> String {
+        prefilledStagedIDs.contains(att.id) ? "Remove from thought" : "Remove"
     }
 
     private func applyPrimaryActivityRefIfNeeded() {
@@ -1962,6 +2029,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
     /// chooses. No other access changed.
     func save() {
         if isThoughtMode && !canSaveThought { return }
+        // One local save per editor: once the commit has succeeded, a second tap
+        // must not create a second entry.
+        if didCommitLocally { return }
         // Guideline 1.2: shared text is read by other members. Private text is never checked.
         if SharedTextFilter.refusesSave(sharingAvailable: appModeManager.canShareWithFollowers,
                                        isShared: isPublic,
@@ -2175,6 +2245,13 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 // a failed save restores the rows, and they must not point at
                 // media that has already been destroyed.
                 for path in pendingFileDeletions { AttachmentStore.removeIfExists(path: path) }
+                didCommitLocally = true
+                // Save thought: the timer consumes exactly these — here, after the
+                // durable local save and before the sharing choice is queued or
+                // its alert can delay the finish.
+                if let onLocalCommit {
+                    onLocalCommit(attempt.committedStagedIDs.filter { prefilledStagedIDs.contains($0) })
+                }
             },
             discardAttempt: {
                 // Attempt-local, by undo group rather than by heuristic. No
