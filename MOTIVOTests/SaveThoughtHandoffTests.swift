@@ -331,6 +331,81 @@ final class SaveThoughtHandoffTests: XCTestCase {
         XCTAssertTrue(ptv.contains("if !hasAttachments {\n                        Button {\n                            showAddEntryActions = false\n                            showThoughtEditorSheet = true"))
     }
 
+    // MARK: - A thought made from the timer returns to the timer
+
+    func testThoughtsMadeFromTheTimerReturnToTheTimerWithAViewNotice() {
+        let ptv = code("PracticeTimerView.swift")
+        let st = code("PracticeTimerView+SaveThought.swift")
+        let aesv = code("AddEditSessionView.swift")
+        XCTAssertFalse(block(after: "func thoughtHandoffEditor(", in: st)?.contains("appRoute.route") ?? true, "Save Thought no longer navigates away")
+        XCTAssertFalse(block(after: "private var thoughtEditorSheet", in: ptv)?.contains("appRoute.route") ?? true, "nor does Add thought")
+        XCTAssertTrue(st.contains("onSavedEntry: { objectID in savedThoughtNotice = SavedThoughtNotice(objectID: objectID) }"))
+        XCTAssertTrue(ptv.contains("onSavedEntry: { objectID in savedThoughtNotice = SavedThoughtNotice(objectID: objectID) }"))
+        XCTAssertTrue(block(after: "let finishEditor: () -> Void = {", in: aesv)?.contains("onSavedEntry?(savedObjectID)") ?? false,
+                      "the saved entry is named exactly once, with the existing finish")
+        XCTAssertEqual(aesv.components(separatedBy: "appRoute.route = .content").count - 1, 0, "the editor itself never routes")
+        // Other entry points keep their navigation: the manual session sheet still routes to the journal.
+        XCTAssertTrue(block(after: ".sheet(isPresented: $showManualAddSheet)", in: ptv)?.contains("appRoute.route = .content") ?? false)
+    }
+
+    func testThoughtModeOrdersAttachmentsFirstOnlyWhenTheyCameIn() {
+        let aesv = code("AddEditSessionView.swift")
+        guard let thought = block(after: "if isThoughtMode {\n                    if arrivedWithAttachments {", in: aesv)
+                ?? block(after: "if arrivedWithAttachments {", in: aesv) else { return XCTFail("thought layout not found") }
+        _ = thought
+        let stack = block(after: "private var contentStack: some View", in: aesv) ?? ""
+        let order = ["if arrivedWithAttachments {", "threadRow", "startTimeRow", "notesCard", "visibilityRow", "if !arrivedWithAttachments {", "addAttachmentControls"]
+        var cursor = stack.startIndex
+        for token in order {
+            guard let r = stack.range(of: token, range: cursor..<stack.endIndex) else { return XCTFail("\(token) out of order or missing") }
+            cursor = r.upperBound
+        }
+        XCTAssertTrue(aesv.contains("private var arrivedWithAttachments: Bool { !prefillAttachments.isEmpty }"), "fixed for the presentation; removing all media does not reflow")
+        XCTAssertTrue(aesv.contains("ToolbarItem(placement: .confirmationAction) {\n                    Button(\"Save Thought\")"), "one save action, in the toolbar")
+        XCTAssertEqual(stack.components(separatedBy: "bottomSaveButton").count - 1, 1, "the bottom save button is sessions only")
+    }
+
+    // MARK: - Audio-only thoughts are named by their recording
+
+    func testAudioSummaryNamingAndFormatting() {
+        XCTAssertEqual(ThoughtMediaSummaryBuilder.readableName(fromStem: "2026oct11_10:35"), "2026oct11_10:35", "the name the member saw")
+        XCTAssertNil(ThoughtMediaSummaryBuilder.readableName(fromStem: UUID().uuidString), "a UUID is a filename, not a name")
+        XCTAssertNil(ThoughtMediaSummaryBuilder.readableName(fromStem: "  "))
+        // No name: the symbol stands alone, no redundant "Video"/"Photo"/"Recording" text.
+        XCTAssertEqual(ThoughtMediaSummary(title: nil, kind: .video, durationText: "0:04", count: 1, uniformKind: true).title, nil)
+        XCTAssertFalse(code("ThoughtMediaSummary.swift").contains("fallbackTitle"), "no fallback title text; the spoken kind is for VoiceOver only")
+        XCTAssertEqual(ThoughtMediaSummaryBuilder.format(seconds: 11), "0:11")
+        XCTAssertEqual(ThoughtMediaSummaryBuilder.format(seconds: 725), "12:05")
+        XCTAssertEqual(ThoughtMediaSummaryBuilder.format(seconds: 3723), "1:02:03")
+        XCTAssertNil(ThoughtMediaSummary(title: "x", kind: .audio, durationText: nil, count: 1, uniformKind: true).countText)
+        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .audio, durationText: nil, count: 3, uniformKind: true).countText, "3 recordings")
+        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .video, durationText: nil, count: 2, uniformKind: true).countText, "2 videos")
+        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .image, durationText: nil, count: 4, uniformKind: true).countText, "4 photos")
+        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .video, durationText: nil, count: 3, uniformKind: false).countText, "3 attachments")
+        XCTAssertEqual(ThoughtMediaSummary(title: "x", kind: .video, durationText: nil, count: 1, uniformKind: true).systemImage, "video")
+        XCTAssertNil(ThoughtMediaSummaryBuilder.durationText(for: URL(fileURLWithPath: "/nonexistent/\(UUID().uuidString).m4a")))
+    }
+
+    func testPersistedTitleWinsOverTheStem() {
+        let id = UUID()
+        let suite = UserDefaults(suiteName: "SaveThoughtHandoffTests.titles")!
+        suite.removePersistentDomain(forName: "SaveThoughtHandoffTests.titles")
+        AttachmentTitlePersistenceKeys.writeLocalTitle("Bridge idea", kind: .audio, attachmentID: id, defaults: suite)
+        XCTAssertEqual(LocalAttachmentTitles.title(for: id, kind: .audio, defaults: suite), "Bridge idea")
+        XCTAssertNil(LocalAttachmentTitles.title(for: UUID(), kind: .audio, defaults: suite))
+        suite.removePersistentDomain(forName: "SaveThoughtHandoffTests.titles")
+    }
+
+    func testBothJournalThoughtRowsUseTheSummaryWhenThereIsNoHeading() {
+        for file in ["ContentViewMonthThoughtRow.swift", "ContentViewThoughtRow.swift"] {
+            let s = code(file)
+            XCTAssertTrue(s.contains("ThoughtMediaSummaryBuilder.summary(for: session)"), "\(file)")
+            XCTAssertTrue(s.contains("audioSummary.systemImage"), "\(file): the kind indicator")
+        }
+        XCTAssertTrue(block(after: "private var audioSummary: ThoughtMediaSummary?", in: code("ContentViewMonthThoughtRow.swift"))?.contains("writtenHeader == nil") ?? false,
+                      "a written heading always wins")
+    }
+
     func testEveryStagingWriteIsTrackedAsPending() {
         let ptv = code("PracticeTimerView.swift")
         for fn in ["func stageAudioURL(", "func stageVideoURL(", "func stageImage(", "func handleTrimSaveAsNew(", "func handleTrimReplaceOriginal("] {

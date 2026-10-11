@@ -19,6 +19,7 @@
 
 import Foundation
 import SwiftUI
+import CoreData
 
 /// Everything one Save thought tap carries into the editor. Built once per
 /// tap, after pending title edits are flushed; released when the sheet closes.
@@ -220,6 +221,8 @@ struct TimerThoughtHandoffPresentation<Editor: View>: ViewModifier {
     @Binding var handoff: TimerThoughtHandoff?
     @Binding var errorMessage: String?
     @Binding var isRecording: Bool
+    @Binding var savedNotice: SavedThoughtNotice?
+    @Binding var viewingSaved: SavedThoughtNotice?
     let editor: (TimerThoughtHandoff) -> Editor
 
     static var recorderStateNotification: Notification.Name {
@@ -241,57 +244,105 @@ struct TimerThoughtHandoffPresentation<Editor: View>: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: Self.recorderStateNotification)) { note in
                 isRecording = (note.object as? Bool) ?? false
             }
+            // After a save the editor closes back to the timer; the notice (an
+            // overlay inside the navigation stack, see `ThoughtSavedNoticeOverlay`)
+            // offers View, which opens the saved entry here.
+            .sheet(item: $viewingSaved) { notice in
+                SavedThoughtDetailSheet(notice: notice, onClose: { viewingSaved = nil })
+            }
     }
 }
 
-/// A brief confirmation in the app's existing hint style (see "Added to
-/// Favourites"): fades in, holds, fades out. Shown where the member lands.
-struct TransientNoticeView: View {
-    @EnvironmentObject private var appRoute: AppRouteStore
-    @State private var shown: String? = nil
-    @State private var token = UUID()
+/// A thought saved from the timer: the editor closes back to the timer, and
+/// this names the saved entry so the member can view it.
+struct SavedThoughtNotice: Identifiable, Equatable {
+    let id = UUID()
+    let objectID: NSManagedObjectID
+}
+
+/// "Thought saved · View", in the app's existing hint style (see "Added to
+/// Favourites"): fades in, holds, fades out. The member stays on the timer;
+/// nothing navigates on its own.
+struct ThoughtSavedNoticeView: View {
+    @Binding var notice: SavedThoughtNotice?
+    let onView: (SavedThoughtNotice) -> Void
+    @State private var shownID: UUID? = nil
 
     var body: some View {
-        // A ZStack, not a Group: an empty Group renders nothing, so its
-        // `onAppear`/`onChange` never fire and the notice would never show.
-        ZStack(alignment: .top) {
-            if let shown {
-                Text(shown)
-                    .font(Theme.Text.meta)
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, Theme.Spacing.l)
-                    .padding(.vertical, Theme.Spacing.s)
-                    .background(Capsule(style: .continuous).fill(.thinMaterial))
-                    .padding(.top, Theme.Spacing.s)
-                    .transition(.opacity)
-                    .accessibilityAddTraits(.isStaticText)
+        ZStack(alignment: .bottom) {
+            if let notice, shownID == notice.id {
+                HStack(spacing: Theme.Spacing.m) {
+                    Text("Thought saved")
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(.primary)
+                    Button("View") { onView(notice) }
+                        .font(Theme.Text.meta.weight(.semibold))
+                        .foregroundStyle(Theme.Colors.accent)
+                        .accessibilityLabel("View the saved thought")
+                }
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.vertical, Theme.Spacing.s)
+                .background(Capsule(style: .continuous).fill(.thinMaterial))
+                .padding(.bottom, Theme.Spacing.m)
+                .transition(.opacity)
             }
         }
-        .allowsHitTesting(false)
-        .onChange(of: appRoute.transientNotice) { _, notice in
-            guard let notice else { return }
-            consume(notice)
+        .onChange(of: notice) { _, new in
+            guard let new else { return }
+            present(new)
         }
         .onAppear {
-            if let notice = appRoute.transientNotice { consume(notice) }
+            if let notice { present(notice) }
         }
     }
 
-    /// Shows the notice and clears the store outside the current view update.
-    private func consume(_ notice: String) {
-        present(notice)
-        DispatchQueue.main.async {
-            if appRoute.transientNotice == notice { appRoute.transientNotice = nil }
+    private func present(_ n: SavedThoughtNotice) {
+        withAnimation(.easeInOut(duration: 0.15)) { shownID = n.id }
+        // Long enough to read and act on; "Added to Favourites" holds 3 s with
+        // nothing to tap.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
+            guard shownID == n.id else { return }
+            withAnimation(.easeInOut(duration: 1.0)) { shownID = nil }
+            if notice?.id == n.id { notice = nil }
         }
     }
+}
 
-    private func present(_ text: String) {
-        let t = UUID()
-        token = t
-        withAnimation(.easeInOut(duration: 0.15)) { shown = text }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            guard token == t else { return }
-            withAnimation(.easeInOut(duration: 1.0)) { shown = nil }
+/// The notice as an overlay on the timer's scroll root. It must sit INSIDE the
+/// navigation stack: an overlay on the stack itself is not drawn.
+struct ThoughtSavedNoticeOverlay: ViewModifier {
+    @Binding var notice: SavedThoughtNotice?
+    let onView: (SavedThoughtNotice) -> Void
+
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .bottom) {
+            ThoughtSavedNoticeView(notice: $notice, onView: onView)
+        }
+    }
+}
+
+/// The saved thought, opened from the notice in the existing detail view.
+struct SavedThoughtDetailSheet: View {
+    let notice: SavedThoughtNotice
+    let onClose: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let session = try? PersistenceController.shared.container.viewContext
+                    .existingObject(with: notice.objectID) as? Session {
+                    SessionDetailView(session: session)
+                } else {
+                    Text("This thought is no longer available.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { onClose() }
+                }
+            }
         }
     }
 }

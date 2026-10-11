@@ -173,6 +173,17 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   video declared as MOV after a trim in the editor, and id-keyed titles for
   audio/video saved through the editor (C-108 to C-110). Known boundary:
   the Core Data save and the staging consumption are not one step (C-111).
+  **Refinements 2026-10-11 (not device-verified):** in Thought mode the
+  editor orders Attachments → Thread → Time → Notes when media came in from
+  the timer (a written thought keeps Thread → Time → Notes with the attachment
+  controls after), sharing after Notes, and the one save action is in the
+  toolbar. A thought made from the timer (Save Thought or Add thought) closes
+  back to the timer with a quiet "Thought saved · View" notice; View opens
+  the entry in the existing detail view. Other editor entry points keep their
+  navigation. In the journal, a thought with no written heading is named by
+  its first attachment (local title for audio and video, else a readable
+  file stem for audio, else the kind symbol alone) with a kind indicator, the
+  duration and a count (`ThoughtMediaSummary.swift`).
   Tests: `SaveThoughtHandoffTests`, `C84SessionPreservationTests` (updated);
   also corrected the `P6I01SaveOrderingTests` pin that C-107 had left stale.
   Simulator smoke check passed 2026-10-11 (iPhone 17 Pro, iOS 26.5, Debug,
@@ -317,6 +328,11 @@ the join.
   library. No separate sketchbook screen: capture lands in one place. Pushes
   Études towards a musician's notebook rather than only a practice journal,
   and towards "pay once for what runs on the device".
+  **Design consideration, not an approved layout (2026-10-11):** when
+  manuscript capture arrives, reassess PTV's capture controls together rather
+  than adding another row. Consider a stave/pen or treble-clef launch icon,
+  clearly distinct from the musical-note session-setup control, and direct
+  access to written thoughts alongside audio, video and manuscript.
 - A suspended member lands in Solo with no explanation. Optional: a short
   "account suspended, contact support" message.
 - Block is per device. "Reply to all commenters" still fans out server-side to

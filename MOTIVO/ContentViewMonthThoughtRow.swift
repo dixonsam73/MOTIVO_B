@@ -29,15 +29,27 @@ struct MonthThoughtRow: View {
         return formatter
     }()
 
-    private var titleText: String {
-        if let header = session.thoughtHeader?.trimmingCharacters(in: .whitespacesAndNewlines), !header.isEmpty {
-            return header
-        }
+    private var writtenHeader: String? {
+        let header = session.thoughtHeader?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return header.isEmpty ? nil : header
+    }
+
+    /// With no written heading, a media thought is named by its first attachment.
+    private var audioSummary: ThoughtMediaSummary? {
+        writtenHeader == nil ? ThoughtMediaSummaryBuilder.summary(for: session) : nil
+    }
+
+    /// Nil for a media thought with no name: the kind symbol stands alone.
+    private var titleText: String? {
+        if let writtenHeader { return writtenHeader }
+        if let audioSummary { return audioSummary.title }
         return "Thought"
     }
 
     private var timestampText: String {
-        Self.timestampFormatter.string(from: session.timestamp ?? Date())
+        let stamp = Self.timestampFormatter.string(from: session.timestamp ?? Date())
+        guard let audioSummary else { return stamp }
+        return ([stamp] + [audioSummary.durationText, audioSummary.countText].compactMap { $0 }).joined(separator: " · ")
     }
 
     private var threadLabel: String? {
@@ -59,12 +71,25 @@ struct MonthThoughtRow: View {
             .frame(width: 6, height: 44, alignment: .center)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(titleText)
-                    .font(Theme.Text.body.weight(.semibold))
-                    .foregroundStyle(Color.primary.opacity(0.75))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .accessibilityIdentifier("monthThought.title")
+                HStack(spacing: 5) {
+                    if let audioSummary {
+                        Image(systemName: audioSummary.systemImage)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                            .accessibilityHidden(true)
+                    }
+                    if let titleText {
+                        Text(titleText)
+                            .font(Theme.Text.body.weight(.semibold))
+                            .foregroundStyle(Color.primary.opacity(0.75))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .accessibilityIdentifier("monthThought.title")
+                    }
+                }
+                .frame(minHeight: 22)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(audioSummary.map { s in [s.spokenKind, titleText].compactMap { $0 }.joined(separator: ", ") } ?? (titleText ?? "Thought"))
 
                 Text(timestampText)
                     .font(.caption2)

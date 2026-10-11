@@ -139,17 +139,10 @@ extension PracticeTimerView {
             onLocalCommit: { committed in
                 consumeStagedAttachmentsSavedAsThought(committed, sourceIDs: payload.sourceIDs)
             },
-            onSuccessfulSave: {
-                thoughtHandoff = nil
-                appRoute.transientNotice = "Thought saved"
-                if isHomePresentation {
-                    DispatchQueue.main.async {
-                        appRoute.route = .content
-                    }
-                } else {
-                    isPresented = false
-                }
-            }
+            onSavedEntry: { objectID in savedThoughtNotice = SavedThoughtNotice(objectID: objectID) },
+            // Back to the timer, with any left-out clips and the rest of the
+            // draft intact; the notice offers View.
+            onSuccessfulSave: { thoughtHandoff = nil }
         )
     }
 

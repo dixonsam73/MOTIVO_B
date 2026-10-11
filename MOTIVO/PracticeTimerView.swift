@@ -371,6 +371,10 @@ struct PracticeTimerView: View {
     @State var pendingStagingOps: Set<UUID> = []
     @State var isAudioRecorderRecording = false
     @State var showSaveThoughtRow = false
+    /// A thought just saved from this timer (Save Thought or Add thought): the
+    /// editor has closed back here, and the notice offers View.
+    @State var savedThoughtNotice: SavedThoughtNotice? = nil
+    @State var viewingSavedThought: SavedThoughtNotice? = nil
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var showManualAddSheet: Bool = false
     @State private var showThoughtEditorSheet: Bool = false
@@ -1358,16 +1362,10 @@ private func loadPracticeDefaultsIfNeeded() {
         AddEditSessionView(
             isThoughtMode: true,
             threadLabelPrefill: selectedProvisionalThreadLabelForReview,
-            onSuccessfulSave: {
-                if isHomePresentation {
-                    showThoughtEditorSheet = false
-                    DispatchQueue.main.async {
-                        appRoute.route = .content
-                    }
-                } else {
-                    isPresented = false
-                }
-            }
+            onSavedEntry: { objectID in savedThoughtNotice = SavedThoughtNotice(objectID: objectID) },
+            // A thought made from the timer returns to the timer; the notice
+            // offers View. The timer's draft is untouched.
+            onSuccessfulSave: { showThoughtEditorSheet = false }
         )
     }
 
@@ -1453,6 +1451,8 @@ private func loadPracticeDefaultsIfNeeded() {
         } else {
             NavigationStack {
                 mainScrollView
+                    .modifier(ThoughtSavedNoticeOverlay(notice: $savedThoughtNotice,
+                                                        onView: { viewingSavedThought = $0 }))
                     .onChange(of: metronomeSettings) { _, value in
                         audioServices.metronomeEngine.update(settings: value)
                     }
@@ -2011,6 +2011,8 @@ private func loadPracticeDefaultsIfNeeded() {
         .modifier(TimerThoughtHandoffPresentation(handoff: $thoughtHandoff,
                                                   errorMessage: $saveThoughtErrorMessage,
                                                   isRecording: $isAudioRecorderRecording,
+                                                  savedNotice: $savedThoughtNotice,
+                                                  viewingSaved: $viewingSavedThought,
                                                   editor: { payload in thoughtHandoffEditor(for: payload) }))
         .onChange(of: showReviewSheet) { oldValue, newValue in
             // C-84 — DISMISSAL WITHOUT EXPLICIT DESTRUCTIVE CONFIRMATION PRESERVES

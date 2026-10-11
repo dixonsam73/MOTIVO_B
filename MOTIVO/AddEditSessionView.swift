@@ -192,6 +192,12 @@ struct AddEditSessionView: View {
     /// independent of the sharing choice and its alert. `onSuccessfulSave`
     /// stays for navigation.
     var onLocalCommit: (([UUID]) -> Void)? = nil
+    /// The saved entry's identity, delivered just before `onSuccessfulSave`, so a
+    /// caller can offer "View" without owning the save.
+    var onSavedEntry: ((NSManagedObjectID) -> Void)? = nil
+    /// Layout only: true for the whole presentation when media came in from the
+    /// timer, so removing it all does not reflow the page.
+    private var arrivedWithAttachments: Bool { !prefillAttachments.isEmpty }
     /// The staged ids that came from the timer; their removal here is "Remove
     /// from thought" (the timer keeps them), not a delete.
     @State var prefilledStagedIDs: Set<UUID> = []
@@ -505,6 +511,7 @@ struct AddEditSessionView: View {
         prefillVideoTitles: [UUID: String] = [:],
         prefillThumbnailID: UUID? = nil,
         onLocalCommit: (([UUID]) -> Void)? = nil,
+        onSavedEntry: ((NSManagedObjectID) -> Void)? = nil,
         onSuccessfulSave: (() -> Void)? = nil
     ) {
         self.session = session
@@ -516,6 +523,7 @@ struct AddEditSessionView: View {
         self.prefillVideoTitles = prefillVideoTitles
         self.prefillThumbnailID = prefillThumbnailID
         self.onLocalCommit = onLocalCommit
+        self.onSavedEntry = onSavedEntry
         // Seed time-related fields on edit so they don’t flash empty
         if let s = session {
             if let ts = s.timestamp { _timestamp = State(initialValue: ts) }
@@ -754,6 +762,18 @@ struct AddEditSessionView: View {
                 }
                 .font(.body.weight(.medium))
                 .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            if isThoughtMode {
+                // The one save action for a thought: always reachable, however
+                // many attachments sit above the notes.
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save Thought") { attemptSaveWithConnectedPreflight() }
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Theme.Colors.primaryAction)
+                        .disabled(!canSaveThought || sharingSaveGate.isAwaitingDecision || didCommitLocally)
+                        .accessibilityLabel("Save Thought")
+                        .accessibilityIdentifier("button.saveThought")
+                }
             }
         }
         .sheet(isPresented: $showInstrumentPicker) {
@@ -1078,6 +1098,43 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                     .padding(.vertical, 10)
                 }
 
+                if isThoughtMode {
+                    // Thought mode (2026-10-11). With media carried in from the
+                    // timer: Attachments → Thread → Time → Notes, then sharing, so
+                    // the recording the member came to save is the first thing
+                    // they see. A written thought keeps Thread → Time → Notes with
+                    // the attachment controls afterwards; no empty attachments
+                    // card above the writing area. The save action is in the
+                    // toolbar, reachable without scrolling past the attachments.
+                    if arrivedWithAttachments {
+                        attachmentsGridSection
+                    }
+                    threadRow
+                    startTimeRow
+                    notesCard
+                    visibilityRow
+                    stateAndScoreSections
+                    if !arrivedWithAttachments {
+                        attachmentsGridSection
+                    }
+                    addAttachmentControls
+                } else {
+                    threadRow
+                    startTimeRow
+                    durationSection
+                    visibilityRow
+                    notesCard
+                    stateAndScoreSections
+                    attachmentsGridSection
+                    addAttachmentControls
+                    bottomSaveButton
+                }
+            }
+    }
+
+    /// Thread (owner-only metadata).
+    @ViewBuilder
+    private var threadRow: some View {
                 // Thread (owner-only metadata)
                 Button {
                     showThreadPicker = true
@@ -1116,7 +1173,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Thread")
                 .accessibilityIdentifier("picker.thread")
+    }
 
+    /// Start time (or, for a thought, its time).
+    @ViewBuilder
+    private var startTimeRow: some View {
                 // Start Time
                 Button {
                     tempDate = timestamp
@@ -1148,7 +1209,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                     .padding(.vertical, 10)
                 }
                 .buttonStyle(.plain)
+    }
 
+    /// Duration — sessions only; the `if` inside is the original guard.
+    @ViewBuilder
+    private var durationSection: some View {
                 // Duration
                 if !isThoughtMode {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1192,7 +1257,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                         }
                     }
                 }
+    }
 
+    /// Share with followers, when sharing is available. Defaults unchanged.
+    @ViewBuilder
+    private var visibilityRow: some View {
                 if appModeManager.canShareWithFollowers {
                 // ---------- Visibility ----------
                 HStack(alignment: .center, spacing: Theme.Spacing.m) {
@@ -1218,7 +1287,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 .contentShape(Rectangle())
                 .padding(.vertical, 10)
                 }
+    }
 
+    /// Notes.
+    @ViewBuilder
+    private var notesCard: some View {
                 // Notes
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     HStack(alignment: .firstTextBaseline) {
@@ -1259,6 +1332,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 }
                 .cardSurface()
                 .padding(.bottom, Theme.Spacing.s)
+    }
+
+    /// The state strip (sessions only) and attached scores.
+    @ViewBuilder
+    private var stateAndScoreSections: some View {
                 // NEW — State card (read/write)
                 if !isThoughtMode {
                     stateStripCard_edit
@@ -1269,7 +1347,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                     scoreAttachmentsSection_AESV
                         .cardSurface()
                 }
+    }
 
+    /// The attachments card with its page-selection sheet.
+    @ViewBuilder
+    private var attachmentsGridSection: some View {
                 // Attachments grid
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Attachments").sectionHeader()
@@ -1660,7 +1742,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                         )
                     )
                 }
+    }
 
+    /// Photo library, file and score buttons.
+    @ViewBuilder
+    private var addAttachmentControls: some View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     HStack(spacing: 32) {
                         Button(action: { showPhotoPicker = true }) {
@@ -1724,9 +1810,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 }
                 .padding(.top, Theme.Spacing.xs)
                 .padding(.bottom, Theme.Spacing.s)
-
-                bottomSaveButton
-            }
     }
 
     private var bottomSaveButton: some View {
@@ -2351,7 +2434,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
             // P6-I-02 Unit 2d-1. The editor finishes EXACTLY ONCE: now, or — if the
             // sharing choice could not be saved — when the member answers the alert.
             // Everything above has already happened and is not repeated.
+            let savedObjectID = s.objectID
             let finishEditor: () -> Void = {
+                onSavedEntry?(savedObjectID)
                 if let onSuccessfulSave {
                     onSuccessfulSave()
                 } else {
