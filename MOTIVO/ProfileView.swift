@@ -1770,6 +1770,10 @@ private var sessionSetupSection: some View {
                 )
                  .foregroundStyle(Theme.Colors.secondaryText)
          }
+         // The whole row is the tap target. With `.buttonStyle(.plain)`, a
+         // `contentShape` on the Button does not widen the hit area; it has to
+         // be on the label, or only the words and the chevron respond.
+         .contentShape(Rectangle())
      }
  
      // MARK: - Data

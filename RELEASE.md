@@ -186,6 +186,13 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   quiet kind indicator on its date line (with a count when there are
   several); the week card keeps its date, preview and favourite control
   (`ThoughtMediaSummary.swift`).
+  **Onboarding for capture (2026-10-11):** first launch no longer opens the
+  "+" panel; one-word captions (Audio, Photo, Video) sit under the recorders
+  until each is used once; About now leads with capture and Save Thought,
+  explains Start Timer, Finish and Add session, and no longer says "sketch";
+  Profile's navigation rows are tappable across their full width; the
+  unreachable Voice Memos
+  and Camera help sheets are removed.
   Tests: `SaveThoughtHandoffTests`, `C84SessionPreservationTests` (updated);
   also corrected the `P6I01SaveOrderingTests` pin that C-107 had left stale.
   Simulator smoke check passed 2026-10-11 (iPhone 17 Pro, iOS 26.5, Debug,

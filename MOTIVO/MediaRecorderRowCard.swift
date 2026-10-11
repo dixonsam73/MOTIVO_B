@@ -13,6 +13,13 @@ struct MediaRecorderRowCard: View {
     @Binding var droneIsOn: Bool
 
     @State private var isAudioRecorderRecording = false
+
+    // First-use captions (2026-10-11): one word under each recorder until it
+    // has been used once, so a first launch leads with capture. VoiceOver
+    // already reads the full button labels, so the captions are hidden from it.
+    @AppStorage("ptv_hasUsedAudioCapture_v1") private var hasUsedAudioCapture = false
+    @AppStorage("ptv_hasUsedPhotoCapture_v1") private var hasUsedPhotoCapture = false
+    @AppStorage("ptv_hasUsedVideoCapture_v1") private var hasUsedVideoCapture = false
     @State private var showCameraDeniedAlert = false
     @State private var showMicrophoneDeniedAlert = false
 
@@ -49,10 +56,22 @@ struct MediaRecorderRowCard: View {
         isTunerOpen ? 0.45 : 1.0
     }
 
+    /// The quiet first-use caption, in the "+" hints' style.
+    private func captureCaption(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(Theme.Colors.secondaryText)
+            .lineLimit(1)
+            .accessibilityHidden(true)
+            .transition(.opacity)
+    }
+
     var body: some View {
         VStack(spacing: Theme.Spacing.s) {
-            HStack(spacing: Theme.Spacing.m) {
+            HStack(alignment: .top, spacing: Theme.Spacing.m) {
+                VStack(spacing: 4) {
                 Button {
+                    hasUsedAudioCapture = true
                     if showAudioRecorder {
                         // Close the recorder panel when already visible
                         showAudioRecorder = false
@@ -109,9 +128,13 @@ struct MediaRecorderRowCard: View {
                     ? "Unavailable while tuner is open."
                     : "Opens the audio recorder for this session."
                 )
+                if !hasUsedAudioCapture { captureCaption("Audio") }
+                }
 
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    VStack(spacing: 4) {
                     Button {
+                        hasUsedPhotoCapture = true
                         droneEngine.stop()
                         droneIsOn = false
 
@@ -127,9 +150,13 @@ struct MediaRecorderRowCard: View {
                     .buttonStyle(.bordered)
                     .accessibilityLabel("Take photo")
                     .accessibilityHint("Opens the camera to capture a still photo for this session.")
+                    if !hasUsedPhotoCapture { captureCaption("Photo") }
+                    }
                 }
 
+                VStack(spacing: 4) {
                 Button {
+                    hasUsedVideoCapture = true
                     stopAttachmentPlayback()
 
                     func presentVideoRecorder() {
@@ -190,6 +217,8 @@ struct MediaRecorderRowCard: View {
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Record video")
                 .accessibilityHint("Opens the video recorder for this session.")
+                if !hasUsedVideoCapture { captureCaption("Video") }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .center)
         }

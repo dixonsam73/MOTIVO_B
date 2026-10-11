@@ -51,17 +51,20 @@ struct AboutEtudesView<ConnectedDestination: View>: View {
                 .foregroundStyle(.primary)
                 .accessibilityAddTraits(.isHeader)
 
-            Text("Keep a record of your practice, rehearsals, performances and ideas, and build an archive of your musical life.")
+            Text("Catch ideas as they arrive and keep a record of your practice, rehearsals and performances, building an archive of your musical life.")
                 .aboutBody()
         }
     }
 
     private var captureSection: some View {
         aboutSection("Capture sessions and ideas") {
-            Text("Start the Timer when you begin, or add a session manually afterwards. Keep notes, record audio and video, and take photos alongside your work.")
+            Text("When an idea comes, record audio or video, or take a photo, on the timer page, then tap Save Thought to log it in your journal.")
                 .aboutBody()
 
-            Text("For something that doesn’t need a timed session, add a Thought: an idea, reflection, sketch or fragment, with text and any existing files you’d like to attach.")
+            Text("Tap Start Timer when you begin a session, and Finish when you’re done to review it before you save. Anything you record while the timer runs goes with that session. To log something you’ve already done, use Add session in the + menu.")
+                .aboutBody()
+
+            Text("A Thought holds anything that doesn’t need a timed session: a recording, a photo, a few lines of text, or files you attach.")
                 .aboutBody()
 
             Text("Choose your instruments and activities in Profile to make session setup your own.")

@@ -208,36 +208,6 @@ extension PracticeTimerView {
         }
 
     @ViewBuilder
-     var audioHelpSheet: some View {
-            InfoSheetView(
-                title: "Quick audio takes (for now)",
-                bullets: [
-                    "Open Voice Memos to record.",
-                    "Share to Files when done.",
-                    "Back here, use Add Attachment to include it."
-                ],
-                primaryCTA: nil
-            )
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
-        }
-
-    @ViewBuilder
-     var videoHelpSheet: some View {
-            InfoSheetView(
-                title: "Quick video clips (for now)",
-                bullets: [
-                    "Open Camera → Video to record.",
-                    "Save to Photos or Files.",
-                    "Back here, use Add Attachment to include it."
-                ],
-                primaryCTA: nil
-            )
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
-        }
-
-    @ViewBuilder
     var audioRecorderPanel: some View {
         AudioRecorderView { url in
             Task { await stageAudioURL(url) }

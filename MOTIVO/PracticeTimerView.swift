@@ -410,9 +410,6 @@ struct PracticeTimerView: View {
 
     // Clean, minimal engine for soft sine-ish drone
     let audioServices = AudioServices.shared
-    // Info-only recording helpers
-    @State private var showAudioHelp = false
-    @State private var showVideoHelp = false
     // MARK: - Metronome State
 
     @State var metronomeIsOn: Bool = false
@@ -1137,7 +1134,9 @@ private func loadPracticeDefaultsIfNeeded() {
         guard !hasShownFirstUseGuidance else { return }
         hasShownFirstUseGuidance = true
         showSessionMetaSetup = true
-        showAddEntryActions = true
+        // The "+" panel is not opened on first launch (2026-10-11): capture
+        // leads, through the recorder captions. Its own hints still show the
+        // first time it is opened.
     }
 
     private func evaluateAppSetUpGate() {
@@ -2070,13 +2069,6 @@ private func loadPracticeDefaultsIfNeeded() {
             persistTasksSnapshot()
         }
 
-        // Info sheets for recording help
-        .sheet(isPresented: $showAudioHelp) {
-            audioHelpSheet
-        }
-        .sheet(isPresented: $showVideoHelp) {
-            videoHelpSheet
-        }
         // Audio recorder sheet
         
         // Video recorder fullScreenCover replacement
@@ -5152,35 +5144,5 @@ private func openAudioViewer(_ id: UUID) {
     }
 }
  
-// MARK: - Local InfoSheetView (minimal)
-// If a global InfoSheetView exists later, rename this to avoid collisions.
-struct InfoSheetView: View {
-    let title: String
-    let bullets: [String]
-    let primaryCTA: (() -> Void)?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-            Text(title)
-                .font(.headline)
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                ForEach(bullets, id: \.self) { item in
-                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
-                        Text("•").font(.headline)
-                        Text(item)
-                    }
-                }
-            }
-            if let cta = primaryCTA {
-                Button("Continue") { cta() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.Colors.accent)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(Theme.Spacing.l)
-        .appBackground()
-    }
-}
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
