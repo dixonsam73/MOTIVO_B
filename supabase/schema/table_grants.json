@@ -70,6 +70,41 @@
     "table_name": "account_directory"
   },
   {
+    "grantee": "service_role",
+    "privilege_type": "DELETE",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRIGGER",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRUNCATE",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "connected_age_refusals"
+  },
+  {
     "grantee": "anon",
     "privilege_type": "DELETE",
     "table_name": "connected_attachments"

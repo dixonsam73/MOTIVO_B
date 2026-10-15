@@ -60,6 +60,30 @@
     "table_name": "account_privacy"
   },
   {
+    "conname": "connected_age_refusals_month_is_first_day",
+    "contype": "c",
+    "definition": "CHECK ((month = (date_trunc('month'::text, (month)::timestamp with time zone))::date))",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "conname": "connected_age_refusals_non_negative",
+    "contype": "c",
+    "definition": "CHECK ((refusals >= 0))",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "conname": "connected_age_refusals_pkey",
+    "contype": "p",
+    "definition": "PRIMARY KEY (month, reason)",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "conname": "connected_age_refusals_reason",
+    "contype": "c",
+    "definition": "CHECK ((reason = ANY (ARRAY['under_18'::text, 'unconfirmed_adult'::text, 'declined'::text, 'unavailable'::text, 'ios_update_needed'::text])))",
+    "table_name": "connected_age_refusals"
+  },
+  {
     "conname": "connected_attachments_asset_recipient_unique",
     "contype": "u",
     "definition": "UNIQUE (asset_id, recipient_user_id)",

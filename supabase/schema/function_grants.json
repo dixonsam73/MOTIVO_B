@@ -696,6 +696,27 @@
     "can_execute": true,
     "direct_execute": true,
     "grantee": "anon",
+    "proname": "record_connected_age_refusal_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "authenticated",
+    "proname": "record_connected_age_refusal_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "service_role",
+    "proname": "record_connected_age_refusal_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "anon",
     "proname": "reply_to_commenter",
     "public_execute": true
   },

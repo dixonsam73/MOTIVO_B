@@ -16,7 +16,7 @@
       "audio/aac",
       "application/vnd.etudes.list+json"
     ],
-    "file_size_limit": 157286400,
+    "file_size_limit": 52428800,
     "id": "attachments",
     "name": "attachments",
     "public": false

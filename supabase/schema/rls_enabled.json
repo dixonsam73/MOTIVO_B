@@ -12,6 +12,11 @@
   {
     "rls_enabled": true,
     "rls_forced": false,
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "rls_enabled": true,
+    "rls_forced": false,
     "table_name": "connected_attachments"
   },
   {

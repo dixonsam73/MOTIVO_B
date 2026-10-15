@@ -140,6 +140,19 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   number only, no user id). It's the evidence the children's access
   assessment relies on at its reviews. It needs a small server-side counter,
   so it gets a single round of Codex review.
+  **Progress 2026-10-15.** Client built (not device-tested): the pure rule
+  (`ConnectedAgeGate`), Connected mode gated on a confirmed adult on this
+  device, re-checked at launch, foreground and sign-in for Connected
+  identities only, join refusal and Profile's paused notice with Try Again,
+  and the 13–17 client code removed. Server **applied to production
+  2026-10-15** with Samuel's approval, after local rehearsal and one Codex
+  round (one finding, fixed: rollback locks the counter first): the
+  anonymous `connected_age_refusals` counter (month, reason, count; an
+  indicator, not an audited figure) and `account_privacy_upsert_v1` limited
+  to `band_18_plus`. Read back: final row as expected, anon can't read the
+  table, counter empty, 2 privacy rows, 0 teen rows. Apply/rollback in
+  `supabase/sql/2026-10-15-adult-gate-*`. Left: the app's counter call, the
+  privacy wording, and device tests with Apple's sandbox age-range cases.
 - [ ] **S — Approve the children's access assessment.** Drafted 2026-10-15
   (`ETUDES legal documents/Etudes-Childrens-Access-Assessment-DRAFT-2026-10-15.docx`),
   following Ofcom's April 2025 guidance and record template. Stage 1: yes

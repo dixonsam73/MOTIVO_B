@@ -480,6 +480,78 @@
     "table_name": "account_directory"
   },
   {
+    "column_name": "month",
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "column_name": "month",
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "column_name": "month",
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "column_name": "month",
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "column_name": "reason",
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "column_name": "reason",
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "column_name": "reason",
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "column_name": "reason",
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "column_name": "refusals",
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "column_name": "refusals",
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "column_name": "refusals",
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "connected_age_refusals"
+  },
+  {
+    "column_name": "refusals",
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "connected_age_refusals"
+  },
+  {
     "column_name": "asset_id",
     "grantee": "anon",
     "privilege_type": "INSERT",
