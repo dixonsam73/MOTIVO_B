@@ -121,10 +121,25 @@ enum ProductionAppModeActivation {
     /// `auth.hasConnectedIdentity`, which account deletion consumes on its own,
     /// without the entitlement (C-35). One definition, so the deletion gate and
     /// the mode resolver cannot drift apart.
+    ///
+    /// The third term is the adult-only gate: Apple has confirmed an adult on
+    /// this device. It sits here, not in `hasConnectedIdentity`, for the same
+    /// reason entitlement does: account deletion consumes the identity alone,
+    /// so age can never gate deletion.
     static func resolve(auth: AuthManager, isEntitled: Bool) -> AppMode {
-        guard BackendConfig.isConfigured else { return .solo }
+        resolve(backendConfigured: BackendConfig.isConfigured,
+                isEntitled: isEntitled,
+                hasConnectedIdentity: auth.hasConnectedIdentity,
+                adultConfirmed: ConnectedAgeGate.isConfirmedOnThisDevice())
+    }
+
+    /// PURE.
+    static func resolve(backendConfigured: Bool, isEntitled: Bool,
+                        hasConnectedIdentity: Bool, adultConfirmed: Bool) -> AppMode {
+        guard backendConfigured else { return .solo }
         guard isEntitled else { return .solo }
-        guard auth.hasConnectedIdentity else { return .solo }
+        guard hasConnectedIdentity else { return .solo }
+        guard adultConfirmed else { return .solo }
         return .connected
     }
 }

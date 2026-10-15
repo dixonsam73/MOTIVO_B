@@ -79,14 +79,12 @@ struct MOTIVOApp: App {
     /// U5f — owns the attestation invariant and the duplicate suppression.
     @StateObject private var attestation = MembershipAttestationCoordinator()
     @Environment(\.scenePhase) private var scenePhase
-    /// CP-3 Finding A: recovery from `identityWithoutBand`. The declared range is
-    /// re-acquired from Apple rather than persisted, so no band is ever invented
-    /// after process death.
-    @StateObject private var ageBandRecovery = AgeBandRecoveryCoordinator()
+    /// The adult-only gate's automatic check (launch, foreground, sign-in).
+    @StateObject private var connectedAgeRecheck = ConnectedAgeRecheck()
     // NO `@Environment(\.requestAgeRange)` HERE, DELIBERATELY. It presents system
     // UI and needs a presentation context; read from `App` scope it established
-    // no band on device (2026-09-08). It is read in a View instead --
-    // `AgeBandRecoveryTrigger`, attached below via `.ageBandRecovery(...)`.
+    // nothing on device (2026-09-08). It is read in a View instead --
+    // `ConnectedAgeRecheckTrigger`, attached below via `.connectedAgeRecheck(...)`.
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
     init() {
@@ -281,10 +279,13 @@ struct MOTIVOApp: App {
                 .environmentObject(appModeManager)
                 .environmentObject(connectedMembershipStore)
                 .environmentObject(attestation)
-                // CP-3 Finding A — the recovery triggers, in a VIEW so that
+                .environmentObject(connectedAgeRecheck)
+                // The adult-only gate's checks, in a VIEW so that
                 // `requestAgeRange` has a presentation context. See
-                // `AgeBandRecoveryTrigger`.
-                .ageBandRecovery(coordinator: ageBandRecovery, auth: auth)
+                // `ConnectedAgeRecheckTrigger`.
+                .connectedAgeRecheck(connectedAgeRecheck, auth: auth) {
+                    if !UnitTestHost.isActive { appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled) } // C-100
+                }
                 .onAppear {
                     // P6-I-03 / C1. Replay any saved sharing choice the queue never
                     // took, BEFORE anything can be dispatched. Local only — Core Data

@@ -76,6 +76,83 @@ enum ConnectedAgeGate {
         return .confirmedAdult
     }
 
+    // MARK: - The result held on this device
+
+    /// The last decisive answer from Apple on this device. Absent means never
+    /// checked. Per device, not per identity: Apple answers for the Apple
+    /// Account signed in to the device. Erase All wipes it with the rest of
+    /// UserDefaults.
+    ///
+    /// Persisting it is allowed because access is a reversible decision
+    /// (invariant 3): it is set only by a live Apple check, a later decisive
+    /// refusal clears it, and the server row never depends on it.
+    enum StoredResult: Equatable {
+        case confirmed
+        case refused(RefusalReason)
+
+        var rawValue: String {
+            switch self {
+            case .confirmed: return "confirmed"
+            case .refused(let reason): return reason.rawValue
+            }
+        }
+
+        init?(rawValue: String) {
+            if rawValue == "confirmed" { self = .confirmed }
+            else if let reason = RefusalReason(rawValue: rawValue) { self = .refused(reason) }
+            else { return nil }
+        }
+    }
+
+    static let storedResultKey = "connectedAgeGate.result_v1"
+
+    static func storedResult(in defaults: UserDefaults = .standard) -> StoredResult? {
+        defaults.string(forKey: storedResultKey).flatMap(StoredResult.init(rawValue:))
+    }
+
+    static func setStoredResult(_ result: StoredResult?, in defaults: UserDefaults = .standard) {
+        if let result { defaults.set(result.rawValue, forKey: storedResultKey) }
+        else { defaults.removeObject(forKey: storedResultKey) }
+    }
+
+    /// The resolver's age condition. Only a stored confirmation admits.
+    static func isConfirmedOnThisDevice(in defaults: UserDefaults = .standard) -> Bool {
+        storedResult(in: defaults) == .confirmed
+    }
+
+    /// PURE. What to store after a check.
+    ///
+    /// `.unavailable` is an error, not an answer, so it leaves the stored
+    /// result alone: a confirmed member isn't paused by a glitch, and a member
+    /// never checked stays unchecked and is retried (Samuel, choice 1,
+    /// 2026-10-15). Every other refusal is decisive and replaces it.
+    static func nextStoredResult(current: StoredResult?, outcome: Outcome) -> StoredResult? {
+        switch outcome {
+        case .confirmedAdult: return .confirmed
+        case .refused(.unavailable): return current
+        case .refused(let reason): return .refused(reason)
+        }
+    }
+
+    /// PURE. Whether to ask Apple without the person tapping anything.
+    ///
+    /// Never checked, or confirmed (to notice a withdrawal or a changed
+    /// Apple Account): yes. A decisive refusal: no, so the person isn't shown
+    /// Apple's sheet on every return to the app; they retry from Profile.
+    /// The exception is iOS 26.4, retried automatically once iOS can answer.
+    static func shouldCheckAutomatically(stored: StoredResult?, osCanReportConfirmed: Bool) -> Bool {
+        switch stored {
+        case nil, .confirmed?: return true
+        case .refused(.iosUpdateNeeded)?: return osCanReportConfirmed
+        case .refused?: return false
+        }
+    }
+
+    static var osCanReportConfirmed: Bool {
+        if #available(iOS 26.5, *) { return true }
+        return false
+    }
+
     /// The user-facing reason. One place, so the join path, sign-in and the
     /// paused-member notice can't drift apart.
     static func refusalMessage(for reason: RefusalReason) -> String {

@@ -96,6 +96,101 @@ final class ConnectedAgeGateTests: XCTestCase {
         }
     }
 
+    // MARK: - The stored result
+
+    func testStoredResultRoundTripsEveryValue() {
+        let all: [Gate.StoredResult] = [.confirmed] + Gate.RefusalReason.allCases.map { .refused($0) }
+        for result in all {
+            XCTAssertEqual(Gate.StoredResult(rawValue: result.rawValue), result)
+        }
+        XCTAssertNil(Gate.StoredResult(rawValue: "band_18_plus"))
+    }
+
+    func testOnlyAStoredConfirmationAdmits() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "ConnectedAgeGateTests"))
+        defaults.removePersistentDomain(forName: "ConnectedAgeGateTests")
+        XCTAssertFalse(Gate.isConfirmedOnThisDevice(in: defaults), "never checked must not admit")
+        Gate.setStoredResult(.refused(.unconfirmedAdult), in: defaults)
+        XCTAssertFalse(Gate.isConfirmedOnThisDevice(in: defaults))
+        Gate.setStoredResult(.confirmed, in: defaults)
+        XCTAssertTrue(Gate.isConfirmedOnThisDevice(in: defaults))
+        Gate.setStoredResult(nil, in: defaults)
+        XCTAssertFalse(Gate.isConfirmedOnThisDevice(in: defaults))
+        defaults.removePersistentDomain(forName: "ConnectedAgeGateTests")
+    }
+
+    func testConfirmationIsStoredFromAnyStartingPoint() {
+        for current in [nil, .confirmed, .refused(.declined)] as [Gate.StoredResult?] {
+            XCTAssertEqual(Gate.nextStoredResult(current: current, outcome: .confirmedAdult), .confirmed)
+        }
+    }
+
+    /// Choice 1: an error is not an answer, so it never pauses a confirmed
+    /// member and never confirms anyone.
+    func testUnavailableLeavesTheStoredResultAlone() {
+        for current in [nil, .confirmed, .refused(.under18)] as [Gate.StoredResult?] {
+            XCTAssertEqual(Gate.nextStoredResult(current: current, outcome: .refused(.unavailable)), current)
+        }
+    }
+
+    func testADecisiveRefusalReplacesAConfirmation() {
+        for reason in [.under18, .unconfirmedAdult, .declined, .iosUpdateNeeded] as [Gate.RefusalReason] {
+            XCTAssertEqual(Gate.nextStoredResult(current: .confirmed, outcome: .refused(reason)), .refused(reason))
+        }
+    }
+
+    func testAutomaticCheckRunsWhenUncheckedOrConfirmedButNotAfterARefusal() {
+        XCTAssertTrue(Gate.shouldCheckAutomatically(stored: nil, osCanReportConfirmed: true))
+        XCTAssertTrue(Gate.shouldCheckAutomatically(stored: .confirmed, osCanReportConfirmed: true))
+        for reason in [.under18, .unconfirmedAdult, .declined, .unavailable] as [Gate.RefusalReason] {
+            XCTAssertFalse(Gate.shouldCheckAutomatically(stored: .refused(reason), osCanReportConfirmed: true),
+                           "\(reason) must wait for the person to retry")
+        }
+    }
+
+    func testIOSUpdateRefusalIsRetriedOnceIOSCanAnswer() {
+        XCTAssertFalse(Gate.shouldCheckAutomatically(stored: .refused(.iosUpdateNeeded), osCanReportConfirmed: false))
+        XCTAssertTrue(Gate.shouldCheckAutomatically(stored: .refused(.iosUpdateNeeded), osCanReportConfirmed: true))
+    }
+
+    // MARK: - The resolver
+
+    @MainActor
+    func testConnectedNeedsAConfirmedAdultAsWellAsEverythingElse() {
+        XCTAssertEqual(ProductionAppModeActivation.resolve(backendConfigured: true, isEntitled: true,
+                                                           hasConnectedIdentity: true, adultConfirmed: true), .connected)
+        XCTAssertEqual(ProductionAppModeActivation.resolve(backendConfigured: true, isEntitled: true,
+                                                           hasConnectedIdentity: true, adultConfirmed: false), .solo,
+                       "an entitled member with an identity but no confirmation stays Solo")
+        XCTAssertEqual(ProductionAppModeActivation.resolve(backendConfigured: true, isEntitled: false,
+                                                           hasConnectedIdentity: true, adultConfirmed: true), .solo)
+        XCTAssertEqual(ProductionAppModeActivation.resolve(backendConfigured: true, isEntitled: true,
+                                                           hasConnectedIdentity: false, adultConfirmed: true), .solo)
+        XCTAssertEqual(ProductionAppModeActivation.resolve(backendConfigured: false, isEntitled: true,
+                                                           hasConnectedIdentity: true, adultConfirmed: true), .solo)
+    }
+
+    // MARK: - The automatic check's gating
+
+    @MainActor
+    func testRecheckGating() {
+        let now = Date()
+        func attempt(identity: Bool = true, backend: Bool = true, stored: Gate.StoredResult? = nil,
+                     inFlight: Bool = false, last: Date? = nil) -> Bool {
+            ConnectedAgeRecheck.shouldAttempt(hasConnectedIdentity: identity, backendConfigured: backend,
+                                              stored: stored, osCanReportConfirmed: true,
+                                              inFlight: inFlight, lastAttemptAt: last, now: now)
+        }
+        XCTAssertTrue(attempt())
+        XCTAssertTrue(attempt(stored: .confirmed))
+        XCTAssertFalse(attempt(identity: false), "Solo users are never asked")
+        XCTAssertFalse(attempt(backend: false))
+        XCTAssertFalse(attempt(stored: .refused(.declined)))
+        XCTAssertFalse(attempt(inFlight: true))
+        XCTAssertFalse(attempt(last: now.addingTimeInterval(-10)), "cooldown")
+        XCTAssertTrue(attempt(last: now.addingTimeInterval(-(ConnectedAgeRecheck.cooldown + 1))))
+    }
+
     // MARK: - Apple mapping
 
     #if canImport(DeclaredAgeRange)
