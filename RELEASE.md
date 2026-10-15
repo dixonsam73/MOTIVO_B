@@ -129,9 +129,13 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
     objectionable content. If so, add a one-time acceptance on joining Connected.
 - [ ] **A — Adult-only gate for Connected** on Apple's Declared Age Range
   (risk-based approach), replacing the 13–17 pathway. Refuse anything under 18
-  and fail closed to Solo; never gate account deletion. Decide at build time
-  whether a self-declared 18+ is accepted or only `confirmed` (recommendation:
-  accept any 18+, since "`confirmed` only" may turn away genuine UK adults).
+  and fail closed to Solo; never gate account deletion. **Decided 2026-10-15:
+  accept only `confirmed` adults.** Most UK adults pass automatically (account
+  age or a credit card on file); anyone else is told how to confirm ("Confirm
+  you're 18+ in Settings → [your name] → Personal Information → Age
+  Confirmation, then try again"). `.confirmed` needs iOS 26.5, so devices on
+  26.4 get "update iOS to join Connected". Solo is unaffected. Self-declared or
+  guardian-declared 18+ is refused.
   **Must also keep an anonymous count of joins refused as under 18** (a
   number only, no user id). It's the evidence the children's access
   assessment relies on at its reviews. It needs a small server-side counter,
@@ -163,12 +167,12 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   solicitors; decide after the readout test, and if sent, cap the reply
   (e.g. within £300 + VAT). Check every month or two for changes, such as
   Apple dropping account age or telling apps the method.
-- [ ] **A + S — TEMPORARY age readout** (`MOTIVO/AgeRangeProbeRow.swift`, plus
-  one line in ProfileView's build-info footer). It shows what the Declared Age
-  Range returns on the device, including how the age was set. S: run it on a
-  UK device and report the result. Does "Confirmed 18+" arrive as
-  `.confirmed`? If so, the gate should probably accept only `confirmed`.
-  **Remove it as soon as the answer is recorded**, as a pure deletion.
+- [x] **A + S — Age readout test, done 2026-10-15.** On Device B (iOS 27,
+  build 1789 · 631257e), Samuel's UK account ("Confirmed 18+", by account age)
+  returned **"Range: 18 to none · Set by: confirmed"**. So Apple's UK
+  confirmation, even account-age-based, reaches apps as `.confirmed`. The
+  readout was removed as a verified pure deletion (app source identical to
+  `631257e^`).
 - [x] **A — Documents updated for the legal advice** (2026-10-15; previous
   versions kept as `.before-advice.docx.bak` in "ETUDES legal documents").
   Terms: proactive-technology disclosure (s.10(7)), the complaint categories

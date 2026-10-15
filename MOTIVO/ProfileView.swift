@@ -1358,7 +1358,6 @@ private var sessionSetupSection: some View {
                  .foregroundStyle(Theme.Colors.secondaryText)
                  .textSelection(.enabled)
                  .frame(maxWidth: .infinity, alignment: .center)
-             AgeRangeProbeRow() // TEMPORARY — UK age-confirmation check; see AgeRangeProbeRow.swift
          }
          .listRowBackground(Color.clear)
          .listRowSeparator(.hidden)

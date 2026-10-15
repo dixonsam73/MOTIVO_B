@@ -67,7 +67,8 @@ in place; don't add a "CORRECTED" paragraph on top of it.
    confirms Solo is outside the Online Safety Act. **Connected launches 18+
    only** (decided 2026-09-18), gated on Apple's Declared Age Range under a
    **risk-based approach** (decided 2026-10-15 after legal advice that Apple's
-   signal isn't highly effective age assurance; see `RELEASE.md`). The current
+   signal isn't highly effective age assurance; see `RELEASE.md`), accepting
+   **only Apple-`confirmed` adults** (decided 2026-10-15). The current
    code and production still implement the superseded 13+ design with 13–17
    protections (age band, B-40, `tg_directory_requires_band`). These stay in
    force until the adult-only gate replaces them. Age eligibility must never
