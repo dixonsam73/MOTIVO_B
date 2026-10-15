@@ -154,9 +154,9 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   `supabase/sql/2026-10-15-adult-gate-*`. The app counts refused join
   attempts anonymously (public anon key only; launch re-checks not counted).
   The count is an **indicator, not an audited figure** (attempts, not people;
-  inflatable). Privacy: label recommendations and the replacement "Age" row
-  for the policy are in `docs/app-store-privacy-disclosures.md` §8 (S to paste
-  into the Word draft and decide the labels). Accepted limits: C-112.
+  inflatable). Privacy: the policy draft's "Age" row is replaced (2026-10-15,
+  backup `.before-adult-gate.docx.bak`); label recommendations are in
+  `docs/app-store-privacy-disclosures.md` §8 (S to decide). Accepted limits: C-112.
   **Left: device tests**, `docs/qa-plan.md` Group AG (also in section D).
 - [ ] **S — Approve the children's access assessment.** Drafted 2026-10-15
   (`ETUDES legal documents/Etudes-Childrens-Access-Assessment-DRAFT-2026-10-15.docx`),
@@ -343,8 +343,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] Production Billing Grace (C-31).
 - [ ] Privacy policy published at `etudes.app/privacy`. Drafted 2026-09-23
   (Desktop). Its backup line ("up to 7 days") is true on Free and Pro. Before
-  publishing: replace the provisional age row with the wording in
-  `docs/app-store-privacy-disclosures.md` §8 (the gate exists now), add
+  publishing: approve the age row (replaced 2026-10-15 for the built gate;
+  see `docs/app-store-privacy-disclosures.md` §8), add
   the date, then publish. The internal legitimate-interests assessment (LIA)
   for the safety, age-check and support uses was drafted 2026-09-23 (Desktop).
   Approve it alongside the policy.

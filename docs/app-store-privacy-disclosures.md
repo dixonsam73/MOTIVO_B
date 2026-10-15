@@ -365,9 +365,10 @@ assessment's reviews, never as a measured number of children.
    the count adds the purpose **Other Purposes** (compliance evidence).
 3. §7's re-derivation is otherwise still owed for the rest of Phase 5/6.
 
-**Privacy policy, "Age" row — replacement for the PROVISIONAL text** in
-`Etudes-Privacy-Policy-DRAFT-2026-09-23.docx` (paste in Word; not edited by
-an agent, to keep the document intact):
+**Privacy policy, "Age" row — replaced the PROVISIONAL text** in
+`Etudes-Privacy-Policy-DRAFT-2026-09-23.docx` on 2026-10-15 (backup:
+`….before-adult-gate.docx.bak`; only that paragraph changed, checked at XML
+level). Still subject to Samuel's approval of the whole policy:
 
 > When you join Études Connected, Apple tells us whether it has confirmed that
 > you are 18 or over. We don't receive your date of birth or how Apple checked.
