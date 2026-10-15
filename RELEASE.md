@@ -12,7 +12,21 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   Limited on the NCA's CSEA Industry Reporting Portal**. Done: takedown and
   suspension tests passed, and the support auto-reply is live (both
   2026-09-23; commands in `supabase/README.md`).
-- [ ] **S — Adult-access adequacy: solicitor engaged 2026-10-07.** Scope
+- [x] **S — Adult-access decision: risk-based approach (option 3), decided
+  2026-10-15, watching for Apple's UK measures (option 2).** Simkins advice
+  (2026-10-15): Apple's Declared Age Range, including "confirmed", is helpful
+  evidence but not a sufficiently certain basis to conclude children can't
+  access Connected (no visibility of the method used; UK not among Apple's
+  enhanced-verification regions; Ofcom's Aylo/Pornhub investigation shows
+  responsibility stays with the provider). Options: (1) a recognised highly
+  effective age-assurance provider; (2) wait for Apple in the UK; (3) proceed
+  on Apple's signal, with enforcement risk "materially lower" for a service
+  like Connected. Chosen 3, because Connected isn't broadcasting: members are
+  seen only by people they approve and see only those they follow. Revisit if
+  Apple extends its measures to the UK, Connected grows, or Ofcom guidance
+  changes. Solo confirmed outside the OSA. Fee at the upper end, so any
+  further call or question is charged by time.
+  **Earlier record:** solicitor engaged 2026-10-07. Scope
   accepted: short email answers on (1) age assurance, (2) whether Solo is
   outside the OSA, and (4) the privacy policy and terms **for OSA compliance
   only**, plus practical steps to comply if Apple's Declared Age Range isn't
@@ -113,9 +127,23 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
     and receiving, 2026-09-23).
   - Check whether App Review expects users to accept terms that forbid
     objectionable content. If so, add a one-time acceptance on joining Connected.
-- [ ] **A — Adult-only gate for Connected**, replacing the 13–17 pathway, using
-  whatever mechanism the legal answer says is adequate. Then finalise the
-  provisional grooming rating in the risk assessment.
+- [ ] **A — Adult-only gate for Connected** on Apple's Declared Age Range
+  (risk-based approach), replacing the 13–17 pathway. Refuse anything under 18
+  and fail closed to Solo; never gate account deletion. Decide at build time
+  whether a self-declared 18+ is accepted or only `confirmed` (recommendation:
+  accept any 18+, since "`confirmed` only" may turn away genuine UK adults).
+- [ ] **S (A can draft) — Ofcom children's access assessment** for Connected.
+  Required for every regulated user-to-user service, and now needed because
+  children can't be ruled out. Stage 2 (is the child user condition met?) may
+  matter for a paid, adults-only, approval-based service. Ofcom publishes free
+  guidance.
+- [x] **A — Documents updated for the legal advice** (2026-10-15; previous
+  versions kept as `.before-advice.docx.bak` in "ETUDES legal documents").
+  Terms: proactive-technology disclosure (s.10(7)), the complaint categories
+  (s.21) and the right to claim for breach of contract (s.72). Privacy policy:
+  a child-friendly Solo section (ICO Children's Code). Risk assessment: the
+  decision recorded, child users "Possible", grooming Medium (adds no
+  measures), and a children's access assessment to do.
 - [x] **A — Align the server upload limit to 50 MiB (B-45).** Decided
   2026-09-24: 50 MiB per file at launch. Oversized files can't be published
   (trim, replace or keep private); no automatic video compression in v1. Set
