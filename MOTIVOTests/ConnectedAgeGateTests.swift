@@ -167,6 +167,22 @@ final class ConnectedAgeGateTests: XCTestCase {
                      "Solo users see the normal Explore Connected")
     }
 
+    // MARK: - The Share default
+
+    /// D-1 must survive: a confirmed adult with no private-posts preference
+    /// defaults to sharing ON, exactly the pre-CP-3 expression.
+    func testConfirmedAdultShareDefaultIsTheSettledRule() {
+        for defaultPrivacy in [true, false] {
+            XCTAssertEqual(Gate.shareDefaultOn(adultConfirmed: true, defaultPostingIsPrivate: defaultPrivacy),
+                           !defaultPrivacy)
+        }
+    }
+
+    func testShareDefaultIsOffWithoutAConfirmedAdult() {
+        XCTAssertFalse(Gate.shareDefaultOn(adultConfirmed: false, defaultPostingIsPrivate: false))
+        XCTAssertFalse(Gate.shareDefaultOn(adultConfirmed: false, defaultPostingIsPrivate: true))
+    }
+
     // MARK: - The resolver
 
     @MainActor

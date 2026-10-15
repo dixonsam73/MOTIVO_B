@@ -175,12 +175,13 @@ final class AuthManager: NSObject, ObservableObject {
 
     // MARK: - CP-3 · age band and privacy state
 
-    /// The band Apple returned, held BEFORE Sign in with Apple runs.
+    /// The band to establish once an identity exists, held BEFORE Sign in with
+    /// Apple runs.
     ///
     /// IN MEMORY ONLY. It is never written to disk and never sent anywhere until
-    /// an authenticated identity exists to attach it to. An under-13, a decline
-    /// or an error never sets it, so no state is created for a member who was
-    /// refused Connected.
+    /// an authenticated identity exists to attach it to. Only a confirmed adult
+    /// sets it (always `band_18_plus`), so no state is created for anyone the
+    /// adult-only gate refused.
     var pendingAgeBand: AgeBand?
 
     /// TRUE when Sign in with Apple minted an identity but the band could not be
@@ -201,7 +202,6 @@ final class AuthManager: NSObject, ObservableObject {
         case .success(let state):
             accountPrivacyState = state
             ProfileStore.setDiscoveryModeRaw(state.lookupEffective ? 1 : 0, for: backendUserID)
-            ProfileStore.setLastKnownAgeBand(state.ageBand)
             return state
         case .failure:
             return nil
@@ -231,7 +231,6 @@ final class AuthManager: NSObject, ObservableObject {
         switch await AccountPrivacyService.fetchSelf(auth: self, reason: "\(reason)-check") {
         case .success(let state):
             accountPrivacyState = state
-            ProfileStore.setLastKnownAgeBand(state.ageBand)
             pendingAgeBand = nil
             connectedSetupIncomplete = false
             return true
@@ -245,7 +244,6 @@ final class AuthManager: NSObject, ObservableObject {
         switch await AccountPrivacyService.upsertBand(band, auth: self, reason: reason) {
         case .success(let state):
             accountPrivacyState = state
-            ProfileStore.setLastKnownAgeBand(state.ageBand)
             pendingAgeBand = nil
             connectedSetupIncomplete = false
             return true
@@ -735,11 +733,9 @@ final class AuthManager: NSObject, ObservableObject {
             // reimplemented on the client, where drift would fail permissive.
             if case .success(let privacy) = await AccountPrivacyService.fetchSelf(auth: self, reason: "hydrate") {
                 ProfileStore.setDiscoveryModeRaw(privacy.lookupEffective ? 1 : 0, for: userID)
-                ProfileStore.setLastKnownAgeBand(privacy.ageBand)
                 self.accountPrivacyState = privacy
             } else {
                 self.accountPrivacyState = nil
-                ProfileStore.setLastKnownAgeBand(nil)
             }
 
             self.backendAvatarKey = row.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines)

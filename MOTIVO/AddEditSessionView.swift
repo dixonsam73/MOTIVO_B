@@ -1989,8 +1989,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
             // New mode defaults
             timestamp = Date()
             durationSeconds = 0
-            isPublic = isThoughtMode ? false : DeclaredAgeRangeService.shareDefaultOn(
-                band: ProfileStore.lastKnownAgeBand(),
+            isPublic = isThoughtMode ? false : ConnectedAgeGate.shareDefaultOn(
+                adultConfirmed: ConnectedAgeGate.isConfirmedOnThisDevice(),
                 defaultPostingIsPrivate: fetchDefaultPostingIsPrivate())
 
             // Threads v1 (owner-only metadata)

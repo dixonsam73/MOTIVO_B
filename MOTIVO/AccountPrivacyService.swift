@@ -19,8 +19,8 @@
 //  ── NO ROW IS EVER CREATED BEFORE ELIGIBILITY IS ESTABLISHED ───────────────
 //
 //  `upsertBand` is the only writer of `age_band` and is called only after Apple
-//  has returned a band. An under-13, a decline and an error all write nothing at
-//  all, so the table can never become a register of children who tried to join.
+//  has confirmed an adult (ConnectedAgeGate). Every refusal writes nothing, so
+//  the table can never become a register of children who tried to join.
 //
 //  ── AND IT NEVER WRITES A PREFERENCE AS A SIDE EFFECT ──────────────────────
 //
@@ -31,6 +31,16 @@
 //
 
 import Foundation
+
+/// The server's `age_band` vocabulary. The adult-only gate only ever writes
+/// `band_18_plus`; `band_13_17` stays because the server's check constraint
+/// and the superseded 13+ design's rows still use it, and a row the client
+/// can't decode would read as a failure rather than as a band. Absence of a
+/// row is the unknown state.
+enum AgeBand: String, Equatable, CaseIterable {
+    case band13to17 = "band_13_17"
+    case band18Plus = "band_18_plus"
+}
 
 @MainActor
 enum AccountPrivacyService {

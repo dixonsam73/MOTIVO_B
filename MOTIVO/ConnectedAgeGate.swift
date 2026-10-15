@@ -164,6 +164,16 @@ enum ConnectedAgeGate {
         return nil
     }
 
+    /// PURE. THE SINGLE SHARE-DEFAULT RULE for a new session or post.
+    ///
+    /// Settled: Share defaults ON, unless the member chose Default to Private
+    /// Posts. It is OFF while Apple hasn't confirmed an adult on this device,
+    /// the protective direction for every unknown (formerly keyed on the 13-17
+    /// band). The per-session toggle is unchanged.
+    static func shareDefaultOn(adultConfirmed: Bool, defaultPostingIsPrivate: Bool) -> Bool {
+        adultConfirmed && !defaultPostingIsPrivate
+    }
+
     /// The user-facing reason. One place, so the join path, sign-in and the
     /// paused-member notice can't drift apart.
     static func refusalMessage(for reason: RefusalReason) -> String {

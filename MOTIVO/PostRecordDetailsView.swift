@@ -326,8 +326,8 @@ struct PostRecordDetailsView: View {
             isPublic = UserDefaults.standard.bool(forKey: draftIsPublicKey)
         } else {
             // Brand new draft — honour the user's default posting preference.
-            isPublic = DeclaredAgeRangeService.shareDefaultOn(
-                band: ProfileStore.lastKnownAgeBand(),
+            isPublic = ConnectedAgeGate.shareDefaultOn(
+                adultConfirmed: ConnectedAgeGate.isConfirmedOnThisDevice(),
                 defaultPostingIsPrivate: fetchDefaultPostingIsPrivate())
         }
     }
