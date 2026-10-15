@@ -151,8 +151,13 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   indicator, not an audited figure) and `account_privacy_upsert_v1` limited
   to `band_18_plus`. Read back: final row as expected, anon can't read the
   table, counter empty, 2 privacy rows, 0 teen rows. Apply/rollback in
-  `supabase/sql/2026-10-15-adult-gate-*`. Left: the app's counter call, the
-  privacy wording, and device tests with Apple's sandbox age-range cases.
+  `supabase/sql/2026-10-15-adult-gate-*`. The app counts refused join
+  attempts anonymously (public anon key only; launch re-checks not counted).
+  The count is an **indicator, not an audited figure** (attempts, not people;
+  inflatable). Privacy: label recommendations and the replacement "Age" row
+  for the policy are in `docs/app-store-privacy-disclosures.md` §8 (S to paste
+  into the Word draft and decide the labels). Accepted limits: C-112.
+  **Left: device tests**, `docs/qa-plan.md` Group AG (also in section D).
 - [ ] **S — Approve the children's access assessment.** Drafted 2026-10-15
   (`ETUDES legal documents/Etudes-Childrens-Access-Assessment-DRAFT-2026-10-15.docx`),
   following Ofcom's April 2025 guidance and record template. Stage 1: yes
@@ -338,7 +343,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 - [ ] Production Billing Grace (C-31).
 - [ ] Privacy policy published at `etudes.app/privacy`. Drafted 2026-09-23
   (Desktop). Its backup line ("up to 7 days") is true on Free and Pro. Before
-  publishing: confirm the provisional age row once the adult-only gate exists, add
+  publishing: replace the provisional age row with the wording in
+  `docs/app-store-privacy-disclosures.md` §8 (the gate exists now), add
   the date, then publish. The internal legitimate-interests assessment (LIA)
   for the safety, age-check and support uses was drafted 2026-09-23 (Desktop).
   Approve it alongside the policy.
@@ -390,6 +396,9 @@ the join.
 - [ ] Erase All on a disposable install (never Device B).
 - [ ] Backup and restore on one device: journal, Scores and media survive.
 - [ ] Smoke test: recording, tuner, metronome, Lists, playback speed.
+- [ ] Adult-only gate: `docs/qa-plan.md` Group AG on Device A (Release,
+  Sandbox Apple Account), including AG0's cache-trap probe and the refusal
+  count arithmetic.
 
 ## E. After launch / known limitations (not release work)
 

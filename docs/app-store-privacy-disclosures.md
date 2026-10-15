@@ -270,7 +270,7 @@ configuration, 2026-09-06.**
 |---|---|
 | **Controller identity** | **NOT established by project records.** The only trace of "SD Songs" anywhere is the bundle identifier `com.sdsongs.etudes`. **No company name, number, registered address or copyright string exists** in the repo or in production configuration. **A bundle id is not evidence of a legal entity.** The intended controller is **SD Songs Ltd**, confirmed by the account holder; **company number and registered office remain to be supplied** |
 | **Privacy contact route** | **NONE EXISTS.** No `mailto:`, no support address, and **no reference to `etudes.app` anywhere in the app**. Intended: `privacy@etudes.app` — **requires setup and verification before publication** |
-| **Age gate** | **NONE.** No age gate and no date-of-birth collection anywhere |
+| **Age gate** | **Adult-only gate for Connected (2026-10-15; see §8).** Apple's Declared Age Range, accepting only an 18+ range Apple reports as `confirmed`. No date of birth and no age range are collected; Études never learns how Apple checked |
 | **Self-serve data export** | **NONE.** Profile editing and in-app account deletion exist; there is no export feature, so access and portability requests must be handled manually |
 | **Hosting region** | **`eu-central-1`** (AWS Frankfurt, EU) — authoritative, from `supabase projects list` |
 | **Processors established** | **Supabase** (hosting/processing) and **Apple** (Sign in with Apple, subscription purchases and status) |
@@ -328,3 +328,56 @@ entered" as evidence of "still correct".**
 The customer-facing wording of the App Store description and the in-app
 About/Explore copy is **C-32, jointly owned with RC**. U8 has made the in-app
 copy *accurate*; final polish is RC's.
+
+---
+
+## 8. ADULT-ONLY GATE (2026-10-15) — WHAT IT ADDS, AND THE POLICY ROW
+
+Derived from the built code (`ConnectedAgeGate`, `ConnectedAgeRecheck`,
+`ConnectedAgeRefusalReport`) and the production schema applied 2026-10-15.
+**Recommendations for the account holder; nothing entered in ASC.**
+
+**What leaves the device:**
+- **A confirmed adult with a Connected identity:** `account_privacy.age_band =
+  'band_18_plus'`, linked to the user id. Only that value is ever written now
+  (the server refuses `band_13_17`). No date of birth, no range, no provenance.
+  This existed since Phase 5 and was never in the mapping above.
+- **A refused join:** one anonymous increment of `connected_age_refusals`
+  (month, reason, count). No user id, device id, name or finer timestamp; the
+  request uses the public anon key even when signed in. Supabase sees the
+  request's IP address in transit, as with any request.
+- **On the device only:** the last decisive answer (`connectedAgeGate.result_v1`),
+  so Apple isn't asked on every launch.
+
+**The refusal count is an indicator, not an audited figure.** It counts
+attempts, not people (a retry counts again), and anyone holding the public
+anon key can add to it. Read it as a trend at the children's access
+assessment's reviews, never as a measured number of children.
+
+**Recommended label changes (S to decide):**
+1. Declare the adult flag. The closest Apple type is **Other Data → Other Data
+   Types**, Linked: Yes, Tracking: No, App Functionality (it decides access to
+   Connected).
+2. The refusal count is aggregate and has no identifier, so it is **not linked**.
+   It most likely fits Apple's optional-disclosure exception (infrequent, not
+   tracking or advertising, not the app's primary function), but if in doubt,
+   declare **Usage Data → Product Interaction**, which is already declared;
+   the count adds the purpose **Other Purposes** (compliance evidence).
+3. §7's re-derivation is otherwise still owed for the rest of Phase 5/6.
+
+**Privacy policy, "Age" row — replacement for the PROVISIONAL text** in
+`Etudes-Privacy-Policy-DRAFT-2026-09-23.docx` (paste in Word; not edited by
+an agent, to keep the document intact):
+
+> When you join Études Connected, Apple tells us whether it has confirmed that
+> you are 18 or over. We don't receive your date of birth or how Apple checked.
+> If Apple has confirmed it, we note on your Connected account that you are 18
+> or over, and your iPhone remembers the answer so it doesn't need to ask each
+> time. If Apple hasn't confirmed it, you can't join Connected and we keep
+> nothing about you; we only add one to an anonymous monthly count of refused
+> joins and the reason (for example "not confirmed"), with no name, account or
+> device. That count helps us check that children aren't trying to use
+> Connected.
+
+The policy's lawful-basis row "Checking you are 18 or over" and section 11
+("Children") already match the build.

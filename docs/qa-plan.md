@@ -849,6 +849,44 @@ reached outside the departing member's prefix, which would be a serious defect.*
 Anything else disappearing from Files or Photos means the reset reached outside
 Études-managed storage, which the settled product rule forbids.
 
+## Group AG — Adult-only gate (Apple sandbox age ranges)
+
+Built 2026-10-15 (`ConnectedAgeGate`, `ConnectedAgeRecheck`,
+`ConnectedAgeRefusalReport`). **Device A (iPhone 16e), Release install, with a
+Sandbox Apple Account** — never Samuel's Études Dev account on Device B.
+Physical device only: the Simulator doesn't support age assurance.
+Fixture path: Settings → Developer → Sandbox Apple Account → *account* →
+Manage → **Age Assurance**, with **Revoke App Consent** on the same screen.
+
+**Cache trap (CP-3).** Apple caches answers per account and doesn't document
+that changing the fixture clears them. **After every fixture change, tap Revoke
+App Consent**, and run AG0 first: if AG0 shows the old answer, every later row
+is invalid.
+
+**The refusal count.** Read it in the SQL editor before and after the run:
+`select month, reason, refusals from public.connected_age_refusals order by month, reason;`
+Each counted refusal adds exactly one. **It is an indicator, not an audited
+figure** (attempts, not people), so check the arithmetic of this run only.
+
+| # | Fixture / state | Steps | Expected |
+|---|---|---|---|
+| AG0 | 18+ `confirmed`, then switch to 18+ `selfDeclared` + Revoke App Consent | Explore Connected → Continue once on each | First reaches Sign in with Apple (cancel it); second is refused. If the second also reaches SIWA, the fixture switch is inert: stop |
+| AG1 | 18+ `confirmed` | Continue | Sign in with Apple sheet; no refusal; **no count**. (Full join is D's clean first join) |
+| AG2 | 18+ `selfDeclared` | Continue | Alert "Connected isn't available": "Études Connected is for adults. Confirm you're 18+ in Settings → [your name] → Personal Information → Age Confirmation, then try again." No SIWA sheet; no identity; `unconfirmed_adult` +1 |
+| AG3 | 16-17 `guardianDeclared` | Continue | Same alert; `under_18` +1 |
+| AG4 | 13-15 | Continue | Same alert; `under_18` +1 |
+| AG5 | Under 13 | Continue | Same alert; `under_18` +1 |
+| AG6 | Decline sharing in Apple's sheet | Continue | Same alert; `declined` +1 |
+| AG7 | Any; **a device on iOS 26.4**, if one is available | Continue | "Update iOS to join Études Connected…"; **Apple's sheet never appears**; `ios_update_needed` +1. Skip and record if no 26.4 device |
+| AG8 | Solo only, no Connected identity | Launch, background and foreground 3 times, open Profile | **Apple's age sheet never appears**; no count. Solo behaves exactly as before |
+| AG9 | Connected member (disposable), fixture 18+ `confirmed` | Switch to `selfDeclared` + Revoke App Consent; foreground the app | Within a foreground, Solo; Profile shows "Connected is paused on this iPhone", the confirm wording and Try Again, with Delete Account in the same card; journal, Scores and media intact; **no count** (re-checks aren't counted) |
+| AG10 | Continuing AG9 | Foreground several more times | No Apple sheet each time (a refusal isn't re-asked automatically) |
+| AG11 | Continuing AG9 | Switch back to `confirmed` + Revoke; tap Try Again | Connected returns **without a relaunch**; feed and shares as before |
+| AG12 | Continuing, fixture `selfDeclared` + Revoke | Try Again | Stays paused; `unconfirmed_adult` +1 (Try Again is a join attempt) |
+| AG13 | Disposable member signed out; fixture `selfDeclared` + Revoke | Sign In (returning member) | After sign-in, paused notice; `unconfirmed_adult` +1 |
+| AG14 | Paused disposable member (AG12/13) | Delete Account | Deletion completes without any age prompt (**age never gates deletion**), with the usual confirmation and outcome |
+| AG15 | First launch of this build on an **existing** confirmed member | Install over the previous TestFlight build | Starts in Solo for a moment, switches to Connected once Apple answers; later launches start Connected |
+
 ## Group C — Membership lifecycle (disposable account)
 
 Rewritten for the settled architecture. Three properties are under test, and

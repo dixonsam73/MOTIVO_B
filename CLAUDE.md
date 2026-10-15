@@ -68,11 +68,13 @@ in place; don't add a "CORRECTED" paragraph on top of it.
    only** (decided 2026-09-18), gated on Apple's Declared Age Range under a
    **risk-based approach** (decided 2026-10-15 after legal advice that Apple's
    signal isn't highly effective age assurance; see `RELEASE.md`), accepting
-   **only Apple-`confirmed` adults** (decided 2026-10-15). The current
-   code and production still implement the superseded 13+ design with 13–17
-   protections (age band, B-40, `tg_directory_requires_band`). These stay in
-   force until the adult-only gate replaces them. Age eligibility must never
-   gate account deletion.
+   **only Apple-`confirmed` adults** (decided 2026-10-15). Built 2026-10-15
+   (`ConnectedAgeGate`): Connected mode needs Apple's `.confirmed` 18+ answer
+   on the device, checked only for Connected identities, so Solo is never
+   asked; the server accepts only `band_18_plus` and keeps an anonymous
+   refusal count. B-40, the band columns and `tg_directory_requires_band`
+   deliberately stay on the server. Age eligibility must never gate account
+   deletion.
 
 ## Settled behaviour — don't change without Samuel
 
