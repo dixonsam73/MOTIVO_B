@@ -150,10 +150,25 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   could make Stage 1 "no"). If the conclusion ever becomes "met", the
   children's risk assessment and safety duties apply, and opening Connected
   to 13+ with the existing teen protections becomes worth considering.
-- [ ] **S — Recurring: watch for Apple bringing enhanced age verification to
-  the UK.** Check Apple's developer news and the Declared Age Range docs every
-  month or two. If it arrives, re-run the children's access assessment and
-  consider accepting only `confirmed`.
+- [ ] **S — Recurring: watch Apple's UK age confirmation.** **Finding
+  2026-10-15:** Apple has asked UK users to confirm they're 18+ since iOS 26.4
+  (March 2026; Ofcom welcomed it), a fact both Apple Support and the
+  solicitors' advice missed. Methods (support.apple.com/en-gb/125662): how
+  long you've had an Apple Account, a credit card on file or added (not
+  debit), or a passport/driving licence/ID scan. Unconfirmed users keep child
+  safety settings and can't download 18+ apps. Samuel's account shows
+  "Confirmed 18+" by account age. It supports the risk-based approach but
+  isn't highly effective: account age isn't on Ofcom's list, and apps can't
+  see which method was used. Recorded in both assessments. Not sent to the
+  solicitors; decide after the readout test, and if sent, cap the reply
+  (e.g. within £300 + VAT). Check every month or two for changes, such as
+  Apple dropping account age or telling apps the method.
+- [ ] **A + S — TEMPORARY age readout** (`MOTIVO/AgeRangeProbeRow.swift`, plus
+  one line in ProfileView's build-info footer). It shows what the Declared Age
+  Range returns on the device, including how the age was set. S: run it on a
+  UK device and report the result. Does "Confirmed 18+" arrive as
+  `.confirmed`? If so, the gate should probably accept only `confirmed`.
+  **Remove it as soon as the answer is recorded**, as a pure deletion.
 - [x] **A — Documents updated for the legal advice** (2026-10-15; previous
   versions kept as `.before-advice.docx.bak` in "ETUDES legal documents").
   Terms: proactive-technology disclosure (s.10(7)), the complaint categories
