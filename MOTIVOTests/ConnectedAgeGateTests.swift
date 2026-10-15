@@ -183,6 +183,23 @@ final class ConnectedAgeGateTests: XCTestCase {
         XCTAssertFalse(Gate.shareDefaultOn(adultConfirmed: false, defaultPostingIsPrivate: true))
     }
 
+    // MARK: - The anonymous refusal report
+
+    /// What leaves the device: the reason only, with the public anon key as
+    /// both apikey and bearer, never a member's token.
+    func testRefusalReportSendsTheReasonOnlyWithTheAnonKey() throws {
+        let base = try XCTUnwrap(URL(string: "https://example.supabase.co"))
+        let request = ConnectedAgeRefusalReport.request(reason: .under18, baseURL: base, anonKey: "anon-key")
+        XCTAssertEqual(request.url?.absoluteString,
+                       "https://example.supabase.co/rest/v1/rpc/record_connected_age_refusal_v1")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "apikey"), "anon-key")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer anon-key")
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(json, ["p_reason": "under_18"], "nothing but the reason")
+    }
+
     // MARK: - The resolver
 
     @MainActor

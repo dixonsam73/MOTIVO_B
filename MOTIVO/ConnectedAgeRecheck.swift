@@ -56,8 +56,11 @@ final class ConnectedAgeRecheck: ObservableObject {
         lastAttemptAt = nil
     }
 
+    /// `countsRefusal`: true only for the sign-in check, which is a join
+    /// attempt. Launch and foreground re-checks are never counted.
     func checkIfNeeded(auth: AuthManager,
                        reason: String,
+                       countsRefusal: Bool = false,
                        now: Date = Date(),
                        check: () async -> ConnectedAgeGate.Outcome,
                        onRecorded: () -> Void) async {
@@ -72,13 +75,16 @@ final class ConnectedAgeRecheck: ObservableObject {
         lastAttemptAt = now
         defer { inFlight = false }
 
-        await record(await check(), auth: auth, reason: reason)
+        let outcome = await check()
+        await record(outcome, auth: auth, reason: reason)
+        if countsRefusal, case .refused(let refusal) = outcome { ConnectedAgeRefusalReport.send(refusal) }
         onRecorded()
     }
 
     /// A check the person asked for: Continue on the join path, or Try Again
     /// on a paused Connected. Bypasses the cooldown and the "don't re-ask
-    /// after a refusal" rule, but not single-flight.
+    /// after a refusal" rule, but not single-flight. A refusal here is a join
+    /// attempt, so it is counted anonymously.
     func checkNow(auth: AuthManager,
                   reason: String,
                   check: () async -> ConnectedAgeGate.Outcome) async -> ConnectedAgeGate.Outcome? {
@@ -87,6 +93,7 @@ final class ConnectedAgeRecheck: ObservableObject {
         defer { inFlight = false }
         let outcome = await check()
         await record(outcome, auth: auth, reason: reason)
+        if case .refused(let refusal) = outcome { ConnectedAgeRefusalReport.send(refusal) }
         return outcome
     }
 
@@ -129,14 +136,14 @@ struct ConnectedAgeRecheckTrigger: ViewModifier {
             .onReceive(auth.$backendUserID.removeDuplicates()) { backendUserID in
                 recheck.resetCooldown()
                 guard backendUserID != nil else { return }
-                Task { await run(reason: "signIn") }
+                Task { await run(reason: "signIn", countsRefusal: true) }
             }
     }
 
     @MainActor
-    private func run(reason: String) async {
+    private func run(reason: String, countsRefusal: Bool = false) async {
         guard !UnitTestHost.isActive else { return }
-        await recheck.checkIfNeeded(auth: auth, reason: reason, check: {
+        await recheck.checkIfNeeded(auth: auth, reason: reason, countsRefusal: countsRefusal, check: {
             #if canImport(DeclaredAgeRange)
             return await ConnectedAgeGate.check(using: requestAgeRange)
             #else
