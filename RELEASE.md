@@ -132,11 +132,28 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   and fail closed to Solo; never gate account deletion. Decide at build time
   whether a self-declared 18+ is accepted or only `confirmed` (recommendation:
   accept any 18+, since "`confirmed` only" may turn away genuine UK adults).
-- [ ] **S (A can draft) — Ofcom children's access assessment** for Connected.
-  Required for every regulated user-to-user service, and now needed because
-  children can't be ruled out. Stage 2 (is the child user condition met?) may
-  matter for a paid, adults-only, approval-based service. Ofcom publishes free
-  guidance.
+  **Must also keep an anonymous count of joins refused as under 18** (a
+  number only, no user id). It's the evidence the children's access
+  assessment relies on at its reviews. It needs a small server-side counter,
+  so it gets a single round of Codex review.
+- [ ] **S — Approve the children's access assessment.** Drafted 2026-10-15
+  (`ETUDES legal documents/Etudes-Childrens-Access-Assessment-DRAFT-2026-10-15.docx`),
+  following Ofcom's April 2025 guidance and record template. Stage 1: yes
+  (no highly effective age assurance). Stage 2: child user condition **not
+  met**, a reasoned judgement under the risk-based approach (paid app plus
+  subscription, adult positioning, Apple 18+ gate, approval-only design, no
+  browsable content, no evidence of child users), acknowledging that music
+  appeals to children and pre-launch evidence is thin. Must be completed
+  within three months of launch. **Early review three months after launch**
+  using the refused-join count and support reports, then at least annually.
+  Triggers include Apple extending enhanced verification to the UK (which
+  could make Stage 1 "no"). If the conclusion ever becomes "met", the
+  children's risk assessment and safety duties apply, and opening Connected
+  to 13+ with the existing teen protections becomes worth considering.
+- [ ] **S — Recurring: watch for Apple bringing enhanced age verification to
+  the UK.** Check Apple's developer news and the Declared Age Range docs every
+  month or two. If it arrives, re-run the children's access assessment and
+  consider accepting only `confirmed`.
 - [x] **A — Documents updated for the legal advice** (2026-10-15; previous
   versions kept as `.before-advice.docx.bak` in "ETUDES legal documents").
   Terms: proactive-technology disclosure (s.10(7)), the complaint categories
