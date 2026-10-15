@@ -153,6 +153,20 @@ final class ConnectedAgeGateTests: XCTestCase {
         XCTAssertTrue(Gate.shouldCheckAutomatically(stored: .refused(.iosUpdateNeeded), osCanReportConfirmed: true))
     }
 
+    // MARK: - Profile's paused notice
+
+    func testPausedNoticeShowsOnlyForAnEntitledIdentityWithADecisiveRefusal() {
+        XCTAssertEqual(Gate.pauseReason(hasConnectedIdentity: true, isEntitled: true,
+                                        stored: .refused(.unconfirmedAdult)), .unconfirmedAdult)
+        XCTAssertNil(Gate.pauseReason(hasConnectedIdentity: true, isEntitled: true, stored: .confirmed))
+        XCTAssertNil(Gate.pauseReason(hasConnectedIdentity: true, isEntitled: true, stored: nil),
+                     "never checked: a check is under way")
+        XCTAssertNil(Gate.pauseReason(hasConnectedIdentity: true, isEntitled: false, stored: .refused(.declined)),
+                     "a lapsed member has nothing to unpause")
+        XCTAssertNil(Gate.pauseReason(hasConnectedIdentity: false, isEntitled: true, stored: .refused(.declined)),
+                     "Solo users see the normal Explore Connected")
+    }
+
     // MARK: - The resolver
 
     @MainActor

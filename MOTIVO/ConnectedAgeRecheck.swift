@@ -76,9 +76,22 @@ final class ConnectedAgeRecheck: ObservableObject {
         onRecorded()
     }
 
+    /// A check the person asked for: Continue on the join path, or Try Again
+    /// on a paused Connected. Bypasses the cooldown and the "don't re-ask
+    /// after a refusal" rule, but not single-flight.
+    func checkNow(auth: AuthManager,
+                  reason: String,
+                  check: () async -> ConnectedAgeGate.Outcome) async -> ConnectedAgeGate.Outcome? {
+        guard !inFlight else { return nil }
+        inFlight = true
+        defer { inFlight = false }
+        let outcome = await check()
+        await record(outcome, auth: auth, reason: reason)
+        return outcome
+    }
+
     /// Stores the outcome and, for a confirmed adult with an identity, makes
-    /// sure the server holds the adult row. Used by the automatic check and,
-    /// from step 3, by join and retry.
+    /// sure the server holds the adult row.
     func record(_ outcome: ConnectedAgeGate.Outcome, auth: AuthManager, reason: String) async {
         let next = ConnectedAgeGate.nextStoredResult(current: ConnectedAgeGate.storedResult(), outcome: outcome)
         ConnectedAgeGate.setStoredResult(next)

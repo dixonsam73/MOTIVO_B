@@ -444,6 +444,8 @@ struct ProfileNameDraftState: Equatable {
     /// Already injected app-wide — `MembershipSelectionView`, presented from this
     /// screen, resolves the same object.
     @EnvironmentObject private var membershipStore: ConnectedMembershipStore
+    /// The adult-only gate's stored result, and the explicit check.
+    @EnvironmentObject private var connectedAgeRecheck: ConnectedAgeRecheck
     /// F2/F3. The per-screen reconciliation state: the spent completion and the
     /// write this screen has evidenced. **Boundedness**: a still-refused retry
     /// cannot re-trigger itself, because the completion that authorised it is
@@ -618,20 +620,18 @@ struct ProfileNameDraftState: Equatable {
                 showConnectedSignInSheet = true
             },
             onContinue: {
-                // CP-3: Apple's declared age range is requested BEFORE
-                // Sign in with Apple, so an ineligible or undisclosed
-                // result turns the member away WITHOUT minting an
-                // identity that would then need deleting. The band is
-                // held in memory only until an identity exists.
+                // The adult-only gate runs BEFORE Sign in with Apple, so a
+                // refusal turns the person away WITHOUT minting an identity
+                // that would then need deleting. The adult row is held in
+                // memory only until an identity exists.
                 Task { @MainActor in
-                    switch await requestDeclaredAgeRange() {
-                    case .band(let band):
-                        auth.pendingAgeBand = band
+                    guard let outcome = await runConnectedAgeCheck(reason: "join") else { return }
+                    switch outcome {
+                    case .confirmedAdult:
+                        auth.pendingAgeBand = .band18Plus
                         continueToConnectedJoin()
-                    case .ineligible:
-                        ageRangeRefusedNotice = "Études Connected is for ages 13 and over."
-                    case .unavailable:
-                        ageRangeRefusedNotice = "Études needs Apple to share your age range before Connected can be set up. You can change this in Settings, under your Apple Account."
+                    case .refused(let reason):
+                        ageRangeRefusedNotice = ConnectedAgeGate.refusalMessage(for: reason)
                     }
                 }
             }
@@ -1149,6 +1149,8 @@ private var sessionSetupSection: some View {
      private var connectedPromoSection: some View {
          Section(header: Text("Account").sectionHeader()) {
              VStack(spacing: 0) {
+                 connectedAgePausedRows
+
                  Button { showConnectedIntroduction = true } label: {
                      navigationRow(title: "Explore Connected")
                  }
@@ -1551,19 +1553,58 @@ private var sessionSetupSection: some View {
          discoverabilityOn = auth.accountPrivacyState?.lookupEffective ?? false
      }
 
-     /// Asks Apple to share the member's age range and reduces it to a band.
-     /// Any thrown error -- including `.notAvailable` and `.invalidRequest` --
-     /// is `.unavailable`: never a band, and never eligibility.
+     /// The adult-only gate, asked for by the person (Continue, or Try Again
+     /// on a paused Connected). Stores the result and re-resolves the mode at
+     /// once, so a confirmation takes effect without a relaunch. Nil only when
+     /// another check is already running.
      @MainActor
-     private func requestDeclaredAgeRange() async -> DeclaredAgeRangeOutcome {
-         do {
-             let response = try await requestAgeRange(
-                 ageGates: DeclaredAgeRangeService.minimumGate,
-                 DeclaredAgeRangeService.adultGate
-             )
-             return DeclaredAgeRangeService.outcome(for: response)
-         } catch {
-             return .unavailable
+     private func runConnectedAgeCheck(reason: String) async -> ConnectedAgeGate.Outcome? {
+         let outcome = await connectedAgeRecheck.checkNow(auth: auth, reason: reason) {
+             await ConnectedAgeGate.check(using: requestAgeRange)
+         }
+         if outcome != nil {
+             appModeManager.applyActivation(auth: auth, isEntitled: membershipStore.isEntitled)
+         }
+         return outcome
+     }
+
+     /// The refusal that has paused Connected on this device, if any: an
+     /// entitled member with an identity whose last decisive answer from Apple
+     /// wasn't a confirmed adult. Unchecked isn't shown: a check is under way.
+     private var connectedAgePauseReason: ConnectedAgeGate.RefusalReason? {
+         ConnectedAgeGate.pauseReason(hasConnectedIdentity: auth.hasConnectedIdentity,
+                                      isEntitled: membershipStore.isEntitled,
+                                      stored: connectedAgeRecheck.stored)
+     }
+
+     @State private var connectedAgeRetryBusy = false
+
+     /// Shown in place of Connected while the gate refuses. The local journal
+     /// is untouched and Delete Account stays below it in the same card.
+     @ViewBuilder
+     private var connectedAgePausedRows: some View {
+         if let reason = connectedAgePauseReason {
+             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                 Text("Connected is paused on this iPhone")
+                     .font(Theme.Text.body)
+                 Text(ConnectedAgeGate.refusalMessage(for: reason))
+                     .font(Theme.Text.meta)
+                     .foregroundStyle(Theme.Colors.secondaryText)
+                     .fixedSize(horizontal: false, vertical: true)
+                 Button(connectedAgeRetryBusy ? "Checking…" : "Try Again") {
+                     connectedAgeRetryBusy = true
+                     Task { @MainActor in
+                         _ = await runConnectedAgeCheck(reason: "retry")
+                         connectedAgeRetryBusy = false
+                     }
+                 }
+                 .disabled(connectedAgeRetryBusy)
+                 .font(Theme.Text.body)
+                 .frame(minHeight: 44, alignment: .leading)
+             }
+             .frame(maxWidth: .infinity, alignment: .leading)
+             .padding(.vertical, Theme.Spacing.s)
+             .overlay(alignment: .bottom) { quietDivider() }
          }
      }
 

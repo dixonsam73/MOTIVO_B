@@ -153,6 +153,17 @@ enum ConnectedAgeGate {
         return false
     }
 
+    /// PURE. Why Connected is paused on this device, for Profile's notice: an
+    /// entitled member with an identity whose last decisive answer wasn't a
+    /// confirmed adult. Never checked shows nothing, because a check is under
+    /// way; a lapsed member has nothing to unpause.
+    static func pauseReason(hasConnectedIdentity: Bool, isEntitled: Bool,
+                            stored: StoredResult?) -> RefusalReason? {
+        guard hasConnectedIdentity, isEntitled else { return nil }
+        if case .refused(let reason)? = stored { return reason }
+        return nil
+    }
+
     /// The user-facing reason. One place, so the join path, sign-in and the
     /// paused-member notice can't drift apart.
     static func refusalMessage(for reason: RefusalReason) -> String {
