@@ -24,10 +24,20 @@ BEGIN
        (SELECT prosrc FROM pg_proc WHERE oid = 'public.account_privacy_upsert_v1(text)'::regprocedure)) = 0 THEN
     RAISE EXCEPTION 'adult gate rollback: upsert is not in the applied state';
   END IF;
+END $guard$;
+
+-- Codex review 2026-10-15: without this, a refusal recorded between the
+-- count check and DROP TABLE would be dropped with the table while the
+-- rollback reported success. Held to COMMIT; a refusal sent meanwhile waits,
+-- then fails once the table is gone (the app ignores counter failures).
+LOCK TABLE public.connected_age_refusals IN ACCESS EXCLUSIVE MODE;
+
+DO $guard_counts$
+BEGIN
   IF EXISTS (SELECT 1 FROM public.connected_age_refusals WHERE refusals > 0) THEN
     RAISE EXCEPTION 'adult gate rollback: the counter holds counts; export and delete them first';
   END IF;
-END $guard$;
+END $guard_counts$;
 
 CREATE OR REPLACE FUNCTION public.account_privacy_upsert_v1(p_age_band text)
  RETURNS TABLE(o_age_band text, o_lookup_enabled boolean, o_lookup_effective boolean, o_follow_requests_enabled boolean, o_follow_requests_effective boolean)
