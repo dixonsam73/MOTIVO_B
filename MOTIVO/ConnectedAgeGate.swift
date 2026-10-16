@@ -18,6 +18,7 @@
 //
 
 import Foundation
+import os
 
 #if canImport(DeclaredAgeRange)
 import DeclaredAgeRange
@@ -191,8 +192,13 @@ enum ConnectedAgeGate {
     static func outcome(for response: AgeRangeService.Response) -> Outcome {
         switch response {
         case .declinedSharing:
+            diagnosticLog.notice("age answer: declinedSharing")
             return .refused(.declined)
         case .sharing(let range):
+            // DIAGNOSTIC, device QA 2026-10-16: what Apple actually returned,
+            // to tell a cached self-declared answer from a deprecated "checked"
+            // label on iOS 26.x. On-device console only; nothing is sent.
+            diagnosticLog.notice("age answer: lower=\(String(describing: range.lowerBound), privacy: .public) upper=\(String(describing: range.upperBound), privacy: .public) declaration=\(String(describing: range.ageRangeDeclaration), privacy: .public)")
             return evaluate(lowerBound: range.lowerBound,
                             upperBound: range.upperBound,
                             declaration: range.ageRangeDeclaration.map(declaration(for:)))
@@ -200,6 +206,8 @@ enum ConnectedAgeGate {
             return .refused(.unavailable)
         }
     }
+
+    private static let diagnosticLog = Logger(subsystem: "com.sdsongs.etudes", category: "ageGate")
 
     @available(iOS 26.5, *)
     static func declaration(for apple: AgeRangeService.AgeRangeDeclaration) -> Declaration {
