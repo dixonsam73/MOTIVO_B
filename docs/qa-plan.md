@@ -858,10 +858,13 @@ Physical device only: the Simulator doesn't support age assurance.
 Fixture path: Settings → Developer → Sandbox Apple Account → *account* →
 Manage → **Age Assurance**, with **Revoke App Consent** on the same screen.
 
-**Cache trap (CP-3).** Apple caches answers per account and doesn't document
-that changing the fixture clears them. **After every fixture change, tap Revoke
-App Consent**, and run AG0 first: if AG0 shows the old answer, every later row
-is invalid.
+**Cache trap (CP-3), and what the 2026-10-16 run found.** Apple caches answers
+per account. **Revoke App Consent clears the Age Assurance setting** (and sends
+a `RESCIND_CONSENT` notification, which the server records and ignores), so
+revoke first, then set the fixture, and re-open the screen to check it stuck.
+On Device A (iOS 26.6.1) **the fixtures were ignored**: 18+ confirmed and
+13-15 both came back as the cached 18+ `selfDeclared` answer from 7 September.
+Treat AG0 as decisive: if it shows the old answer, the fixture rows can't run.
 
 **The refusal count.** Read it in the SQL editor before and after the run:
 `select month, reason, refusals from public.connected_age_refusals order by month, reason;`
@@ -872,7 +875,7 @@ figure** (attempts, not people), so check the arithmetic of this run only.
 |---|---|---|---|
 | AG0 | 18+ `confirmed`, then switch to 18+ `selfDeclared` + Revoke App Consent | Explore Connected → Continue once on each | First reaches Sign in with Apple (cancel it); second is refused. If the second also reaches SIWA, the fixture switch is inert: stop |
 | AG1 | 18+ `confirmed` | Continue | Sign in with Apple sheet; no refusal; **no count**. (Full join is D's clean first join) |
-| AG2 | 18+ `selfDeclared` | Continue | Alert "Connected isn't available": "Études Connected is for adults. Confirm you're 18+ in Settings → [your name] → Personal Information → Age Confirmation, then try again." No SIWA sheet; no identity; `unconfirmed_adult` +1 |
+| AG2 | 18+ `selfDeclared` | Continue | Alert "Connected isn't available" with the refusal wording ("…for adults whose age Apple has confirmed. Confirm yours in Settings → … → Age Confirmation, then try again. If you've already confirmed…contact Support."). No SIWA sheet; no identity; `unconfirmed_adult` +1 |
 | AG3 | 16-17 `guardianDeclared` | Continue | Same alert; `under_18` +1 |
 | AG4 | 13-15 | Continue | Same alert; `under_18` +1 |
 | AG5 | Under 13 | Continue | Same alert; `under_18` +1 |
@@ -886,6 +889,20 @@ figure** (attempts, not people), so check the arithmetic of this run only.
 | AG13 | Disposable member signed out; fixture `selfDeclared` + Revoke | Sign In (returning member) | After sign-in, paused notice; `unconfirmed_adult` +1 |
 | AG14 | Paused disposable member (AG12/13) | Delete Account | Deletion completes without any age prompt (**age never gates deletion**), with the usual confirmation and outcome |
 | AG15 | First launch of this build on an **existing** confirmed member | Install over the previous TestFlight build | Starts in Solo for a moment, switches to Connected once Apple answers; later launches start Connected |
+
+### Group AG — RESULT, 2026-10-16 (Device A Release, then Device B Release)
+
+| Row | Result |
+|---|---|
+| AG0 | **Fixtures ignored.** Every answer was Device A's cached 18+ `selfDeclared` (7 September), whatever the fixture, with or without the Sandbox Apple Account signed in. Revoke App Consent cleared the fixture setting |
+| AG2 | **Pass** (real account): refused with the right wording, counted `unconfirmed_adult` each time, no Apple sheet (cached) |
+| AG3–AG7 | **Not runnable** (fixtures ignored; no 26.4 device). Rules covered by `ConnectedAgeGateTests` |
+| AG9–AG13 | **Not reachable**: needs an entitled, unconfirmed member, and the gate correctly blocks the purchase. Unit tests only |
+| AG15 | **Pass on Device B** (iOS 27.0.1, confirmed, 1789 → 1802 · `927c336`) after fixing a **re-check loop** found on the first install (`927c336`): Connected with no prompt, responsive, nothing counted |
+| Confirm path | Device A confirmed for real by credit card. **Still refused**: Apple kept returning the cached `selfDeclared` answer (diagnostic `a5f881d`), after toggling Age Range for Apps and a restart. Wording changed (`ffd3b87`); see C-113 |
+
+**Test refusals in production: 11** by the run's tally (9 read back by SQL; the
+last two not yet), all `unconfirmed_adult`, October 2026, all from Device A. Discount them at the children's access assessment review.
 
 ## Group C — Membership lifecycle (disposable account)
 

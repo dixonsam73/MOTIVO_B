@@ -157,7 +157,15 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   inflatable). Privacy: the policy draft's "Age" row is replaced (2026-10-15,
   backup `.before-adult-gate.docx.bak`); label recommendations are in
   `docs/app-store-privacy-disclosures.md` §8 (S to decide). Accepted limits: C-112.
-  **Left: device tests**, `docs/qa-plan.md` Group AG (also in section D).
+  **Device QA 2026-10-16** (`docs/qa-plan.md`, Group AG result): refusal
+  and count pass on Device A; Device B (confirmed) passes after a re-check
+  loop fix (`927c336`); sandbox age fixtures were ignored, so the under-18
+  and paused rows rest on unit tests. **Found C-113**: after confirming,
+  Apple kept returning the old self-declared answer, so the copy now asks
+  people to confirm before Continue and the refusal points to Support
+  (`ffd3b87`). Left: retry Device A on a later day, file Apple Feedback,
+  remove the diagnostic log (`a5f881d`). 11 test refusals are in the
+  production count.
 - [ ] **S — Approve the children's access assessment.** Drafted 2026-10-15
   (`ETUDES legal documents/Etudes-Childrens-Access-Assessment-DRAFT-2026-10-15.docx`),
   following Ofcom's April 2025 guidance and record template. Stage 1: yes
