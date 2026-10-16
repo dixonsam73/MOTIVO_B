@@ -79,6 +79,9 @@ struct MOTIVOApp: App {
     /// U5f — owns the attestation invariant and the duplicate suppression.
     @StateObject private var attestation = MembershipAttestationCoordinator()
     @Environment(\.scenePhase) private var scenePhase
+    /// C-114. The last backend user id delivered (`nil` = none yet), so a lost
+    /// Connected identity is acted on once, not on every redraw.
+    @State private var lastDeliveredBackendUserID: String?? = nil
     /// The adult-only gate's automatic check (launch, foreground, sign-in).
     @StateObject private var connectedAgeRecheck = ConnectedAgeRecheck()
     // NO `@Environment(\.requestAgeRange)` HERE, DELIBERATELY. It presents system
@@ -425,24 +428,27 @@ struct MOTIVOApp: App {
                     persistenceController.currentUserID = uid
                     if let id = uid {
                         Task { await persistenceController.runOneTimeBackfillIfNeeded(for: id) }
-                    } else {
-                        // Phase 14.3H (A): Connected-mode sign-out must clear any retained feed/follow state.
-                        // Triggered by auth state transition (not UI navigation).
-                        if BackendEnvironment.shared.isConnected {
-                            BackendFeedStore.shared.resetForSignOut()
-                            FollowStore.shared.resetForSignOut()
-                        }
-
-                        // U5f — the next attestation concerns a DIFFERENT identity
-                        // and must not be throttled by this one's cooldown, nor
-                        // inherit its recorded outcome. Deliberately NOT gated on
-                        // `isConnected`: an identity can be withdrawn while the
-                        // visible experience is already Solo.
-                        attestation.reset()
                     }
                 }
                 .onReceive(auth.$backendUserID.removeDuplicates()) { backendUserID in
                     if !UnitTestHost.isActive { appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled) } // C-100
+
+                    // C-114. A withdrawal now keeps `currentUserID`, so the loss of
+                    // the Connected identity is seen here. Only on a real change:
+                    // this is re-delivered on every root redraw (C-55, `927c336`).
+                    let previous = lastDeliveredBackendUserID
+                    if previous != .some(backendUserID) { lastDeliveredBackendUserID = .some(backendUserID) }
+                    if case .some(.some) = previous, backendUserID == nil {
+                        // Phase 14.3H (A): sign-out must clear retained feed/follow
+                        // state. In-memory only, so safe after the switch to Solo.
+                        BackendFeedStore.shared.resetForSignOut()
+                        FollowStore.shared.resetForSignOut()
+
+                        // U5f — the next attestation concerns a DIFFERENT identity
+                        // and must not be throttled by this one's cooldown, nor
+                        // inherit its recorded outcome.
+                        attestation.reset()
+                    }
 
                     // U5f — the identity half of the invariant just became true.
                     // Covers the member who was already entitled and has only now

@@ -119,6 +119,38 @@ final class C27SignOutLocationTests: XCTestCase {
         XCTAssertTrue(C98AuthStub.strayRequests.isEmpty)
     }
 
+    /// C-114 — a withdrawal keeps the Apple user ID, the local journal's owner key,
+    /// while the Connected identity goes.
+    func testClearConnectedIdentityKeepsTheLocalOwner() throws {
+        let apple = "c114-apple-" + UUID().uuidString
+        let auth = try makeManager(identity: true, scoped: nil, local: nil, appleUserID: apple)
+        auth.clearConnectedIdentity(reason: "c114")
+        XCTAssertNil(auth.backendUserID)
+        XCTAssertFalse(auth.hasConnectedIdentity)
+        XCTAssertEqual(auth.currentUserID, apple)
+        XCTAssertEqual(C98Keychain.appItem("appleUserID").flatMap { String(data: $0, encoding: .utf8) }, apple)
+        XCTAssertTrue(C98AuthStub.strayRequests.isEmpty)
+    }
+
+    /// C-114 — Leave Connected is the same withdrawal.
+    func testLeaveConnectedKeepsTheLocalOwner() throws {
+        let apple = "c114-apple-" + UUID().uuidString
+        let auth = try makeManager(identity: true, scoped: nil, local: nil, appleUserID: apple)
+        auth.leaveConnected()
+        XCTAssertNil(auth.backendUserID)
+        XCTAssertFalse(auth.hasConnectedIdentity)
+        XCTAssertEqual(auth.currentUserID, apple)
+        XCTAssertNotNil(C98Keychain.appItem("appleUserID"))
+    }
+
+    /// C-114 — `signOut()` is reset-only and still drops the local owner.
+    func testSignOutStillDropsTheLocalOwner() throws {
+        let auth = try makeManager(identity: true, scoped: nil, local: nil, appleUserID: "c114-apple-" + UUID().uuidString)
+        auth.signOut()
+        XCTAssertNil(auth.currentUserID)
+        XCTAssertNil(C98Keychain.appItem("appleUserID"))
+    }
+
     /// 3 — an identity whose scoped location was never written leaves the local value.
     func testSignOutWithoutAScopedLocationLeavesTheLocalProfileUnchanged() throws {
         let auth = try makeManager(identity: true, scoped: nil, local: "London")
@@ -150,8 +182,9 @@ final class C27SignOutLocationTests: XCTestCase {
 
     // MARK: Fixture
 
-    private func makeManager(identity: Bool, scoped: String?, local: String?) throws -> AuthManager {
+    private func makeManager(identity: Bool, scoped: String?, local: String?, appleUserID: String? = nil) throws -> AuthManager {
         for account in Self.keychainAccounts { C98Keychain.setAppItem(account, nil) }
+        if let appleUserID { C98Keychain.setAppString("appleUserID", appleUserID) }
         if identity {
             UserDefaults.standard.set(uid, forKey: "supabaseUserID_v1")
             UserDefaults.standard.set(uid, forKey: "backendUserID_v1")
@@ -163,7 +196,7 @@ final class C27SignOutLocationTests: XCTestCase {
         if let local { UserDefaults.standard.set(local, forKey: Self.localLocationKey) } else { UserDefaults.standard.removeObject(forKey: Self.localLocationKey) }
 
         let manager = AuthManager(identityService: LocalStubIdentityService())
-        guard manager.backendUserID == (identity ? uid : nil), manager.currentUserID == nil else {
+        guard manager.backendUserID == (identity ? uid : nil), manager.currentUserID == appleUserID else {
             throw C98NotEstablished(reason: "the AuthManager fixture did not load the arranged identity")
         }
         return manager

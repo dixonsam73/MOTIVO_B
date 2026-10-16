@@ -102,6 +102,11 @@ final class AppleCredentialStateMonitor {
         }
     }
 
+    /// PURE. C-114.
+    nonisolated static func hasConnectedSessionToWithdraw(hasAccessToken: Bool, backendUserID: String?) -> Bool {
+        hasAccessToken || !(backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
     func check(auth: AuthManager, reason: String) async {
         // C-44: a SUCCESSFUL revocation makes Apple report `.revoked`, so without
         // this guard the deletion workflow would sign itself out between revoking
@@ -116,6 +121,12 @@ final class AppleCredentialStateMonitor {
         guard !LocalFactoryReset.isInProgress else { return }
 
         guard let appleUserID = Keychain.get("appleUserID"), !appleUserID.isEmpty else { return }
+
+        // C-114. The Apple user ID now outlives a withdrawal as the local owner,
+        // so act only while there is a Connected session to withdraw. Otherwise a
+        // revoked credential would re-withdraw on every return to the app.
+        guard Self.hasConnectedSessionToWithdraw(hasAccessToken: auth.hasSupabaseAccessToken,
+                                                 backendUserID: auth.backendUserID) else { return }
 
         guard !checkInFlight else { return }
         checkInFlight = true

@@ -631,7 +631,10 @@ final class C98AuthRefreshLifecycleTests: XCTestCase {
         XCTAssertEqual(results["A"], false)
         XCTAssertEqual(s.access, "nil"); XCTAssertEqual(s.refresh, "nil"); XCTAssertEqual(s.bearer, "nil")
         XCTAssertEqual(s.supabaseUserID, "nil"); XCTAssertEqual(s.backendUserIDDefault, "nil")
-        XCTAssertEqual(s.backendUserID, "nil"); XCTAssertEqual(s.apple, "nil"); XCTAssertFalse(s.signedIn)
+        XCTAssertEqual(s.backendUserID, "nil")
+        // C-114: the Apple user ID is the local journal's owner and survives a withdrawal.
+        XCTAssertEqual(s.apple, "present"); XCTAssertTrue(s.signedIn)
+        XCTAssertEqual(auth?.hasConnectedIdentity, false)
     }
 
     /// F-2 — a transport failure of the still-current token retains everything and reports failure.
@@ -792,9 +795,12 @@ final class C98AuthRefreshLifecycleTests: XCTestCase {
             "caller A started", "token#0 arrived R1", "step \(step)", "token#0 released", "caller A returned",
         ])
         let s = try await readState(f)
-        XCTAssertEqual(results["A"], false, "no locally signed-in identity remains, so the stale caller must report failure")
-        XCTAssertFalse(s.signedIn)
-        XCTAssertEqual(s.apple, "nil")
+        XCTAssertEqual(results["A"], false, "no Connected session remains, so the stale caller must report failure")
+        // C-114: a withdrawal keeps the local owner; only `signOut()` (reset-only) drops it.
+        let keepsLocalOwner = step == "clearConnectedIdentity"
+        XCTAssertEqual(s.signedIn, keepsLocalOwner)
+        XCTAssertEqual(s.apple, keepsLocalOwner ? "present" : "nil")
+        XCTAssertEqual(auth.hasConnectedIdentity, false)
         XCTAssertEqual(s.backendUserID, "nil", "the stale refresh must not repopulate the in-memory backend user id")
         if newer == nil {
             XCTAssertEqual(s.access, "nil", "the stale refresh must not resurrect an access token")

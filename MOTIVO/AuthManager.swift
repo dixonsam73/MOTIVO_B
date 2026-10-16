@@ -57,6 +57,7 @@ import AuthenticationServices
 import CryptoKit
 import Combine
 import CoreData
+import os
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -1282,6 +1283,13 @@ final class AuthManager: NSObject, ObservableObject {
     /// Device-local Études content, profile fields and attachment metadata remain
     /// untouched. This is authentication-state withdrawal, not erasure.
     ///
+    /// C-114. **The Apple user ID is KEPT.** It is also the local journal's owner
+    /// key (sessions, Lists, threads, instruments), so deleting it here hid the
+    /// whole journal after any withdrawal (Device B, 2026-10-16). Without the
+    /// Supabase session `hasConnectedIdentity` is false, so the app is Solo; only
+    /// Erase All and Delete Account (`signOut()` inside `LocalFactoryReset`) drop
+    /// the local owner. Leave Connected, the person's own choice, comes here too.
+    ///
     /// RENAMED 2026-08-13 (closes C-25). It was
     /// `clearConnectedIdentityAfterMembershipExpiry`, which named a caller's motive
     /// rather than what the function does — and it has just acquired a caller whose
@@ -1292,9 +1300,8 @@ final class AuthManager: NSObject, ObservableObject {
     /// per-user attachment *title* mappings (`:880-883`). Those titles are content
     /// the user typed, so destroying them in response to an external signal —
     /// Apple revoking a credential, a server-side expiry — would be silent data
-    /// loss the user never asked for. `signOut()` remains correct where the user
-    /// themselves chose to sign out, and inside `LocalFactoryReset`, where
-    /// everything is going anyway.
+    /// loss the user never asked for. `signOut()` remains correct only inside
+    /// `LocalFactoryReset`, where everything is going anyway (C-114).
     ///
     /// C-1 still holds and is unchanged in substance: **no client-side entitlement
     /// path may reach this.** The client governs access only, and a negative
@@ -1322,16 +1329,12 @@ final class AuthManager: NSObject, ObservableObject {
         directoryHydrationInFlightUserID = nil
         lastHydratedDirectoryUserID = nil
 
-        Keychain.delete("appleUserID")
-        Keychain.delete("displayName")
         Keychain.delete(Self.supabaseAccessTokenKeychainKey)
         Keychain.delete(Self.supabaseRefreshTokenKeychainKey)
         UserDefaults.standard.removeObject(forKey: Self.supabaseUserIDDefaultsKey)
         UserDefaults.standard.removeObject(forKey: Self.backendUserDefaultsKey)
         NetworkManager.shared.clearBearerToken()
 
-        self.currentUserID = nil
-        self.displayName = nil
         self.backendUserID = nil
         self.backendAvatarKey = nil
         self.isSigningIn = false
@@ -1360,7 +1363,15 @@ final class AuthManager: NSObject, ObservableObject {
         }
     }
 
-    // Local sign-out
+    /// C-114. Profile's Leave Connected: the person's own choice, but still only
+    /// a withdrawal. The journal stays, and signing in again restores Connected.
+    func leaveConnected() {
+        clearConnectedIdentity(reason: "leaveConnected")
+    }
+
+    /// Drops the local owner as well as the Connected identity. C-114: ONLY for
+    /// `LocalFactoryReset`, where the journal is going too. Anything else that
+    /// called this would hide the member's journal.
     func signOut() {
         // P6-I-02. See `clearConnectedIdentity`. Queue retained, acknowledgements
         // from the previous identity voided.
@@ -1408,6 +1419,20 @@ final class AuthManager: NSObject, ObservableObject {
 
         // Persist stable Apple user ID (always present)
         let userID = credential.user
+
+        // C-114. The kept local owner is another Apple Account's, and its journal
+        // is still here: refuse, so one person's journal is never claimed by (and
+        // shared under) someone else's Connected account. Nothing is changed.
+        let storedOwner = Keychain.get("appleUserID")
+        if Self.refusesSignIn(storedOwner: storedOwner, incoming: userID,
+                              storedOwnerHasLocalJournal: storedOwner.map(Self.hasLocalJournal(ownedBy:)) ?? false) {
+            Logger(subsystem: "com.sdsongs.etudes", category: "auth")
+                .notice("signIn refused: journal belongs to another Apple Account")
+            signInRefusal = Self.anotherAccountRefusalMessage
+            return
+        }
+        signInRefusal = nil
+
         Keychain.set(userID, for: "appleUserID")
         self.currentUserID = userID
 
@@ -1449,6 +1474,35 @@ final class AuthManager: NSObject, ObservableObject {
         // exchange already unwinds the sign-in navigation today, and narrowing
         // that is a separate decision.
         noteSignInCompleted()
+    }
+
+    /// C-114. Shown on the sign-in sheet when `process` refuses.
+    @Published var signInRefusal: String?
+
+    static let anotherAccountRefusalMessage = "This iPhone’s journal belongs to a different Apple Account. To use Connected, sign in with that Apple Account in Settings, or erase this iPhone’s Études data first."
+
+    /// PURE. C-114. A different Apple Account may sign in only when the kept
+    /// owner has no journal here (for example after a reinstall, where the
+    /// Keychain outlives the app's data).
+    nonisolated static func refusesSignIn(storedOwner: String?, incoming: String,
+                                          storedOwnerHasLocalJournal: Bool) -> Bool {
+        let stored = storedOwner?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !stored.isEmpty, stored != incoming else { return false }
+        return storedOwnerHasLocalJournal
+    }
+
+    /// Any session or saved List owned by `owner` on this device.
+    static func hasLocalJournal(ownedBy owner: String) -> Bool {
+        let request = NSFetchRequest<NSManagedObject>(entityName: "Session")
+        request.predicate = NSPredicate(format: "ownerUserID == %@", owner)
+        request.fetchLimit = 1
+        let sessions = (try? PersistenceController.shared.container.viewContext.count(for: request)) ?? 0
+        if sessions > 0 { return true }
+        switch SavedListLibrary.stored(ownerScope: owner, defaults: .standard) {
+        case .absent: return false
+        case .unmigrated(let lists), .migrated(let lists): return !lists.isEmpty
+        case .damaged: return true
+        }
     }
 
     private func noteSignInCompleted() {

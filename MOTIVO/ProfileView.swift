@@ -611,6 +611,9 @@ struct ProfileNameDraftState: Equatable {
      @State private var discoverabilityNotice: String?
      @State private var showTintModeSelection: Bool = false
     @State private var signedOutGateWasVisible: Bool = false
+    @State private var showLeaveConnectedConfirm: Bool = false
+
+    static let leaveConnectedMessage = "Your journal, lists and threads stay on this iPhone. Your shared posts stay on Connected until you delete your account. You can sign back in at any time from Explore Connected.\n\nLeaving doesn’t cancel your subscription. Manage that in Settings → Apple Account → Subscriptions."
  
 
     private var connectedIntroduction: some View {
@@ -842,6 +845,14 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, Theme.Spacing.l)
+            // C-114. Sign-in refused: this iPhone's journal is another Apple Account's.
+            .alert("Can’t sign in",
+                   isPresented: Binding(get: { auth.signInRefusal != nil },
+                                        set: { if !$0 { auth.signInRefusal = nil } })) {
+                Button("OK", role: .cancel) { auth.signInRefusal = nil }
+            } message: {
+                Text(auth.signInRefusal ?? "")
+            }
             .onAppear {
                 signedOutGateWasVisible = true
             }
@@ -1311,10 +1322,12 @@ private var sessionSetupSection: some View {
 
                  legalLinkRows
 
+                 // C-114. A withdrawal, never a sign-out of Études: the journal,
+                 // Lists and threads stay. Not `signOut()`, which is reset-only.
                  Button {
-                     auth.signOut()
+                     showLeaveConnectedConfirm = true
                  } label: {
-                     Text("Sign out")
+                     Text("Leave Connected")
                          .foregroundStyle(.primary)
                          .frame(maxWidth: .infinity, alignment: .leading)
                          .frame(minHeight: 44, alignment: .center)
@@ -1324,6 +1337,12 @@ private var sessionSetupSection: some View {
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
                      quietDivider()
+                 }
+                 .alert("Leave Connected?", isPresented: $showLeaveConnectedConfirm) {
+                     Button("Leave Connected") { auth.leaveConnected() }
+                     Button("Cancel", role: .cancel) {}
+                 } message: {
+                     Text(Self.leaveConnectedMessage)
                  }
 
                  eraseAllEtudesDataButton
