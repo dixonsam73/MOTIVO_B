@@ -905,6 +905,32 @@ figure** (attempts, not people), so check the arithmetic of this run only.
 the sysdiagnose capture for FB25211228), all `unconfirmed_adult`, October 2026,
 all from Device A. Discount them at the children's access assessment review.
 
+## Group LO — Leaving Connected keeps the local journal (C-114)
+
+Run on a disposable install (Device B Release here). Only LO6 touches Samuel's
+Études Dev account, and it changes nothing.
+
+| Row | Install | Steps | Expect |
+|---|---|---|---|
+| LO0 | Release, Solo, never joined | Add a thread and a List, then join Connected | Both carried into Connected |
+| LO8 | Release, Connected | Change the location in Profile, then Leave Connected straight away | The new location is still shown |
+| LO1 | same | Note thread and List counts; Profile → Leave Connected | Alert: the journal stays; the subscription isn't cancelled |
+| LO2 | same | Confirm | Solo. Same threads in the filter and pickers; same Lists in the manager and the timer's import; create controls present |
+| LO3 | same | Relaunch; background and return twice | Still Solo, journal intact, no repeated withdrawals or freezing |
+| LO4 | same | Add a thread and a List in Solo | Saved and visible |
+| LO5 | same | Explore Connected → Sign in, same Apple Account | Connected; everything from LO1 and LO4 present; feed and follows load |
+| LO6 | Études Dev (Samuel's account) | Look only: filter, pickers, Lists manager, timer import | All visible; build stamp matches |
+| LO7 | Release, Solo after leaving | Explore Connected → Sign in, then dismiss the sheet | Profile shows normally, not blank |
+
+The different-account refusal is unit-tested only (`C114LocalOwnerTests`):
+testing it on a device means changing the phone's Apple Account.
+
+### Group LO — RESULT, 2026-10-16 (Device B, build 1812 · `24354fc`)
+
+All rows **pass**. LO0–LO5, LO7, LO8 on Release; LO6 on Études Dev. Both
+stamps read `24354fc-dirty` only because the scheme's Run action was
+uncommitted (Debug, for the Dev install); the app source was clean.
+
 ## Group C — Membership lifecycle (disposable account)
 
 Rewritten for the settled architecture. Three properties are under test, and
