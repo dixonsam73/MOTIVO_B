@@ -164,8 +164,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   Apple kept returning the old self-declared answer, so the copy now asks
   people to confirm before Continue and the refusal points to Support
   (`ffd3b87`). Apple Feedback **FB25211228** filed. Left: retry Device A
-  on a later day, remove the diagnostic log (`a5f881d`). 11 test refusals are in the
-  production count.
+  on a later day, remove the diagnostic log (`a5f881d`). 14 test refusals are in the
+  production count (October 2026).
 - [ ] **S — Approve the children's access assessment.** Drafted 2026-10-15
   (`ETUDES legal documents/Etudes-Childrens-Access-Assessment-DRAFT-2026-10-15.docx`),
   following Ofcom's April 2025 guidance and record template. Stage 1: yes
