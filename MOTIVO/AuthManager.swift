@@ -1498,11 +1498,7 @@ final class AuthManager: NSObject, ObservableObject {
         request.fetchLimit = 1
         let sessions = (try? PersistenceController.shared.container.viewContext.count(for: request)) ?? 0
         if sessions > 0 { return true }
-        switch SavedListLibrary.stored(ownerScope: owner, defaults: .standard) {
-        case .absent: return false
-        case .unmigrated(let lists), .migrated(let lists): return !lists.isEmpty
-        case .damaged: return true
-        }
+        return SavedListLibrary.hasContent(ownerScope: owner)
     }
 
     private func noteSignInCompleted() {

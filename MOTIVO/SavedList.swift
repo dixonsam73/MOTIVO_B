@@ -202,6 +202,28 @@ enum SavedListLibrary {
         return .lists(result)
     }
 
+    /// C-114. Whether this owner has Lists on the device, without migrating or
+    /// writing. Until migration has run, any legacy key counts, readable or not
+    /// (it may be the only copy); once migrated, only the canonical library
+    /// counts, so legacy copies of deleted Lists never do.
+    static func hasContent(ownerScope: String, defaults: UserDefaults = .standard) -> Bool {
+        switch stored(ownerScope: ownerScope, defaults: defaults) {
+        case .damaged: return true
+        case .migrated(let lists): return !lists.isEmpty
+        case .unmigrated(let lists):
+            return !lists.isEmpty || hasLegacyContent(ownerScope: ownerScope, defaults: defaults)
+        case .absent:
+            return hasLegacyContent(ownerScope: ownerScope, defaults: defaults)
+        }
+    }
+
+    private static func hasLegacyContent(ownerScope: String, defaults: UserDefaults) -> Bool {
+        legacyKeys(ownerScope: ownerScope, defaults: defaults).contains { key in
+            guard let data = defaults.data(forKey: key), let lists = decode(data) else { return true }
+            return !lists.isEmpty
+        }
+    }
+
     static func read(ownerScope: String, defaults: UserDefaults = .standard) throws -> [SavedList] {
         guard case .lists(let lists) = load(ownerScope: ownerScope, defaults: defaults) else {
             throw ConnectedListError.damagedLibrary

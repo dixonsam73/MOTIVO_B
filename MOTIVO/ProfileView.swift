@@ -612,6 +612,19 @@ struct ProfileNameDraftState: Equatable {
      @State private var showTintModeSelection: Bool = false
     @State private var signedOutGateWasVisible: Bool = false
     @State private var showLeaveConnectedConfirm: Bool = false
+    /// C-114. `signInCompletionCount` when the sign-in sheet appeared.
+    @State private var signInCompletionsAtGateAppear: Int = 0
+
+    /// PURE. C-114. Whether closing the sign-in sheet clears the suppression that
+    /// hides Profile after a gate sign-in. Only a sign-in that completed while
+    /// the sheet was up keeps it (the success handler dismisses Profile). A
+    /// cancel or a refusal clears it: after Leave Connected `currentUserID` is
+    /// still set, and keying on nil alone left Profile blank (Codex, bd2e5a6).
+    nonisolated static func gateSuppressionClearsOnDismiss(currentUserID: String?,
+                                                           completionsAtAppear: Int,
+                                                           completionsNow: Int) -> Bool {
+        currentUserID == nil || completionsNow == completionsAtAppear
+    }
 
     static let leaveConnectedMessage = "Your journal, lists and threads stay on this iPhone. Your shared posts stay on Connected until you delete your account. You can sign back in at any time from Explore Connected.\n\nLeaving doesn’t cancel your subscription. Manage that in Settings → Apple Account → Subscriptions."
  
@@ -718,7 +731,9 @@ struct ProfileNameDraftState: Equatable {
                     TintModeSelectionView()
                 }
                 .sheet(isPresented: $showConnectedSignInSheet, onDismiss: {
-                    if auth.currentUserID == nil {
+                    if Self.gateSuppressionClearsOnDismiss(currentUserID: auth.currentUserID,
+                                                           completionsAtAppear: signInCompletionsAtGateAppear,
+                                                           completionsNow: auth.signInCompletionCount) {
                         signedOutGateWasVisible = false
                     }
                 }) {
@@ -855,6 +870,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
             }
             .onAppear {
                 signedOutGateWasVisible = true
+                signInCompletionsAtGateAppear = auth.signInCompletionCount
             }
         }
     }
@@ -1648,7 +1664,29 @@ private var sessionSetupSection: some View {
          }
      }
 
-     private func clearUserPresentedStateForSignOut() {
+     /// Keeps the presented profile (name, location) as the local Études profile
+    /// when the Connected identity goes. Callers check `localStorageIsUsable`.
+    ///
+    /// C-70. The Result is not discarded. Identity scoping is DELIBERATELY
+    /// UNCHANGED — the old-owner write and the `nil`-owner write both happen as
+    /// before; only the silence is removed. Without this, a failure here reports
+    /// nowhere, and the debounce that might otherwise have retried has just been
+    /// cancelled by the identity transition.
+    private func preservePresentedProfileAtIdentityLoss(oldBackendID: String?) {
+        if let oldBackendID {
+            ProfileStore.setLocation(locationText, for: oldBackendID)
+        }
+        switch save() {
+        case .success:
+            nameDraft.evidencedSaved()
+            localSaveMessage = nil
+        case .failure:
+            localSaveMessage = "Not saved yet. Your changes are still here — try again."
+        }
+        ProfileStore.setLocation(locationText, for: nil)
+    }
+
+    private func clearUserPresentedStateForSignOut() {
          // Clear all user-presented state without mutating persisted device-level Profile.
          profile = nil
          name = ""
@@ -2777,32 +2815,22 @@ private func initials(from string: String) -> String {
                         return
                     }
 
-                    if let oldBackendID = auth.backendUserID {
-                        ProfileStore.setLocation(locationText, for: oldBackendID)
-                    }
-
-                    // Preserve the currently presented profile as the local Études profile after sign-out.
-                    //
-                    // C-70. The Result is no longer discarded. Identity scoping is
-                    // DELIBERATELY UNCHANGED — the old-owner write above and the
-                    // `nil`-owner write below both still happen exactly as before;
-                    // only the silence is removed. Without this, a failure here
-                    // reports nowhere, and the debounce that might otherwise have
-                    // retried has just been cancelled by the identity transition.
-                    switch save() {
-                    case .success:
-                        nameDraft.evidencedSaved()
-                        localSaveMessage = nil
-                    case .failure:
-                        localSaveMessage = "Not saved yet. Your changes are still here — try again."
-                    }
-                    ProfileStore.setLocation(locationText, for: nil)
+                    preservePresentedProfileAtIdentityLoss(oldBackendID: auth.backendUserID)
                     onAppearLoad()
                 } else {
                     onAppearLoad()
                 }
             }
-            .onChange(of: auth.backendUserID) { _, newValue in
+            .onChange(of: auth.backendUserID) { oldValue, newValue in
+                // C-114. A withdrawal (Leave Connected, a failed refresh) keeps
+                // `currentUserID`, so the handler above no longer runs for it.
+                // Save what is on screen FIRST, exactly as it does: the cancel
+                // below would otherwise drop an unsaved edit, and the rehydrate
+                // would replace a typed location (Codex, bd2e5a6).
+                if newValue == nil, oldValue != nil, auth.currentUserID != nil, localStorageIsUsable {
+                    preservePresentedProfileAtIdentityLoss(oldBackendID: oldValue)
+                }
+
                 // C-70. CANCEL THE PRE-SUBMIT DEBOUNCE.
                 //
                 // `DirectoryWriteCoordinator` owns a write only AFTER it is
