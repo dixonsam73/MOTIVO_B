@@ -51,9 +51,42 @@ final class ConnectedAgeRecheck: ObservableObject {
         return now.timeIntervalSince(last) >= cooldown
     }
 
-    /// A different identity must not inherit this one's cooldown.
-    func resetCooldown() {
-        lastAttemptAt = nil
+    private var hasSeenIdentity = false
+    private var lastSeenBackendUserID: String?
+
+    enum IdentityDelivery: Equatable {
+        /// The first delivery, at launch. The launch check covers it; it is
+        /// not a sign-in and must not be counted as one.
+        case initial
+        /// The same identity again: SwiftUI re-delivers it on every redraw.
+        case unchanged
+        /// A real sign-in, sign-out or switch.
+        case changed
+    }
+
+    /// PURE. What a delivery of the backend user id means.
+    ///
+    /// DEVICE-FOUND DEFECT, 2026-10-16 (Device B, Release): SwiftUI re-delivers
+    /// the CURRENT id whenever the root view redraws, and every check redraws
+    /// it (the stored result, the privacy state). Treating each delivery as a
+    /// sign-in cleared the cooldown and re-ran the check, in a tight loop that
+    /// froze the app and repeatedly called Apple and the server. Only a real
+    /// change of identity is a sign-in.
+    static func identityDelivery(hasSeen: Bool, previous: String?, current: String?) -> IdentityDelivery {
+        guard hasSeen else { return .initial }
+        return previous == current ? .unchanged : .changed
+    }
+
+    /// Notes a delivered identity. On a real change the cooldown is cleared,
+    /// so a different identity doesn't inherit this one's.
+    func noteIdentity(_ backendUserID: String?) -> IdentityDelivery {
+        let delivery = Self.identityDelivery(hasSeen: hasSeenIdentity,
+                                             previous: lastSeenBackendUserID,
+                                             current: backendUserID)
+        hasSeenIdentity = true
+        lastSeenBackendUserID = backendUserID
+        if delivery == .changed { lastAttemptAt = nil }
+        return delivery
     }
 
     /// `countsRefusal`: true only for the sign-in check, which is a join
@@ -102,7 +135,8 @@ final class ConnectedAgeRecheck: ObservableObject {
     func record(_ outcome: ConnectedAgeGate.Outcome, auth: AuthManager, reason: String) async {
         let next = ConnectedAgeGate.nextStoredResult(current: ConnectedAgeGate.storedResult(), outcome: outcome)
         ConnectedAgeGate.setStoredResult(next)
-        stored = next
+        // Publish only a change: an unchanged result must not redraw the app.
+        if stored != next { stored = next }
 
         guard outcome == .confirmedAdult, auth.hasConnectedIdentity else { return }
         auth.pendingAgeBand = .band18Plus
@@ -134,8 +168,8 @@ struct ConnectedAgeRecheckTrigger: ViewModifier {
                 Task { await run(reason: "foreground") }
             }
             .onReceive(auth.$backendUserID.removeDuplicates()) { backendUserID in
-                recheck.resetCooldown()
-                guard backendUserID != nil else { return }
+                // Re-delivered on every redraw: act on a real sign-in only.
+                guard recheck.noteIdentity(backendUserID) == .changed, backendUserID != nil else { return }
                 Task { await run(reason: "signIn", countsRefusal: true) }
             }
     }

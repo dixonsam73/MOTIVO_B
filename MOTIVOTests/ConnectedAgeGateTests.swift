@@ -183,6 +183,34 @@ final class ConnectedAgeGateTests: XCTestCase {
         XCTAssertFalse(Gate.shareDefaultOn(adultConfirmed: false, defaultPostingIsPrivate: true))
     }
 
+    // MARK: - Identity deliveries (Device B loop, 2026-10-16)
+
+    @MainActor
+    func testIdentityDeliveryDistinguishesLaunchRedrawAndRealSignIn() {
+        typealias R = ConnectedAgeRecheck
+        XCTAssertEqual(R.identityDelivery(hasSeen: false, previous: nil, current: "a"), .initial,
+                       "launch's first delivery is not a sign-in")
+        XCTAssertEqual(R.identityDelivery(hasSeen: false, previous: nil, current: nil), .initial)
+        XCTAssertEqual(R.identityDelivery(hasSeen: true, previous: "a", current: "a"), .unchanged,
+                       "a redraw re-delivering the same id must not re-run the check")
+        XCTAssertEqual(R.identityDelivery(hasSeen: true, previous: nil, current: "a"), .changed)
+        XCTAssertEqual(R.identityDelivery(hasSeen: true, previous: "a", current: "b"), .changed)
+        XCTAssertEqual(R.identityDelivery(hasSeen: true, previous: "a", current: nil), .changed)
+    }
+
+    /// The loop itself: repeated deliveries of one identity must leave the
+    /// cooldown in force, so at most one automatic check runs per cooldown.
+    @MainActor
+    func testRepeatedDeliveriesOfOneIdentityKeepTheCooldown() {
+        let recheck = ConnectedAgeRecheck()
+        XCTAssertEqual(recheck.noteIdentity("a"), .initial)
+        for _ in 0..<50 {
+            XCTAssertEqual(recheck.noteIdentity("a"), .unchanged)
+        }
+        XCTAssertEqual(recheck.noteIdentity(nil), .changed)
+        XCTAssertEqual(recheck.noteIdentity("b"), .changed)
+    }
+
     // MARK: - The anonymous refusal report
 
     /// What leaves the device: the reason only, with the public anon key as
