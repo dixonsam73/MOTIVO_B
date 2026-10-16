@@ -216,7 +216,10 @@ struct ConnectedIntroductionView: View {
     }
 
     private var closingSection: some View {
-        Text("Continue to get started with Études Connected.")
+        // Asked BEFORE Continue triggers Apple's request (device QA 2026-10-16):
+        // an answer shared before confirming is cached by Apple and keeps being
+        // returned after the person confirms, so confirming first avoids it.
+        Text("Études Connected is for adults whose age Apple has confirmed. If you haven’t confirmed yours yet, do that first in Settings → [your name] → Personal Information → Age Confirmation, then come back and tap Continue.")
             .connectedBody()
             .editorialMargins()
     }

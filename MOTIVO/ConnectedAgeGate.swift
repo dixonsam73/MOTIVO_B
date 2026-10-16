@@ -182,7 +182,9 @@ enum ConnectedAgeGate {
         case .iosUpdateNeeded:
             return "Update iOS to join Études Connected. Études itself works as it does now."
         case .under18, .unconfirmedAdult, .declined, .unavailable:
-            return "Études Connected is for adults. Confirm you’re 18+ in Settings → [your name] → Personal Information → Age Confirmation, then try again."
+            // Doesn't promise "try again" works at once: Apple can keep serving an
+            // answer shared before the person confirmed (device QA 2026-10-16).
+            return "Études Connected is for adults whose age Apple has confirmed. Confirm yours in Settings → [your name] → Personal Information → Age Confirmation, then try again. If you’ve already confirmed and still see this, Apple can take a while to update your answer for Études; if it doesn’t change, contact Support."
         }
     }
 

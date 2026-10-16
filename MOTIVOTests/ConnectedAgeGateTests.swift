@@ -93,6 +93,8 @@ final class ConnectedAgeGateTests: XCTestCase {
         for reason in [.under18, .unconfirmedAdult, .declined, .unavailable] as [Gate.RefusalReason] {
             XCTAssertTrue(Gate.refusalMessage(for: reason).contains("Personal Information → Age Confirmation"),
                           "\(reason) must tell the person how to confirm")
+            XCTAssertTrue(Gate.refusalMessage(for: reason).contains("contact Support"),
+                          "\(reason) must say what to do if Apple's answer doesn't update")
         }
     }
 
