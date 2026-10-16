@@ -163,8 +163,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   and paused rows rest on unit tests. **Found C-113**: after confirming,
   Apple kept returning the old self-declared answer, so the copy now asks
   people to confirm before Continue and the refusal points to Support
-  (`ffd3b87`). Left: retry Device A on a later day, file Apple Feedback,
-  remove the diagnostic log (`a5f881d`). 11 test refusals are in the
+  (`ffd3b87`). Apple Feedback **FB25211228** filed. Left: retry Device A
+  on a later day, remove the diagnostic log (`a5f881d`). 11 test refusals are in the
   production count.
 - [ ] **S — Approve the children's access assessment.** Drafted 2026-10-15
   (`ETUDES legal documents/Etudes-Childrens-Access-Assessment-DRAFT-2026-10-15.docx`),
