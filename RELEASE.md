@@ -36,6 +36,11 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   per Ofcom's Pornhub investigation, the provider must satisfy itself through
   due diligence and testing. That evidence so far: the 2026-10-16 device QA
   (`docs/qa-plan.md` Group AG), C-113 and Apple Feedback FB25211228.
+  Added to both assessment drafts on 2026-10-16 (backups
+  `.before-followup-advice.docx.bak`): the advice and the testing in the
+  children's access assessment (Stage 1 and Method), and in the risk
+  assessment's "Age position", whose stale "development build" paragraph now
+  says the gate is built.
   **Earlier record:** solicitor engaged 2026-10-07. Scope
   accepted: short email answers on (1) age assurance, (2) whether Solo is
   outside the OSA, and (4) the privacy policy and terms **for OSA compliance
