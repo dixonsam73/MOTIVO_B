@@ -26,6 +26,16 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   Apple extends its measures to the UK, Connected grows, or Ofcom guidance
   changes. Solo confirmed outside the OSA. Fee at the upper end, so any
   further call or question is charged by time.
+  **Follow-up advice 2026-10-16** (on the Apple UK age-confirmation update;
+  not charged): Apple's guidance now confirms age confirmation applies to UK
+  accounts (credit card, ID, in some cases account information), which
+  removes their earlier concern that the UK wasn't covered. Accepting only
+  Apple-`confirmed` adults and sending everyone else to Solo **materially
+  strengthens** the risk-based approach; they put the risk as **extremely
+  low**. They still won't call `confirmed` highly effective age assurance:
+  per Ofcom's Pornhub investigation, the provider must satisfy itself through
+  due diligence and testing. That evidence so far: the 2026-10-16 device QA
+  (`docs/qa-plan.md` Group AG), C-113 and Apple Feedback FB25211228.
   **Earlier record:** solicitor engaged 2026-10-07. Scope
   accepted: short email answers on (1) age assurance, (2) whether Solo is
   outside the OSA, and (4) the privacy policy and terms **for OSA compliance
