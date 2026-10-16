@@ -440,9 +440,23 @@ Score, per *Sequencing* above.
 # iPad and private sync — agreed plan (M13 + M14)
 
 **Status: design agreed 2026-09-24 (Samuel, with Claude and Codex reviews).
-Not started, and no iPad work before the iPhone release.** The object model,
-sequencing and product decisions below are settled. The CloudKit media route
-is preferred, but it's conditional on the Stage 0 proof.
+Not started.** The object model, sequencing and sync decisions below are
+settled for whenever sync is built. The CloudKit media route is preferred,
+but it's conditional on the Stage 0 proof.
+
+**Revisions under consideration, 2026-10-16** (recorded in `RELEASE.md`,
+section E; nothing here is implemented): an iPad version before the iPhone
+release, with **no sync and a separate journal per device, disclosed**,
+which would revise the "one coherent journal from the first iPad release"
+requirement in Domain 2 and the "iPhone shows ink read-only" rule below.
+Decided already, whichever way that goes: the iPad work preserves the
+existing appearance, navigation, controls and behaviour (spacing, sizing and
+sections opening and closing), so the *Navigation* sidebar, People from
+Feed and the Journal list/detail arrangement below are **not approved**;
+markup and sketches ship without `InkRevision`, `InkSnapshot`,
+`SessionSketch`, score-first Practice or page turners (an editable live layer
+per page, a sidecar per sketch); and the `PracticeSessionController`
+extraction is not a prerequisite for either.
 
 ## Principle
 

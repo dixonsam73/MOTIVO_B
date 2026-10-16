@@ -331,8 +331,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   the unfolded screen (capped width, centred, nothing stretched) and check
   the vertical tab and tool bars the 27.1 SDK brings. Test folding and
   unfolding with the timer running and during a recording. This is iPhone
-  compatibility, not iPad work: the wide layout is the post-launch item in
-  section E. Apple: [prepare](https://developer.apple.com/iphone-duo/prepare/),
+  compatibility, not iPad work; the iPad adaptation (section E, under
+  consideration) would share it. Apple: [prepare](https://developer.apple.com/iphone-duo/prepare/),
   [submission news, 5 Oct 2026](https://developer.apple.com/news/?id=kkphp5qo).
 - [x] **A + S — iOS 27 compatibility check** (iOS 27 public 2026-09-26).
   S: update one test device to iOS 27 and run the practice tools, a
@@ -432,16 +432,43 @@ the join.
 - Gate 6 part 3: production grant at the first real subscription.
 - B-34 (shadow telemetry blind to denied writes). Observability only.
 - Invitations, iPad (with Pencil markup and sketchpad, plus private iCloud sync; agreed plan in `docs/architecture.md`, "iPad and private sync"), recorder R1 diagnostics.
-- **One wide layout for iPad and the unfolded iPhone Duo** (agreed
-  2026-10-11). The iPad plan already chooses layouts by available width, with
-  narrow windows falling back to the iPhone layout; the folded Duo is the
-  narrow case and the unfolded Duo the wide one, so build the wide layout
-  once and both get it. Allow for: the unfolded Duo is near-square and
-  smaller than an iPad (breakpoints in points; a full sidebar may not fit);
-  folding mid-session, which the plan's `PracticeSessionController`
-  extraction makes safe and must be tested; and no assumed Pencil on Duo, so
-  ink works by finger. The Duo half needs no new device family, no iPad
-  screenshots and no sync, so it can ship before the iPad and sync release.
+- **iPad before launch: under consideration, not decided (2026-10-16).** The
+  option being weighed is independent iPhone and iPad versions at launch
+  (markup and manuscript sketches on both, no sync, the separation disclosed
+  before purchase and on first run), estimated at 9.5–13.5 agent-weeks and
+  about 3½–5 months elapsed against 3–6 weeks for iPhone first. No
+  implementation is authorised. Decisions already taken for the iPad work,
+  whenever it happens:
+  - **Preserve the existing appearance, navigation, controls and behaviour.**
+    The work is spacing, sizing and adapting the layout as sections open and
+    close. Lists, attachments and the audio recorder keep their buttons (tap
+    to open, tap again to close). No sidebar, no new selector, no replacement
+    navigation. **The Journal list/detail redesign is not approved.**
+  - **Timer in landscape: workspace direction preferred**, exact arrangement
+    to be worked out in the app.
+  - **One page at a time:** agree its adaptations, implement, test the
+    relevant window sizes and open/closed states, refine, Samuel signs off,
+    then the next page. Every step keeps the iPhone experience unchanged.
+    Build setting to make this safe: the app target's
+    `TARGETED_DEVICE_FAMILY` is per configuration, so Debug can be `1,2`
+    while pages are adapted and Release stays `1` until the last page is
+    signed off.
+  - **The Duo shares this work.** The unfolded Duo is the wide case and the
+    folded Duo the narrow one; both are near-square or small, so size in
+    points, not by device. Ink works by finger (no Pencil on Duo).
+  - The Scores library and manuscript mock-ups (reviewed with Codex,
+    2026-10-16) are design references, not specifications.
+  - **Minimal preparation for a future merge of two journals:** a persisted
+    install id; sketch and ink records carry their UUID, install id, created
+    and modified dates, and (for ink) the score UUID, page and a SHA-256 of
+    the PDF at first save. Merge policy, if it comes: union, de-duplicate
+    only by normalised name or identical hash, **keep both** of anything
+    ambiguous (two ink layers named by device and date), never infer
+    deletions. No Core Data or sync work before launch.
+  - **If option 2 is chosen, revise:** the "one journal from the first iPad
+    release" requirement and "iPhone shows ink read-only" in
+    `docs/architecture.md`; the privacy policy's "stays on the iPhone"; the
+    App Store description; an iPad first-run notice; M13/M14 in `CLAUDE.md`.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
@@ -460,19 +487,40 @@ the join.
   harmonics, or the option stops at the cello's range). Adds about 2–5 MB.
   New audio engine, so write a one-page scope first. Loop quality needs
   listening on a device. Copy mentions it only once it ships.
-- **Manuscript sketch as a Thought** (idea, 2026-10-11; with the iPad and
-  sketch work above). A manuscript/sketch button on the timer page beside the
-  mic, camera and video: open the sketchpad, write a page, and save it as a
-  Thought through the existing Save Thought route, with no timer and no
-  post-record details. A sketch is one more staged attachment kind in the
-  hand-off (`TimerThoughtHandoff.swift`), so the capture-side flow, the
-  started-since-reset gate and the consumption rule already apply. Prefer PDF
-  output (existing kind, viewer, page selection and sharing path; prints and
-  exports cleanly) over an image. Marking up an existing score must save a
-  new attachment that references the score and never write into the score
-  library. No separate sketchbook screen: capture lands in one place. Pushes
-  Études towards a musician's notebook rather than only a practice journal,
-  and towards "pay once for what runs on the device".
+- **Manuscript sketch as a Thought** (idea 2026-10-11; scope agreed
+  2026-10-16, about 3–4 agent-weeks for a single page, about 1 more for
+  additional pages). Digital manuscript paper with freehand drawing, finger
+  or Pencil; no recognition, engraving, playback or symbol editing. Paper,
+  chosen before drawing: single staff with printed treble, bass, alto or no
+  clef; piano (paired staves, clefs and braces printed); plain. Printed
+  clefs are part of the paper, not a symbol palette. Controls: pen with a few
+  thicknesses, eraser, undo/redo, zoom/pan, save/discard, recovery of
+  unfinished work. Fixed page size and staff positions; screen size and
+  orientation change the view, never the staves. A sketch button on the
+  timer page opens the pad without starting the timer; a sketch is a
+  **fourth staged kind** (`StagingStore` knows audio, video and image) in
+  the existing hand-off (`TimerThoughtHandoff.swift`): Save Thought before
+  the timer starts, absorbed into the session if the timer is started, a
+  normal session attachment during a session. Saved Thoughts are never
+  absorbed by a later Start (true today; pin with a test). Output is a PDF
+  (`AttachmentKind.pdf` already flows through editor, viewer, journal rows
+  and sharing) with the editable `PKDrawing` kept as a sidecar keyed by
+  attachment id, which must follow the editor's staged-to-final id
+  migration; reopening and editing regenerates the PDF and thumbnail.
+  Sharing a viewable PDF is enough; exchanging editable sketches is out of
+  scope. No separate sketchbook screen.
+- **Score markup** (scope agreed 2026-10-16, about 2.5–3.5 agent-weeks).
+  Draw and erase over PDFs in the Scores library through PDFKit's
+  `PDFPageOverlayViewProvider` with a `PKCanvasView` per page on the
+  existing single-page viewer; read-only until Markup is entered; Pencil
+  draws and a finger turns pages when a Pencil is paired. Editable ink kept
+  per (score UUID, page) beside the Scores directory with a manifest;
+  save/discard and recovery. Sharing exports a **flattened copy**; the
+  source PDF is never altered. No revision history, per-session snapshots,
+  score-first Practice or page turners. Open questions: the overlay's
+  behaviour under single-page mode and autoscaling (a 2–3 day spike settles
+  it); clef glyph source for the sketch paper (paths, or a bundled OFL
+  font); exported ink is raster at a chosen scale.
   **Design consideration, not an approved layout (2026-10-11):** when
   manuscript capture arrives, reassess PTV's capture controls together rather
   than adding another row. Consider a stave/pen or treble-clef launch icon,
