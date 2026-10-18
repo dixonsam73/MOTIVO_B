@@ -52,6 +52,9 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, @unchecked Sendab
     private let stateLock = NSLock()
     private var paused = false
     private var currentUserRecordName: String?
+    /// Called (on the main actor) with the single owner key found on imported
+    /// sessions when this device has none yet. See `AuthManager.adoptOwnerForSyncTest`.
+    var ownerDiscovered: ((String) -> Void)?
 
     init(containerIdentifier: String, persistence: NSPersistentContainer, store: JournalSyncStateStore, status: JournalSyncStatus) {
         self.container = CKContainer(identifier: containerIdentifier)
@@ -361,6 +364,33 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, @unchecked Sendab
         }
         store.update { $0.recordsReceived += received; $0.bytesReceived += bytes }
         if received > 0 { log("Imported \(received) record(s)") }
+        if received > 0 { discoverOwnerIfNeeded() }
+    }
+
+    /// Adopts the journal's owner key from its sessions when this device has
+    /// none: exactly one distinct non-empty `ownerUserID`, else nothing.
+    func discoverOwnerIfNeeded() {
+        if let existing = Keychain.get("appleUserID") {
+            log("Owner adoption skipped: Keychain already holds a key (\(existing.prefix(12))…)")
+            return
+        }
+        guard let handler = ownerDiscovered else { log("Owner adoption skipped: no handler"); return }
+        var owners = Set<String>()
+        importContext.performAndWait {
+            let request = NSFetchRequest<NSDictionary>(entityName: JournalSyncRecordType.session)
+            request.resultType = .dictionaryResultType
+            request.propertiesToFetch = ["ownerUserID"]
+            request.returnsDistinctResults = true
+            for row in (try? importContext.fetch(request)) ?? [] {
+                if let owner = row["ownerUserID"] as? String, !owner.isEmpty { owners.insert(owner) }
+            }
+        }
+        guard owners.count == 1, let owner = owners.first else {
+            log("Owner adoption skipped: \(owners.count) distinct owner(s) on sessions")
+            return
+        }
+        log("Adopting owner key from \(owners.count) journal owner")
+        Task { @MainActor in handler(owner) }
     }
 
     /// Returns true when the server record was applied.
@@ -652,6 +682,8 @@ final class JournalSyncCoordinator {
     let status = JournalSyncStatus()
     private(set) var engine: JournalSyncEngine?
     private(set) var store: JournalSyncStateStore?
+    /// Set by the app before `startIfNeeded`; receives the adopted owner key.
+    var onOwnerDiscovered: ((String) -> Void)?
 
     private var persistence: NSPersistentContainer?
 
@@ -673,6 +705,7 @@ final class JournalSyncCoordinator {
         store.update { $0.engineState = nil }
         store.log("Engine state reset; fresh engine")
         let engine = JournalSyncEngine(containerIdentifier: Self.containerIdentifier, persistence: persistence, store: store, status: status)
+        engine.ownerDiscovered = onOwnerDiscovered
         self.engine = engine
         Task { await engine.start() }
     }

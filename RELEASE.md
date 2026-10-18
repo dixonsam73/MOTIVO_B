@@ -500,10 +500,28 @@ the join.
   yet, so shipping sync needs it. Untested: account sign-out, per-app iCloud
   off, account switch, large media, Scores/lists/profile, Connected. Still
   separate: profile name/avatar/location sync (2–3 days plus the
-  `ProfileView` save-observer isolation fix). **Checkpoint 2 (verified copy of
-  the real journal) not started**: needs the test data reset, the read-only
-  container download and its verification, owner-key adoption on import,
-  and storage/quota figures.
+  `ProfileView` save-observer isolation fix).
+  **Checkpoint 2, representative subset: passed 2026-10-18.** Études Dev's
+  container was copied read-only from Device B (`devicectl`, file by file;
+  the directory form fails), verified by `docs/sync-trial/verify_container_copy.py`
+  (112 sessions, 83 attachments, 102 files, 832 MB, nothing missing), and a
+  subset from 2026-07-01 built through Core Data with the app's model by
+  `docs/sync-trial/make_subset.swift` (22 sessions, 24 attachments, 236 MB;
+  scratch, Connected caches and backend ids stripped). Pushed into a fresh
+  iPhone Sync Test install: bootstrap uploaded 46 records / 187.6 MB in
+  ~20 s. Empty iPad cold-imported everything in ~70 s; counts match; media
+  opens; a star toggled on the iPhone appeared on the iPad at once. Études
+  Dev untouched. **Findings:** the per-attachment privacy map
+  (`AttachmentPrivacy.json`) isn't synced and defaults to private, so the
+  iPad's journal cards hide thumbnails and attachment counts (must move onto
+  the Attachment record for shipping); the `Instrument` relationship is
+  needed (an entry showed "Instrument" where the iPhone shows "Bass
+  Guitar"); owner-key adoption did not fire on the iPad (records carry the
+  owner; early exits now logged). The full copies live outside the repo in
+  `~/Documents/Xcode projects/EtudesDev-container-copy-2026-10-18` and
+  `…/EtudesDev-subset-2026-07-01`. **Left:** the full-history run (112
+  sessions, 832 MB) after another reset; the Attachment `recordName` index
+  in the Console to clear one orphaned test attachment.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
