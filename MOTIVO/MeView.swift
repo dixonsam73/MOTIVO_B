@@ -2145,9 +2145,11 @@ private struct PracticeRhythmGlyph: View {
     private func isFrameVisibleEnough(_ frame: CGRect) -> Bool {
         guard !frame.isNull, frame.width > 0, frame.height > 0 else { return false }
 
-        let screenBounds = UIScreen.main.bounds
+        // The window (SwiftUI's .global space), not the screen: equal on
+        // iPhone, not on the unfolded Duo.
+        let windowBounds = WindowMetrics.windowBounds
         let verticalMargin: CGFloat = 24
-        let visibleBounds = screenBounds.insetBy(dx: 0, dy: verticalMargin)
+        let visibleBounds = windowBounds.insetBy(dx: 0, dy: verticalMargin)
         let intersection = frame.intersection(visibleBounds)
         guard !intersection.isNull, intersection.height > 0 else { return false }
 
@@ -2369,9 +2371,11 @@ private struct PracticeWindowGlyph: View {
     private func isFrameVisibleEnough(_ frame: CGRect) -> Bool {
         guard !frame.isNull, frame.width > 0, frame.height > 0 else { return false }
 
-        let screenBounds = UIScreen.main.bounds
+        // The window (SwiftUI's .global space), not the screen: equal on
+        // iPhone, not on the unfolded Duo.
+        let windowBounds = WindowMetrics.windowBounds
         let verticalMargin: CGFloat = 24
-        let visibleBounds = screenBounds.insetBy(dx: 0, dy: verticalMargin)
+        let visibleBounds = windowBounds.insetBy(dx: 0, dy: verticalMargin)
         let intersection = frame.intersection(visibleBounds)
         guard !intersection.isNull, intersection.height > 0 else { return false }
 
@@ -2622,9 +2626,11 @@ private struct SessionShapeGlyph: View {
     private func isFrameVisibleEnough(_ frame: CGRect) -> Bool {
         guard !frame.isNull, frame.width > 0, frame.height > 0 else { return false }
 
-        let screenBounds = UIScreen.main.bounds
+        // The window (SwiftUI's .global space), not the screen: equal on
+        // iPhone, not on the unfolded Duo.
+        let windowBounds = WindowMetrics.windowBounds
         let verticalMargin: CGFloat = 24
-        let visibleBounds = screenBounds.insetBy(dx: 0, dy: verticalMargin)
+        let visibleBounds = windowBounds.insetBy(dx: 0, dy: verticalMargin)
         let intersection = frame.intersection(visibleBounds)
         guard !intersection.isNull, intersection.height > 0 else { return false }
 

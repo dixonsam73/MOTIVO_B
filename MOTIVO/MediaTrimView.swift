@@ -41,6 +41,7 @@ public struct MediaTrimView: View {
     public let onReplaceAttachment: (URL, URL, MediaType) -> Void
 
     @StateObject private var model = Model()
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     public init(assetURL: URL,
                 mediaType: MediaType,
@@ -70,7 +71,9 @@ public struct MediaTrimView: View {
     @ViewBuilder
     private var content: some View {
         GeometryReader { geo in
-            let isLandscapePhone = (UIDevice.current.userInterfaceIdiom == .phone) && (geo.size.width > geo.size.height)
+            // A compact height, not the device kind: on every iPhone that is
+            // exactly "held sideways"; on the Duo it follows the actual space.
+            let isLandscapePhone = verticalSizeClass == .compact && geo.size.width > geo.size.height
 
             Group {
                 mainContent(isLandscapePhone: isLandscapePhone, availableHeight: geo.size.height)

@@ -336,6 +336,15 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   compatibility, not iPad work; the iPad adaptation (section E, under
   consideration) would share it. Apple: [prepare](https://developer.apple.com/iphone-duo/prepare/),
   [submission news, 5 Oct 2026](https://developer.apple.com/news/?id=kkphp5qo).
+  **Progress 2026-10-18:** the flagged patterns are fixed without Xcode 27.1:
+  sizing now follows the app's window (`WindowMetrics`), not the screen, and
+  `MediaTrimView` uses the compact height size class instead of the device
+  kind. The capture orientation reads only set recording rotation, so they
+  stay. On iPhone the window is the screen (checked on the simulator by
+  `WindowMetricsTests`), so the iPhone layout is unchanged. **Left:** install
+  Xcode 27.1 (beta since 18 September; Samuel downloads it), build with the
+  27.1 SDK, run Apple's Duo check and the Duo simulator, then the unfolded
+  layout and fold/unfold tests above.
 - [x] **A + S — iOS 27 compatibility check** (iOS 27 public 2026-09-26).
   S: update one test device to iOS 27 and run the practice tools, a
   recording, playback, and a Connected purchase and sign-in on the current

@@ -742,8 +742,8 @@ struct AddEditSessionView: View {
                 return
             }
 
-            let screenHeight = UIScreen.main.bounds.height
-            notesKeyboardInset = max(0, screenHeight - frame.minY)
+            // The window, not the screen: equal on iPhone, not on the unfolded Duo.
+            notesKeyboardInset = WindowMetrics.keyboardOverlap(keyboardFrameInScreen: frame)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             notesKeyboardInset = 0
