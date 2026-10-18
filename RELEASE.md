@@ -252,14 +252,15 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   instrumentation. Only plain `xcodebuild build` runs added it.
 - [ ] **A — Any copy changes** from the legal decision and the 1.2 work (About,
   Explore Connected, refusal text).
-- [ ] **A — "Tell someone about Études" share button** (decided 2026-10-09).
-  Client-only: the iOS share sheet with the App Store link and a short
-  message. Keep it out of the way, in Profile's Account card. The message or a
-  hint should say the recipient finds you by name only if "Let other members
-  find you" is on. No contacts access, no backend. With it, change
-  `ConnectedIntroductionView.swift:211` ("you can invite them"), which is
-  false today, to match. Also reword "sketch" in `AboutEtudesView.swift:64`
-  (no drawing tool yet). Private invitations stay post-launch (section E).
+- [x] **A — "Tell someone about Études" share button** (decided 2026-10-09,
+  built 2026-10-18). "Tell Someone About Études" in both Profile Account
+  cards opens the share sheet with the App Store link
+  (`LegalLinks.appStore`) and Samuel's wording; Connected members also see
+  that they're found by name only if "Let other members find you" is on. No
+  contacts, no backend. The Connected introduction now says you can send a
+  link from Profile, not "invite". The "sketch" line in About was already
+  gone. Checked in the simulator; not yet on a device. Private invitations
+  stay post-launch (section E).
 - [x] **A — Save spontaneous recordings as a thought** (scoped 2026-10-11,
   built 2026-10-11, **not device-verified**). Part A: idle shows **Start
   Timer** alone; running and paused carry one **Reset**, whose card offers

@@ -1202,6 +1202,8 @@ private var sessionSetupSection: some View {
                      quietDivider()
                  }
 
+                 tellSomeoneRow(showFindHint: false)
+
                  // Guideline 1.2: published contact details. With no mail app,
                  // the address is copied and shown instead.
                  Button {
@@ -1310,6 +1312,8 @@ private var sessionSetupSection: some View {
                      quietDivider()
                  }
 
+                 tellSomeoneRow(showFindHint: true)
+
                  // Guideline 1.2: published contact details. With no mail app,
                  // the address is copied and shown instead.
                  Button {
@@ -1366,6 +1370,34 @@ private var sessionSetupSection: some View {
              .cardSurface(padding: profileInnerCardPadding)
              .listRowSeparator(.hidden)
                 .padding(.vertical, profileSectionSpacing / 2)
+         }
+     }
+
+     static let tellSomeoneMessage = "Check out Études on the App Store. It’s a journal and notebook for your music work and practice."
+     static let tellSomeoneFindHint = "Members can find you by name only if “Let other members find you” is on."
+
+     /// The share sheet with the App Store link. No contacts, no backend, and no
+     /// invitation: there is nothing for the recipient to accept. The hint is
+     /// shown only to Connected members, who have the discovery toggle.
+     private func tellSomeoneRow(showFindHint: Bool) -> some View {
+         VStack(alignment: .leading, spacing: 4) {
+             ShareLink(item: LegalLinks.appStore, message: Text(Self.tellSomeoneMessage)) {
+                 navigationRow(title: "Tell Someone About Études")
+             }
+             .buttonStyle(.plain)
+             .contentShape(Rectangle())
+             .frame(minHeight: 44, alignment: .center)
+             .font(Theme.Text.body)
+
+             if showFindHint {
+                 Text(Self.tellSomeoneFindHint)
+                     .font(.footnote)
+                     .foregroundStyle(Theme.Colors.secondaryText)
+                     .padding(.bottom, Theme.Spacing.s)
+             }
+         }
+         .overlay(alignment: .bottom) {
+             quietDivider()
          }
      }
 

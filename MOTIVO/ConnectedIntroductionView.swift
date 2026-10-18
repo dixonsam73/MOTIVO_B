@@ -208,7 +208,7 @@ struct ConnectedIntroductionView: View {
                 Text("Start with the people you already make music with.")
                     .connectedBody()
 
-                Text("If someone isn't using Études Connected yet, you can invite them.")
+                Text("If someone isn't using Études yet, you can send them a link from Profile.")
                     .connectedBody()
             }
         }

@@ -12,6 +12,8 @@ import SwiftUI
 enum LegalLinks {
     static let privacyPolicy = URL(string: "https://etudes.app/privacy")!
     static let termsOfUse = URL(string: "https://etudes.app/terms")!
+    /// The App Store page, for Profile's "Tell Someone About Études".
+    static let appStore = URL(string: "https://apps.apple.com/app/id6759682059")!
 }
 
 /// "Terms of Use · Privacy Policy", quietly, for the foot of a purchase screen.
