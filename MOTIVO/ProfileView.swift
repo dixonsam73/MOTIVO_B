@@ -685,6 +685,11 @@ struct ProfileNameDraftState: Equatable {
                              connectedPromoSection
                          }
                      }
+                     #if SYNCTEST
+                     Section {
+                         NavigationLink("Sync Test diagnostics") { SyncTestDiagnosticsView() }
+                     }
+                     #endif
                      buildInfoFooter
                         }
                         .background(KeyboardDismissFormTapCatcher(onDismiss: {

@@ -1,0 +1,155 @@
+//
+//  JournalRecordMapping.swift
+//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//
+//  CORE DATA ↔ CKRECORD FOR SESSION AND ATTACHMENT, AND THE TRIAL CONFLICT RULE.
+//
+//  Media stays as files: an Attachment record carries a CKAsset built from the
+//  resolved local file, and an imported asset is materialised at
+//  Documents/<id>.<ext>, which is where AttachmentPathResolver and the viewers
+//  already look. Nothing is stored in a Core Data binary attribute.
+//
+//  Conflict rule (TRIAL POLICY, not the shipping design): the record whose
+//  `userModifiedAt` is later wins as a whole; ties go to the server; a missing
+//  stamp counts as the distant past. The loser's title and notes are kept in
+//  the state file's conflict log so nothing silently disappears during the
+//  trial. Limits: device clocks can disagree, and a whole-record winner cannot
+//  merge edits to different fields.
+//
+
+#if SYNCTEST
+import Foundation
+import CloudKit
+import CoreData
+
+enum JournalConflictWinner: Equatable { case server, local }
+
+enum JournalConflictRule {
+    static func decide(localUserModifiedAt: Date?, serverUserModifiedAt: Date?) -> JournalConflictWinner {
+        let local = localUserModifiedAt ?? .distantPast
+        let server = serverUserModifiedAt ?? .distantPast
+        return local > server ? .local : .server
+    }
+}
+
+enum JournalRecordMapping {
+    static let zoneID = CKRecordZone.ID(zoneName: "Journal", ownerName: CKCurrentUserDefaultName)
+
+    static let sessionKeys = ["title", "notes", "timestamp", "durationSeconds", "activityType", "activityDetail",
+                              "mood", "effort", "threadLabel", "userInstrumentLabel", "userActivityLabel",
+                              "areNotesPrivate", "isPublic", "ownerUserID", "userModifiedAt"]
+    static let attachmentKeys = ["kind", "displayName", "createdAt", "isThumbnail", "ownerUserID", "userModifiedAt"]
+    static let assetKey = "file"
+    static let fileExtKey = "fileExt"
+    static let sessionRefKey = "session"
+
+    static func recordID(for id: UUID) -> CKRecord.ID {
+        CKRecord.ID(recordName: id.uuidString, zoneID: zoneID)
+    }
+
+    // MARK: Core Data → CKRecord
+
+    /// Starts from the last known server copy (so the change tag matches) or a
+    /// fresh record, then writes every mapped field.
+    static func record(for object: NSManagedObject, base: CKRecord?) -> CKRecord? {
+        guard let entity = object.entity.name, let id = object.value(forKey: "id") as? UUID else { return nil }
+        let record = base ?? CKRecord(recordType: entity, recordID: recordID(for: id))
+        guard record.recordType == entity else { return nil }
+        switch entity {
+        case JournalSyncRecordType.session:
+            for key in sessionKeys { record[key] = ckValue(object.value(forKey: key)) }
+        case JournalSyncRecordType.attachment:
+            for key in attachmentKeys { record[key] = ckValue(object.value(forKey: key)) }
+            if let session = object.value(forKey: "session") as? NSManagedObject,
+               let sid = session.value(forKey: "id") as? UUID {
+                record[sessionRefKey] = CKRecord.Reference(recordID: recordID(for: sid), action: .none)
+            } else {
+                record[sessionRefKey] = nil
+            }
+            let stored = object.value(forKey: "fileURL") as? String
+            if let url = AttachmentPathResolver.resolve(stored) {
+                record[assetKey] = CKAsset(fileURL: url)
+                record[fileExtKey] = url.pathExtension as CKRecordValue
+            } else {
+                record[fileExtKey] = (URL(fileURLWithPath: stored ?? "").pathExtension) as CKRecordValue
+            }
+        default:
+            return nil
+        }
+        return record
+    }
+
+    private static func ckValue(_ value: Any?) -> CKRecordValue? {
+        switch value {
+        case nil: return nil
+        case let s as String: return s as CKRecordValue
+        case let d as Date: return d as CKRecordValue
+        case let b as Bool: return NSNumber(value: b)
+        case let n as NSNumber: return n
+        case let i as Int16: return NSNumber(value: i)
+        case let i as Int64: return NSNumber(value: i)
+        case let i as Int: return NSNumber(value: i)
+        default: return nil
+        }
+    }
+
+    // MARK: CKRecord → Core Data
+
+    /// Writes the record's fields onto an existing or new object. Returns false
+    /// when the record is of an unknown type.
+    static func apply(_ record: CKRecord, to object: NSManagedObject) -> Bool {
+        let keys: [String]
+        switch record.recordType {
+        case JournalSyncRecordType.session: keys = sessionKeys
+        case JournalSyncRecordType.attachment: keys = attachmentKeys
+        default: return false
+        }
+        if object.value(forKey: "id") == nil, let id = UUID(uuidString: record.recordID.recordName) {
+            object.setValue(id, forKey: "id")
+        }
+        let attributes = object.entity.attributesByName
+        for key in keys {
+            guard let attribute = attributes[key] else { continue }
+            let raw = record[key]
+            switch attribute.attributeType {
+            case .booleanAttributeType:
+                if let n = raw as? NSNumber { object.setValue(n.boolValue, forKey: key) }
+                else if !attribute.isOptional { object.setValue(attribute.defaultValue ?? false, forKey: key) }
+            case .integer16AttributeType, .integer32AttributeType, .integer64AttributeType:
+                if let n = raw as? NSNumber { object.setValue(n, forKey: key) }
+                else if !attribute.isOptional { object.setValue(attribute.defaultValue ?? 0, forKey: key) }
+            case .stringAttributeType:
+                if let s = raw as? String { object.setValue(s, forKey: key) }
+                else if attribute.isOptional { object.setValue(nil, forKey: key) }
+                else { object.setValue("", forKey: key) }
+            case .dateAttributeType:
+                if let d = raw as? Date { object.setValue(d, forKey: key) }
+                else if attribute.isOptional { object.setValue(nil, forKey: key) }
+                else { object.setValue(Date(), forKey: key) }
+            default:
+                object.setValue(raw, forKey: key)
+            }
+        }
+        // `fileURL` is required but device-specific: a fresh import points at the
+        // materialised location so the resolver's filename match finds the bytes.
+        if record.recordType == JournalSyncRecordType.attachment, object.value(forKey: "fileURL") == nil {
+            let ext = (record[fileExtKey] as? String) ?? ""
+            object.setValue(materialisedURL(recordName: record.recordID.recordName, ext: ext).path, forKey: "fileURL")
+        }
+        return true
+    }
+
+    static func userModifiedAt(of record: CKRecord) -> Date? { record["userModifiedAt"] as? Date }
+    static func sessionRecordName(of attachment: CKRecord) -> String? {
+        (attachment[sessionRefKey] as? CKRecord.Reference)?.recordID.recordName
+    }
+
+    /// Where an imported attachment's bytes live: the same convention the
+    /// editor uses for its own files, so the resolver finds them by filename.
+    static func materialisedURL(recordName: String, ext: String) -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let name = ext.isEmpty ? recordName : "\(recordName).\(ext)"
+        return docs.appendingPathComponent(name, isDirectory: false)
+    }
+}
+#endif

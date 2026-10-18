@@ -294,6 +294,15 @@ struct MOTIVOApp: App {
                     // took, BEFORE anything can be dispatched. Local only — Core Data
                     // and the queue file — so it needs no identity or network.
                     if !UnitTestHost.isActive { SharingHandoffRecovery.run(reason: "launch") }
+                    #if SYNCTEST
+                    if !UnitTestHost.isActive {
+                        // Silent CloudKit pushes are what tell CKSyncEngine the
+                        // database moved; without them the daemon answers "no
+                        // changes" from its cache (seen in Checkpoint 1).
+                        UIApplication.shared.registerForRemoteNotifications()
+                        JournalSyncCoordinator.shared.startIfNeeded(persistence: persistenceController.container)
+                    }
+                    #endif
                     if !UnitTestHost.isActive { connectedMembershipStore.start() } // C-100
                     if !UnitTestHost.isActive { appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled) } // C-100
 

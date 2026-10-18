@@ -36,6 +36,11 @@ final class PersistenceController {
         if let description = container.persistentStoreDescriptions.first {
             description.setOption(true as NSNumber, forKey: NSMigratePersistentStoresAutomaticallyOption)
             description.setOption(true as NSNumber, forKey: NSInferMappingModelAutomaticallyOption)
+            #if SYNCTEST
+            // Sync trial: persistent history is how local changes from EVERY
+            // context reach the outbox (JournalChangeTracker).
+            description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+            #endif
         }
 
         container.loadPersistentStores { _, error in
@@ -51,6 +56,9 @@ final class PersistenceController {
         // v7.8 Maintenance: clearer debugging + avoid unused undo stack work
         container.viewContext.name = "viewContext"
         container.viewContext.undoManager = nil
+        #if SYNCTEST
+        container.viewContext.transactionAuthor = JournalSyncAuthor.app
+        #endif
     }
 }
 
@@ -431,5 +439,8 @@ extension PersistenceController {
         container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.name = "viewContext"
         container.viewContext.undoManager = nil
+        #if SYNCTEST
+        container.viewContext.transactionAuthor = JournalSyncAuthor.app
+        #endif
     }
 }

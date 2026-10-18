@@ -480,6 +480,30 @@ the join.
     release" requirement and "iPhone shows ink read-only" in
     `docs/architecture.md`; the privacy policy's "stays on the iPhone"; the
     App Store description; an iPad first-run notice; M13/M14 in `CLAUDE.md`.
+- **Private sync trial, Checkpoint 1: passed 2026-10-18.** Separate "Études
+  Sync Test" installs (`SyncTest` configuration, bundle id
+  `com.samueldixon.motivo.synctest`, development container
+  `iCloud.com.samueldixon.motivo.synctest`, code under `MOTIVO/SyncTest/`,
+  all `#if SYNCTEST`) on Device B and the iPad Pro 11" M4 (iPadOS 27.0.1),
+  same iCloud account, no Connected. `CKSyncEngine` with Core Data
+  persistent-history change tracking across every context, an outbox and
+  history token written atomically together, Session and Attachment
+  records, media as `CKAsset` files materialised at `Documents/<id>.<ext>`,
+  attachments held until their session arrives, record-level conflict rule
+  by `userModifiedAt` with the loser's text logged, journal bound to the
+  iCloud user record and never deleted on account events. Model V11 adds
+  preserved ids and `userModifiedAt` (lightweight). Passed: Thought and
+  photo both ways, edit, offline conflict, interrupted sync with relaunch,
+  deletion; 11 unit tests. **Finding: `CKSyncEngine` needs silent pushes**
+  (`aps-environment` plus `remote-notification`); without them the device
+  never learns the database changed. Études proper has no push capability
+  yet, so shipping sync needs it. Untested: account sign-out, per-app iCloud
+  off, account switch, large media, Scores/lists/profile, Connected. Still
+  separate: profile name/avatar/location sync (2–3 days plus the
+  `ProfileView` save-observer isolation fix). **Checkpoint 2 (verified copy of
+  the real journal) not started**: needs the test data reset, the read-only
+  container download and its verification, owner-key adoption on import,
+  and storage/quota figures.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
