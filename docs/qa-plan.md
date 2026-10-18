@@ -901,9 +901,12 @@ figure** (attempts, not people), so check the arithmetic of this run only.
 | AG15 | **Pass on Device B** (iOS 27.0.1, confirmed, 1789 → 1802 · `927c336`) after fixing a **re-check loop** found on the first install (`927c336`): Connected with no prompt, responsive, nothing counted |
 | Confirm path | Device A confirmed for real by credit card. **Still refused**: Apple kept returning the cached `selfDeclared` answer (diagnostic `a5f881d`), after toggling Age Range for Apps and a restart. Wording changed (`ffd3b87`); see C-113 |
 
-**Test refusals in production: 14**, read back by SQL after the run (including
-the sysdiagnose capture for FB25211228), all `unconfirmed_adult`, October 2026,
-all from Device A. Discount them at the children's access assessment review.
+**Retry 2026-10-18** (Device A, `bdde096`, Sandbox signed out): still refused;
+Apple still returns 18+ `selfDeclared`. No refresh after about two days (C-113).
+
+**Test refusals in production: 15** (14 read back by SQL after the 2026-10-16
+run, including the sysdiagnose capture for FB25211228, plus the 2026-10-18
+retry), all `unconfirmed_adult`, October 2026, all from Device A. Discount them at the children's access assessment review.
 
 ## Group LO — Leaving Connected keeps the local journal (C-114)
 
