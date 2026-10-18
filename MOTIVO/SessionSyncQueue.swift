@@ -1000,11 +1000,12 @@ public final class SessionSyncQueue: ObservableObject {
                         case .noRowMatched:
                             BackendLogger.notice("Withdrawal • owner-scoped DELETE matched no row: absent, not owned, or not yet committed — indistinguishable • postID=\(payload.id.uuidString)")
                         case .simulatedUnverified:
-                            // Acknowledged as before 2c. This path sends NOTHING
-                            // and is reachable in Connected mode when HTTP config
-                            // is absent — a separately identified concern, not
-                            // changed here and never evidence of a withdrawal.
-                            BackendLogger.notice("Withdrawal • SIMULATED service — nothing sent, UNVERIFIED • postID=\(payload.id.uuidString)")
+                            // R1-a. HELD, never acknowledged. This path sends
+                            // NOTHING and is reachable in Connected mode when HTTP
+                            // config is absent, so acknowledging it would drop an
+                            // owed withdrawal that was never made.
+                            BackendLogger.notice("Withdrawal held • SIMULATED service — nothing sent • postID=\(payload.id.uuidString)")
+                            continue
                         }
                         self.acknowledge(payload, revision: revision, generation: flushGeneration)
                     case .failure(let error) where (error as? WithdrawalResultError) == .undetermined:

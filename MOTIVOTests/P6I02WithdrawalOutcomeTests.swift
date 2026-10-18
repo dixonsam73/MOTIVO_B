@@ -175,8 +175,8 @@ final class P6I02WithdrawalOutcomeTests: XCTestCase {
     // MARK: - V10, V11 · the simulated service reports itself as unverified
 
     /// `SimulatedPublishService` is selected whenever HTTP config is absent. It
-    /// sends nothing and reports `.simulatedUnverified`, which the queue
-    /// acknowledges, as it did before 2c.
+    /// sends nothing and reports `.simulatedUnverified`, which the queue HOLDS
+    /// (R1-a): an unsent withdrawal is never acknowledged.
     func testV10_SimulatedServiceReportsSimulatedUnverified() async throws {
         let id = UUID()
         let savedBase = NetworkManager.shared.baseURL
@@ -190,16 +190,14 @@ final class P6I02WithdrawalOutcomeTests: XCTestCase {
 
         queue.enqueue(unshare(id))
         await queue.flushNow()
-        XCTAssertFalse(queued(id), "acknowledged as before 2c")
+        XCTAssertTrue(queued(id), "R1-a: held, not acknowledged")
         XCTAssertTrue(QueueStubServer.arrivals.isEmpty, "and nothing was sent")
     }
 
-    /// CHARACTERISES CURRENT BEHAVIOUR — NOT A CONNECTED WITHDRAWAL PROOF, and
-    /// a separately identified concern for the final scope review. In
-    /// backendConnected mode with HTTP config missing, the publish service falls
-    /// back to the simulated one: the withdrawal is ACKNOWLEDGED although NOTHING
-    /// WAS SENT. 2c reports it truthfully and does not change it.
-    func testV11_ConnectedModeWithoutHTTPConfig_FallsBackAndAcknowledgesUnsent() async throws {
+    /// R1-a. In backendConnected mode with HTTP config missing, the publish
+    /// service falls back to the simulated one. Nothing is sent, so the
+    /// withdrawal stays queued until a configured flush can make it.
+    func testV11_ConnectedModeWithoutHTTPConfig_FallsBackAndHoldsUnsent() async throws {
         let id = UUID()
         XCTAssertEqual(BackendEnvironment.shared.mode, .backendConnected, "fixture: Connected mode")
         let savedBase = NetworkManager.shared.baseURL
@@ -211,8 +209,14 @@ final class P6I02WithdrawalOutcomeTests: XCTestCase {
         queue.enqueue(unshare(id))
         await queue.flushNow()
 
-        XCTAssertFalse(queued(id), "CURRENT BEHAVIOUR: acknowledged")
-        XCTAssertTrue(QueueStubServer.arrivals.isEmpty, "although nothing was sent")
+        XCTAssertTrue(queued(id), "R1-a: held, not acknowledged")
+        XCTAssertTrue(QueueStubServer.arrivals.isEmpty, "nothing was sent")
+
+        // Once configuration returns, the held withdrawal is actually sent.
+        NetworkManager.shared.baseURL = savedBase
+        await queue.flushNow()
+        XCTAssertEqual(QueueStubServer.count(key("DELETE", id)), 1, "sent once configured")
+        XCTAssertFalse(queued(id), "and only then acknowledged")
     }
 
     // MARK: - OPEN BLOCKER — characterisation, NOT closure evidence

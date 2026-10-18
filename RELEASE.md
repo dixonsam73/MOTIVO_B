@@ -236,9 +236,9 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   (section C, Pro upgrade). **Applied to production 2026-09-25** with
   Samuel's go-ahead; read back `attachments` = 52428800, still private, 14
   MIME types, 16 objects, `avatars` unchanged.
-- [ ] **A — R1-a:** don't acknowledge an unsent simulated withdrawal
+- [x] **A — R1-a:** don't acknowledge an unsent simulated withdrawal
   (`SessionSyncQueue.swift`, client-only, small). Cheap insurance, not a
-  blocker.
+  blocker. Done 2026-10-18: held instead (C-115).
 - [x] **A — Real build numbers.** A "Stamp Build Number" script sets the build
   number to the git commit count and records the short hash. Both show at the
   foot of the Profile page, e.g. `Version 1.0 (1747 · abc1234)`. When uploading,
