@@ -1,28 +1,30 @@
 //
-//  JournalOwnerStoreMigration.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  LocalOwnerStoreMigration.swift
+//  MOTIVO
 //
-//  KEEPING LOCAL DATA WHEN A DEVICE ADOPTS THE JOURNAL'S OWNER (stage B).
+//  C-116. Several local stores are looked up under the Apple user ID once the
+//  person has signed in, and under a fixed "no owner" name before that:
+//  saved Lists and their per-context settings ("device"), ensembles
+//  ("local-device"), instrument and thread tint maps ("__anonymous__") and
+//  saves ("unknown"). Signing in moved the lookup without moving the data, so
+//  anything made before the first sign-in disappeared from view (the mirror
+//  image of C-114, where leaving Connected moved it the other way).
 //
-//  Several local stores are looked up under K1, or under a fixed "no owner"
-//  name when K1 is absent. When a device without K1 adopts the journal's
-//  owner, those lookups move. This copies each "no owner" store into the K1
-//  form WITHOUT overwriting anything already there and without deleting the
-//  source, so it is idempotent and a re-run after an interruption is safe.
-//
-//  Stores covered: saved Lists ("device"), per-context list settings,
-//  ensembles ("local-device"), instrument and thread tint maps
-//  ("__anonymous__"), saves/favourites ("unknown"), and the local profile's
-//  location and avatar files ("__local_etudes_profile__"). Attachment titles
-//  need nothing: their writes are unscoped (C-47) and reads still see them.
-//  Nothing here uploads, publishes or touches the backend.
+//  This merges each "no owner" store into the owner's, ONCE per owner:
+//  - union by id (Lists, ensembles) or by key (settings, tint entries, saves),
+//    so content on both sides is kept and two Lists with the same name stay
+//    two Lists;
+//  - the owner's own value wins where the same id or key exists on both;
+//  - the source is never deleted, and the once-per-owner marker is written
+//    last, so an interrupted run is simply repeated and nothing is
+//    duplicated or lost.
+//  Nothing here touches the network or any cloud copy.
 //
 
-#if SYNCTEST
 import Foundation
 
 @MainActor
-enum JournalOwnerStoreMigration {
+enum LocalOwnerStoreMigration {
 
     static let listsNoOwnerScope = "device"
     static let ensemblesNoOwner = "local-device"
@@ -30,12 +32,31 @@ enum JournalOwnerStoreMigration {
     static let savesNoOwner = "unknown"
     static let profileNoOwner = "__local_etudes_profile__"
 
-    /// Returns one line per store for the diagnostics log.
+    static func markerKey(_ owner: String) -> String { "localOwnerStoresMerged_v1::" + owner }
+
+    static func normalized(_ raw: String?) -> String? {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Merges once per owner. A later run for the same owner does nothing, so
+    /// a List deleted after the merge is not brought back by the next sign-in.
     @discardableResult
-    static func mergeNoOwnerStores(into rawOwner: String,
-                                   defaults: UserDefaults = .standard,
-                                   profilesDirectory: URL? = defaultProfilesDirectory()) -> [String] {
-        guard let owner = JournalOwnership.normalized(rawOwner) else { return ["No owner given; nothing moved"] }
+    static func mergeNoOwnerStoresIfNeeded(into rawOwner: String, defaults: UserDefaults = .standard,
+                                           includeProfile: Bool = false, profilesDirectory: URL? = nil) -> [String] {
+        guard let owner = normalized(rawOwner) else { return ["No owner given; nothing moved"] }
+        guard !defaults.bool(forKey: markerKey(owner)) else { return ["Already merged for this owner"] }
+        let notes = mergeNoOwnerStores(into: owner, defaults: defaults, includeProfile: includeProfile, profilesDirectory: profilesDirectory)
+        defaults.set(true, forKey: markerKey(owner))
+        return notes
+    }
+
+    /// The unconditional merge: idempotent, never overwriting, never deleting.
+    /// Returns one line per store for a log.
+    @discardableResult
+    static func mergeNoOwnerStores(into rawOwner: String, defaults: UserDefaults = .standard,
+                                   includeProfile: Bool = false, profilesDirectory: URL? = nil) -> [String] {
+        guard let owner = normalized(rawOwner) else { return ["No owner given; nothing moved"] }
         var notes: [String] = []
         notes.append(mergeSavedLists(into: owner, defaults: defaults))
         notes.append(copyPrefixedKeys(from: "practiceTasks_v1::\(listsNoOwnerScope)::",
@@ -49,12 +70,14 @@ enum JournalOwnerStoreMigration {
         }
         notes.append(copyTrueFlags(prefix: "feed.interact.v2.save.", fromPart: savesNoOwner,
                                    toPart: safeSaveKeyPart(owner), defaults: defaults))
-        notes.append(copyIfAbsent(from: "profile.\(profileNoOwner).location", to: "profile.\(owner).location",
-                                  defaults: defaults, label: "Profile location"))
-        if let dir = profilesDirectory {
-            for suffix in ["-original.jpg", "-avatar.png"] {
-                notes.append(copyFileIfAbsent(dir.appendingPathComponent(profileNoOwner + suffix),
-                                              dir.appendingPathComponent(owner + suffix)))
+        if includeProfile {
+            notes.append(copyIfAbsent(from: "profile.\(profileNoOwner).location", to: "profile.\(owner).location",
+                                      defaults: defaults, label: "Profile location"))
+            if let dir = profilesDirectory {
+                for suffix in ["-original.jpg", "-avatar.png"] {
+                    notes.append(copyFileIfAbsent(dir.appendingPathComponent(profileNoOwner + suffix),
+                                                  dir.appendingPathComponent(owner + suffix)))
+                }
             }
         }
         return notes
@@ -164,4 +187,3 @@ enum JournalOwnerStoreMigration {
         ProfileStore.avatarDerivedURL(for: nil)?.deletingLastPathComponent()
     }
 }
-#endif

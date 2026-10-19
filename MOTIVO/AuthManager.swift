@@ -1510,6 +1510,13 @@ final class AuthManager: NSObject, ObservableObject {
         // by adopting only ownerless local sessions into this authenticated identity.
         PersistenceController.shared.currentUserID = userID
         PersistenceController.shared.adoptOwnerlessLocalSessionsIfNeeded(for: userID)
+        // C-116. Lists, list settings, ensembles, tint maps and saves made before
+        // the first sign-in are looked up under "no owner" scopes; move them with
+        // the owner, once, never overwriting (mirror of C-114's kept owner).
+        for note in LocalOwnerStoreMigration.mergeNoOwnerStoresIfNeeded(into: userID) {
+            Logger(subsystem: "com.sdsongs.etudes", category: "auth").notice("C-116 \(note, privacy: .public)")
+        }
+        EnsembleStore.shared.load()
         return true
     }
 

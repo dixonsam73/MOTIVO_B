@@ -101,10 +101,6 @@ struct JournalSyncPersistedState: Codable {
     /// change of LOOKUP, never a deletion (seen 2026-10-19: a sign-in step
     /// moved the scope and the empty new scope was sent as two deletions).
     var listScope: String?
-    /// The owner the "no owner" stores (Lists, ensembles, tint maps, saves,
-    /// profile) were last merged into. Once per owner, on whichever launch
-    /// first sees that key.
-    var noOwnerStoresMergedInto: String?
 
     init() {}
 
@@ -132,7 +128,6 @@ struct JournalSyncPersistedState: Codable {
         customsBootstrapQueued = try c.decodeIfPresent(Bool.self, forKey: .customsBootstrapQueued) ?? false
         listFingerprints = try c.decodeIfPresent([String: String].self, forKey: .listFingerprints) ?? [:]
         listScope = try c.decodeIfPresent(String.self, forKey: .listScope)
-        noOwnerStoresMergedInto = try c.decodeIfPresent(String.self, forKey: .noOwnerStoresMergedInto)
     }
 }
 

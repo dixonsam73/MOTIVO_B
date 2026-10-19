@@ -24,7 +24,7 @@ enum JournalSavedListSync {
     /// Mirrors `TasksManagerView.ownerScope`.
     static func currentScope() -> String {
         if let id = JournalOwnership.normalized(PersistenceController.shared.currentUserID) { return id }
-        return JournalOwnerStoreMigration.listsNoOwnerScope
+        return LocalOwnerStoreMigration.listsNoOwnerScope
     }
 
     static func fingerprint(_ list: SavedList) -> String {

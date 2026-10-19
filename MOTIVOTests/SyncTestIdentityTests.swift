@@ -560,7 +560,7 @@ final class SyncTestIdentityTests: XCTestCase {
         // Once the lists are merged into the new scope they are re-sent (same ids,
         // so the server replaces rather than duplicates); a later real deletion
         // in the SAME scope is still detected.
-        JournalOwnerStoreMigration.mergeNoOwnerStores(into: "owner-1", defaults: defaults, profilesDirectory: nil)
+        LocalOwnerStoreMigration.mergeNoOwnerStores(into: "owner-1", defaults: defaults)
         let resent = JournalSavedListSync.scan(store: store, defaults: defaults, scope: "owner-1")
         XCTAssertEqual(Set(resent.map(\.recordName)), [l1.id.uuidString, l2.id.uuidString])
         XCTAssertTrue(resent.allSatisfy { $0.op == .save })
@@ -570,52 +570,9 @@ final class SyncTestIdentityTests: XCTestCase {
         XCTAssertEqual(deletion.map(\.op), [.delete])
     }
 
-    // MARK: (4) stores whose lookup changes on adoption
-
-    @MainActor
-    func testAdoptionStoreMergeIsCopyIfAbsentAndIdempotent() throws {
-        let owner = "001234.abcdef.5678"
-        let d = defaults!
-        // Lists: one under "device", one already under the owner.
-        let deviceList = SavedList(id: UUID(), name: "Warm-up", items: [SavedListLine(text: "Long tones")])
-        let ownerList = SavedList(id: UUID(), name: "Warm-up", items: [SavedListLine(text: "Arpeggios")])
-        try SavedListLibrary.commit(snapshot: [], updated: [deviceList], ownerScope: "device", defaults: d)
-        try SavedListLibrary.commit(snapshot: [], updated: [ownerList], ownerScope: owner, defaults: d)
-        d.set(["a"], forKey: "practiceTasks_v1::device::core:0")
-        d.set(["keep"], forKey: "practiceTasks_v1::\(owner)::core:1")
-        d.set(["overwrite?"], forKey: "practiceTasks_v1::device::core:1")
-        // Ensembles.
-        let e1 = Ensemble(id: "e1", name: "Quartet", memberUserIDs: ["x"])
-        let e2 = Ensemble(id: "e2", name: "Trio", memberUserIDs: ["y"])
-        d.set(try JSONEncoder().encode([e1]), forKey: "EnsembleStore.items::local-device")
-        d.set(try JSONEncoder().encode([e2]), forKey: "EnsembleStore.items::\(owner.lowercased())")
-        // Tint maps, saves, location, avatar files.
-        d.set(["cello": 2, "viola": 4], forKey: "theme.instrumentTint.slotMap.v1.__anonymous__")
-        d.set(["cello": 7], forKey: "theme.instrumentTint.slotMap.v1.\(owner.lowercased())")
-        let saved = UUID()
-        d.set(true, forKey: "feed.interact.v2.save.unknown.\(saved.uuidString)")
-        d.set("Leeds", forKey: "profile.__local_etudes_profile__.location")
-        let profiles = tempDir.appendingPathComponent("Profiles", isDirectory: true)
-        try FileManager.default.createDirectory(at: profiles, withIntermediateDirectories: true)
-        try Data([1]).write(to: profiles.appendingPathComponent("__local_etudes_profile__-avatar.png"))
-
-        for _ in 0..<2 {  // the second run is the "interrupted, resumed" case
-            JournalOwnerStoreMigration.mergeNoOwnerStores(into: owner, defaults: d, profilesDirectory: profiles)
-        }
-
-        let lists = try SavedListLibrary.read(ownerScope: owner, defaults: d)
-        XCTAssertEqual(Set(lists.map(\.id)), [deviceList.id, ownerList.id], "union; the same name twice is two lists")
-        XCTAssertEqual(try SavedListLibrary.read(ownerScope: "device", defaults: d).map(\.id), [deviceList.id], "the source is never deleted")
-        XCTAssertEqual(d.stringArray(forKey: "practiceTasks_v1::\(owner)::core:0"), ["a"])
-        XCTAssertEqual(d.stringArray(forKey: "practiceTasks_v1::\(owner)::core:1"), ["keep"], "the owner's own value wins")
-        let ensembles = try JSONDecoder().decode([Ensemble].self, from: XCTUnwrap(d.data(forKey: "EnsembleStore.items::\(owner.lowercased())")))
-        XCTAssertEqual(Set(ensembles.map(\.id)), ["e1", "e2"])
-        XCTAssertEqual(d.dictionary(forKey: "theme.instrumentTint.slotMap.v1.\(owner.lowercased())") as? [String: Int], ["cello": 7, "viola": 4])
-        XCTAssertTrue(d.bool(forKey: "feed.interact.v2.save.\(JournalOwnerStoreMigration.safeSaveKeyPart(owner)).\(saved.uuidString)"))
-        XCTAssertEqual(d.string(forKey: "profile.\(owner).location"), "Leeds")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: profiles.appendingPathComponent("\(owner)-avatar.png").path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: profiles.appendingPathComponent("__local_etudes_profile__-avatar.png").path))
-    }
+    // (4) The store merge on adoption is C-116's production merge; its cases
+    // (both sides with content, same name twice, repeat and interruption) are
+    // in C116OwnerStoreMigrationTests.
 
     // MARK: state file compatibility
 

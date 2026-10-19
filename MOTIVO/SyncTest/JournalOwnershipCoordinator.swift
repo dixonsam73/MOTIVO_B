@@ -107,10 +107,9 @@ final class JournalOwnershipCoordinator {
         let owner = JournalOwnership.normalized(Keychain.get("appleUserID"))
         // Whatever route set the key (adoption, the sign-in step, or a launch
         // that already holds it): stores looked up under "no owner" move with
-        // it, once per owner. Copy-if-absent, so nothing is overwritten.
-        if let owner, store.state.noOwnerStoresMergedInto != owner {
-            mergeNoOwnerStores(into: owner, tag: "Owner key set")
-        }
+        // it, once per owner (C-116's production merge, plus the local
+        // profile, which the trial has no sign-in flow to carry).
+        if let owner { mergeNoOwnerStores(into: owner, tag: "Owner key set") }
         if owner != lastSeenOwner {
             lastSeenOwner = owner
             onOwnerChanged()
@@ -122,9 +121,11 @@ final class JournalOwnershipCoordinator {
     }
 
     private func mergeNoOwnerStores(into owner: String, tag: String) {
-        for note in JournalOwnerStoreMigration.mergeNoOwnerStores(into: owner) { store.log("\(tag): \(note)") }
+        let notes = LocalOwnerStoreMigration.mergeNoOwnerStoresIfNeeded(
+            into: owner, includeProfile: true, profilesDirectory: LocalOwnerStoreMigration.defaultProfilesDirectory())
+        guard notes != ["Already merged for this owner"] else { return }
+        for note in notes { store.log("\(tag): \(note)") }
         EnsembleStore.shared.load()
-        store.update { $0.noOwnerStoresMergedInto = owner }
     }
 
     /// Recoverable: the marker is written first, every store merge is
