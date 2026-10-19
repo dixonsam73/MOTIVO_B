@@ -535,8 +535,61 @@ the join.
   journal is empty for ~5 min and then complete: a visible first-sync state
   is needed; (3) owner adoption had never been wired to the engine (fixed).
   **Trial complete.** Untested remains as listed: account sign-out, per-app
-  iCloud off, account switch; Scores, lists, privacy map, Instrument/Tag
+  iCloud off, account switch; Scores, privacy map, Instrument/Tag
   relationships, profile; Connected with sync on.
+  **Stage B, identity: passed 2026-10-19.** The bound private zone is the
+  journal; no new identifier. One Apple user id (K1, `Session.ownerUserID`)
+  or none per journal, enforced (`JournalOwnership`): a device without a
+  key adopts the journal's single owner only after its first complete fetch
+  and over the whole store; a device with a key is never overwritten; mixed
+  owners are kept, reported on the diagnostics screen and held back from
+  upload. Upload eligibility is ownership alone, never a screen filter.
+  Ownership is merged separately from content (`JournalImporter`): an
+  owner-only change is not a user edit, never beats a notes edit and never
+  re-sends media (both arrival orders unit-tested); `Attachment.ownerUserID`
+  is not synced and follows the session. Custom instruments and activities
+  sync without an owner and are stamped with the local install key
+  (`local:<install>`) on import; duplicates by normalised name collapse to
+  the smallest id on every device, keeping the loser's order and visibility.
+  Saved Lists sync as records by id (two lists with the same name both
+  survive). Stores looked up under "no owner" (Lists and list settings,
+  ensembles, tint maps, saves, profile location and avatar) are copied into
+  the owner scope once per owner, never overwriting, never deleting the
+  source (`JournalOwnerStoreMigration`). Adoption sets the Keychain key and
+  nothing else: no Connected session, publishing, directory or avatar work.
+  C-114 refusal and withdrawal unchanged; the sign-in's local half is now
+  `AuthManager.applyLocalSignIn`. 20 unit tests (`SyncTestIdentityTests`).
+  Device run on fresh Sync Test installs with disposable data (Études and
+  Études Dev untouched): two Solo journals made in Airplane Mode (2
+  sessions, a photo, a saved list, a custom instrument each) converged to 4
+  sessions, both lists, one instrument, media both ways, re-import without
+  duplicates; an iPad notes edit against the iPhone's owner step kept the
+  notes, took the owner, media bytes unchanged; the iPad adopted the owner
+  with no Connected identity and all content intact; a different owner was
+  refused; the withdrawal kept the key and a Thought still crossed.
+  **Findings:** (1) a change of list lookup scope was sent as two deletions
+  and applied on the other device — fixed (a scope change never infers
+  deletion; the no-owner stores are merged on whichever launch first sees
+  the key); the lists came back from the untouched "device" copies. The
+  production sign-in has the same lookup move without the merge (C-116).
+  (2) Clearing the owner key while the journal holds owned entries re-adopts
+  it at once, by the rules; the trial reset button now suspends the rules
+  first. (3) Editing the other device's session is blocked until the
+  Instrument relationship syncs (`AddEditSessionView` Save needs an
+  instrument object). (4) The engine does not retry a failed first iCloud
+  check; after Airplane Mode a relaunch is needed. (5) `ProfileStore`
+  hydration writes the backend id as a custom-row owner (C-117, separate).
+  **Pre-shipping requirement, erase (Samuel, 2026-10-19):** removing local
+  data from one device must not silently delete the private iCloud journal
+  or the copies on other devices; deleting the journal everywhere needs a
+  separate, explicit action; pausing sync alone must not leave local-reset
+  deletions queued for when sync resumes; the implementation must define
+  and test what happens when sync is re-enabled. Today `LocalFactoryReset`'s
+  batch deletes would be tracked as deletions. Not a stage-B change.
+  Hands-on: agent ≈ 1 h implementation and tests, ≈ 35 min device-run fixes,
+  ≈ 25 min waiting on builds; Samuel ≈ 40 min at the devices, ≈ 25 min
+  waiting on fixes. Reset rule: Delete server zone, Clear owner key (both
+  devices), delete both apps, reinstall.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

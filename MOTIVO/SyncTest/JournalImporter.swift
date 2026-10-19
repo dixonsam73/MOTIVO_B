@@ -1,0 +1,413 @@
+//
+//  JournalImporter.swift
+//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//
+//  SERVER RECORDS → CORE DATA, SEPARATE FROM THE ENGINE SO IT CAN BE TESTED
+//  WITHOUT CLOUDKIT.
+//
+//  Content follows the trial conflict rule (`JournalConflictRule`, newest
+//  user edit wins). Ownership does NOT: it is merged on its own
+//  (`JournalOwnership.mergedOwner`), so an owner-only change never beats a
+//  notes edit and a notes edit never erases an owner. When the merged owner
+//  differs from what the server holds, the entry is queued to send it.
+//
+//  `Attachment.ownerUserID` is not synced; it follows its session locally.
+//  Custom instruments and activities arrive without an owner and are stamped
+//  with this install's K2; duplicates by normalised name collapse to the
+//  smallest id on every device.
+//
+
+#if SYNCTEST
+import Foundation
+import CloudKit
+import CoreData
+
+/// What the importer asks the engine to send.
+protocol JournalSendQueue: AnyObject {
+    func enqueueSave(_ recordName: String, recordType: String)
+    func enqueueDelete(_ recordName: String, recordType: String)
+    func removePendingSave(_ recordName: String)
+}
+
+final class JournalImporter {
+    let context: NSManagedObjectContext
+    let store: JournalSyncStateStore
+    weak var queue: JournalSendQueue?
+    var log: (String) -> Void = { _ in }
+    /// This install's K2 (`PersistenceController.ownerIDForCustoms`), read once
+    /// on the main actor by the owner of this importer; it never changes.
+    let customOwner: String?
+
+    init(context: NSManagedObjectContext, store: JournalSyncStateStore, customOwner: String?) {
+        self.context = context
+        self.store = store
+        self.customOwner = customOwner
+    }
+
+    struct Summary { var received = 0; var bytes: Int64 = 0; var customs = 0 }
+
+    // MARK: Modifications
+
+    /// Imports Session, Attachment and custom-row records (not SavedList).
+    /// Must be called on the context's queue (`performAndWait`).
+    func importModifications(_ records: [CKRecord]) -> Summary {
+        var summary = Summary()
+        let sessions = records.filter { $0.recordType == JournalSyncRecordType.session }
+        let attachments = records.filter { $0.recordType == JournalSyncRecordType.attachment }
+        let customs = records.filter { JournalSyncRecordType.customs.contains($0.recordType) }
+        for record in sessions { if importSession(record) { summary.received += 1 } }
+        for record in attachments {
+            let outcome = importAttachment(record)
+            if outcome.imported { summary.received += 1 }
+            summary.bytes += outcome.bytes
+        }
+        // Any held attachment whose session has now arrived.
+        for (name, held) in store.state.awaitingParent {
+            guard let sid = UUID(uuidString: held.sessionRecordName),
+                  fetch(entity: JournalSyncRecordType.session, id: sid) != nil,
+                  let record = JournalSyncStateStore.decodeWholeRecord(held.recordData) else { continue }
+            let outcome = importAttachment(record, heldFile: held.heldFilePath)
+            if outcome.imported {
+                summary.received += 1; summary.bytes += outcome.bytes
+                store.update { $0.awaitingParent.removeValue(forKey: name) }
+                log("Linked held attachment \(name) to its session")
+            }
+        }
+        var importedCustoms: [NSManagedObject] = []
+        for record in customs {
+            if let object = importCustom(record) { importedCustoms.append(object); summary.received += 1; summary.customs += 1 }
+        }
+        save()
+        if !importedCustoms.isEmpty {
+            store.update { st in
+                for object in importedCustoms where !object.objectID.isTemporaryID {
+                    if let id = object.value(forKey: "id") as? UUID {
+                        st.customRecordNames[object.objectID.uriRepresentation().absoluteString] = id.uuidString
+                    }
+                }
+            }
+            dedupeCustoms()
+        }
+        return summary
+    }
+
+    /// Returns true when the server record was applied.
+    func importSession(_ record: CKRecord) -> Bool {
+        let name = record.recordID.recordName
+        guard let id = UUID(uuidString: name) else { return false }
+        let existing = fetch(entity: JournalSyncRecordType.session, id: id)
+        let localOwner = existing?.value(forKey: "ownerUserID") as? String
+        let serverOwner = record["ownerUserID"] as? String
+        if let existing, localChangePending(name) {
+            let local = existing.value(forKey: "userModifiedAt") as? Date
+            let server = JournalRecordMapping.userModifiedAt(of: record)
+            if JournalConflictRule.decide(localUserModifiedAt: local, serverUserModifiedAt: server) == .local {
+                // Keep our content; take the server's owner if we have none, so
+                // the resend carries both. Remember the server copy's change tag.
+                absorbOwner(serverOwner, into: existing, localOwner: localOwner, recordName: name)
+                store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+                recordConflict(record, winner: .local, local: existing)
+                return false
+            }
+            recordConflict(record, winner: .server, local: existing)
+            queue?.removePendingSave(name)
+        }
+        let object = existing ?? NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.session, into: context)
+        _ = JournalRecordMapping.apply(record, to: object)
+        let merged = JournalOwnership.mergedOwner(local: localOwner, server: serverOwner)
+        object.setValue(merged, forKey: "ownerUserID")
+        if let l = JournalOwnership.normalized(localOwner), let s = JournalOwnership.normalized(serverOwner), l != s {
+            log("Owner differs on \(name): kept this device's owner; reported")
+            store.update { $0.ownerConflicts += 1 }
+        }
+        followSessionOwner(object)
+        store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+        if JournalOwnership.normalized(merged) != JournalOwnership.normalized(serverOwner) {
+            // The server lost an owner this device holds (an edit from a device
+            // that had not yet seen the ownership): send it back, owner only.
+            queue?.enqueueSave(name, recordType: JournalSyncRecordType.session)
+            log("Kept owner on \(name) over an ownerless server copy; resending")
+        }
+        return true
+    }
+
+    /// Local content won a conflict: carry the server's owner if we have none.
+    private func absorbOwner(_ serverOwner: String?, into object: NSManagedObject, localOwner: String?, recordName: String) {
+        let merged = JournalOwnership.mergedOwner(local: localOwner, server: serverOwner)
+        guard JournalOwnership.normalized(merged) != JournalOwnership.normalized(localOwner) else { return }
+        object.setValue(merged, forKey: "ownerUserID")
+        followSessionOwner(object)
+        log("Took owner from the server copy of \(recordName) while keeping local content")
+    }
+
+    /// Attachments carry their session's owner locally (not synced).
+    private func followSessionOwner(_ session: NSManagedObject) {
+        let owner = session.value(forKey: "ownerUserID") as? String
+        for case let att as NSManagedObject in (session.value(forKey: "attachments") as? Set<NSManagedObject>) ?? [] {
+            if (att.value(forKey: "ownerUserID") as? String) != owner { att.setValue(owner, forKey: "ownerUserID") }
+        }
+    }
+
+    func importAttachment(_ record: CKRecord, heldFile: String? = nil) -> (imported: Bool, bytes: Int64) {
+        let name = record.recordID.recordName
+        guard let id = UUID(uuidString: name) else { return (false, 0) }
+        guard let sidName = JournalRecordMapping.sessionRecordName(of: record), let sid = UUID(uuidString: sidName) else {
+            log("Attachment \(name) has no session reference; skipped")
+            return (false, 0)
+        }
+        guard let session = fetch(entity: JournalSyncRecordType.session, id: sid) else {
+            hold(record, sessionRecordName: sidName)
+            return (false, 0)
+        }
+        let existing = fetch(entity: JournalSyncRecordType.attachment, id: id)
+        if let existing, localChangePending(name) {
+            let local = existing.value(forKey: "userModifiedAt") as? Date
+            let server = JournalRecordMapping.userModifiedAt(of: record)
+            if JournalConflictRule.decide(localUserModifiedAt: local, serverUserModifiedAt: server) == .local {
+                store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+                recordConflict(record, winner: .local, local: existing)
+                return (false, 0)
+            }
+            recordConflict(record, winner: .server, local: existing)
+            queue?.removePendingSave(name)
+        }
+        let object = existing ?? NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.attachment, into: context)
+        _ = JournalRecordMapping.apply(record, to: object)
+        object.setValue(session, forKey: "session")
+        object.setValue(session.value(forKey: "ownerUserID") as? String, forKey: "ownerUserID")
+
+        // Bytes: materialise where the resolver looks, but ONLY when this device
+        // has no usable file already. The device that created the attachment
+        // keeps its own file (named <base>-<id>.<ext> by staging); rewriting its
+        // path to <id>.<ext> would break the attachment it just made.
+        var bytes: Int64 = 0
+        let ext = (record[JournalRecordMapping.fileExtKey] as? String) ?? ""
+        let destination = JournalRecordMapping.materialisedURL(recordName: name, ext: ext)
+        let existingFile = AttachmentPathResolver.resolve(object.value(forKey: "fileURL") as? String)
+        let sourceURL = heldFile.map { URL(fileURLWithPath: $0) } ?? (record[JournalRecordMapping.assetKey] as? CKAsset)?.fileURL
+        if existingFile == nil {
+            if let sourceURL, FileManager.default.fileExists(atPath: sourceURL.path) {
+                let incoming = (try? FileManager.default.attributesOfItem(atPath: sourceURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+                let present = (try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? NSNumber)?.int64Value
+                if present != incoming {
+                    try? FileManager.default.removeItem(at: destination)
+                    do { try FileManager.default.copyItem(at: sourceURL, to: destination); bytes = incoming }
+                    catch { log("Could not materialise \(name): \(error.localizedDescription)") }
+                }
+            } else {
+                log("Attachment \(name) arrived without a file")
+            }
+            // Point at the materialised path even if the copy failed, so the
+            // resolver's filename match finds it once a later fetch supplies it.
+            object.setValue(destination.path, forKey: "fileURL")
+        }
+        if heldFile != nil, let sourceURL { try? FileManager.default.removeItem(at: sourceURL) }
+        store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+        return (true, bytes)
+    }
+
+    private func hold(_ record: CKRecord, sessionRecordName: String) {
+        let name = record.recordID.recordName
+        var heldPath: String?
+        if let asset = record[JournalRecordMapping.assetKey] as? CKAsset, let url = asset.fileURL,
+           FileManager.default.fileExists(atPath: url.path) {
+            let dest = JournalSyncStateStore.holdingDirectory().appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: dest)
+            if (try? FileManager.default.copyItem(at: url, to: dest)) != nil { heldPath = dest.path }
+        }
+        guard let data = JournalSyncStateStore.encodeWholeRecord(record) else { return }
+        store.update { $0.awaitingParent[name] = JournalSyncHeldAttachment(recordData: data, sessionRecordName: sessionRecordName, heldFilePath: heldPath) }
+        log("Holding attachment \(name) until session \(sessionRecordName) arrives")
+    }
+
+    // MARK: Custom instruments and activities
+
+    /// Applies a custom row and stamps this install's K2. Server wins a
+    /// conflict (custom rows carry no edit stamp; ties go to the server).
+    private func importCustom(_ record: CKRecord) -> NSManagedObject? {
+        let name = record.recordID.recordName
+        guard let id = UUID(uuidString: name), let owner = customOwner else { return nil }
+        let existing = fetch(entity: record.recordType, id: id)
+        if existing != nil, localChangePending(name) {
+            log("Custom \(record.recordType) \(name): server copy applied over a pending local change")
+            queue?.removePendingSave(name)
+        }
+        let object = existing ?? NSEntityDescription.insertNewObject(forEntityName: record.recordType, into: context)
+        guard JournalRecordMapping.apply(record, to: object) else { return nil }
+        object.setValue(owner, forKey: "ownerUserID")
+        store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+        return object
+    }
+
+    /// Collapses custom rows of this install that share a normalised name to
+    /// the smallest id, keeping the other rows' settings where the winner has
+    /// none. The losers are deleted here and on the server; every device picks
+    /// the same winner, so no row is lost or bounced between devices.
+    func dedupeCustoms() {
+        guard let owner = customOwner else { return }
+        var deletes: [(String, String)] = []
+        var saves: [(String, String)] = []
+        for entity in [JournalSyncRecordType.userInstrument, JournalSyncRecordType.userActivity] {
+            let request = NSFetchRequest<NSManagedObject>(entityName: entity)
+            request.predicate = NSPredicate(format: "ownerUserID == %@", owner)
+            let rows = (try? context.fetch(request)) ?? []
+            let groups = Dictionary(grouping: rows) { row -> String in
+                (row.value(forKey: "normalizedName") as? String)
+                    ?? PersistenceController.normalized(row.value(forKey: "displayName") as? String ?? "")
+            }
+            for (_, group) in groups where group.count > 1 {
+                let ids = group.compactMap { $0.value(forKey: "id") as? UUID }
+                guard let winnerID = JournalOwnership.dedupeWinner(ids),
+                      let winner = group.first(where: { ($0.value(forKey: "id") as? UUID) == winnerID }) else { continue }
+                var changed = false
+                for loser in group where loser !== winner {
+                    if entity == JournalSyncRecordType.userInstrument {
+                        if (winner.value(forKey: "displayOrder") as? Int16 ?? 0) == 0,
+                           let order = loser.value(forKey: "displayOrder") as? Int16, order != 0 {
+                            winner.setValue(order, forKey: "displayOrder"); changed = true
+                        }
+                        let wVisible = winner.value(forKey: "isVisibleOnProfile") as? Bool ?? true
+                        let lVisible = loser.value(forKey: "isVisibleOnProfile") as? Bool ?? true
+                        if !wVisible && lVisible { winner.setValue(true, forKey: "isVisibleOnProfile"); changed = true }
+                        if winner.value(forKey: "coreInstrument") == nil, let core = loser.value(forKey: "coreInstrument") {
+                            winner.setValue(core, forKey: "coreInstrument")
+                        }
+                    }
+                    if let lid = loser.value(forKey: "id") as? UUID { deletes.append((lid.uuidString, entity)) }
+                    let uri = loser.objectID.uriRepresentation().absoluteString
+                    store.update { $0.customRecordNames.removeValue(forKey: uri) }
+                    context.delete(loser)
+                }
+                if changed { saves.append((winnerID.uuidString, entity)) }
+                log("Merged \(group.count) \(entity) rows named \"\(winner.value(forKey: "displayName") as? String ?? "")\" into \(winnerID.uuidString.prefix(8))…")
+            }
+        }
+        save()
+        for (name, type) in saves { queue?.enqueueSave(name, recordType: type) }
+        for (name, type) in deletes { queue?.enqueueDelete(name, recordType: type) }
+    }
+
+    // MARK: Deletions
+
+    func importDeletions(_ deletions: [(CKRecord.ID, CKRecord.RecordType)]) {
+        for (recordID, type) in deletions where type != JournalSyncRecordType.savedList {
+            guard let id = UUID(uuidString: recordID.recordName) else { continue }
+            if let object = fetch(entity: type, id: id) {
+                if type == JournalSyncRecordType.session {
+                    for case let att as NSManagedObject in (object.value(forKey: "attachments") as? Set<NSManagedObject>) ?? [] {
+                        removeFile(of: att)
+                    }
+                } else if type == JournalSyncRecordType.attachment {
+                    removeFile(of: object)
+                }
+                let uri = object.objectID.uriRepresentation().absoluteString
+                context.delete(object)
+                store.update { $0.customRecordNames.removeValue(forKey: uri) }
+            }
+            store.update {
+                $0.lastKnownRecords.removeValue(forKey: recordID.recordName)
+                $0.outbox.removeAll { $0.recordName == recordID.recordName }
+                $0.awaitingParent.removeValue(forKey: recordID.recordName)
+            }
+        }
+        save()
+    }
+
+    private func removeFile(of attachment: NSManagedObject) {
+        if let url = AttachmentPathResolver.resolve(attachment.value(forKey: "fileURL") as? String) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    // MARK: Send conflicts (serverRecordChanged)
+
+    /// Resolves a rejected save against the server copy. Returns true when the
+    /// local record should be resent (on top of the server's change tag).
+    func resolveSendConflict(recordType: String, recordName: String, server: CKRecord) -> Bool {
+        guard let id = UUID(uuidString: recordName), let local = fetch(entity: recordType, id: id) else { return false }
+        store.update { $0.lastKnownRecords[recordName] = JournalSyncStateStore.encodeSystemFields(server) }
+        if JournalSyncRecordType.customs.contains(recordType) {
+            _ = JournalRecordMapping.apply(server, to: local)
+            if let owner = customOwner { local.setValue(owner, forKey: "ownerUserID") }
+            save()
+            queue?.removePendingSave(recordName)
+            log("Conflict on \(recordType) \(recordName): server kept")
+            return false
+        }
+        let localOwner = local.value(forKey: "ownerUserID") as? String
+        let serverOwner = server["ownerUserID"] as? String
+        let decision = JournalConflictRule.decide(localUserModifiedAt: local.value(forKey: "userModifiedAt") as? Date,
+                                                  serverUserModifiedAt: JournalRecordMapping.userModifiedAt(of: server))
+        if decision == .server {
+            recordConflict(server, winner: .server, local: local)
+            _ = JournalRecordMapping.apply(server, to: local)
+            var resend = false
+            if recordType == JournalSyncRecordType.session {
+                let merged = JournalOwnership.mergedOwner(local: localOwner, server: serverOwner)
+                local.setValue(merged, forKey: "ownerUserID")
+                followSessionOwner(local)
+                resend = JournalOwnership.normalized(merged) != JournalOwnership.normalized(serverOwner)
+            } else if recordType == JournalSyncRecordType.attachment {
+                local.setValue(localOwner, forKey: "ownerUserID")
+            }
+            save()
+            queue?.removePendingSave(recordName)
+            if resend { queue?.enqueueSave(recordName, recordType: recordType) }
+            log("Conflict on \(recordName): server content kept\(resend ? "; resending owner" : "")")
+            return false
+        }
+        recordConflict(server, winner: .local, local: local)
+        if recordType == JournalSyncRecordType.session {
+            absorbOwner(serverOwner, into: local, localOwner: localOwner, recordName: recordName)
+            save()
+        }
+        log("Conflict on \(recordName): local content kept, resending")
+        return true
+    }
+
+    // MARK: Helpers
+
+    private func localChangePending(_ recordName: String) -> Bool {
+        store.state.outbox.contains { $0.recordName == recordName && $0.op == .save }
+    }
+
+    private func recordConflict(_ server: CKRecord, winner: JournalConflictWinner, local: NSManagedObject) {
+        let loserTitle: String?
+        let loserNotes: String?
+        if winner == .server {
+            loserTitle = Self.value(local, "title") as? String ?? Self.value(local, "displayName") as? String
+            loserNotes = Self.value(local, "notes") as? String
+        } else {
+            loserTitle = server["title"] as? String ?? server["displayName"] as? String
+            loserNotes = server["notes"] as? String
+        }
+        let conflict = JournalSyncConflict(at: Date(), recordName: server.recordID.recordName, recordType: server.recordType,
+                                           winner: winner == .server ? "server" : "local",
+                                           localUserModifiedAt: Self.value(local, "userModifiedAt") as? Date,
+                                           serverUserModifiedAt: JournalRecordMapping.userModifiedAt(of: server),
+                                           losingTitle: loserTitle, losingNotes: loserNotes)
+        store.update { $0.conflicts.append(conflict) }
+    }
+
+    /// `value(forKey:)` raises for a key the entity lacks (Attachment has no
+    /// title or notes).
+    static func value(_ object: NSManagedObject, _ key: String) -> Any? {
+        object.entity.propertiesByName[key] == nil ? nil : object.value(forKey: key)
+    }
+
+    func fetch(entity: String, id: UUID) -> NSManagedObject? {
+        let request = NSFetchRequest<NSManagedObject>(entityName: entity)
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        request.fetchLimit = 1
+        return (try? context.fetch(request))?.first
+    }
+
+    func save() {
+        guard context.hasChanges else { return }
+        do { try context.save() } catch {
+            log("Import save failed: \(error.localizedDescription)")
+            context.rollback()
+        }
+    }
+}
+#endif

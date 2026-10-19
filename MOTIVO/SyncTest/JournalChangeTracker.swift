@@ -22,7 +22,15 @@ import CoreData
 enum JournalSyncRecordType {
     static let session = "Session"
     static let attachment = "Attachment"
-    static let tracked: Set<String> = [session, attachment]
+    static let userInstrument = "UserInstrument"
+    static let userActivity = "UserActivity"
+    /// Not a Core Data entity: saved Lists live in UserDefaults.
+    static let savedList = "SavedList"
+    static let customs: Set<String> = [userInstrument, userActivity]
+    /// Entities that carry `userModifiedAt` and a preserved `id`.
+    static let stamped: Set<String> = [session, attachment]
+    /// Entities read from persistent history.
+    static let tracked: Set<String> = stamped.union(customs)
 }
 
 final class JournalChangeTracker {
@@ -74,6 +82,58 @@ final class JournalChangeTracker {
         return ok ? pending.count : 0
     }
 
+    /// Stage B: queues every custom instrument and activity of this install
+    /// (K2) once, recording each object's URI so a later local deletion can be
+    /// sent. Rows under any other owner are left alone.
+    @discardableResult
+    func bootstrapCustomsIfNeeded(customOwner: String?) -> Int {
+        guard store.state.customsBootstrapQueued == false, let customOwner else { return 0 }
+        var pending: [JournalSyncPendingChange] = []
+        var names: [String: String] = [:]
+        context.performAndWait {
+            for entity in [JournalSyncRecordType.userInstrument, JournalSyncRecordType.userActivity] {
+                let request = NSFetchRequest<NSManagedObject>(entityName: entity)
+                request.predicate = NSPredicate(format: "ownerUserID == %@", customOwner)
+                for row in (try? context.fetch(request)) ?? [] {
+                    guard let id = row.value(forKey: "id") as? UUID else { continue }
+                    names[row.objectID.uriRepresentation().absoluteString] = id.uuidString
+                    pending.append(.init(recordName: id.uuidString, recordType: entity, op: .save))
+                }
+            }
+        }
+        let ok = store.update { st in
+            Self.merge(pending, into: &st.outbox)
+            st.customRecordNames.merge(names) { _, new in new }
+            st.customsBootstrapQueued = true
+            st.log.append(.init(at: Date(), text: "Bootstrap queued \(pending.count) custom row(s)"))
+        }
+        return ok ? pending.count : 0
+    }
+
+    /// Queues every Session and Attachment the server has not seen and that is
+    /// not already pending. Used when the journal's owner changes, because
+    /// entries held back as ineligible may now be eligible.
+    @discardableResult
+    func requeueUnsent() -> [JournalSyncPendingChange] {
+        var pending: [JournalSyncPendingChange] = []
+        let known = Set(store.state.lastKnownRecords.keys)
+        let queued = Set(store.state.outbox.map(\.recordName))
+        context.performAndWait {
+            for entity in [JournalSyncRecordType.session, JournalSyncRecordType.attachment] {
+                let request = NSFetchRequest<NSManagedObject>(entityName: entity)
+                for row in (try? context.fetch(request)) ?? [] {
+                    guard let id = row.value(forKey: "id") as? UUID else { continue }
+                    let name = id.uuidString
+                    if known.contains(name) || queued.contains(name) { continue }
+                    pending.append(.init(recordName: name, recordType: entity, op: .save))
+                }
+            }
+        }
+        guard !pending.isEmpty else { return [] }
+        let ok = store.update { Self.merge(pending, into: &$0.outbox) }
+        return ok ? pending : []
+    }
+
     /// Reads history after the saved token, converts local transactions to
     /// outbox entries and advances the token, all in one durable write.
     /// Returns the entries added (already merged into the store's outbox).
@@ -82,6 +142,9 @@ final class JournalChangeTracker {
         let after = JournalSyncStateStore.decodeToken(store.state.historyToken)
         var added: [JournalSyncPendingChange] = []
         var newToken: NSPersistentHistoryToken?
+        var namesAdded: [String: String] = [:]
+        var urisRemoved: [String] = []
+        let knownCustomNames = store.state.customRecordNames
 
         context.performAndWait {
             let request = NSPersistentHistoryChangeRequest.fetchHistory(after: after)
@@ -94,19 +157,28 @@ final class JournalChangeTracker {
                 for change in transaction.changes ?? [] {
                     guard let entity = change.changedObjectID.entity.name,
                           JournalSyncRecordType.tracked.contains(entity) else { continue }
+                    let uri = change.changedObjectID.uriRepresentation().absoluteString
                     switch change.changeType {
                     case .insert, .update:
                         // The object may already be gone; its tombstone follows.
                         guard let object = try? context.existingObject(with: change.changedObjectID),
                               let id = object.value(forKey: "id") as? UUID else { continue }
-                        // A save whose only changed key is the stamp itself is not a user edit.
-                        if change.changeType == .update,
-                           let keys = change.updatedProperties?.map(\.name), !keys.isEmpty,
-                           Set(keys) == ["userModifiedAt"] { continue }
+                        if change.changeType == .update, let keys = change.updatedProperties.map({ Set($0.map(\.name)) }) {
+                            // A save whose only changed key is the stamp itself is not a user edit.
+                            if keys == ["userModifiedAt"] { continue }
+                            // An attachment's owner is not synced (it follows its session).
+                            if entity == JournalSyncRecordType.attachment, JournalOwnership.isOwnershipOnly(keys) { continue }
+                        }
+                        if JournalSyncRecordType.customs.contains(entity) { namesAdded[uri] = id.uuidString }
                         added.append(.init(recordName: id.uuidString, recordType: entity, op: .save))
                     case .delete:
-                        guard let id = change.tombstone?["id"] as? UUID else { continue }
-                        added.append(.init(recordName: id.uuidString, recordType: entity, op: .delete))
+                        if let id = change.tombstone?["id"] as? UUID {
+                            added.append(.init(recordName: id.uuidString, recordType: entity, op: .delete))
+                        } else if let name = namesAdded[uri] ?? knownCustomNames[uri] {
+                            // Custom rows keep no id after deletion; the URI map has it.
+                            added.append(.init(recordName: name, recordType: entity, op: .delete))
+                            urisRemoved.append(uri)
+                        }
                     @unknown default:
                         continue
                     }
@@ -117,6 +189,8 @@ final class JournalChangeTracker {
         guard newToken != nil || !added.isEmpty else { return [] }
         let ok = store.update { st in
             Self.merge(added, into: &st.outbox)
+            st.customRecordNames.merge(namesAdded) { _, new in new }
+            for uri in urisRemoved { st.customRecordNames.removeValue(forKey: uri) }
             if let newToken { st.historyToken = JournalSyncStateStore.encode(token: newToken) }
         }
         return ok ? added : []
@@ -136,7 +210,9 @@ final class JournalChangeTracker {
 
 /// Stamps `userModifiedAt` on every Session and Attachment a LOCAL context is
 /// about to save, so both devices carry a comparable user-edit time. The
-/// import context (author `sync`) is skipped so server values are kept as-is.
+/// import context (author `sync`) is skipped so server values are kept as-is,
+/// and so is an ownership-only change (stage B: giving an entry its owner is
+/// not a user edit and must not beat one under the conflict rule).
 enum JournalUserEditStamp {
     static func install() -> NSObjectProtocol {
         NotificationCenter.default.addObserver(forName: .NSManagedObjectContextWillSave, object: nil, queue: nil) { note in
@@ -144,9 +220,9 @@ enum JournalUserEditStamp {
                   ctx.transactionAuthor != JournalSyncAuthor.sync else { return }
             let now = Date()
             for object in ctx.insertedObjects.union(ctx.updatedObjects) {
-                guard let name = object.entity.name, JournalSyncRecordType.tracked.contains(name) else { continue }
+                guard let name = object.entity.name, JournalSyncRecordType.stamped.contains(name) else { continue }
                 let changed = Set(object.changedValues().keys)
-                if object.isInserted || !changed.subtracting(["userModifiedAt"]).isEmpty {
+                if object.isInserted || !changed.subtracting(JournalOwnership.ownershipOnlyKeys).isEmpty {
                     object.setValue(now, forKey: "userModifiedAt")
                 }
             }

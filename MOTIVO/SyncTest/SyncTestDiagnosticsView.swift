@@ -41,6 +41,30 @@ struct SyncTestDiagnosticsView: View {
                 Button("Delete server zone (trial reset)") { Task { await JournalSyncCoordinator.shared.engine?.deleteServerZone(); refreshTick += 1 } }
                     .foregroundStyle(.red)
             }
+            Section("Ownership (stage B)") {
+                row("Owner key (K1)", ownerKeyText)
+                row("Connected identity", JournalSyncCoordinator.shared.auth?.hasConnectedIdentity == true ? "yes" : "no")
+                row("Assessment", state?.ownershipReport ?? "—")
+                row("First complete fetch", state?.initialFetchComplete == true ? "yes" : "no")
+                row("Held-back sends (other owner)", "\(state?.ineligibleCount ?? 0)")
+                row("Owner differences kept", "\(state?.ownerConflicts ?? 0)")
+                row("Pending adoption", state?.pendingOwnerAdoption.map { String($0.prefix(12)) + "…" } ?? "none")
+                row("Synced lists", "\(state?.listFingerprints.count ?? 0)")
+                if let refusal = JournalSyncCoordinator.shared.auth?.signInRefusal { row("Sign-in refused", refusal) }
+                // Disposable owner ids only: the trial never runs Sign in with
+                // Apple, so no real account and no backend are involved.
+                Button("Sign-in owner step as Trial Owner A") { localSignIn("synctest.trial-owner-a") }
+                Button("Sign-in owner step as Trial Owner B") { localSignIn("synctest.trial-owner-b") }
+                Button("Leave Connected (C-114 withdrawal)") {
+                    JournalSyncCoordinator.shared.auth?.leaveConnected(); refreshTick += 1
+                }
+                Button("Clear owner key (trial reset)") {
+                    // Suspend first, or the cleared key is re-adopted from the journal.
+                    JournalSyncCoordinator.shared.ownership?.suspendForReset()
+                    _ = JournalSyncCoordinator.shared.auth?.clearOwnerForSyncTest(); refreshTick += 1
+                }
+                .foregroundStyle(.orange)
+            }
             Section("Counts") {
                 row("Outbox (pending)", "\(status.outboxCount)")
                 row("Held attachments", "\(status.heldCount)")
@@ -80,6 +104,20 @@ struct SyncTestDiagnosticsView: View {
         .id(refreshTick)
         .navigationTitle("Sync Test")
         .onReceive(status.objectWillChange) { _ in refreshTick += 1 }
+    }
+
+    private var ownerKeyText: String {
+        guard let k1 = Keychain.get("appleUserID"), !k1.isEmpty else { return "none" }
+        return String(k1.prefix(24)) + (k1.count > 24 ? "…" : "")
+    }
+
+    /// The local half of a sign-in (`AuthManager.applyLocalSignIn`): the C-114
+    /// refusal, the owner key, and ownerless entries given that owner.
+    private func localSignIn(_ userID: String) {
+        let accepted = JournalSyncCoordinator.shared.auth?.applyLocalSignIn(userID: userID) ?? false
+        JournalSyncCoordinator.shared.store?.log("Sign-in owner step as \(userID): \(accepted ? "accepted" : "refused (C-114)")")
+        JournalSyncCoordinator.shared.ownership?.evaluate(reason: "sign-in step")
+        refreshTick += 1
     }
 
     private func row(_ label: String, _ value: String) -> some View {

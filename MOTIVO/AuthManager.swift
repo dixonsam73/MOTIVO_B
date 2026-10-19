@@ -1387,6 +1387,18 @@ final class AuthManager: NSObject, ObservableObject {
         Logger(subsystem: "com.samueldixon.motivo.synctest", category: "JournalSync")
             .notice("Adopted local owner key from the journal (Solo; no Connected services)")
     }
+
+    /// Sync trial resets only. The Keychain outlives an uninstall, so a fresh
+    /// Sync Test install would otherwise start with the previous trial's owner.
+    /// Refused while a Connected identity is held.
+    @discardableResult
+    func clearOwnerForSyncTest() -> Bool {
+        guard !hasConnectedIdentity else { return false }
+        Keychain.delete("appleUserID")
+        self.currentUserID = nil
+        PersistenceController.shared.currentUserID = nil
+        return true
+    }
     #endif
 
     func signOut() {
@@ -1437,26 +1449,7 @@ final class AuthManager: NSObject, ObservableObject {
         // Persist stable Apple user ID (always present)
         let userID = credential.user
 
-        // C-114. The kept local owner is another Apple Account's, and its journal
-        // is still here: refuse, so one person's journal is never claimed by (and
-        // shared under) someone else's Connected account. Nothing is changed.
-        let storedOwner = Keychain.get("appleUserID")
-        if Self.refusesSignIn(storedOwner: storedOwner, incoming: userID,
-                              storedOwnerHasLocalJournal: storedOwner.map(Self.hasLocalJournal(ownedBy:)) ?? false) {
-            Logger(subsystem: "com.sdsongs.etudes", category: "auth")
-                .notice("signIn refused: journal belongs to another Apple Account")
-            signInRefusal = Self.anotherAccountRefusalMessage
-            return
-        }
-        signInRefusal = nil
-
-        Keychain.set(userID, for: "appleUserID")
-        self.currentUserID = userID
-
-        // First Connected activation: retain the existing device-local Études journal
-        // by adopting only ownerless local sessions into this authenticated identity.
-        PersistenceController.shared.currentUserID = userID
-        PersistenceController.shared.adoptOwnerlessLocalSessionsIfNeeded(for: userID)
+        guard applyLocalSignIn(userID: userID) else { return }
 
         // Apple only provides fullName on the very first authorization.
         // On subsequent sign-ins it's usually nil — handle safely without force unwraps.
@@ -1491,6 +1484,33 @@ final class AuthManager: NSObject, ObservableObject {
         // exchange already unwinds the sign-in navigation today, and narrowing
         // that is a separate decision.
         noteSignInCompleted()
+    }
+
+    /// The local half of a sign-in, before any Apple name or backend work. False
+    /// when C-114 refuses, in which case nothing is changed.
+    @discardableResult
+    func applyLocalSignIn(userID: String) -> Bool {
+        // C-114. The kept local owner is another Apple Account's, and its journal
+        // is still here: refuse, so one person's journal is never claimed by (and
+        // shared under) someone else's Connected account. Nothing is changed.
+        let storedOwner = Keychain.get("appleUserID")
+        if Self.refusesSignIn(storedOwner: storedOwner, incoming: userID,
+                              storedOwnerHasLocalJournal: storedOwner.map(Self.hasLocalJournal(ownedBy:)) ?? false) {
+            Logger(subsystem: "com.sdsongs.etudes", category: "auth")
+                .notice("signIn refused: journal belongs to another Apple Account")
+            signInRefusal = Self.anotherAccountRefusalMessage
+            return false
+        }
+        signInRefusal = nil
+
+        Keychain.set(userID, for: "appleUserID")
+        self.currentUserID = userID
+
+        // First Connected activation: retain the existing device-local Études journal
+        // by adopting only ownerless local sessions into this authenticated identity.
+        PersistenceController.shared.currentUserID = userID
+        PersistenceController.shared.adoptOwnerlessLocalSessionsIfNeeded(for: userID)
+        return true
     }
 
     /// C-114. Shown on the sign-in sheet when `process` refuses.

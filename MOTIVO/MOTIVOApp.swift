@@ -300,7 +300,7 @@ struct MOTIVOApp: App {
                         // database moved; without them the daemon answers "no
                         // changes" from its cache (seen in Checkpoint 1).
                         UIApplication.shared.registerForRemoteNotifications()
-                        JournalSyncCoordinator.shared.onOwnerDiscovered = { [weak auth] owner in auth?.adoptOwnerForSyncTest(owner) }
+                        JournalSyncCoordinator.shared.auth = auth
                         JournalSyncCoordinator.shared.startIfNeeded(persistence: persistenceController.container)
                     }
                     #endif

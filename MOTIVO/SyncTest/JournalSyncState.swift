@@ -78,6 +78,62 @@ struct JournalSyncPersistedState: Codable {
     var bytesReceived: Int64 = 0
     var recordsSent = 0
     var recordsReceived = 0
+
+    // Stage B (identity). Decoded with defaults, so older state files load.
+    /// A complete fetch has finished at least once; owner adoption waits for it.
+    var initialFetchComplete = false
+    /// Set before an owner adoption starts and cleared when it has finished,
+    /// so an interrupted adoption is completed on the next launch.
+    var pendingOwnerAdoption: String?
+    /// Latest ownership assessment, for diagnostics.
+    var ownershipReport: String?
+    /// Entries held back from upload because another Apple user id owns them.
+    var ineligibleCount = 0
+    /// Imports whose owner differed from this device's (kept, reported).
+    var ownerConflicts = 0
+    /// Custom rows have no id preserved after deletion, so their record names
+    /// are kept here by object URI to turn a local deletion into a server one.
+    var customRecordNames: [String: String] = [:]
+    var customsBootstrapQueued = false
+    /// SavedList id → content hash last sent or received, valid for `listScope`.
+    var listFingerprints: [String: String] = [:]
+    /// The owner scope the fingerprints were taken under. A scope change is a
+    /// change of LOOKUP, never a deletion (seen 2026-10-19: a sign-in step
+    /// moved the scope and the empty new scope was sent as two deletions).
+    var listScope: String?
+    /// The owner the "no owner" stores (Lists, ensembles, tint maps, saves,
+    /// profile) were last merged into. Once per owner, on whichever launch
+    /// first sees that key.
+    var noOwnerStoresMergedInto: String?
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        engineState = try c.decodeIfPresent(CKSyncEngine.State.Serialization.self, forKey: .engineState)
+        historyToken = try c.decodeIfPresent(Data.self, forKey: .historyToken)
+        bootstrapQueued = try c.decodeIfPresent(Bool.self, forKey: .bootstrapQueued) ?? false
+        boundUserRecordName = try c.decodeIfPresent(String.self, forKey: .boundUserRecordName)
+        outbox = try c.decodeIfPresent([JournalSyncPendingChange].self, forKey: .outbox) ?? []
+        lastKnownRecords = try c.decodeIfPresent([String: Data].self, forKey: .lastKnownRecords) ?? [:]
+        awaitingParent = try c.decodeIfPresent([String: JournalSyncHeldAttachment].self, forKey: .awaitingParent) ?? [:]
+        conflicts = try c.decodeIfPresent([JournalSyncConflict].self, forKey: .conflicts) ?? []
+        log = try c.decodeIfPresent([JournalSyncLogEntry].self, forKey: .log) ?? []
+        bytesSent = try c.decodeIfPresent(Int64.self, forKey: .bytesSent) ?? 0
+        bytesReceived = try c.decodeIfPresent(Int64.self, forKey: .bytesReceived) ?? 0
+        recordsSent = try c.decodeIfPresent(Int.self, forKey: .recordsSent) ?? 0
+        recordsReceived = try c.decodeIfPresent(Int.self, forKey: .recordsReceived) ?? 0
+        initialFetchComplete = try c.decodeIfPresent(Bool.self, forKey: .initialFetchComplete) ?? false
+        pendingOwnerAdoption = try c.decodeIfPresent(String.self, forKey: .pendingOwnerAdoption)
+        ownershipReport = try c.decodeIfPresent(String.self, forKey: .ownershipReport)
+        ineligibleCount = try c.decodeIfPresent(Int.self, forKey: .ineligibleCount) ?? 0
+        ownerConflicts = try c.decodeIfPresent(Int.self, forKey: .ownerConflicts) ?? 0
+        customRecordNames = try c.decodeIfPresent([String: String].self, forKey: .customRecordNames) ?? [:]
+        customsBootstrapQueued = try c.decodeIfPresent(Bool.self, forKey: .customsBootstrapQueued) ?? false
+        listFingerprints = try c.decodeIfPresent([String: String].self, forKey: .listFingerprints) ?? [:]
+        listScope = try c.decodeIfPresent(String.self, forKey: .listScope)
+        noOwnerStoresMergedInto = try c.decodeIfPresent(String.self, forKey: .noOwnerStoresMergedInto)
+    }
 }
 
 /// Thread-safe owner of `JournalSyncPersistedState`. Every mutation goes

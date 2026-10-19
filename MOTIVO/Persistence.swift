@@ -166,7 +166,8 @@ extension PersistenceController {
 
 
     /// Normalize names for dedupe/search (case + diacritic-insensitive; whitespace-collapsing).
-    static func normalized(_ raw: String) -> String {
+    /// Pure, so callable off the main actor (the sync importer de-duplicates on a background context).
+    nonisolated static func normalized(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
         let collapsed = lowered

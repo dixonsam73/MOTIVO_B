@@ -38,7 +38,14 @@ enum JournalRecordMapping {
     static let sessionKeys = ["title", "notes", "timestamp", "durationSeconds", "activityType", "activityDetail",
                               "mood", "effort", "threadLabel", "userInstrumentLabel", "userActivityLabel",
                               "areNotesPrivate", "isPublic", "ownerUserID", "userModifiedAt"]
-    static let attachmentKeys = ["kind", "displayName", "createdAt", "isThumbnail", "ownerUserID", "userModifiedAt"]
+    /// No `ownerUserID`: an attachment's owner follows its session locally, so
+    /// giving a journal its owner never re-sends media.
+    static let attachmentKeys = ["kind", "displayName", "createdAt", "isThumbnail", "userModifiedAt"]
+    /// Custom rows: no owner either; an import is stamped with this install's K2.
+    static let userInstrumentKeys = ["displayName", "normalizedName", "displayOrder", "isVisibleOnProfile"]
+    static let userActivityKeys = ["displayName", "normalizedName", "coreActivityCode"]
+    static let savedListNameKey = "name"
+    static let savedListItemsKey = "items"
     static let assetKey = "file"
     static let fileExtKey = "fileExt"
     static let sessionRefKey = "session"
@@ -58,6 +65,10 @@ enum JournalRecordMapping {
         switch entity {
         case JournalSyncRecordType.session:
             for key in sessionKeys { record[key] = ckValue(object.value(forKey: key)) }
+        case JournalSyncRecordType.userInstrument:
+            for key in userInstrumentKeys { record[key] = ckValue(object.value(forKey: key)) }
+        case JournalSyncRecordType.userActivity:
+            for key in userActivityKeys { record[key] = ckValue(object.value(forKey: key)) }
         case JournalSyncRecordType.attachment:
             for key in attachmentKeys { record[key] = ckValue(object.value(forKey: key)) }
             if let session = object.value(forKey: "session") as? NSManagedObject,
@@ -102,6 +113,8 @@ enum JournalRecordMapping {
         switch record.recordType {
         case JournalSyncRecordType.session: keys = sessionKeys
         case JournalSyncRecordType.attachment: keys = attachmentKeys
+        case JournalSyncRecordType.userInstrument: keys = userInstrumentKeys
+        case JournalSyncRecordType.userActivity: keys = userActivityKeys
         default: return false
         }
         if object.value(forKey: "id") == nil, let id = UUID(uuidString: record.recordID.recordName) {
@@ -137,6 +150,28 @@ enum JournalRecordMapping {
             object.setValue(materialisedURL(recordName: record.recordID.recordName, ext: ext).path, forKey: "fileURL")
         }
         return true
+    }
+
+    // MARK: SavedList (UserDefaults, not Core Data)
+
+    /// The list's lines as JSON. `sourceSendID` is local provenance and stays
+    /// on the device.
+    static func record(for list: SavedList, base: CKRecord?) -> CKRecord? {
+        let record = base ?? CKRecord(recordType: JournalSyncRecordType.savedList, recordID: recordID(for: list.id))
+        guard record.recordType == JournalSyncRecordType.savedList,
+              let items = try? JSONEncoder().encode(list.items) else { return nil }
+        record[savedListNameKey] = list.name as CKRecordValue
+        record[savedListItemsKey] = items as CKRecordValue
+        return record
+    }
+
+    static func savedList(from record: CKRecord) -> SavedList? {
+        guard record.recordType == JournalSyncRecordType.savedList,
+              let id = UUID(uuidString: record.recordID.recordName),
+              let name = record[savedListNameKey] as? String,
+              let data = record[savedListItemsKey] as? Data,
+              let items = try? JSONDecoder().decode([SavedListLine].self, from: data) else { return nil }
+        return SavedList(id: id, name: name, items: items)
     }
 
     static func userModifiedAt(of record: CKRecord) -> Date? { record["userModifiedAt"] as? Date }
