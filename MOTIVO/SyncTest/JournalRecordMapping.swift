@@ -44,6 +44,12 @@ enum JournalRecordMapping {
     /// Custom rows: no owner either; an import is stamped with this install's K2.
     static let userInstrumentKeys = ["displayName", "normalizedName", "displayOrder", "isVisibleOnProfile"]
     static let userActivityKeys = ["displayName", "normalizedName", "coreActivityCode"]
+    static let instrumentKeys = ["name"]
+    /// A session's (or a custom instrument's) link to a profile instrument:
+    /// the reference by id, plus the name so it resolves before, or without,
+    /// the Instrument record itself.
+    static let instrumentRefKey = "instrumentRef"
+    static let instrumentNameKey = "instrumentName"
     static let savedListNameKey = "name"
     static let savedListItemsKey = "items"
     static let assetKey = "file"
@@ -65,8 +71,12 @@ enum JournalRecordMapping {
         switch entity {
         case JournalSyncRecordType.session:
             for key in sessionKeys { record[key] = ckValue(object.value(forKey: key)) }
+            setInstrumentLink(record, object.value(forKey: "instrument") as? NSManagedObject)
+        case JournalSyncRecordType.instrument:
+            for key in instrumentKeys { record[key] = ckValue(object.value(forKey: key)) }
         case JournalSyncRecordType.userInstrument:
             for key in userInstrumentKeys { record[key] = ckValue(object.value(forKey: key)) }
+            setInstrumentLink(record, object.value(forKey: "coreInstrument") as? NSManagedObject)
         case JournalSyncRecordType.userActivity:
             for key in userActivityKeys { record[key] = ckValue(object.value(forKey: key)) }
         case JournalSyncRecordType.attachment:
@@ -88,6 +98,21 @@ enum JournalRecordMapping {
             return nil
         }
         return record
+    }
+
+    private static func setInstrumentLink(_ record: CKRecord, _ instrument: NSManagedObject?) {
+        if let instrument, let id = instrument.value(forKey: "id") as? UUID {
+            record[instrumentRefKey] = CKRecord.Reference(recordID: recordID(for: id), action: .none)
+            record[instrumentNameKey] = (instrument.value(forKey: "name") as? String).map { $0 as CKRecordValue }
+        } else {
+            record[instrumentRefKey] = nil
+            record[instrumentNameKey] = nil
+        }
+    }
+
+    /// The instrument a session or custom row points at, as (record name, name).
+    static func instrumentLink(of record: CKRecord) -> (recordName: String?, name: String?) {
+        ((record[instrumentRefKey] as? CKRecord.Reference)?.recordID.recordName, record[instrumentNameKey] as? String)
     }
 
     private static func ckValue(_ value: Any?) -> CKRecordValue? {
@@ -115,6 +140,7 @@ enum JournalRecordMapping {
         case JournalSyncRecordType.attachment: keys = attachmentKeys
         case JournalSyncRecordType.userInstrument: keys = userInstrumentKeys
         case JournalSyncRecordType.userActivity: keys = userActivityKeys
+        case JournalSyncRecordType.instrument: keys = instrumentKeys
         default: return false
         }
         if object.value(forKey: "id") == nil, let id = UUID(uuidString: record.recordID.recordName) {

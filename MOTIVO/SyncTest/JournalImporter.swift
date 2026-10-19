@@ -16,6 +16,14 @@
 //  with this install's K2; duplicates by normalised name collapse to the
 //  smallest id on every device.
 //
+//  Profile instruments (`Instrument`, what `Session.instrument` points at)
+//  sync by id and name. A session's link resolves by id, then by a recorded
+//  alias, then by name against this device's instruments, and only then
+//  creates the instrument under the local profile. Two devices that each
+//  had "Cello" before they met keep their own rows; an alias maps the other
+//  device's id to this one's, so nothing is deleted or re-keyed and the
+//  per-instrument list settings keep working.
+//
 
 #if SYNCTEST
 import Foundation
@@ -55,6 +63,10 @@ final class JournalImporter {
         let sessions = records.filter { $0.recordType == JournalSyncRecordType.session }
         let attachments = records.filter { $0.recordType == JournalSyncRecordType.attachment }
         let customs = records.filter { JournalSyncRecordType.customs.contains($0.recordType) }
+        let instruments = records.filter { $0.recordType == JournalSyncRecordType.instrument }
+        // Instruments first, so sessions and custom rows resolve them by id.
+        var importedInstruments: [NSManagedObject] = []
+        for record in instruments { if let o = importInstrument(record) { importedInstruments.append(o); summary.received += 1 } }
         for record in sessions { if importSession(record) { summary.received += 1 } }
         for record in attachments {
             let outcome = importAttachment(record)
@@ -78,6 +90,15 @@ final class JournalImporter {
             if let object = importCustom(record) { importedCustoms.append(object); summary.received += 1; summary.customs += 1 }
         }
         save()
+        if !importedInstruments.isEmpty {
+            store.update { st in
+                for object in importedInstruments where !object.objectID.isTemporaryID {
+                    if let id = object.value(forKey: "id") as? UUID {
+                        st.customRecordNames[object.objectID.uriRepresentation().absoluteString] = id.uuidString
+                    }
+                }
+            }
+        }
         if !importedCustoms.isEmpty {
             store.update { st in
                 for object in importedCustoms where !object.objectID.isTemporaryID {
@@ -114,6 +135,8 @@ final class JournalImporter {
         }
         let object = existing ?? NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.session, into: context)
         _ = JournalRecordMapping.apply(record, to: object)
+        let link = JournalRecordMapping.instrumentLink(of: record)
+        object.setValue(resolveInstrument(recordName: link.recordName, name: link.name), forKey: "instrument")
         let merged = JournalOwnership.mergedOwner(local: localOwner, server: serverOwner)
         object.setValue(merged, forKey: "ownerUserID")
         if let l = JournalOwnership.normalized(localOwner), let s = JournalOwnership.normalized(serverOwner), l != s {
@@ -235,8 +258,70 @@ final class JournalImporter {
         let object = existing ?? NSEntityDescription.insertNewObject(forEntityName: record.recordType, into: context)
         guard JournalRecordMapping.apply(record, to: object) else { return nil }
         object.setValue(owner, forKey: "ownerUserID")
+        if record.recordType == JournalSyncRecordType.userInstrument {
+            let link = JournalRecordMapping.instrumentLink(of: record)
+            if let core = resolveInstrument(recordName: link.recordName, name: link.name) { object.setValue(core, forKey: "coreInstrument") }
+        }
         store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
         return object
+    }
+
+    // MARK: Profile instruments
+
+    /// Applies an Instrument record: by id, else by alias, else by name (an
+    /// alias is recorded and no row is made), else a new row under the local
+    /// profile with the record's id.
+    private func importInstrument(_ record: CKRecord) -> NSManagedObject? {
+        let name = record.recordID.recordName
+        guard UUID(uuidString: name) != nil, let instrumentName = record["name"] as? String else { return nil }
+        let object = resolveInstrument(recordName: name, name: instrumentName, applyName: true)
+        store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+        return object
+    }
+
+    /// The local Instrument for a link. With `applyName` the resolved row takes
+    /// the record's name (a rename on the other device); otherwise the name is
+    /// only used to find or create the row.
+    func resolveInstrument(recordName: String?, name: String?, applyName: Bool = false) -> NSManagedObject? {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let recordName, let id = UUID(uuidString: recordName) {
+            if let byID = fetch(entity: JournalSyncRecordType.instrument, id: id) {
+                if applyName, !trimmed.isEmpty, (byID.value(forKey: "name") as? String) != trimmed { byID.setValue(trimmed, forKey: "name") }
+                return byID
+            }
+            if let alias = store.state.instrumentAliases[recordName], let aliasID = UUID(uuidString: alias),
+               let byAlias = fetch(entity: JournalSyncRecordType.instrument, id: aliasID) {
+                if applyName, !trimmed.isEmpty, (byAlias.value(forKey: "name") as? String) != trimmed { byAlias.setValue(trimmed, forKey: "name") }
+                return byAlias
+            }
+        }
+        guard !trimmed.isEmpty else { return nil }
+        if let byName = instrument(named: trimmed) {
+            if let recordName, let localID = byName.value(forKey: "id") as? UUID, localID.uuidString != recordName {
+                store.update { $0.instrumentAliases[recordName] = localID.uuidString }
+                log("Instrument \"\(trimmed)\" exists here as \(localID.uuidString.prefix(8))…; aliasing \(recordName.prefix(8))… to it")
+            }
+            return byName
+        }
+        let created = NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.instrument, into: context)
+        created.setValue(recordName.flatMap(UUID.init(uuidString:)) ?? UUID(), forKey: "id")
+        created.setValue(trimmed, forKey: "name")
+        created.setValue(localProfile(), forKey: "profile")
+        log("Created instrument \"\(trimmed)\" from the journal")
+        return created
+    }
+
+    private func instrument(named name: String) -> NSManagedObject? {
+        let wanted = PersistenceController.normalized(name)
+        let request = NSFetchRequest<NSManagedObject>(entityName: JournalSyncRecordType.instrument)
+        let rows = (try? context.fetch(request)) ?? []
+        return rows.first { PersistenceController.normalized($0.value(forKey: "name") as? String ?? "") == wanted }
+    }
+
+    private func localProfile() -> NSManagedObject? {
+        let request = NSFetchRequest<NSManagedObject>(entityName: "Profile")
+        request.fetchLimit = 1
+        return (try? context.fetch(request))?.first
     }
 
     /// Collapses custom rows of this install that share a normalised name to
@@ -300,6 +385,9 @@ final class JournalImporter {
                 } else if type == JournalSyncRecordType.attachment {
                     removeFile(of: object)
                 }
+                // An Instrument deleted on the other device goes here only when
+                // it is the same row (same id); an aliased row of this device's
+                // own stays, and its alias is dropped.
                 let uri = object.objectID.uriRepresentation().absoluteString
                 context.delete(object)
                 store.update { $0.customRecordNames.removeValue(forKey: uri) }
@@ -308,6 +396,7 @@ final class JournalImporter {
                 $0.lastKnownRecords.removeValue(forKey: recordID.recordName)
                 $0.outbox.removeAll { $0.recordName == recordID.recordName }
                 $0.awaitingParent.removeValue(forKey: recordID.recordName)
+                $0.instrumentAliases.removeValue(forKey: recordID.recordName)
             }
         }
         save()
@@ -326,9 +415,9 @@ final class JournalImporter {
     func resolveSendConflict(recordType: String, recordName: String, server: CKRecord) -> Bool {
         guard let id = UUID(uuidString: recordName), let local = fetch(entity: recordType, id: id) else { return false }
         store.update { $0.lastKnownRecords[recordName] = JournalSyncStateStore.encodeSystemFields(server) }
-        if JournalSyncRecordType.customs.contains(recordType) {
+        if JournalSyncRecordType.customs.contains(recordType) || recordType == JournalSyncRecordType.instrument {
             _ = JournalRecordMapping.apply(server, to: local)
-            if let owner = customOwner { local.setValue(owner, forKey: "ownerUserID") }
+            if JournalSyncRecordType.customs.contains(recordType), let owner = customOwner { local.setValue(owner, forKey: "ownerUserID") }
             save()
             queue?.removePendingSave(recordName)
             log("Conflict on \(recordType) \(recordName): server kept")
@@ -343,6 +432,8 @@ final class JournalImporter {
             _ = JournalRecordMapping.apply(server, to: local)
             var resend = false
             if recordType == JournalSyncRecordType.session {
+                let link = JournalRecordMapping.instrumentLink(of: server)
+                local.setValue(resolveInstrument(recordName: link.recordName, name: link.name), forKey: "instrument")
                 let merged = JournalOwnership.mergedOwner(local: localOwner, server: serverOwner)
                 local.setValue(merged, forKey: "ownerUserID")
                 followSessionOwner(local)

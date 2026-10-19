@@ -95,6 +95,13 @@ struct JournalSyncPersistedState: Codable {
     /// are kept here by object URI to turn a local deletion into a server one.
     var customRecordNames: [String: String] = [:]
     var customsBootstrapQueued = false
+    /// Stage C: profile instruments, and the instrument links of sessions
+    /// already uploaded, queued once (an upgrade of an existing store).
+    var instrumentsBootstrapQueued = false
+    /// Instrument record name (the other device's id) → this device's
+    /// Instrument id, when both had an instrument of the same name before
+    /// they met. Neither row is deleted or re-keyed; sessions resolve through it.
+    var instrumentAliases: [String: String] = [:]
     /// SavedList id → content hash last sent or received, valid for `listScope`.
     var listFingerprints: [String: String] = [:]
     /// The owner scope the fingerprints were taken under. A scope change is a
@@ -126,8 +133,10 @@ struct JournalSyncPersistedState: Codable {
         ownerConflicts = try c.decodeIfPresent(Int.self, forKey: .ownerConflicts) ?? 0
         customRecordNames = try c.decodeIfPresent([String: String].self, forKey: .customRecordNames) ?? [:]
         customsBootstrapQueued = try c.decodeIfPresent(Bool.self, forKey: .customsBootstrapQueued) ?? false
+        instrumentsBootstrapQueued = try c.decodeIfPresent(Bool.self, forKey: .instrumentsBootstrapQueued) ?? false
         listFingerprints = try c.decodeIfPresent([String: String].self, forKey: .listFingerprints) ?? [:]
         listScope = try c.decodeIfPresent(String.self, forKey: .listScope)
+        instrumentAliases = try c.decodeIfPresent([String: String].self, forKey: .instrumentAliases) ?? [:]
     }
 }
 

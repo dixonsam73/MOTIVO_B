@@ -18,7 +18,16 @@
 import Foundation
 import CloudKit
 import CoreData
+import Network
 import os
+
+/// Backoff for a failed first iCloud check: 5, 10, 20, 40 s, then every 60 s.
+enum JournalSyncStartRetry {
+    static func delay(attempt: Int) -> TimeInterval {
+        guard attempt >= 1 else { return 5 }
+        return min(60, 5 * pow(2, Double(attempt - 1)))
+    }
+}
 
 @MainActor
 final class JournalSyncStatus: ObservableObject {
@@ -59,6 +68,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     var fetchCycleCompleted: (@MainActor () -> Void)?
     private var listObserver: NSObjectProtocol?
     private var listScanScheduled = false
+    /// The part of `start()` after the iCloud check has run once.
+    private var started = false
+    private var startAttempts = 0
+    private var waitingForICloud = false
+    private var startInFlight = false
+    private var pathMonitor: NWPathMonitor?
 
     init(containerIdentifier: String, persistence: NSPersistentContainer, store: JournalSyncStateStore, status: JournalSyncStatus, customOwner: String?) {
         self.container = CKContainer(identifier: containerIdentifier)
@@ -88,13 +103,26 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     // MARK: Lifecycle
 
     func start() async {
-        stampObserver = JournalUserEditStamp.install()
+        if stampObserver == nil { stampObserver = JournalUserEditStamp.install() }
+        await attemptStart()
+    }
+
+    /// The iCloud check, then the one-time remainder of start-up. A failed
+    /// check (offline, or no iCloud account yet) is NOT an account change: the
+    /// journal and pending work are kept and the check is retried on a backoff
+    /// and as soon as the network path is satisfied, with no relaunch needed.
+    /// A bound-account mismatch still pauses and is not retried here.
+    private func attemptStart() async {
+        guard !started, !startInFlight else { return }
+        startInFlight = true
+        defer { startInFlight = false }
         await publish { $0.phase = "Checking iCloud account" }
         do {
             let me = try await container.userRecordID()
             currentUserRecordName = me.recordName
             if let bound = store.state.boundUserRecordName {
                 if bound != me.recordName {
+                    waitingForICloud = false
                     pause("This journal is linked to a different iCloud account. Nothing is uploaded.")
                     return
                 }
@@ -103,9 +131,14 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 log("Bound journal to iCloud user \(me.recordName)")
             }
         } catch {
-            pause("iCloud unavailable: \(error.localizedDescription)")
+            scheduleStartRetry(after: error)
             return
         }
+        if waitingForICloud { log("iCloud reachable again; starting without a relaunch") }
+        waitingForICloud = false
+        stateLock.lock(); paused = false; stateLock.unlock()
+        await publish { $0.pausedReason = nil }
+        started = true
 
         engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
         let bootstrapped = tracker.bootstrapIfNeeded()
@@ -129,6 +162,32 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                   ctx.persistentStoreCoordinator === self.persistence.persistentStoreCoordinator else { return }
             self.noteLocalChanges()
         }
+    }
+
+    private func scheduleStartRetry(after error: Error) {
+        waitingForICloud = true
+        startAttempts += 1
+        let delay = JournalSyncStartRetry.delay(attempt: startAttempts)
+        log("iCloud check failed (\(error.localizedDescription)); journal and pending changes kept; retrying in \(Int(delay)) s")
+        Task { @MainActor in self.status.pausedReason = "Waiting for iCloud (retrying)"; self.status.phase = "Waiting for iCloud" }
+        installPathMonitorIfNeeded()
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard let self, self.waitingForICloud else { return }
+            await self.attemptStart()
+        }
+    }
+
+    /// Retries at once when connectivity returns, instead of waiting out the backoff.
+    private func installPathMonitorIfNeeded() {
+        guard pathMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self, path.status == .satisfied, self.waitingForICloud else { return }
+            Task { await self.attemptStart() }
+        }
+        monitor.start(queue: DispatchQueue(label: "com.samueldixon.motivo.synctest.path"))
+        pathMonitor = monitor
     }
 
     /// Lists live in UserDefaults; any defaults change schedules one scan.
@@ -406,11 +465,17 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         return Eligibility(journalOwner: owner, customOwner: customOwner)
     }
 
+    /// Instruments, then everything sessions need, then attachments, deletes last.
     private func rank(_ change: CKSyncEngine.PendingRecordZoneChange, _ types: [String: String]) -> Int {
         switch change {
-        case .saveRecord(let id): return types[id.recordName] == JournalSyncRecordType.attachment ? 1 : 0
-        case .deleteRecord: return 2
-        @unknown default: return 3
+        case .saveRecord(let id):
+            switch types[id.recordName] {
+            case JournalSyncRecordType.instrument: return 0
+            case JournalSyncRecordType.attachment: return 2
+            default: return 1
+            }
+        case .deleteRecord: return 3
+        @unknown default: return 4
         }
     }
 
@@ -422,7 +487,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         var ineligible = false
         importContext.performAndWait {
             let entities = type.map { [$0] } ?? [JournalSyncRecordType.session, JournalSyncRecordType.attachment,
-                                                 JournalSyncRecordType.userInstrument, JournalSyncRecordType.userActivity]
+                                                 JournalSyncRecordType.userInstrument, JournalSyncRecordType.userActivity,
+                                                 JournalSyncRecordType.instrument]
             guard let object = entities.lazy.compactMap({ self.fetch(entity: $0, id: id, in: self.importContext) }).first else { return }
             switch object.entity.name {
             case JournalSyncRecordType.session:
@@ -432,6 +498,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 let session = object.value(forKey: "session") as? NSManagedObject
                 ineligible = session == nil || !JournalOwnership.isEligible(owner: session?.value(forKey: "ownerUserID") as? String,
                                                                              journalOwner: eligibility.journalOwner)
+            case JournalSyncRecordType.instrument:
+                ineligible = false   // profile instruments have no owner
             default:
                 // Custom rows: only this install's own (K2). Rows under any other
                 // owner (legacy, or the backend-id hydration bug) stay local.
@@ -458,6 +526,13 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     // MARK: Account
 
     private func handleAccountChange(_ e: CKSyncEngine.Event.AccountChange) {
+        if !started {
+            // The first iCloud check never passed (offline, or signed in later):
+            // this is the start we were waiting for, not a change of account.
+            if case .signOut = e.changeType { return }
+            Task { await attemptStart() }
+            return
+        }
         switch e.changeType {
         case .signIn(let user):
             currentUserRecordName = user.recordName

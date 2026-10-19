@@ -590,6 +590,40 @@ the join.
   ≈ 25 min waiting on builds; Samuel ≈ 40 min at the devices, ≈ 25 min
   waiting on fixes. Reset rule: Delete server zone, Clear owner key (both
   devices), delete both apps, reinstall.
+  **Stage C, session round trip: built and unit-tested 2026-10-19; device
+  run pending.** (1) Profile instruments (`Instrument`, what
+  `Session.instrument` points at) now sync by id and name; a session and a
+  custom-instrument mirror carry their instrument link (`instrumentRef` +
+  `instrumentName`). A link resolves by id, then by a recorded alias, then
+  by name against this device's instruments, and only then creates the row
+  under the local profile with the sender's id. Two devices that each had
+  "Cello" before they met keep their own rows and an alias maps the other
+  device's id (nothing deleted or re-keyed, so per-instrument list settings
+  keep working); a rename reaches the aliased row; an Instrument deleted on
+  the other device is removed here only when it is the same row. Instruments
+  are sent before sessions. This is what lets the editor save the other
+  device's sessions (`AddEditSessionView` Save needs an instrument object).
+  (2) A failed first iCloud check (offline, or no iCloud account yet) is no
+  longer terminal: the journal and pending work are kept, the check is
+  retried on a 5/10/20/40/60 s backoff and at once when the network path is
+  satisfied (`NWPathMonitor`), and a later CloudKit sign-in event starts
+  the engine rather than "resuming" one that never started. Network
+  unavailability is never treated as an account change; a bound-account
+  mismatch still pauses and is not retried. (3) C-116 fixed in production
+  (`0bc7891`, separate commit): `LocalOwnerStoreMigration` runs once per
+  owner from `applyLocalSignIn`; the trial's adoption path uses the same
+  code. Verified by tests: both sides holding lists merge by id with
+  neither lost; the same name twice stays two lists; repeat or interruption
+  neither loses nor duplicates; a scope change never produces cloud
+  deletions; a list deleted after the merge is not brought back. The other
+  merged stores: ensembles by id, tint entries and saves by key (union);
+  per-context list settings and autofill flags are single values, so where
+  both scopes set the same context the owner's value stands and the
+  pre-sign-in value is left in place but not applied (reported, not
+  changed). 8 new unit tests (`SyncTestInstrumentSyncTests`); Debug,
+  Release and SyncTest build. **Device run still to do** (iPhone session
+  with instrument, notes and attachment → opens, edits and saves on the
+  iPad; reverse edit; offline start then reconnect without relaunch).
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

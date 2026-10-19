@@ -24,13 +24,17 @@ enum JournalSyncRecordType {
     static let attachment = "Attachment"
     static let userInstrument = "UserInstrument"
     static let userActivity = "UserActivity"
+    /// The profile's instruments, which sessions point at (`Session.instrument`).
+    static let instrument = "Instrument"
     /// Not a Core Data entity: saved Lists live in UserDefaults.
     static let savedList = "SavedList"
     static let customs: Set<String> = [userInstrument, userActivity]
+    /// Rows without a preserved id: deletions are found through the URI map.
+    static let directory: Set<String> = customs.union([instrument])
     /// Entities that carry `userModifiedAt` and a preserved `id`.
     static let stamped: Set<String> = [session, attachment]
     /// Entities read from persistent history.
-    static let tracked: Set<String> = stamped.union(customs)
+    static let tracked: Set<String> = stamped.union(directory)
 }
 
 final class JournalChangeTracker {
@@ -83,29 +87,50 @@ final class JournalChangeTracker {
     }
 
     /// Stage B: queues every custom instrument and activity of this install
-    /// (K2) once, recording each object's URI so a later local deletion can be
-    /// sent. Rows under any other owner are left alone.
+    /// (K2) and every profile instrument once, recording each object's URI so
+    /// a later local deletion can be sent. Rows under any other owner are
+    /// left alone.
     @discardableResult
     func bootstrapCustomsIfNeeded(customOwner: String?) -> Int {
-        guard store.state.customsBootstrapQueued == false, let customOwner else { return 0 }
+        guard let customOwner else { return 0 }
+        let customs = store.state.customsBootstrapQueued == false
+        let instruments = store.state.instrumentsBootstrapQueued == false
+        guard customs || instruments else { return 0 }
         var pending: [JournalSyncPendingChange] = []
         var names: [String: String] = [:]
         context.performAndWait {
-            for entity in [JournalSyncRecordType.userInstrument, JournalSyncRecordType.userActivity] {
+            var entities: [String] = []
+            if customs { entities += [JournalSyncRecordType.userInstrument, JournalSyncRecordType.userActivity] }
+            if instruments { entities.append(JournalSyncRecordType.instrument) }
+            for entity in entities {
                 let request = NSFetchRequest<NSManagedObject>(entityName: entity)
-                request.predicate = NSPredicate(format: "ownerUserID == %@", customOwner)
+                if entity != JournalSyncRecordType.instrument {
+                    request.predicate = NSPredicate(format: "ownerUserID == %@", customOwner)
+                }
                 for row in (try? context.fetch(request)) ?? [] {
                     guard let id = row.value(forKey: "id") as? UUID else { continue }
                     names[row.objectID.uriRepresentation().absoluteString] = id.uuidString
                     pending.append(.init(recordName: id.uuidString, recordType: entity, op: .save))
                 }
             }
+            if instruments, store.state.bootstrapQueued {
+                // An existing store whose sessions were uploaded before links
+                // existed: send each session with an instrument once more, so
+                // the other device can resolve it. Attachments are untouched.
+                let request = NSFetchRequest<NSManagedObject>(entityName: JournalSyncRecordType.session)
+                request.predicate = NSPredicate(format: "instrument != nil")
+                for row in (try? context.fetch(request)) ?? [] {
+                    guard let id = row.value(forKey: "id") as? UUID else { continue }
+                    pending.append(.init(recordName: id.uuidString, recordType: JournalSyncRecordType.session, op: .save))
+                }
+            }
         }
         let ok = store.update { st in
             Self.merge(pending, into: &st.outbox)
             st.customRecordNames.merge(names) { _, new in new }
-            st.customsBootstrapQueued = true
-            st.log.append(.init(at: Date(), text: "Bootstrap queued \(pending.count) custom row(s)"))
+            if customs { st.customsBootstrapQueued = true }
+            if instruments { st.instrumentsBootstrapQueued = true }
+            st.log.append(.init(at: Date(), text: "Bootstrap queued \(pending.count) directory row(s) / linked session(s)"))
         }
         return ok ? pending.count : 0
     }
@@ -169,7 +194,7 @@ final class JournalChangeTracker {
                             // An attachment's owner is not synced (it follows its session).
                             if entity == JournalSyncRecordType.attachment, JournalOwnership.isOwnershipOnly(keys) { continue }
                         }
-                        if JournalSyncRecordType.customs.contains(entity) { namesAdded[uri] = id.uuidString }
+                        if JournalSyncRecordType.directory.contains(entity) { namesAdded[uri] = id.uuidString }
                         added.append(.init(recordName: id.uuidString, recordType: entity, op: .save))
                     case .delete:
                         if let id = change.tombstone?["id"] as? UUID {
