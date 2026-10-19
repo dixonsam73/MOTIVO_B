@@ -519,9 +519,24 @@ the join.
   Guitar"); owner-key adoption did not fire on the iPad (records carry the
   owner; early exits now logged). The full copies live outside the repo in
   `~/Documents/Xcode projects/EtudesDev-container-copy-2026-10-18` and
-  `…/EtudesDev-subset-2026-07-01`. **Left:** the full-history run (112
-  sessions, 832 MB) after another reset; the Attachment `recordName` index
-  in the Console to clear one orphaned test attachment.
+  `…/EtudesDev-subset-2026-07-01`.
+  **Checkpoint 2, full history: passed 2026-10-19.** The whole journal
+  (112 sessions, 83 attachments, 679 MB; prepared by `make_subset.swift`
+  with cutoff 2000-01-01, verified) uploaded from a fresh iPhone Sync Test
+  install in ~75 s (195 records); the empty iPad imported all 195 records
+  in 4 min 48 s, owner key adopted, every entry and medium opening, new
+  Thoughts still crossing. **Findings:** (1) deleting records server-side
+  for the reset left tombstones that a fresh engine applied to the restored
+  full copy, removing 47 real entries from the trial copy (Études Dev
+  unaffected); a restored backup after deletions elsewhere would lose them
+  the same way, so resets delete the zone (diagnostics button) and the
+  product must state that sync is not backup; (2) the engine delivers a
+  cold import only after every asset in the batch has downloaded, so the
+  journal is empty for ~5 min and then complete: a visible first-sync state
+  is needed; (3) owner adoption had never been wired to the engine (fixed).
+  **Trial complete.** Untested remains as listed: account sign-out, per-app
+  iCloud off, account switch; Scores, lists, privacy map, Instrument/Tag
+  relationships, profile; Connected with sync on.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

@@ -38,6 +38,8 @@ struct SyncTestDiagnosticsView: View {
                     Button("Reset engine state") { JournalSyncCoordinator.shared.resetEngineState(); refreshTick += 1 }
                         .foregroundStyle(.orange)
                 }
+                Button("Delete server zone (trial reset)") { Task { await JournalSyncCoordinator.shared.engine?.deleteServerZone(); refreshTick += 1 } }
+                    .foregroundStyle(.red)
             }
             Section("Counts") {
                 row("Outbox (pending)", "\(status.outboxCount)")

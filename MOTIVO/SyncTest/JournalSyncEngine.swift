@@ -211,6 +211,26 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, @unchecked Sendab
         }
     }
 
+    /// Diagnostic, trial resets only: delete the whole server zone, which also
+    /// clears its tombstones. Deleting records one by one leaves tombstones
+    /// that a fresh engine applies to a restored copy (seen 2026-10-19: 47
+    /// real entries removed from the full-history copy). Pauses first so
+    /// nothing is re-created or resent by this engine afterwards.
+    func deleteServerZone() async {
+        pause("Server zone deleted for a trial reset; uninstall this app next")
+        let op = CKModifyRecordZonesOperation(recordZonesToSave: nil, recordZoneIDsToDelete: [JournalRecordMapping.zoneID])
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            op.modifyRecordZonesResultBlock = { result in
+                switch result {
+                case .success: self.log("Server zone Journal deleted")
+                case .failure(let error): self.log("Zone delete failed: \(error.localizedDescription)")
+                }
+                continuation.resume()
+            }
+            self.container.privateCloudDatabase.add(op)
+        }
+    }
+
     // MARK: CKSyncEngineDelegate
 
     func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
@@ -693,7 +713,10 @@ final class JournalSyncCoordinator {
         let store = JournalSyncStateStore(fileURL: JournalSyncStateStore.defaultURL())
         self.store = store
         let engine = JournalSyncEngine(containerIdentifier: Self.containerIdentifier, persistence: persistence, store: store, status: status)
+        engine.ownerDiscovered = onOwnerDiscovered
         self.engine = engine
+        // A copied journal (Checkpoint 2) carries its owner key in its sessions.
+        engine.discoverOwnerIfNeeded()
         Task { await engine.start() }
     }
 
