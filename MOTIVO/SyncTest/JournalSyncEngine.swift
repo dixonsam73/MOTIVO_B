@@ -86,6 +86,9 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         ctx.name = "syncImport"
         ctx.transactionAuthor = JournalSyncAuthor.sync
         ctx.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        // Outgoing records must reflect the latest local save, not this
+        // context's cached copy (see JournalImporter.freshObject).
+        ctx.stalenessInterval = 0
         self.importContext = ctx
         self.importer = JournalImporter(context: ctx, store: store, customOwner: customOwner)
         super.init()
@@ -489,7 +492,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             let entities = type.map { [$0] } ?? [JournalSyncRecordType.session, JournalSyncRecordType.attachment,
                                                  JournalSyncRecordType.userInstrument, JournalSyncRecordType.userActivity,
                                                  JournalSyncRecordType.instrument]
-            guard let object = entities.lazy.compactMap({ self.fetch(entity: $0, id: id, in: self.importContext) }).first else { return }
+            guard let object = entities.lazy.compactMap({ self.importer.freshObject(entity: $0, id: id) }).first else { return }
             switch object.entity.name {
             case JournalSyncRecordType.session:
                 ineligible = !JournalOwnership.isEligible(owner: object.value(forKey: "ownerUserID") as? String,

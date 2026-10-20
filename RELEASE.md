@@ -576,8 +576,9 @@ the join.
   it at once, by the rules; the trial reset button now suspends the rules
   first. (3) Editing the other device's session is blocked until the
   Instrument relationship syncs (`AddEditSessionView` Save needs an
-  instrument object). (4) The engine does not retry a failed first iCloud
-  check; after Airplane Mode a relaunch is needed. (5) `ProfileStore`
+  instrument object). (4) Launching in Airplane Mode needs no relaunch: the
+  iCloud account check passes from the system's cache even on a fresh
+  install (an assumption at the time, corrected in stage C). (5) `ProfileStore`
   hydration writes the backend id as a custom-row owner (C-117, separate).
   **Pre-shipping requirement, erase (Samuel, 2026-10-19):** removing local
   data from one device must not silently delete the private iCloud journal
@@ -590,8 +591,7 @@ the join.
   ≈ 25 min waiting on builds; Samuel ≈ 40 min at the devices, ≈ 25 min
   waiting on fixes. Reset rule: Delete server zone, Clear owner key (both
   devices), delete both apps, reinstall.
-  **Stage C, session round trip: built and unit-tested 2026-10-19; device
-  run pending.** (1) Profile instruments (`Instrument`, what
+  **Stage C, session round trip: passed 2026-10-20.** (1) Profile instruments (`Instrument`, what
   `Session.instrument` points at) now sync by id and name; a session and a
   custom-instrument mirror carry their instrument link (`instrumentRef` +
   `instrumentName`). A link resolves by id, then by a recorded alias, then
@@ -620,10 +620,28 @@ the join.
   per-context list settings and autofill flags are single values, so where
   both scopes set the same context the owner's value stands and the
   pre-sign-in value is left in place but not applied (reported, not
-  changed). 8 new unit tests (`SyncTestInstrumentSyncTests`); Debug,
-  Release and SyncTest build. **Device run still to do** (iPhone session
-  with instrument, notes and attachment → opens, edits and saves on the
-  iPad; reverse edit; offline start then reconnect without relaunch).
+  changed). 9 unit tests (`SyncTestInstrumentSyncTests`); Debug, Release
+  and SyncTest build. **Device run (Sync Test installs, disposable data,
+  Études and Études Dev untouched):** the iPhone's stage-B sessions gained
+  their instrument on the iPad and could be saved; a new iPhone session
+  with Viola, notes and a photo opened on the iPad with the right
+  instrument and photo, was edited and saved, the edit reached the iPhone,
+  and a title edit went back at once; an iPad started in Airplane Mode kept
+  a Thought pending and sent it on reconnect without a relaunch; a fresh
+  iPad install launched offline imported all 18 records on reconnect,
+  aliased both devices' "Oud" ids to its own, created "Viola", and sent its
+  Thought with no media re-sent. **Findings:** (6) an edit to a session
+  that had arrived by sync was sent with the notes the engine had imported
+  (the long-lived import context's cached copy; the iPhone never saw the
+  iPad's edit) — fixed, outgoing records and send conflicts read a fresh
+  copy, unit-tested (C-118); (7) editing a session re-saves its attachments
+  and each save re-sends the media file, 4 MB per edit here — a cost for
+  the inventory stage (C-119); (8) an owner-only pending save meeting its
+  own server copy is logged as a tie conflict with identical content —
+  noise, to tidy; (9) the retry for a failed first iCloud check is
+  unit-tested only: not reachable on these devices (see stage B (4)).
+  Hands-on: agent ≈ 14 min items 1–3, ≈ 12 min device-run fix, ≈ 20 min
+  waiting on builds; Samuel ≈ 22 min at the devices, ≈ 8 min waiting.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

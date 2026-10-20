@@ -265,6 +265,33 @@ final class SyncTestInstrumentSyncTests: XCTestCase {
         XCTAssertEqual(tracker.bootstrapCustomsIfNeeded(customOwner: "local:TEST"), 0, "once")
     }
 
+    // MARK: outgoing records read fresh
+
+    func testAnEditToASyncedSessionIsReadFreshForSending() throws {
+        let ctx = container.viewContext
+        makeProfile(in: ctx)
+        try ctx.save()
+        let sid = UUID()
+        let (imp, ictx) = importer()
+        var record = sessionRecord(id: sid, instrumentID: nil, instrumentName: nil)
+        record["notes"] = "as imported" as CKRecordValue
+        ictx.performAndWait { _ = imp.importModifications([record]) }
+        // The person edits the imported session in the app's context.
+        let r = NSFetchRequest<NSManagedObject>(entityName: "Session"); r.predicate = NSPredicate(format: "id == %@", sid as CVarArg)
+        let s = try XCTUnwrap(try ctx.fetch(r).first)
+        s.setValue("edited here", forKey: "notes")
+        try ctx.save()
+        var stale: String?, fresh: String?
+        ictx.performAndWait {
+            stale = imp.fetch(entity: "Session", id: sid)?.value(forKey: "notes") as? String
+            fresh = imp.freshObject(entity: "Session", id: sid)?.value(forKey: "notes") as? String
+        }
+        XCTAssertEqual(fresh, "edited here", "the outgoing record carries the edit")
+        _ = stale  // whatever the cache held; the engine no longer reads it
+        record = try XCTUnwrap(ictx.performAndWait { imp.freshObject(entity: "Session", id: sid).flatMap { JournalRecordMapping.record(for: $0, base: nil) } })
+        XCTAssertEqual(record["notes"] as? String, "edited here")
+    }
+
     // MARK: start retry
 
     func testStartRetryBackoff() {

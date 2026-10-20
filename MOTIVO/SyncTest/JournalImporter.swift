@@ -413,7 +413,7 @@ final class JournalImporter {
     /// Resolves a rejected save against the server copy. Returns true when the
     /// local record should be resent (on top of the server's change tag).
     func resolveSendConflict(recordType: String, recordName: String, server: CKRecord) -> Bool {
-        guard let id = UUID(uuidString: recordName), let local = fetch(entity: recordType, id: id) else { return false }
+        guard let id = UUID(uuidString: recordName), let local = freshObject(entity: recordType, id: id) else { return false }
         store.update { $0.lastKnownRecords[recordName] = JournalSyncStateStore.encodeSystemFields(server) }
         if JournalSyncRecordType.customs.contains(recordType) || recordType == JournalSyncRecordType.instrument {
             _ = JournalRecordMapping.apply(server, to: local)
@@ -484,6 +484,19 @@ final class JournalImporter {
     /// title or notes).
     static func value(_ object: NSManagedObject, _ key: String) -> Any? {
         object.entity.propertiesByName[key] == nil ? nil : object.value(forKey: key)
+    }
+
+    /// A FRESH copy for an outgoing record or a send conflict. The import
+    /// context is long-lived and keeps what it last imported; a later local
+    /// edit made in another context is not seen unless the object is
+    /// refreshed (seen 2026-10-20: an iPad notes edit to a synced session was
+    /// sent with the notes it had imported, so the iPhone never saw the edit).
+    func freshObject(entity: String, id: UUID) -> NSManagedObject? {
+        guard let object = fetch(entity: entity, id: id) else { return nil }
+        context.refresh(object, mergeChanges: false)
+        if object.entity.relationshipsByName["session"] != nil,
+           let session = object.value(forKey: "session") as? NSManagedObject { context.refresh(session, mergeChanges: false) }
+        return object
     }
 
     func fetch(entity: String, id: UUID) -> NSManagedObject? {
