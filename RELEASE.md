@@ -664,12 +664,23 @@ the join.
   one metadata-only attachment record; a photo added during Airplane Mode,
   once with reconnect and once with a relaunch while offline, uploaded
   exactly once each, opened on the iPad, two attachments on both devices.
-  **What the measurements establish:** no file was set on any record sent
-  for a metadata change (upload count and bytes unchanged, record counts
-  rising); they do not show the receiving side, where CloudKit downloads
-  the file of every fetched attachment record even when unchanged — that is
-  transport cost the engine cannot avoid with `CKSyncEngine`, counted as
-  "downloaded" and not written. **Findings:** (10) audio and video renames
+  **Replacement (22:25):** the 35 MB video trimmed and replaced in place
+  on the iPhone sent 4 attachment records with 1 media upload (3.8 MB, the
+  clip) and 3 metadata-only; the iPad logged "Replaced media for … from the
+  other device", the trimmed clip plays there, same attachment set, no
+  duplicate. **Still to demonstrate:** an interruption of a transfer that
+  has begun (Airplane Mode and a force-quit mid-upload of a large new
+  video), and an isolated PDF rename with the iPad's counters read before
+  and after. **What the measurements establish:** no file was set on any
+  record sent for a metadata change (upload count and bytes unchanged,
+  record counts rising). On the receiving side, with the current record
+  structure and fetch implementation, changing attachment metadata can
+  cause the unchanged asset to be fetched again; "Asset bytes delivered by
+  CloudKit" sums the sizes of asset files handed to the app with fetched
+  records and is not a network measurement. Asset-field exclusion through
+  lower-level fetch operations, or a separate record for frequently edited
+  metadata, are options to assess before metadata edits to large audio or
+  video become frequent; neither is started. **Findings:** (10) audio and video renames
   live in the per-device title store (C-47), not on the record, so they do
   not sync; only PDF renames write `displayName`. That is the "attachment
   titles" inventory item: writing `displayName` at the two rename sites and

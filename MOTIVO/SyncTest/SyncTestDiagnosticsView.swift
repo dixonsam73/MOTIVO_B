@@ -72,8 +72,11 @@ struct SyncTestDiagnosticsView: View {
                 row("Records received", "\(status.recordsReceived)")
                 row("Media uploads", "\(state?.assetUploads ?? 0) file(s), \(bytes(status.bytesSent))")
                 row("Attachment records sent, metadata only", "\(state?.attachmentRecordsSentWithoutMedia ?? 0)")
-                row("Media downloaded (transport)", bytes(state?.assetBytesDownloaded ?? 0))
-                row("Media written to this device", bytes(status.bytesReceived))
+                // Sum of the sizes of asset files CloudKit handed the app with
+                // fetched attachment records, whether or not they were kept.
+                // Not a network measurement.
+                row("Asset bytes delivered by CloudKit", bytes(state?.assetBytesDownloaded ?? 0))
+                row("Bytes written to media storage", bytes(status.bytesReceived))
                 row("Bootstrap queued", state?.bootstrapQueued == true ? "yes" : "no")
             }
             if let outbox = state?.outbox, !outbox.isEmpty {
