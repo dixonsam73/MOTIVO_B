@@ -19,10 +19,10 @@ import CloudKit
 
 /// Records what the importer asks the engine to send.
 final class RecordingSendQueue: JournalSendQueue {
-    var saves: [(String, String)] = []
+    var saves: [(String, String, Bool)] = []
     var deletes: [(String, String)] = []
     var removed: [String] = []
-    func enqueueSave(_ recordName: String, recordType: String) { saves.append((recordName, recordType)) }
+    func enqueueSave(_ recordName: String, recordType: String, ownerOnly: Bool) { saves.append((recordName, recordType, ownerOnly)) }
     func enqueueDelete(_ recordName: String, recordType: String) { deletes.append((recordName, recordType)) }
     func removePendingSave(_ recordName: String) { removed.append(recordName) }
 }

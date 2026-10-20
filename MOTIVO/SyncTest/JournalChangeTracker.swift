@@ -188,14 +188,16 @@ final class JournalChangeTracker {
                         // The object may already be gone; its tombstone follows.
                         guard let object = try? context.existingObject(with: change.changedObjectID),
                               let id = object.value(forKey: "id") as? UUID else { continue }
+                        var ownerOnly = false
                         if change.changeType == .update, let keys = change.updatedProperties.map({ Set($0.map(\.name)) }) {
                             // A save whose only changed key is the stamp itself is not a user edit.
                             if keys == ["userModifiedAt"] { continue }
                             // An attachment's owner is not synced (it follows its session).
                             if entity == JournalSyncRecordType.attachment, JournalOwnership.isOwnershipOnly(keys) { continue }
+                            ownerOnly = entity == JournalSyncRecordType.session && JournalOwnership.isOwnershipOnly(keys)
                         }
                         if JournalSyncRecordType.directory.contains(entity) { namesAdded[uri] = id.uuidString }
-                        added.append(.init(recordName: id.uuidString, recordType: entity, op: .save))
+                        added.append(.init(recordName: id.uuidString, recordType: entity, op: .save, ownerOnly: ownerOnly))
                     case .delete:
                         if let id = change.tombstone?["id"] as? UUID {
                             added.append(.init(recordName: id.uuidString, recordType: entity, op: .delete))
@@ -222,13 +224,18 @@ final class JournalChangeTracker {
     }
 
     /// A delete supersedes a pending save of the same record; otherwise entries
-    /// are unique by (name, op).
+    /// are unique by (name, op). A content save absorbs a pending owner-only
+    /// save; an owner-only save never downgrades a pending content save.
     static func merge(_ incoming: [JournalSyncPendingChange], into outbox: inout [JournalSyncPendingChange]) {
         for change in incoming {
             if change.op == .delete {
                 outbox.removeAll { $0.recordName == change.recordName }
             }
-            if !outbox.contains(change) { outbox.append(change) }
+            if let i = outbox.firstIndex(where: { $0.recordName == change.recordName && $0.op == change.op }) {
+                if outbox[i].ownerOnly && !change.ownerOnly { outbox[i] = change }
+            } else {
+                outbox.append(change)
+            }
         }
     }
 }

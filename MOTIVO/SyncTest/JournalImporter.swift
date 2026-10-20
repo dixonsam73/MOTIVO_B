@@ -32,7 +32,7 @@ import CoreData
 
 /// What the importer asks the engine to send.
 protocol JournalSendQueue: AnyObject {
-    func enqueueSave(_ recordName: String, recordType: String)
+    func enqueueSave(_ recordName: String, recordType: String, ownerOnly: Bool)
     func enqueueDelete(_ recordName: String, recordType: String)
     func removePendingSave(_ recordName: String)
 }
@@ -119,7 +119,7 @@ final class JournalImporter {
         let existing = fetch(entity: JournalSyncRecordType.session, id: id)
         let localOwner = existing?.value(forKey: "ownerUserID") as? String
         let serverOwner = record["ownerUserID"] as? String
-        if let existing, localChangePending(name) {
+        if let existing, let pending = pendingSave(name), !pending.ownerOnly {
             let local = existing.value(forKey: "userModifiedAt") as? Date
             let server = JournalRecordMapping.userModifiedAt(of: record)
             if JournalConflictRule.decide(localUserModifiedAt: local, serverUserModifiedAt: server) == .local {
@@ -131,6 +131,11 @@ final class JournalImporter {
                 return false
             }
             recordConflict(record, winner: .server, local: existing)
+            queue?.removePendingSave(name)
+        } else if existing != nil, pendingSave(name)?.ownerOnly == true {
+            // Only the owner key is pending here: the server's content is
+            // simply newer knowledge, not a conflict. The owner is merged below
+            // and re-sent if the server lacks it.
             queue?.removePendingSave(name)
         }
         let object = existing ?? NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.session, into: context)
@@ -148,8 +153,8 @@ final class JournalImporter {
         if JournalOwnership.normalized(merged) != JournalOwnership.normalized(serverOwner) {
             // The server lost an owner this device holds (an edit from a device
             // that had not yet seen the ownership): send it back, owner only.
-            queue?.enqueueSave(name, recordType: JournalSyncRecordType.session)
-            log("Kept owner on \(name) over an ownerless server copy; resending")
+            queue?.enqueueSave(name, recordType: JournalSyncRecordType.session, ownerOnly: true)
+            log("Kept owner on \(name) over an ownerless server copy; resending the owner")
         }
         return true
     }
@@ -199,30 +204,49 @@ final class JournalImporter {
         object.setValue(session, forKey: "session")
         object.setValue(session.value(forKey: "ownerUserID") as? String, forKey: "ownerUserID")
 
-        // Bytes: materialise where the resolver looks, but ONLY when this device
-        // has no usable file already. The device that created the attachment
-        // keeps its own file (named <base>-<id>.<ext> by staging); rewriting its
-        // path to <id>.<ext> would break the attachment it just made.
+        // Media. CloudKit downloads the asset of every fetched attachment record
+        // (transport; counted as such). It is written into place only when this
+        // device has no usable file, or when the server's hash says the file was
+        // replaced on the other device. The device that created the attachment
+        // otherwise keeps its own file (named <base>-<id>.<ext> by staging).
         var bytes: Int64 = 0
         let ext = (record[JournalRecordMapping.fileExtKey] as? String) ?? ""
         let destination = JournalRecordMapping.materialisedURL(recordName: name, ext: ext)
         let existingFile = AttachmentPathResolver.resolve(object.value(forKey: "fileURL") as? String)
         let sourceURL = heldFile.map { URL(fileURLWithPath: $0) } ?? (record[JournalRecordMapping.assetKey] as? CKAsset)?.fileURL
-        if existingFile == nil {
+        let serverHash = record[JournalRecordMapping.fileHashKey] as? String
+        let knownHash = store.state.assetHashes[name]
+        if heldFile == nil, let sourceURL, let size = JournalAssetHash.stamp(of: sourceURL)?.size {
+            store.update { $0.assetBytesDownloaded += size }
+        }
+        let replaced = existingFile != nil && serverHash != nil && knownHash != nil && serverHash != knownHash
+        if existingFile == nil || replaced {
             if let sourceURL, FileManager.default.fileExists(atPath: sourceURL.path) {
-                let incoming = (try? FileManager.default.attributesOfItem(atPath: sourceURL.path)[.size] as? NSNumber)?.int64Value ?? 0
-                let present = (try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? NSNumber)?.int64Value
-                if present != incoming {
+                let incoming = JournalAssetHash.stamp(of: sourceURL)?.size ?? 0
+                let present = JournalAssetHash.stamp(of: destination)?.size
+                if present != incoming || replaced {
                     try? FileManager.default.removeItem(at: destination)
                     do { try FileManager.default.copyItem(at: sourceURL, to: destination); bytes = incoming }
                     catch { log("Could not materialise \(name): \(error.localizedDescription)") }
                 }
-            } else {
+                if replaced, let old = existingFile, old.path != destination.path {
+                    try? FileManager.default.removeItem(at: old)
+                    log("Replaced media for \(name) from the other device")
+                }
+                let hash = serverHash ?? JournalAssetHash.hash(of: destination)
+                store.update { st in
+                    if let hash { st.assetHashes[name] = hash }
+                    st.fileStampCache.removeValue(forKey: name)
+                }
+            } else if existingFile == nil {
                 log("Attachment \(name) arrived without a file")
             }
             // Point at the materialised path even if the copy failed, so the
             // resolver's filename match finds it once a later fetch supplies it.
             object.setValue(destination.path, forKey: "fileURL")
+        } else if knownHash == nil, let serverHash {
+            // Our own file, sent before hashes existed: adopt the server's.
+            store.update { $0.assetHashes[name] = serverHash }
         }
         if heldFile != nil, let sourceURL { try? FileManager.default.removeItem(at: sourceURL) }
         store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
@@ -368,7 +392,7 @@ final class JournalImporter {
             }
         }
         save()
-        for (name, type) in saves { queue?.enqueueSave(name, recordType: type) }
+        for (name, type) in saves { queue?.enqueueSave(name, recordType: type, ownerOnly: false) }
         for (name, type) in deletes { queue?.enqueueDelete(name, recordType: type) }
     }
 
@@ -397,6 +421,8 @@ final class JournalImporter {
                 $0.outbox.removeAll { $0.recordName == recordID.recordName }
                 $0.awaitingParent.removeValue(forKey: recordID.recordName)
                 $0.instrumentAliases.removeValue(forKey: recordID.recordName)
+                $0.assetHashes.removeValue(forKey: recordID.recordName)
+                $0.fileStampCache.removeValue(forKey: recordID.recordName)
             }
         }
         save()
@@ -425,6 +451,23 @@ final class JournalImporter {
         }
         let localOwner = local.value(forKey: "ownerUserID") as? String
         let serverOwner = server["ownerUserID"] as? String
+        if recordType == JournalSyncRecordType.session, pendingSave(recordName)?.ownerOnly == true {
+            // Only the owner key was being sent: take the server's content, keep
+            // the owner, and send the owner again on top of the new change tag.
+            _ = JournalRecordMapping.apply(server, to: local)
+            let link = JournalRecordMapping.instrumentLink(of: server)
+            local.setValue(resolveInstrument(recordName: link.recordName, name: link.name), forKey: "instrument")
+            let merged = JournalOwnership.mergedOwner(local: localOwner, server: serverOwner)
+            local.setValue(merged, forKey: "ownerUserID")
+            followSessionOwner(local)
+            save()
+            queue?.removePendingSave(recordName)
+            if JournalOwnership.normalized(merged) != JournalOwnership.normalized(serverOwner) {
+                queue?.enqueueSave(recordName, recordType: recordType, ownerOnly: true)
+            }
+            log("Owner-only send of \(recordName) met a newer server copy: content taken, owner kept")
+            return false
+        }
         let decision = JournalConflictRule.decide(localUserModifiedAt: local.value(forKey: "userModifiedAt") as? Date,
                                                   serverUserModifiedAt: JournalRecordMapping.userModifiedAt(of: server))
         if decision == .server {
@@ -443,7 +486,7 @@ final class JournalImporter {
             }
             save()
             queue?.removePendingSave(recordName)
-            if resend { queue?.enqueueSave(recordName, recordType: recordType) }
+            if resend { queue?.enqueueSave(recordName, recordType: recordType, ownerOnly: true) }
             log("Conflict on \(recordName): server content kept\(resend ? "; resending owner" : "")")
             return false
         }
@@ -459,7 +502,11 @@ final class JournalImporter {
     // MARK: Helpers
 
     private func localChangePending(_ recordName: String) -> Bool {
-        store.state.outbox.contains { $0.recordName == recordName && $0.op == .save }
+        pendingSave(recordName) != nil
+    }
+
+    private func pendingSave(_ recordName: String) -> JournalSyncPendingChange? {
+        store.state.outbox.first { $0.recordName == recordName && $0.op == .save }
     }
 
     private func recordConflict(_ server: CKRecord, winner: JournalConflictWinner, local: NSManagedObject) {

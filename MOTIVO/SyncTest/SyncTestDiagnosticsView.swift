@@ -70,8 +70,10 @@ struct SyncTestDiagnosticsView: View {
                 row("Held attachments", "\(status.heldCount)")
                 row("Records sent", "\(status.recordsSent)")
                 row("Records received", "\(status.recordsReceived)")
-                row("Media bytes sent", bytes(status.bytesSent))
-                row("Media bytes received", bytes(status.bytesReceived))
+                row("Media uploads", "\(state?.assetUploads ?? 0) file(s), \(bytes(status.bytesSent))")
+                row("Attachment records sent, metadata only", "\(state?.attachmentRecordsSentWithoutMedia ?? 0)")
+                row("Media downloaded (transport)", bytes(state?.assetBytesDownloaded ?? 0))
+                row("Media written to this device", bytes(status.bytesReceived))
                 row("Bootstrap queued", state?.bootstrapQueued == true ? "yes" : "no")
             }
             if let outbox = state?.outbox, !outbox.isEmpty {

@@ -21,6 +21,45 @@
 import Foundation
 import CloudKit
 import CoreData
+import CryptoKit
+
+/// SHA-256 of a file, with a "size|mtime|hash" cache so an unchanged file is
+/// hashed once. Pure apart from reading the file.
+enum JournalAssetHash {
+    static func stamp(of url: URL) -> (size: Int64, mtime: TimeInterval)? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+        let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+        let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return (size, mtime)
+    }
+
+    static func hash(of url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Returns the hash and the cache entry to store ("size|mtime|hash").
+    static func cachedHash(of url: URL, cache: String?) -> (hash: String, entry: String)? {
+        guard let stamp = stamp(of: url) else { return nil }
+        let prefix = "\(stamp.size)|\(Int(stamp.mtime))|"
+        if let cache, cache.hasPrefix(prefix) { return (String(cache.dropFirst(prefix.count)), cache) }
+        guard let hash = hash(of: url) else { return nil }
+        return (hash, prefix + hash)
+    }
+}
+
+/// PURE. Whether an outgoing attachment record carries its file.
+enum JournalAssetPolicy {
+    /// A new record (no server copy) always carries it; otherwise only when
+    /// the server's hash is unknown or differs from the local file's.
+    static func includeAsset(hasServerCopy: Bool, serverHash: String?, localHash: String?) -> Bool {
+        guard hasServerCopy, let serverHash, let localHash else { return true }
+        return serverHash != localHash
+    }
+}
 
 enum JournalConflictWinner: Equatable { case server, local }
 
@@ -54,6 +93,8 @@ enum JournalRecordMapping {
     static let savedListItemsKey = "items"
     static let assetKey = "file"
     static let fileExtKey = "fileExt"
+    /// SHA-256 of the media; set only together with the asset.
+    static let fileHashKey = "fileHash"
     static let sessionRefKey = "session"
 
     static func recordID(for id: UUID) -> CKRecord.ID {
@@ -63,13 +104,21 @@ enum JournalRecordMapping {
     // MARK: Core Data → CKRecord
 
     /// Starts from the last known server copy (so the change tag matches) or a
-    /// fresh record, then writes every mapped field.
-    static func record(for object: NSManagedObject, base: CKRecord?) -> CKRecord? {
+    /// fresh record, then writes every mapped field. `ownerOnly` sends just
+    /// the owner key on an existing session record. `includeAsset` decides
+    /// whether an attachment record carries its file (and `fileHash`); when
+    /// it does not, the server keeps the asset it has.
+    static func record(for object: NSManagedObject, base: CKRecord?, ownerOnly: Bool = false,
+                       includeAsset: Bool = true, fileHash: String? = nil) -> CKRecord? {
         guard let entity = object.entity.name, let id = object.value(forKey: "id") as? UUID else { return nil }
         let record = base ?? CKRecord(recordType: entity, recordID: recordID(for: id))
         guard record.recordType == entity else { return nil }
         switch entity {
         case JournalSyncRecordType.session:
+            if ownerOnly, base != nil {
+                record["ownerUserID"] = ckValue(object.value(forKey: "ownerUserID"))
+                return record
+            }
             for key in sessionKeys { record[key] = ckValue(object.value(forKey: key)) }
             setInstrumentLink(record, object.value(forKey: "instrument") as? NSManagedObject)
         case JournalSyncRecordType.instrument:
@@ -89,9 +138,12 @@ enum JournalRecordMapping {
             }
             let stored = object.value(forKey: "fileURL") as? String
             if let url = AttachmentPathResolver.resolve(stored) {
-                record[assetKey] = CKAsset(fileURL: url)
-                record[fileExtKey] = url.pathExtension as CKRecordValue
-            } else {
+                if includeAsset {
+                    record[assetKey] = CKAsset(fileURL: url)
+                    record[fileExtKey] = url.pathExtension as CKRecordValue
+                    record[fileHashKey] = fileHash.map { $0 as CKRecordValue }
+                }
+            } else if base == nil {
                 record[fileExtKey] = (URL(fileURLWithPath: stored ?? "").pathExtension) as CKRecordValue
             }
         default:

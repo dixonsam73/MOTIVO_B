@@ -34,6 +34,22 @@ struct JournalSyncPendingChange: Codable, Hashable {
     let recordName: String
     let recordType: String
     let op: Op
+    /// Stage D: the only pending change is the owner key. Sent as a partial
+    /// record, and never a content conflict against the server copy.
+    var ownerOnly: Bool = false
+
+    init(recordName: String, recordType: String, op: Op, ownerOnly: Bool = false) {
+        self.recordName = recordName; self.recordType = recordType; self.op = op; self.ownerOnly = ownerOnly
+    }
+
+    private enum CodingKeys: String, CodingKey { case recordName, recordType, op, ownerOnly }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        recordName = try c.decode(String.self, forKey: .recordName)
+        recordType = try c.decode(String.self, forKey: .recordType)
+        op = try c.decode(Op.self, forKey: .op)
+        ownerOnly = try c.decodeIfPresent(Bool.self, forKey: .ownerOnly) ?? false
+    }
 }
 
 struct JournalSyncConflict: Codable, Identifiable {
@@ -102,6 +118,20 @@ struct JournalSyncPersistedState: Codable {
     /// Instrument id, when both had an instrument of the same name before
     /// they met. Neither row is deleted or re-keyed; sessions resolve through it.
     var instrumentAliases: [String: String] = [:]
+    /// Stage D. Attachment record name → SHA-256 of the media the SERVER
+    /// holds, as last sent by this device or received from it. An outgoing
+    /// record carries its file only when the local file's hash differs.
+    var assetHashes: [String: String] = [:]
+    /// Attachment record name → "size|mtime|hash" of the local file, so an
+    /// unchanged file is not re-hashed at every send.
+    var fileStampCache: [String: String] = [:]
+    /// Media transfers, distinct from record counts: files set on records
+    /// this device sent (uploads), bytes CloudKit downloaded with fetched
+    /// attachment records (transport; happens whether or not the file is
+    /// then kept), and attachment records sent with metadata only.
+    var assetUploads = 0
+    var assetBytesDownloaded: Int64 = 0
+    var attachmentRecordsSentWithoutMedia = 0
     /// SavedList id → content hash last sent or received, valid for `listScope`.
     var listFingerprints: [String: String] = [:]
     /// The owner scope the fingerprints were taken under. A scope change is a
@@ -137,6 +167,11 @@ struct JournalSyncPersistedState: Codable {
         listFingerprints = try c.decodeIfPresent([String: String].self, forKey: .listFingerprints) ?? [:]
         listScope = try c.decodeIfPresent(String.self, forKey: .listScope)
         instrumentAliases = try c.decodeIfPresent([String: String].self, forKey: .instrumentAliases) ?? [:]
+        assetHashes = try c.decodeIfPresent([String: String].self, forKey: .assetHashes) ?? [:]
+        fileStampCache = try c.decodeIfPresent([String: String].self, forKey: .fileStampCache) ?? [:]
+        assetUploads = try c.decodeIfPresent(Int.self, forKey: .assetUploads) ?? 0
+        assetBytesDownloaded = try c.decodeIfPresent(Int64.self, forKey: .assetBytesDownloaded) ?? 0
+        attachmentRecordsSentWithoutMedia = try c.decodeIfPresent(Int.self, forKey: .attachmentRecordsSentWithoutMedia) ?? 0
     }
 }
 

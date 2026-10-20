@@ -226,8 +226,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     // MARK: JournalSendQueue
 
-    func enqueueSave(_ recordName: String, recordType: String) {
-        let change = JournalSyncPendingChange(recordName: recordName, recordType: recordType, op: .save)
+    func enqueueSave(_ recordName: String, recordType: String, ownerOnly: Bool) {
+        let change = JournalSyncPendingChange(recordName: recordName, recordType: recordType, op: .save, ownerOnly: ownerOnly)
         store.update { JournalChangeTracker.merge([change], into: &$0.outbox) }
         engine.state.add(pendingRecordZoneChanges: [pendingChange(change)])
     }
@@ -428,6 +428,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         // Sessions before their attachments, deletes last.
         let outbox = store.state.outbox
         let typeByName = Dictionary(outbox.map { ($0.recordName, $0.recordType) }, uniquingKeysWith: { a, _ in a })
+        let ownerOnlyNames = Set(outbox.filter { $0.op == .save && $0.ownerOnly }.map(\.recordName))
         pending.sort { a, b in rank(a, typeByName) < rank(b, typeByName) }
         let listNames = pending.compactMap { change -> String? in
             if case .saveRecord(let id) = change, typeByName[id.recordName] == JournalSyncRecordType.savedList { return id.recordName }
@@ -442,7 +443,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 self.store.update { $0.outbox.removeAll { $0.recordName == recordID.recordName && $0.op == .save } }
                 return nil
             }
-            return self.record(for: recordID, type: typeByName[recordID.recordName], eligibility: eligibility)
+            return self.record(for: recordID, type: typeByName[recordID.recordName], eligibility: eligibility,
+                               ownerOnly: ownerOnlyNames.contains(recordID.recordName))
         }
     }
 
@@ -484,8 +486,9 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     /// Builds the outgoing record from Core Data; nil removes the pending change.
     /// Entries this device's ownership rules make ineligible stay local.
-    private func record(for recordID: CKRecord.ID, type: String?, eligibility: Eligibility) -> CKRecord? {
+    private func record(for recordID: CKRecord.ID, type: String?, eligibility: Eligibility, ownerOnly: Bool = false) -> CKRecord? {
         guard let id = UUID(uuidString: recordID.recordName) else { return nil }
+        let name = recordID.recordName
         var result: CKRecord?
         var ineligible = false
         importContext.performAndWait {
@@ -509,10 +512,24 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 ineligible = (object.value(forKey: "ownerUserID") as? String) != eligibility.customOwner
             }
             if ineligible { return }
-            let base = store.state.lastKnownRecords[recordID.recordName].flatMap(JournalSyncStateStore.recordFromSystemFields)
-            result = JournalRecordMapping.record(for: object, base: base)
-            if object.entity.name == JournalSyncRecordType.attachment, result?[JournalRecordMapping.assetKey] == nil {
-                log("Attachment \(recordID.recordName) sent without its file (not found locally)")
+            let base = store.state.lastKnownRecords[name].flatMap(JournalSyncStateStore.recordFromSystemFields)
+            if object.entity.name == JournalSyncRecordType.attachment {
+                // The file travels only when it is new to the server or its
+                // content changed; a metadata edit sends the record alone.
+                var localHash: String?
+                if let url = AttachmentPathResolver.resolve(object.value(forKey: "fileURL") as? String),
+                   let cached = JournalAssetHash.cachedHash(of: url, cache: store.state.fileStampCache[name]) {
+                    localHash = cached.hash
+                    store.update { $0.fileStampCache[name] = cached.entry }
+                }
+                let include = JournalAssetPolicy.includeAsset(hasServerCopy: base != nil,
+                                                              serverHash: store.state.assetHashes[name], localHash: localHash)
+                result = JournalRecordMapping.record(for: object, base: base, includeAsset: include, fileHash: localHash)
+                if include, result?[JournalRecordMapping.assetKey] == nil {
+                    log("Attachment \(name) sent without its file (not found locally)")
+                }
+            } else {
+                result = JournalRecordMapping.record(for: object, base: base, ownerOnly: ownerOnly)
             }
         }
         if result == nil {
@@ -582,15 +599,24 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private func handleSent(_ e: CKSyncEngine.Event.SentRecordZoneChanges) {
         var sent = 0
         var bytes: Int64 = 0
+        var uploads = 0
+        var withoutMedia = 0
         for record in e.savedRecords {
             sent += 1
-            if let asset = record[JournalRecordMapping.assetKey] as? CKAsset, let url = asset.fileURL,
-               let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value {
-                bytes += size
+            let name = record.recordID.recordName
+            if record.recordType == JournalSyncRecordType.attachment {
+                if let hash = record[JournalRecordMapping.fileHashKey] as? String,
+                   let asset = record[JournalRecordMapping.assetKey] as? CKAsset, let url = asset.fileURL {
+                    uploads += 1
+                    bytes += JournalAssetHash.stamp(of: url)?.size ?? 0
+                    store.update { $0.assetHashes[name] = hash }
+                } else {
+                    withoutMedia += 1
+                }
             }
             store.update {
-                $0.lastKnownRecords[record.recordID.recordName] = JournalSyncStateStore.encodeSystemFields(record)
-                $0.outbox.removeAll { $0.recordName == record.recordID.recordName && $0.op == .save }
+                $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
+                $0.outbox.removeAll { $0.recordName == name && $0.op == .save }
             }
         }
         for recordID in e.deletedRecordIDs {
@@ -607,8 +633,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 log("Delete of \(failure.key.recordName) failed: \(failure.value.localizedDescription) (will retry)")
             }
         }
-        store.update { $0.recordsSent += sent; $0.bytesSent += bytes }
-        if sent > 0 { log("Sent \(sent) record(s), \(bytes) bytes of media") }
+        store.update { $0.recordsSent += sent; $0.bytesSent += bytes; $0.assetUploads += uploads; $0.attachmentRecordsSentWithoutMedia += withoutMedia }
+        if sent > 0 { log("Sent \(sent) record(s); \(uploads) media upload(s), \(bytes) bytes; \(withoutMedia) attachment record(s) metadata only") }
     }
 
     private func handleFailedSave(_ failure: CKSyncEngine.Event.SentRecordZoneChanges.FailedRecordSave) {

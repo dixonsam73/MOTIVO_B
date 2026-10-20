@@ -642,6 +642,41 @@ the join.
   unit-tested only: not reachable on these devices (see stage B (4)).
   Hands-on: agent ≈ 14 min items 1–3, ≈ 12 min device-run fix, ≈ 20 min
   waiting on builds; Samuel ≈ 22 min at the devices, ≈ 8 min waiting.
+  **Stage D, media and conflict noise: passed 2026-10-20.** An outgoing
+  attachment record carries its file only when the file is new to the
+  server or its SHA-256 differs from what the server holds (`fileHash` on
+  the record; `JournalAssetPolicy`; a size/mtime cache so an unchanged file
+  is hashed once). A metadata edit sends the record alone and CloudKit keeps
+  the asset. A replaced file arrives with a new hash and is written into
+  place, the old file removed, no duplicate attachment; the creator's own
+  file is otherwise never touched. Owner-only pending saves are flagged
+  (`JournalSyncPendingChange.ownerOnly`), sent as a partial record (just
+  the owner key), and are never a content conflict: the server's content is
+  taken and the owner re-sent; a genuine concurrent edit is still reported
+  with its losing text. Diagnostics now separate record counts from media:
+  "Media uploads" (files set on sent records, bytes), "Attachment records
+  sent, metadata only", "Media downloaded (transport)" and "Media written
+  to this device". 8 unit tests (`SyncTestMediaTests`). Device run
+  (disposable session, 35 MB video): initial upload 1 file / 35 MB, played
+  on the iPad; title, notes and instrument edits arrived with Media uploads
+  unchanged (a session edit does not touch the attachment record at all);
+  a PDF added (+1 upload) and renamed arrived with uploads unchanged and
+  one metadata-only attachment record; a photo added during Airplane Mode,
+  once with reconnect and once with a relaunch while offline, uploaded
+  exactly once each, opened on the iPad, two attachments on both devices.
+  **What the measurements establish:** no file was set on any record sent
+  for a metadata change (upload count and bytes unchanged, record counts
+  rising); they do not show the receiving side, where CloudKit downloads
+  the file of every fetched attachment record even when unchanged — that is
+  transport cost the engine cannot avoid with `CKSyncEngine`, counted as
+  "downloaded" and not written. **Findings:** (10) audio and video renames
+  live in the per-device title store (C-47), not on the record, so they do
+  not sync; only PDF renames write `displayName`. That is the "attachment
+  titles" inventory item: writing `displayName` at the two rename sites and
+  reading it in the viewers. Not started. C-119 fixed.
+  Hands-on: agent ≈ 15 min implementation and tests, ≈ 10 min waiting on
+  builds, ≈ 5 min diagnosis and records; Samuel ≈ 25 min at the devices,
+  ≈ 5 min waiting.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
