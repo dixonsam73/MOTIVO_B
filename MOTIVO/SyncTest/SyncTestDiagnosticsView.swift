@@ -9,6 +9,7 @@
 
 #if SYNCTEST
 import SwiftUI
+import CoreData
 
 struct SyncTestDiagnosticsView: View {
     @ObservedObject private var status = JournalSyncCoordinator.shared.status
@@ -59,6 +60,13 @@ struct SyncTestDiagnosticsView: View {
                 row("Server records known", "\(state?.lastKnownRecords.count ?? 0)")
                 row("Catch-up baseline", state?.catchUpToken == nil ? "none (set after the next fetch)" : "set")
                 row("Metadata migration (stage F)", state?.metadataMigrationDone == true ? "done" : "pending")
+                // Solo has no privacy toggle in the UI (Connected only), so the
+                // trial flips the newest attachment's choice from here.
+                row("Newest attachment privacy", newestAttachmentPrivacyText)
+                Button("Toggle privacy of newest attachment") {
+                    if let id = newestAttachmentID() { AttachmentPrivacy.toggle(id: id, url: nil) }
+                    refreshTick += 1
+                }
                 Button("Re-run metadata migration") {
                     JournalSyncCoordinator.shared.store?.update { $0.metadataMigrationDone = false }
                     JournalSyncCoordinator.shared.engine?.runMetadataMigrationIfNeeded(); refreshTick += 1
@@ -146,6 +154,19 @@ struct SyncTestDiagnosticsView: View {
         }
         .navigationTitle("Sync Test")
         .onReceive(status.objectWillChange) { _ in refreshTick += 1 }
+    }
+
+    private func newestAttachmentID() -> UUID? {
+        let request = NSFetchRequest<NSManagedObject>(entityName: "Attachment")
+        request.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
+        request.fetchLimit = 1
+        return (try? PersistenceController.shared.container.viewContext.fetch(request))?.first?.value(forKey: "id") as? UUID
+    }
+
+    private var newestAttachmentPrivacyText: String {
+        guard let id = newestAttachmentID() else { return "no attachments" }
+        let choice = AttachmentPrivacy.currentMap()[AttachmentPrivacy.privacyKey(id: id, url: nil) ?? ""]
+        return "\(id.uuidString.prefix(8))… \(choice.map { $0 ? "private" : "shared" } ?? "no choice (private by default)")"
     }
 
     private var linkText: String {
