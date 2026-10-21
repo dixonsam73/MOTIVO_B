@@ -60,6 +60,16 @@ enum JournalAccountGuard {
     }
 }
 
+/// PURE. Whether a server-side database check means the engine missed
+/// changes while it did not exist. Without a previous token the check only
+/// establishes a baseline (every zone reads as "changed" on a first call).
+enum JournalCatchUp {
+    static func mustRefetch(hadToken: Bool, changedZones: [String], deletedZones: [String], zoneName: String) -> Bool {
+        guard hadToken else { return false }
+        return changedZones.contains(zoneName) || deletedZones.contains(zoneName)
+    }
+}
+
 /// The local-removal lifecycle on the state file and the store. Every step
 /// is idempotent, so a relaunch can repeat it.
 enum JournalLocalRemoval {
@@ -100,6 +110,7 @@ enum JournalLocalRemoval {
             st.listScope = nil
             st.conflicts.removeAll()
             st.engineState = nil
+            st.catchUpToken = nil
             st.initialFetchComplete = false
             st.pendingOwnerAdoption = nil
             st.ownershipReport = nil

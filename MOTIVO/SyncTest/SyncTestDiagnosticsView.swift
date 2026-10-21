@@ -57,6 +57,7 @@ struct SyncTestDiagnosticsView: View {
                 row("History token", state?.historyToken == nil ? "none" : "set")
                 row("Engine state", state?.engineState == nil ? "none (fresh engine on activation)" : "saved")
                 row("Server records known", "\(state?.lastKnownRecords.count ?? 0)")
+                row("Catch-up baseline", state?.catchUpToken == nil ? "none (set after the next fetch)" : "set")
                 if state?.unlinked == true {
                     Button("Re-enable sync") { JournalSyncCoordinator.shared.reenable(); refreshTick += 1 }
                 } else {

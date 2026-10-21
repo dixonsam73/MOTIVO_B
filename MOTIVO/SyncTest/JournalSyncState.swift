@@ -154,6 +154,12 @@ struct JournalSyncPersistedState: Codable {
     /// journal again with a fresh engine.
     var localCopyRemoved = false
     var localRemovalReason: String?
+    /// Stage E: the database change token of this app's OWN last check,
+    /// taken after each engine fetch cycle. On activation a server-side
+    /// check against it tells whether the zone changed while no engine was
+    /// running (a push consumed with nobody to act on it); if so the engine
+    /// is rebuilt fresh instead of trusting the daemon's "no changes" cache.
+    var catchUpToken: Data?
 
     init() {}
 
@@ -192,6 +198,7 @@ struct JournalSyncPersistedState: Codable {
         localRemovalInProgress = try c.decodeIfPresent(Bool.self, forKey: .localRemovalInProgress) ?? false
         localCopyRemoved = try c.decodeIfPresent(Bool.self, forKey: .localCopyRemoved) ?? false
         localRemovalReason = try c.decodeIfPresent(String.self, forKey: .localRemovalReason)
+        catchUpToken = try c.decodeIfPresent(Data.self, forKey: .catchUpToken)
     }
 }
 

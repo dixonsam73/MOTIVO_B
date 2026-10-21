@@ -373,6 +373,24 @@ final class SyncTestAccountAndEraseTests: XCTestCase {
         XCTAssertEqual(Set(relaunched.state.outbox.map(\.recordName)), Set(before.map(\.recordName)))
     }
 
+    // MARK: catch-up after a dormant period
+
+    func testCatchUpRefetchesOnlyWhenTheZoneMovedSinceOurOwnBaseline() {
+        XCTAssertFalse(JournalCatchUp.mustRefetch(hadToken: false, changedZones: ["Journal"], deletedZones: [], zoneName: "Journal"),
+                       "a first call only sets the baseline")
+        XCTAssertTrue(JournalCatchUp.mustRefetch(hadToken: true, changedZones: ["Journal"], deletedZones: [], zoneName: "Journal"))
+        XCTAssertTrue(JournalCatchUp.mustRefetch(hadToken: true, changedZones: [], deletedZones: ["Journal"], zoneName: "Journal"))
+        XCTAssertFalse(JournalCatchUp.mustRefetch(hadToken: true, changedZones: ["Other"], deletedZones: [], zoneName: "Journal"))
+        XCTAssertFalse(JournalCatchUp.mustRefetch(hadToken: true, changedZones: [], deletedZones: [], zoneName: "Journal"))
+    }
+
+    func testLocalRemovalClearsTheCatchUpBaselineWithTheEngineState() throws {
+        store.update { $0.catchUpToken = Data([1]); $0.engineState = nil }
+        JournalLocalRemoval.begin(store: store, reason: "erase")
+        JournalLocalRemoval.finish(store: store, container: container)
+        XCTAssertNil(store.state.catchUpToken)
+    }
+
     // MARK: lists after an erase
 
     @MainActor

@@ -67,7 +67,10 @@ final class JournalOwnershipCoordinator {
     }
 
     func evaluate(reason: String) {
-        guard !suspendedForReset else { return }
+        // During a local removal the erase deletes the owner key before the
+        // rows; evaluating then re-adopts the owner from rows about to go
+        // (seen 2026-10-21). Nothing to decide until the removal is over.
+        guard !suspendedForReset, !store.state.localRemovalInProgress else { return }
         if let pending = store.state.pendingOwnerAdoption {
             let k1 = JournalOwnership.normalized(Keychain.get("appleUserID"))
             if k1 == nil || k1 == pending {

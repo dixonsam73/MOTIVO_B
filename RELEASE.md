@@ -705,10 +705,9 @@ the join.
   sends. Untested: a mid-transfer cut on an unthrottled link long enough
   to fail an operation (the ~15 s cut did not); recovery after a device
   restart rather than an app force-quit.
-  **Stage E, account change and erase/unlink: built and unit/simulator
-  tested 2026-10-21; account switch passed on Device A the same day; the
-  iPad checks (per-app toggle, unlink/reconnect, interrupted removal,
-  offline erase) still to run (script in the side-session notes).**
+  **Stage E, account change and erase/unlink: passed 2026-10-21** (unit
+  tests, simulator, Device A account switch, iPad/iPhone sections 1–4; one
+  defect found on device and fixed, C-124).
   One account guard (`JournalAccountGuard`: bound user, current user,
   unlinked, removal flags) is asked by outgoing batches, fetched zone and
   database changes (imports AND remote deletions), list imports and the
@@ -801,12 +800,69 @@ the join.
   outbox re-sends it (same record id, tie goes to the server, no duplicate);
   the per-app iCloud toggle's exact CloudKit error is to be observed on
   device; "Delete my journal everywhere" is outside this stage.
+  **iPad and iPhone run (Sync Test installs, disposable data, 2026-10-21
+  13:12–14:03), all four sections passed; state files read over the cable
+  at each step.** (1) iCloud off for the app: a Thought with a photo made
+  offline (outbox 2), the Études Sync Test toggle under Saved to iCloud
+  turned off, network back: the system account notification fired, the
+  check failed with "No iCloud account is configured", engine dropped and
+  "Signed out of iCloud, or iCloud is off for this app; journal and pending
+  changes kept"; a notes edit merged into the pending save; relaunch paused
+  again, outbox 2; toggle back on: the backoff retry rebuilt the engine
+  ("Engine built from saved state (retry)"), 2 records and 1 media upload
+  (686 KB) sent once, the iPhone shows the edited Thought once. So iCloud
+  off for the app is indistinguishable from signed out to CloudKit, and is
+  handled as such. (2) Unlink on the iPhone: engine dropped, a Thought made
+  while unlinked queued (outbox 1) and kept across relaunch, Fetch now and
+  Send now refused three times, the iPad's Thought sent meanwhile not
+  imported; Re-enable sent the pending Thought. **Defect (C-124):** the
+  iPad's Thought did NOT arrive on re-enable, nor on a manual fetch: an
+  engine rebuilt from saved state was answered "no changes" by CloudKit's
+  daemon, because the push for that change had arrived while no engine
+  existed to act on it; the same had happened to the iPad that morning
+  after a push-triggered background launch (the engine is now built after
+  the asynchronous account check, so the push preceded it). Nothing was
+  lost: a later change on the iPad pushed again and the iPhone fetched both
+  (the engine's token was still old). Fixed the same hour: on every
+  activation of an engine from saved state the app runs its own
+  `CKFetchDatabaseChangesOperation` against a token it keeps after each
+  fetch cycle (`catchUpToken`); if the Journal zone moved meanwhile the
+  engine is built fresh and refetches the zone. Re-checked on device: unlink,
+  a Thought from the iPad, Re-enable → "Catch-up: the zone changed while no
+  engine was running; building a fresh engine", 35 records refetched by id,
+  no duplicates, the Thought present with no further push. Cost: a full
+  refetch (records and, unless CloudKit's asset cache still has them, their
+  files) on the rare activation that follows a missed change; a delta
+  catch-up through the app's own zone fetch is the better long-term shape
+  and belongs with the receiver-download inventory. (3) Interrupted removal
+  on the iPad: rows deleted and the app exited before finish; relaunch
+  recovered it ("2 leftover row(s) removed locally", finished, outbox 0,
+  sync off); the iPhone's zone unchanged at 35 with the database probe
+  reporting no zone changes; Re-enable built a fresh engine, 35 records
+  back, the Oud instrument aliased not duplicated, the iPad's own
+  instrument rows re-sent by the post-removal bootstrap (same ids, metadata
+  only). (4) Offline erase: Airplane Mode and Wi-Fi off, "E4 pending before
+  erase" made (outbox 1, confirmed unsent), Erase All Études Data while
+  still offline, set up again; diagnostics "off (local copy removed)",
+  outbox holding only the new setup instrument; back online no send; the
+  iPhone's zone still 35, no zone change, no E4; Re-enable: fresh engine,
+  35 records back, Journal matching the iPhone, E4 gone as defined.
+  **Also seen:** the engine dropped at the erase was still alive five
+  minutes later and attempted a scheduled fetch, ignored by the guard as
+  designed ("Event from a dropped engine ignored"); the ownership rules ran
+  during the erase, after the owner key was deleted and before the rows
+  were, and re-adopted the owner (C-126, fixed: no evaluation while a
+  removal is in progress); and the iPad's background launch while locked
+  logged "Adoption stopped: the owner key holds a different value" because
+  the Keychain was unreadable (C-125, open, harmless).
   Hands-on: agent ≈ 15 min reading and design, ≈ 20 min code and tests,
   ≈ 20 min simulator run and the two fixes, ≈ 20 min guiding the Device A
-  run and reading state files; ≈ 12 min waiting on builds and test runs
-  beyond what overlapped with the simulator work. Samuel: ≈ 35 min at
-  Device A and the iPhone, ≈ 15 min on iCloud sign-out/sign-in prompts.
-  iPad sections not yet run.
+  run and reading state files, ≈ 25 min guiding the iPad run, ≈ 15 min
+  diagnosing and fixing C-124 (code, tests, install); ≈ 12 min waiting on
+  builds and test runs beyond what overlapped with the simulator work,
+  ≈ 8 min waiting during the device runs. Samuel: ≈ 35 min at Device A and
+  the iPhone plus ≈ 15 min on iCloud sign-out/sign-in prompts; ≈ 40 min at
+  the iPad and iPhone plus ≈ 10 min waiting on the C-124 fix and fetches.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

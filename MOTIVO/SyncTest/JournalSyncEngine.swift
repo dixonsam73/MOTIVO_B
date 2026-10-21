@@ -223,7 +223,24 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private func activate(trigger: String) async {
         stateLock.lock()
         let wasDormant = engineInstance == nil
-        if wasDormant {
+        stateLock.unlock()
+        if wasDormant, store.state.engineState != nil {
+            // Seen twice on 2026-10-21: a push that arrives while no engine
+            // exists (dormant, or not yet built at a push-triggered launch)
+            // is consumed with nobody to act on it, and CloudKit's daemon
+            // then answers an engine built from saved state with "no
+            // changes" from its cache. Ask the server ourselves; if the zone
+            // moved since our own last check, build the engine fresh.
+            switch await catchUpCheck() {
+            case .some(true):
+                store.update { $0.engineState = nil }
+                log("Catch-up: the zone changed while no engine was running; building a fresh engine to refetch it")
+            case .some(false): break
+            case .none: log("Catch-up check failed; engine built from saved state regardless")
+            }
+        }
+        stateLock.lock()
+        if engineInstance == nil {
             var configuration = CKSyncEngine.Configuration(database: container.privateCloudDatabase,
                                                            stateSerialization: store.state.engineState, delegate: self)
             configuration.automaticallySync = true
@@ -247,6 +264,36 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         requeueOutbox()
         await publish { $0.phase = "Running" }
         refreshCounts()
+    }
+
+    /// Our own database-changes call against the token of our last check.
+    /// Returns whether the Journal zone changed since (nil on error) and
+    /// stores the new token. With no previous token it only sets a baseline.
+    private func catchUpCheck() async -> Bool? {
+        let previous = store.state.catchUpToken.flatMap {
+            try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: $0)
+        }
+        let op = CKFetchDatabaseChangesOperation(previousServerChangeToken: previous)
+        var changed: [String] = []
+        var deleted: [String] = []
+        op.recordZoneWithIDChangedBlock = { changed.append($0.zoneName) }
+        op.recordZoneWithIDWasDeletedBlock = { deleted.append($0.zoneName) }
+        op.recordZoneWithIDWasPurgedBlock = { deleted.append($0.zoneName) }
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool?, Never>) in
+            op.fetchDatabaseChangesResultBlock = { result in
+                switch result {
+                case .success(let r):
+                    let data = try? NSKeyedArchiver.archivedData(withRootObject: r.serverChangeToken, requiringSecureCoding: true)
+                    self.store.update { $0.catchUpToken = data }
+                    continuation.resume(returning: JournalCatchUp.mustRefetch(hadToken: previous != nil, changedZones: changed,
+                                                                             deletedZones: deleted, zoneName: JournalRecordMapping.zoneID.zoneName))
+                case .failure(let error):
+                    self.log("Catch-up check error: \(error.localizedDescription)")
+                    continuation.resume(returning: nil)
+                }
+            }
+            self.container.privateCloudDatabase.add(op)
+        }
     }
 
     // MARK: Stage E controls
@@ -545,6 +592,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 store.update { $0.initialFetchComplete = true }
                 log("First complete fetch finished")
             }
+            // Move our own baseline past what the engine has just fetched.
+            _ = await catchUpCheck()
             if let fetchCycleCompleted { await MainActor.run { fetchCycleCompleted() } }
         case .willFetchRecordZoneChanges(let e):
             log("Will fetch zone \(e.zoneID.zoneName)")
