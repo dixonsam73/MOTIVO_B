@@ -242,6 +242,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         let wasDormant = engineInstance == nil
         let generation = dormantGeneration
         stateLock.unlock()
+        // Before any import: the catch-up writes favourites under this scope
+        // (seen 2026-10-21: a heart imported by the catch-up at launch landed
+        // under the placeholder scope and never showed).
+        await refreshViewerScope()
         if wasDormant, store.state.engineState != nil {
             // Seen twice on 2026-10-21: a push that arrives while no engine
             // exists (dormant, or not yet built at a push-triggered launch)
