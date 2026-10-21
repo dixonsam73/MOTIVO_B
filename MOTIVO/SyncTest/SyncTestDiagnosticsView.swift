@@ -65,6 +65,7 @@ struct SyncTestDiagnosticsView: View {
                 row("Catch-up totals", "\(state?.catchUpRecords ?? 0) record(s), \(state?.catchUpAssets ?? 0) file(s) fetched")
                 row("Last catch-up", state?.lastCatchUp ?? "—")
                 row("Held metadata records", "\(state?.awaitingMeta.count ?? 0)")
+                row("Own-write echoes (C-134)", "\(state?.echoRecords ?? 0) record(s), \(bytes(state?.echoAssetBytes ?? 0)) delivered")
                 // Solo has no privacy toggle in the UI (Connected only), so the
                 // trial flips the newest attachment's choice from here.
                 row("Newest attachment privacy", newestAttachmentPrivacyText)

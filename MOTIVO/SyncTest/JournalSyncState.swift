@@ -194,6 +194,10 @@ struct JournalSyncPersistedState: Codable {
     var catchUpRecords = 0
     var catchUpAssets = 0
     var lastCatchUp: String?
+    /// C-134: records the engine handed back that this device already held
+    /// (its own sends after a relaunch), and the asset bytes that came with them.
+    var echoRecords = 0
+    var echoAssetBytes: Int64 = 0
 
     init() {}
 
@@ -240,6 +244,8 @@ struct JournalSyncPersistedState: Codable {
         catchUpRecords = try c.decodeIfPresent(Int.self, forKey: .catchUpRecords) ?? 0
         catchUpAssets = try c.decodeIfPresent(Int.self, forKey: .catchUpAssets) ?? 0
         lastCatchUp = try c.decodeIfPresent(String.self, forKey: .lastCatchUp)
+        echoRecords = try c.decodeIfPresent(Int.self, forKey: .echoRecords) ?? 0
+        echoAssetBytes = try c.decodeIfPresent(Int64.self, forKey: .echoAssetBytes) ?? 0
     }
 }
 

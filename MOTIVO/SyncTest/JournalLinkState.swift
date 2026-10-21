@@ -79,6 +79,16 @@ enum JournalCatchUp {
     }
 }
 
+/// C-134: a record the server hands back whose change tag this device already
+/// holds (its own last send, or a copy already imported) carries nothing new.
+enum JournalEcho {
+    static func isKnown(changeTag: String?, storedSystemFields: Data?) -> Bool {
+        guard let changeTag, let storedSystemFields,
+              let known = JournalSyncStateStore.recordFromSystemFields(storedSystemFields)?.recordChangeTag else { return false }
+        return known == changeTag
+    }
+}
+
 /// The local-removal lifecycle on the state file and the store. Every step
 /// is idempotent, so a relaunch can repeat it.
 enum JournalLocalRemoval {

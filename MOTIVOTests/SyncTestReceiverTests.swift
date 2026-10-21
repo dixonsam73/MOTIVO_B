@@ -305,6 +305,21 @@ final class SyncTestReceiverTests: XCTestCase {
         XCTAssertNotNil(pending(aid)); XCTAssertFalse(pending(aid)!.assetFree)
     }
 
+    // MARK: own-write echo
+
+    func testARecordWhoseChangeTagThisDeviceHoldsIsAnEcho() throws {
+        let id = UUID()
+        let record = CKRecord(recordType: "Attachment", recordID: JournalRecordMapping.recordID(for: id))
+        // A record never saved has no change tag: never an echo.
+        XCTAssertFalse(JournalEcho.isKnown(changeTag: record.recordChangeTag, storedSystemFields: JournalSyncStateStore.encodeSystemFields(record)))
+        // Simulate a server-saved record by decoding system fields that carry a tag.
+        let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+        record.encodeSystemFields(with: archiver)
+        let stored = archiver.encodedData
+        XCTAssertFalse(JournalEcho.isKnown(changeTag: "abc", storedSystemFields: stored), "a different (or missing) tag is new information")
+        XCTAssertFalse(JournalEcho.isKnown(changeTag: "abc", storedSystemFields: nil))
+    }
+
     // MARK: catch-up decisions
 
     func testCatchUpFetchesAFileOnlyWhenThisDeviceLacksIt() {

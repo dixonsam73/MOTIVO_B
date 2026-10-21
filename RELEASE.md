@@ -1025,12 +1025,30 @@ the join.
   Existing trial journal intact through the transition, 0 held metadata
   records. **Fixed during the run:** a heart imported by the relaunch
   catch-up landed under the placeholder viewer scope (the scope was read
-  after the catch-up; C-133). **Observed, not fixed:** once, after a
-  relaunch, the iPhone's engine fetched back the eight content records this
-  device had itself sent before the relaunch, with their files (191 MB
-  delivered, 0 written): its saved token predated its own sends. It recurred
-  once more on a later engine fetch (the replaced photo's content record,
-  2.4 MB); recorded as C-134. **Limitations:**
+  after the catch-up; C-133). **C-134, investigated from the evening's
+  state-file snapshots (after Samuel's clue that one clip was renamed
+  repeatedly):** the 191 MB fetch at 21:28 delivered the eight content
+  records the iPhone had itself sent at 20:58 and 21:09 (the C-132 path
+  rewrites, including the repeatedly renamed clip 685EE81F and the newest
+  video F2094F40) plus two meta records; the 2.4 MB at 21:53 was its own
+  replaced-photo content record sent at 21:46. Every rename since 1842
+  logged `["displayName", "userModifiedAt"] → meta`: renaming never saved
+  the content record. The engine's serialized state hash changed only on
+  fetches and engine builds, never after a send (unchanged across the 20:58,
+  21:09, 21:32, 21:36 and 21:46 sends), so after a relaunch the engine
+  fetches with a token that predates its own sends and gets them back with
+  their files. Recurring, not one-time: after any relaunch that follows a
+  content send with no fetch in between; metadata echoes are small. **Fix
+  (built, device acceptance pending):** after a send that saved content
+  records the engine fetches once ~3 s later while the app is alive, so the
+  persisted state passes its own writes; and a delivered record whose change
+  tag this device already holds is skipped (no import work) and counted in
+  diagnostics as "Own-write echoes" with the asset bytes that came with it,
+  so the acceptance shows whether a live post-send fetch itself carries the
+  file. Acceptance to run (script section 8): repeated renames then relaunch
+  deliver the latest title with 0 media delivered; a new photo then relaunch
+  delivers no echo, or shows its cost in the echo counter; new and replaced
+  media still arrive once. **Limitations:**
   after a relaunch the engine may re-deliver changes the catch-up already
   imported (idempotent; costs assets only for content records); the
   catch-up's zone token advances only when a catch-up runs, so each one

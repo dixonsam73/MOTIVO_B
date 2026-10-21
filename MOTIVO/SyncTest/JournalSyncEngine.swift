@@ -747,7 +747,28 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 return
             }
             log("Zone changes: \(e.modifications.count) modified \(e.modifications.map { $0.record.recordType }), \(e.deletions.count) deleted")
-            let records = e.modifications.map(\.record)
+            // C-134: the engine's saved state moves only on fetches, so after a
+            // relaunch it hands back this device's own recent sends, files
+            // included. Nothing new in them: skip the import work and count
+            // what was delivered.
+            let known = store.state.lastKnownRecords
+            var records: [CKRecord] = []
+            var echoCount = 0
+            var echoBytes: Int64 = 0
+            for record in e.modifications.map(\.record) {
+                if JournalEcho.isKnown(changeTag: record.recordChangeTag, storedSystemFields: known[record.recordID.recordName]) {
+                    echoCount += 1
+                    if let url = (record[JournalRecordMapping.assetKey] as? CKAsset)?.fileURL {
+                        echoBytes += JournalAssetHash.stamp(of: url)?.size ?? 0
+                    }
+                } else {
+                    records.append(record)
+                }
+            }
+            if echoCount > 0 {
+                store.update { $0.echoRecords += echoCount; $0.echoAssetBytes += echoBytes; $0.assetBytesDownloaded += echoBytes }
+                log("Own-write echo: \(echoCount) record(s) already held, skipped; \(echoBytes) asset bytes delivered with them")
+            }
             importModifications(records.filter { $0.recordType != JournalSyncRecordType.savedList })
             let lists = records.filter { $0.recordType == JournalSyncRecordType.savedList }
             if !lists.isEmpty {
@@ -998,6 +1019,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
         store.update { $0.recordsSent += sent; $0.bytesSent += bytes; $0.assetUploads += uploads; $0.attachmentRecordsSentWithoutMedia += withoutMedia }
         if sent > 0 { log("Sent \(sent) record(s); \(uploads) media upload(s), \(bytes) bytes; \(withoutMedia) attachment record(s) metadata only") }
+        if e.savedRecords.contains(where: { $0.recordType == JournalSyncRecordType.attachment }) {
+            // C-134: move the engine's saved state past this device's own content
+            // sends while the app is alive, so a relaunch does not fetch them
+            // back with their files. The echo it brings now is skipped above.
+            scheduleFetchAfterOwnContentSend()
+        }
     }
 
     private func handleFailedSave(_ failure: CKSyncEngine.Event.SentRecordZoneChanges.FailedRecordSave) {
@@ -1032,6 +1059,22 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             log("Save of \(name) deferred: \(failure.error.localizedDescription)") // the engine retries
         default:
             log("Save of \(name) failed: \(failure.error.localizedDescription)")
+        }
+    }
+
+    private var ownSendFetchScheduled = false
+    private func scheduleFetchAfterOwnContentSend() {
+        stateLock.lock()
+        if ownSendFetchScheduled { stateLock.unlock(); return }
+        ownSendFetchScheduled = true
+        stateLock.unlock()
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self else { return }
+            self.stateLock.lock(); self.ownSendFetchScheduled = false; self.stateLock.unlock()
+            guard let engine = self.engine, self.currentDecision().allowed else { return }
+            self.log("Fetch after own content send (so the saved state passes it)")
+            do { try await engine.fetchChanges() } catch { self.log("Fetch after own send failed: \(error.localizedDescription)") }
         }
     }
 
