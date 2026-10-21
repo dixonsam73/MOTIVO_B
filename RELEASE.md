@@ -969,6 +969,79 @@ the join.
   ≈ 25 min guiding and reading state files; ≈ 25 min waiting on builds and
   tests. Samuel: ≈ 50 min at the devices (fixture, migration, six sections,
   the isolated measurement), ≈ 25 min waiting on the five builds.
+  **Stage G, receiver-download optimisation (C-130, C-131): passed
+  2026-10-21; final build 1844 (`e9363ab`).** (1) *Why one rename saved six
+  attachment records.* Two sources, found with a tracker diagnostic that logs
+  each attachment update's changed keys and author: the editor's Save ran
+  `AttachmentCommitService.applyThumbnailFlags`, which set `isThumbnail` on
+  every attachment of the session to the value it already had; and the
+  editor's "apply pending replacements" step wrote every attachment's
+  resolved `fileURL` back (the map holds all existing attachments, not only
+  replacements), which after each reinstall differs from the stored path
+  because the app container moves. Both fixed at source (write only a value
+  that changes; write `fileURL` only for a different file), with two nets
+  under SYNCTEST: the stamp observer drops keys set to the value they
+  already hold, and a `fileURL`-only change counts as content only when the
+  file's hash differs from the server's. An ordinary rename now queues one
+  record. (2) *Record layout.* An attachment's name, star, privacy choice and
+  page selection live on a small `AttachmentMeta` record ("<id>-meta"); the
+  content record keeps kind, dates, session link, file and hash. A metadata
+  edit queues only the meta record, so the engine's own fetch delivers a
+  small record and never the file; a content change still carries the file
+  by the stage D hash rule. Meta records arriving first are held; legacy
+  fields on an old content record count only until a meta record is known;
+  deleting an attachment deletes both records; a meta deletion alone deletes
+  no row. Attachment ids, session links, files and side stores are
+  untouched. One-time transition: every attachment queued its meta record
+  (13 small records per device, 0 media) and a records-only pass
+  established the app's own zone token (41 and 54 records, 0 files). (3)
+  *Incremental catch-up.* When the database check says the zone moved while
+  no engine ran, the app fetches the zone's delta with its own zone token and
+  without the asset field, imports it through the importer, and fetches a
+  file only for attachment records whose hash this device does not hold; the
+  engine keeps its saved state. A fresh engine remains the fallback for an
+  expired token or a deleted zone, logged and shown as "Last catch-up".
+  7 unit tests (`SyncTestReceiverTests`), 76 SyncTest tests green; Debug,
+  Release and SyncTest build. **Device run (iPhone and iPad Sync Test
+  installs, state files read over the cable before and after each isolated
+  operation; counters are records sent/received, sender media uploads, asset
+  bytes delivered to the app, bytes written to media storage):** isolated
+  rename through the editor path: iPhone 1 record sent, 0 uploads; iPad 0
+  asset bytes delivered, 0 written (on 1842 the same rename still sent six
+  content records and delivered 378 MB, which is what exposed the path
+  rewrite). Privacy, page selection and heart: three small records, 0 asset
+  bytes delivered either way. Relaunch catch-up: iPad closed, iPhone renamed
+  and hearted, iPad reopened: "Catch-up (the zone changed while no engine
+  was running): 2 changed record(s), 0 deletion(s), 0 file(s) fetched",
+  engine built from saved state, both changes present; offline variation:
+  the check timed out, the engine came from saved state, and on reconnect
+  its own fetch brought the change, 0 asset bytes, no full refetch. New
+  photo: 1 upload 4.68 MB, iPad delivered and wrote 4 675 267 bytes; replaced
+  photo: 1 upload 2.44 MB, iPad wrote 2 438 816, one attachment, no
+  duplicate. Interrupted 84 MB clip (force-quit after Save, relaunch): sent
+  once, iPad delivered and wrote 84 085 390 bytes once, plays. Deletions:
+  an attachment as two remote deletions (content and meta); a session as 4
+  deletions through the iPhone's relaunch catch-up, nothing resurrected.
+  Existing trial journal intact through the transition, 0 held metadata
+  records. **Fixed during the run:** a heart imported by the relaunch
+  catch-up landed under the placeholder viewer scope (the scope was read
+  after the catch-up; C-133). **Observed, not fixed:** once, after a
+  relaunch, the iPhone's engine fetched back the eight content records this
+  device had itself sent before the relaunch, with their files (191 MB
+  delivered, 0 written): its saved token predated its own sends. It recurred
+  once more on a later engine fetch (the replaced photo's content record,
+  2.4 MB); recorded as C-134. **Limitations:**
+  after a relaunch the engine may re-deliver changes the catch-up already
+  imported (idempotent; costs assets only for content records); the
+  catch-up's zone token advances only when a catch-up runs, so each one
+  re-reads what changed since the previous one (records only, files by
+  hash); the transition left the legacy name/star fields on old content
+  records (ignored once a meta record exists).
+  Hands-on: agent ≈ 20 min investigation and design, ≈ 50 min code,
+  ≈ 25 min tests, ≈ 30 min fixes during the device run (path rewrite, scope
+  order), ≈ 35 min guiding and reading state files; ≈ 40 min waiting on
+  builds and tests. Samuel: ≈ 70 min at the devices, ≈ 20 min waiting on
+  the four builds.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
