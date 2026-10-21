@@ -706,7 +706,9 @@ the join.
   to fail an operation (the ~15 s cut did not); recovery after a device
   restart rather than an app force-quit.
   **Stage E, account change and erase/unlink: built and unit/simulator
-  tested 2026-10-21; device run pending (script in the side-session notes).**
+  tested 2026-10-21; account switch passed on Device A the same day; the
+  iPad checks (per-app toggle, unlink/reconnect, interrupted removal,
+  offline erase) still to run (script in the side-session notes).**
   One account guard (`JournalAccountGuard`: bound user, current user,
   unlinked, removal flags) is asked by outgoing batches, fetched zone and
   database changes (imports AND remote deletions), list imports and the
@@ -764,12 +766,34 @@ the join.
   per-app iCloud toggle with pending work and an edit while paused;
   unlink/reconnect across the two devices; interrupted removal and the
   production erase on the iPad's disposable copy with the cloud and iPhone
-  checked unchanged and the journal fetched back. **Coverage unavailable
-  without a second iCloud account:** a real account switch and return. Not
-  done on his devices by instruction; options are a Mac simulator signed
-  into a test Apple ID beside one on his account, or Device A if it has its
-  own account. Unit tests cover the guard sequence; CloudKit's real
-  account-change delivery with a second account is the untested part.
+  checked unchanged and the journal fetched back. **Account switch, Device A
+  (SD beta burner, iPhone 16e, iOS 26.6.1), 2026-10-21, passed.** Device A
+  is on its own Apple Account (iCloud user `_bf8836ca…`), not the trial's
+  (`_cd10ca7e…`); Sync Test was installed beside the untouched Études
+  Release 1818 and the same install carried through A → main account → A
+  with no reinstall or clearing. On A: "DA-1" sent, then offline "DA-2" with
+  a photo made pending and the app force-quit; the state file over the cable
+  showed the two pending changes, records sent 2, binding `_bf88…`, and the
+  same after the device-wide sign-out and sign-in (both app containers kept;
+  iOS's "previous data will be removed" covers synced system data only). On
+  the main account: paused at launch with "linked to a different iCloud
+  account", Fetch now and Send now refused (logged), "DA-3" made and queued
+  (outbox 3), force-quit and relaunch paused again with Fetch refused; no
+  engine activity, server knowledge and sent count unchanged; the iPhone's
+  zone stayed at 27 records with no DA entry while an "E5" Thought from the
+  iPhone synced normally and never reached Device A. Back on A: the system
+  account notification rebuilt the engine from saved state without a
+  relaunch ("Engine built from saved state (iCloud account changed
+  (system))") and 2 s later it sent exactly 3 records with 1 media upload
+  (2.9 MB), no conflicts, nothing held back; A's zone holds 5 records
+  (Instrument, DA-1, DA-2 + attachment, DA-3), the iPhone's 28 (27 + E5),
+  and the two sets of record ids share nothing; after a relaunch Device A
+  shows DA-1/2/3 once each with the photo and no E5. Two accidental taps on
+  the diagnostics "Reset engine state" button (beside Probe zone) during
+  the run rebuilt a fresh engine and re-imported the whole zone by id on
+  each device, with no duplicates and no loss; the button now sits on its
+  own row behind a confirmation. Unit tests cover the guard sequence and
+  the device run covered CloudKit's real account-change delivery.
   **Limitations/decisions:** no automatic migration or merge between
   accounts; after a removal the binding is kept (a new account on an erased
   device needs the binding cleared, not built); whether CloudKit completes
@@ -778,8 +802,11 @@ the join.
   the per-app iCloud toggle's exact CloudKit error is to be observed on
   device; "Delete my journal everywhere" is outside this stage.
   Hands-on: agent ≈ 15 min reading and design, ≈ 20 min code and tests,
-  ≈ 20 min simulator run and the two fixes; ≈ 12 min waiting on builds and
-  test runs beyond what overlapped with the simulator work. Samuel: none yet.
+  ≈ 20 min simulator run and the two fixes, ≈ 20 min guiding the Device A
+  run and reading state files; ≈ 12 min waiting on builds and test runs
+  beyond what overlapped with the simulator work. Samuel: ≈ 35 min at
+  Device A and the iPhone, ≈ 15 min on iCloud sign-out/sign-in prompts.
+  iPad sections not yet run.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

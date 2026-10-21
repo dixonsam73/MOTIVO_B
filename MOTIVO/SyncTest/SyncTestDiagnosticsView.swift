@@ -14,6 +14,7 @@ struct SyncTestDiagnosticsView: View {
     @ObservedObject private var status = JournalSyncCoordinator.shared.status
     @State private var refreshTick = 0
     @State private var showInterruptConfirm = false
+    @State private var showResetEngineConfirm = false
 
     private var state: JournalSyncPersistedState? { JournalSyncCoordinator.shared.store?.state }
 
@@ -38,10 +39,15 @@ struct SyncTestDiagnosticsView: View {
                     Button("Probe zone") { Task { await JournalSyncCoordinator.shared.engine?.probeZone(); refreshTick += 1 } }
                     Spacer()
                     Button("Probe DB changes") { Task { await JournalSyncCoordinator.shared.engine?.probeDatabaseChanges(); refreshTick += 1 } }
-                    Spacer()
-                    Button("Reset engine state") { JournalSyncCoordinator.shared.resetEngineState(); refreshTick += 1 }
-                        .foregroundStyle(.orange)
                 }
+                // Own row and a confirmation: tapped twice by accident beside
+                // Probe zone on 2026-10-21 (harmless, but it refetches the zone).
+                Button("Reset engine state (refetches everything)") { showResetEngineConfirm = true }
+                    .foregroundStyle(.orange)
+                    .confirmationDialog("Discard the engine's change tokens and refetch the whole zone? Journal and outbox are kept.",
+                                        isPresented: $showResetEngineConfirm, titleVisibility: .visible) {
+                        Button("Reset engine state") { JournalSyncCoordinator.shared.resetEngineState(); refreshTick += 1 }
+                    }
                 Button("Delete server zone (trial reset)") { Task { await JournalSyncCoordinator.shared.engine?.deleteServerZone(); refreshTick += 1 } }
                     .foregroundStyle(.red)
             }
