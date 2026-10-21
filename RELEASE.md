@@ -668,10 +668,23 @@ the join.
   on the iPhone sent 4 attachment records with 1 media upload (3.8 MB, the
   clip) and 3 metadata-only; the iPad logged "Replaced media for … from the
   other device", the trimmed clip plays there, same attachment set, no
-  duplicate. **Still to demonstrate:** an interruption of a transfer that
-  has begun (Airplane Mode and a force-quit mid-upload of a large new
-  video), and an isolated PDF rename with the iPad's counters read before
-  and after. **What the measurements establish:** no file was set on any
+  duplicate. **Interrupted transfers (2026-10-21, 80 MB clips from Photos,
+  Network Link Conditioner 3G):** (a) ~15 s of Airplane Mode after
+  "willSendChanges" never surfaced to the engine — no failure event, the
+  same send invocation completed 3 min 25 s after it began; whether bytes
+  were resumed or re-sent beneath CloudKit is not observable from the app.
+  (b) Force-quit after "willSendChanges": after relaunch the outbox still
+  held the attachment and its session; under the throttle every retry ran
+  exactly 3 min and ended "cancelled with an error" (CloudKit's
+  per-operation timeout), four cycles, each a restart; with the throttle
+  lifted the next send completed in a minute (84 MB, one upload, no
+  duplicate), the clip plays on the iPad. So: pending work survives
+  termination; a retry restarts the operation; a large asset on a link
+  too slow to finish within the operation timeout cannot complete until
+  the link improves (C-120). **Isolated PDF rename, iPad counters before →
+  after:** Records received 44 → 45; asset bytes delivered by CloudKit
+  237.3 → 248.7 MB (the PDF, ~11 MB, fetched again); bytes written to media
+  storage 218.8 → 218.8 MB. **What the measurements establish:** no file was set on any
   record sent for a metadata change (upload count and bytes unchanged,
   record counts rising). On the receiving side, with the current record
   structure and fetch implementation, changing attachment metadata can
@@ -687,7 +700,11 @@ the join.
   reading it in the viewers. Not started. C-119 fixed.
   Hands-on: agent ≈ 15 min implementation and tests, ≈ 10 min waiting on
   builds, ≈ 5 min diagnosis and records; Samuel ≈ 25 min at the devices,
-  ≈ 5 min waiting.
+  ≈ 5 min waiting. Completion checks (20–21 Oct): agent ≈ 15 min, ≈ 2 min
+  waiting; Samuel ≈ 35 min at the devices, ≈ 12 min waiting on throttled
+  sends. Untested: a mid-transfer cut on an unthrottled link long enough
+  to fail an operation (the ~15 s cut did not); recovery after a device
+  restart rather than an app force-quit.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
