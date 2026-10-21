@@ -132,8 +132,9 @@ final class SyncTestReceiverTests: XCTestCase {
         a.setValue("/tmp/replaced.m4a", forKey: "fileURL")
         try ctx.save()
         tracker.processHistory()
-        XCTAssertNotNil(pending(aid), "a replaced file queues the content record"); XCTAssertNil(pending(meta))
+        XCTAssertNotNil(pending(aid), "a replaced file queues the content record")
         XCTAssertFalse(pending(aid)!.assetFree)
+        XCTAssertNotNil(pending(meta), "…and the meta record, whose stamp moved (small)")
         store.update { $0.outbox.removeAll() }
 
         // A privacy touch (metadata author, stamp only) → meta only.
@@ -271,6 +272,37 @@ final class SyncTestReceiverTests: XCTestCase {
         ctx.performAndWait { let s = imp.fetch(entity: "Session", id: sid)!; makeAttachment(session: s, in: ctx, id: other); try? ctx.save() }
         ctx.performAndWait { imp.importDeletions([(CKRecord.ID(recordName: JournalSyncRecordType.metaName(for: other.uuidString), zoneID: JournalRecordMapping.zoneID), JournalSyncRecordType.attachmentMeta)]) }
         ctx.performAndWait { XCTAssertNotNil(imp.fetch(entity: "Attachment", id: other)) }
+    }
+
+    // MARK: a path rewrite is not a content change
+
+    func testAPathRewriteWithTheSameBytesQueuesNoContentRecord() throws {
+        let ctx = container.viewContext
+        let s = makeSession(in: ctx)
+        let fileA = tempDir.appendingPathComponent("a.m4a"); try Data([1, 2, 3]).write(to: fileA)
+        let a = makeAttachment(session: s, in: ctx, fileURL: fileA.path)
+        try ctx.save()
+        let aid = (a.value(forKey: "id") as! UUID).uuidString
+        let meta = JournalSyncRecordType.metaName(for: aid)
+        let tracker = JournalChangeTracker(container: container, store: store)
+        tracker.bootstrapIfNeeded(); store.update { $0.outbox.removeAll() }
+        // The server holds this file's hash.
+        let hash = try XCTUnwrap(JournalAssetHash.hash(of: fileA))
+        store.update { $0.assetHashes[aid] = hash }
+
+        // Same bytes at another path (the container moved): meta only, since the stamp moved.
+        let moved = tempDir.appendingPathComponent("moved.m4a"); try Data([1, 2, 3]).write(to: moved)
+        a.setValue(moved.path, forKey: "fileURL"); try ctx.save()
+        tracker.processHistory()
+        XCTAssertNil(pending(aid), "no content record for a path rewrite")
+        XCTAssertNotNil(pending(meta))
+        store.update { $0.outbox.removeAll() }
+
+        // Different bytes: a replacement, content record queued.
+        let replaced = tempDir.appendingPathComponent("replaced.m4a"); try Data([9, 9, 9, 9]).write(to: replaced)
+        a.setValue(replaced.path, forKey: "fileURL"); try ctx.save()
+        tracker.processHistory()
+        XCTAssertNotNil(pending(aid)); XCTAssertFalse(pending(aid)!.assetFree)
     }
 
     // MARK: catch-up decisions

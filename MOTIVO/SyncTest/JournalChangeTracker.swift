@@ -197,6 +197,7 @@ final class JournalChangeTracker {
         var urisRemoved: [String] = []
         let knownCustomNames = store.state.customRecordNames
         let discard = store.state.localRemovalInProgress
+        var diagnostics: [String] = []
 
         context.performAndWait {
             let request = NSPersistentHistoryChangeRequest.fetchHistory(after: after)
@@ -235,11 +236,23 @@ final class JournalChangeTracker {
                                 && transaction.author != JournalSyncAuthor.metadata
                             // Stage G: which of an attachment's two records changed.
                             attachmentContentChanged = !keys.intersection(JournalSyncRecordType.attachmentContentKeys).isEmpty
+                            if entity == JournalSyncRecordType.attachment, attachmentContentChanged,
+                               keys.intersection(JournalSyncRecordType.attachmentContentKeys) == ["fileURL"] {
+                                // A path rewrite with the same bytes is not a content change
+                                // (the stored path moves with the app container). Only a
+                                // file whose hash differs from the server's is.
+                                attachmentContentChanged = Self.fileChanged(object, name: id.uuidString, store: store)
+                            }
                             attachmentMetaChanged = !attachmentContentChanged
                                 || !keys.intersection(["displayName", "isThumbnail"]).isEmpty
+                                || keys.subtracting(["fileURL", "userModifiedAt"]).isEmpty
                         }
                         if JournalSyncRecordType.directory.contains(entity) { namesAdded[uri] = id.uuidString }
                         if entity == JournalSyncRecordType.attachment {
+                            if change.changeType == .update, let keys = change.updatedProperties.map({ $0.map(\.name).sorted() }) {
+                                // Stage G diagnosis: which keys an attachment update carried.
+                                diagnostics.append("Attachment \(id.uuidString.prefix(8))… updated keys \(keys) by \(transaction.author ?? "nil") → \(attachmentContentChanged ? "content" : "meta")")
+                            }
                             if attachmentContentChanged {
                                 added.append(.init(recordName: id.uuidString, recordType: entity, op: .save))
                             }
@@ -271,12 +284,24 @@ final class JournalChangeTracker {
 
         guard newToken != nil || !added.isEmpty else { return [] }
         let ok = store.update { st in
+            for line in diagnostics.prefix(12) { st.log.append(.init(at: Date(), text: line)) }
             Self.merge(added, into: &st.outbox)
             st.customRecordNames.merge(namesAdded) { _, new in new }
             for uri in urisRemoved { st.customRecordNames.removeValue(forKey: uri) }
             if let newToken { st.historyToken = JournalSyncStateStore.encode(token: newToken) }
         }
         return ok ? added : []
+    }
+
+    /// Whether the attachment's file differs from what the server holds. Unknown
+    /// server hash, or no readable file, counts as changed (the send-time hash
+    /// rule then decides whether the file travels).
+    static func fileChanged(_ object: NSManagedObject, name: String, store: JournalSyncStateStore) -> Bool {
+        guard let serverHash = store.state.assetHashes[name],
+              let url = AttachmentPathResolver.resolve(object.value(forKey: "fileURL") as? String),
+              let cached = JournalAssetHash.cachedHash(of: url, cache: store.state.fileStampCache[name]) else { return true }
+        store.update { $0.fileStampCache[name] = cached.entry }
+        return cached.hash != serverHash
     }
 
     /// A delete supersedes a pending save of the same record; otherwise entries

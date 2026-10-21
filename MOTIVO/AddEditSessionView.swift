@@ -2227,7 +2227,16 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
             for attachment in attachments {
                 if let id = attachment.value(forKey: "id") as? UUID,
                    let newURL = existingAttachmentURLMap[id] {
-                    attachment.fileURL = newURL.path
+                    // The map holds EVERY existing attachment's resolved URL (filled
+                    // at load), not only replacements. Writing it back unconditionally
+                    // rewrote the stored path after each reinstall (the container path
+                    // moves), which the sync trial saw as a content change of every
+                    // attachment in the session (2026-10-21). Only a different file is
+                    // a replacement.
+                    let current = resolveStoredFileURL(at: attachment.fileURL ?? "")?.standardizedFileURL
+                    if current != newURL.standardizedFileURL {
+                        attachment.fileURL = newURL.path
+                    }
                 }
             }
         } catch {
