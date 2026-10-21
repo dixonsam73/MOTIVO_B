@@ -30,6 +30,7 @@
 #if SYNCTEST
 import Foundation
 import CoreData
+import CloudKit
 
 enum JournalMetadataKeys {
     static let isPrivate = "isPrivate"
@@ -113,6 +114,15 @@ enum JournalMetadataMirror {
 
 /// Reads side stores into records and writes records into side stores.
 enum JournalMetadataFields {
+    /// Whether a record was written by a build that syncs metadata.
+    static func recordCarriesMetadata(_ record: CKRecord) -> Bool {
+        switch record.recordType {
+        case JournalSyncRecordType.session: return record[JournalMetadataKeys.isSaved] != nil
+        case JournalSyncRecordType.attachment:
+            return record[JournalMetadataKeys.selectedPages] != nil || record[JournalMetadataKeys.isPrivate] != nil
+        default: return false
+        }
+    }
 
     /// Fields an outgoing record carries beside the Core Data attributes.
     static func setAttachmentFields(on record: CKRecordLike, id: UUID) {

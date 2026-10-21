@@ -244,7 +244,9 @@ final class JournalChangeTracker {
                 outbox.removeAll { $0.recordName == change.recordName }
             }
             if let i = outbox.firstIndex(where: { $0.recordName == change.recordName && $0.op == change.op }) {
-                if outbox[i].ownerOnly && !change.ownerOnly { outbox[i] = change }
+                let existingPartial = outbox[i].ownerOnly || outbox[i].metadataOnly
+                let incomingPartial = change.ownerOnly || change.metadataOnly
+                if existingPartial && !incomingPartial { outbox[i] = change }
             } else {
                 outbox.append(change)
             }

@@ -245,6 +245,56 @@ final class SyncTestMetadataTests: XCTestCase {
         XCTAssertFalse(store.state.outbox.first { $0.recordName == sid.uuidString }!.ownerOnly, "a full record, not owner-only")
     }
 
+    // MARK: migration rows meeting server copies
+
+    func testMigrationRowSurvivesAnOldFormatServerCopyAndYieldsToOneWithMetadata() throws {
+        let sid = UUID(), aid = UUID()
+        let queue = RecordingSendQueue()
+        let (imp, ctx) = importer(queue)
+        let old = Date(timeIntervalSince1970: 1_000)
+        ctx.performAndWait {
+            let s = makeSession(in: ctx, id: sid, stamp: old)
+            let a = makeAttachment(session: s, in: ctx, id: aid)
+            a.setValue("Migrated name", forKey: "displayName"); a.setValue(old, forKey: "userModifiedAt")
+            try? ctx.save()
+        }
+        store.update { $0.outbox = [.init(recordName: aid.uuidString, recordType: "Attachment", op: .save, metadataOnly: true),
+                                    .init(recordName: sid.uuidString, recordType: "Session", op: .save, metadataOnly: true)] }
+
+        // Same stamp, written by an older build: no displayName, no fields.
+        let oldFormat = attachmentRecord(id: aid, sessionID: sid, displayName: nil, isPrivate: nil, pages: nil, stamp: old)
+        var applied = false
+        ctx.performAndWait { applied = imp.importAttachment(oldFormat).imported }
+        XCTAssertTrue(applied, "server content applied")
+        ctx.performAndWait { XCTAssertEqual(imp.fetch(entity: "Attachment", id: aid)?.value(forKey: "displayName") as? String, "Migrated name",
+                                            "an absent displayName is no information") }
+        XCTAssertTrue(queue.removed.isEmpty, "the migration row stays queued")
+        XCTAssertNotNil(store.state.lastKnownRecords[aid.uuidString], "…and will go on top of the server's change tag")
+
+        // A copy that carries the fields wins: the other device already migrated.
+        let withFields = attachmentRecord(id: aid, sessionID: sid, displayName: "Their name", isPrivate: true, pages: "[]", stamp: old)
+        ctx.performAndWait { _ = imp.importAttachment(withFields) }
+        XCTAssertEqual(queue.removed, [aid.uuidString])
+        ctx.performAndWait { XCTAssertEqual(imp.fetch(entity: "Attachment", id: aid)?.value(forKey: "displayName") as? String, "Their name") }
+    }
+
+    func testMergeKeepsAContentSaveOverAMetadataOnlyOne() {
+        var outbox: [JournalSyncPendingChange] = [.init(recordName: "A", recordType: "Session", op: .save, metadataOnly: true)]
+        JournalChangeTracker.merge([.init(recordName: "A", recordType: "Session", op: .save)], into: &outbox)
+        XCTAssertFalse(outbox[0].metadataOnly, "a content save replaces a metadata-only one")
+        JournalChangeTracker.merge([.init(recordName: "A", recordType: "Session", op: .save, metadataOnly: true)], into: &outbox)
+        XCTAssertFalse(outbox[0].metadataOnly, "…and is never downgraded")
+    }
+
+    func testAttachmentRecordAlwaysCarriesDisplayNameOnceWrittenByThisBuild() throws {
+        let ctx = container.viewContext
+        let s = makeSession(in: ctx)
+        let a = makeAttachment(session: s, in: ctx)
+        try ctx.save()
+        let r = try XCTUnwrap(JournalRecordMapping.record(for: a, base: nil))
+        XCTAssertEqual(r["displayName"] as? String, "", "nil locally is sent as the explicit empty name")
+    }
+
     // MARK: migration
 
     func testMigrationQueuesRowsWithTheirExistingStampsAndIsIdempotent() throws {

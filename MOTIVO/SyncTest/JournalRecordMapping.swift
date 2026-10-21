@@ -135,6 +135,8 @@ enum JournalRecordMapping {
             for key in userActivityKeys { record[key] = ckValue(object.value(forKey: key)) }
         case JournalSyncRecordType.attachment:
             for key in attachmentKeys { record[key] = ckValue(object.value(forKey: key)) }
+            // Always present once written by this build: "" is "no name / cleared".
+            if record["displayName"] == nil { record["displayName"] = "" as CKRecordValue }
             JournalMetadataFields.setAttachmentFields(on: record, id: id)
             if let session = object.value(forKey: "session") as? NSManagedObject,
                let sid = session.value(forKey: "id") as? UUID {
@@ -208,6 +210,9 @@ enum JournalRecordMapping {
         for key in keys {
             guard let attribute = attributes[key] else { continue }
             let raw = record[key]
+            // An attachment record without displayName was written before
+            // names synced: no information, so the local value stays.
+            if key == "displayName", record.recordType == JournalSyncRecordType.attachment, raw == nil { continue }
             switch attribute.attributeType {
             case .booleanAttributeType:
                 if let n = raw as? NSNumber { object.setValue(n.boolValue, forKey: key) }

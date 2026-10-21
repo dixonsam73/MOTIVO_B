@@ -288,16 +288,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         let caughtUp = tracker.processHistory()
         if !caughtUp.isEmpty { log("Queued \(caughtUp.count) change(s) made while not syncing") }
         await refreshViewerScope()
-        if !store.state.metadataMigrationDone {
-            // Stage F, once: side-store values join their records with the
-            // rows' existing stamps. Idempotent; the flag is set last.
-            let outcome = JournalMetadataMigration.run(container: persistence, privacyMap: AttachmentPrivacy.currentMap(),
-                                                       pagesMap: PDFSelectedPagesStore.load(), viewerScope: viewerScope) { name, type in
-                self.enqueueSave(name, recordType: type, ownerOnly: false)
-            }
-            store.update { $0.metadataMigrationDone = true }
-            log("Metadata migration: \(outcome.titles) title(s) moved to displayName, \(outcome.privacy) privacy choice(s), \(outcome.pages) page selection(s), \(outcome.saves) favourite(s) queued")
-        }
+        runMetadataMigrationIfNeeded()
         await scanLists()
         requeueOutbox()
         await publish { $0.phase = "Running" }
@@ -336,6 +327,22 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             }
             self.container.privateCloudDatabase.add(op)
         }
+    }
+
+    /// Stage F, once: side-store values join their records with the rows'
+    /// existing stamps. Idempotent; the flag is set last. The diagnostics
+    /// screen can clear the flag to run it again.
+    func runMetadataMigrationIfNeeded() {
+        guard !store.state.metadataMigrationDone else { return }
+        let outcome = JournalMetadataMigration.run(container: persistence, privacyMap: AttachmentPrivacy.currentMap(),
+                                                   pagesMap: PDFSelectedPagesStore.load(), viewerScope: viewerScope) { name, type in
+            let change = JournalSyncPendingChange(recordName: name, recordType: type, op: .save, metadataOnly: true)
+            self.store.update { JournalChangeTracker.merge([change], into: &$0.outbox) }
+            self.queueToEngine(zoneChanges: [self.pendingChange(change)])
+        }
+        store.update { $0.metadataMigrationDone = true }
+        log("Metadata migration: \(outcome.titles) title(s) moved to displayName, \(outcome.privacy) privacy choice(s), \(outcome.pages) page selection(s), \(outcome.saves) favourite(s) queued")
+        refreshCounts()
     }
 
     // MARK: Stage E controls

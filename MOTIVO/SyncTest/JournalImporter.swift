@@ -135,7 +135,12 @@ final class JournalImporter {
         let existing = fetch(entity: JournalSyncRecordType.session, id: id)
         let localOwner = existing?.value(forKey: "ownerUserID") as? String
         let serverOwner = record["ownerUserID"] as? String
-        if let existing, let pending = pendingSave(name), !pending.ownerOnly {
+        if existing != nil, let pending = pendingSave(name), pending.metadataOnly {
+            // A migrated row meets its server copy: dropped only when that copy
+            // already carries metadata fields; an older build's copy has less
+            // information, so ours stays queued and goes on top of its tag.
+            if JournalMetadataFields.recordCarriesMetadata(record) { queue?.removePendingSave(name) }
+        } else if let existing, let pending = pendingSave(name), !pending.ownerOnly {
             let local = existing.value(forKey: "userModifiedAt") as? Date
             let server = JournalRecordMapping.userModifiedAt(of: record)
             if JournalConflictRule.decide(localUserModifiedAt: local, serverUserModifiedAt: server) == .local {
@@ -205,7 +210,9 @@ final class JournalImporter {
             return (false, 0)
         }
         let existing = fetch(entity: JournalSyncRecordType.attachment, id: id)
-        if let existing, localChangePending(name) {
+        if existing != nil, let pending = pendingSave(name), pending.metadataOnly {
+            if JournalMetadataFields.recordCarriesMetadata(record) { queue?.removePendingSave(name) }
+        } else if let existing, localChangePending(name) {
             let local = existing.value(forKey: "userModifiedAt") as? Date
             let server = JournalRecordMapping.userModifiedAt(of: record)
             if JournalConflictRule.decide(localUserModifiedAt: local, serverUserModifiedAt: server) == .local {
@@ -469,6 +476,26 @@ final class JournalImporter {
         }
         let localOwner = local.value(forKey: "ownerUserID") as? String
         let serverOwner = server["ownerUserID"] as? String
+        if pendingSave(recordName)?.metadataOnly == true {
+            // Migration meets a newer server copy: its content is taken; the
+            // metadata stays queued unless that copy already carries the fields.
+            _ = JournalRecordMapping.apply(server, to: local)
+            if recordType == JournalSyncRecordType.session {
+                let link = JournalRecordMapping.instrumentLink(of: server)
+                local.setValue(resolveInstrument(recordName: link.recordName, name: link.name), forKey: "instrument")
+                local.setValue(JournalOwnership.mergedOwner(local: localOwner, server: serverOwner), forKey: "ownerUserID")
+                followSessionOwner(local)
+            }
+            applySideStores(server, id: id)
+            save()
+            if JournalMetadataFields.recordCarriesMetadata(server) {
+                queue?.removePendingSave(recordName)
+                log("Migration of \(recordName) superseded by a server copy that carries metadata")
+                return false
+            }
+            log("Migration of \(recordName) resent on top of a newer server copy without metadata")
+            return true
+        }
         if recordType == JournalSyncRecordType.session, pendingSave(recordName)?.ownerOnly == true {
             // Only the owner key was being sent: take the server's content, keep
             // the owner, and send the owner again on top of the new change tag.

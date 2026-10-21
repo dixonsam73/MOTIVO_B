@@ -46,18 +46,24 @@ struct JournalSyncPendingChange: Codable, Hashable {
     /// Stage D: the only pending change is the owner key. Sent as a partial
     /// record, and never a content conflict against the server copy.
     var ownerOnly: Bool = false
+    /// Stage F: queued by the metadata migration with the row's existing
+    /// stamp. Meeting a server copy that carries none of the metadata fields
+    /// (written by an older build) it is kept, not dropped: that copy has
+    /// less information, not newer information.
+    var metadataOnly: Bool = false
 
-    init(recordName: String, recordType: String, op: Op, ownerOnly: Bool = false) {
-        self.recordName = recordName; self.recordType = recordType; self.op = op; self.ownerOnly = ownerOnly
+    init(recordName: String, recordType: String, op: Op, ownerOnly: Bool = false, metadataOnly: Bool = false) {
+        self.recordName = recordName; self.recordType = recordType; self.op = op; self.ownerOnly = ownerOnly; self.metadataOnly = metadataOnly
     }
 
-    private enum CodingKeys: String, CodingKey { case recordName, recordType, op, ownerOnly }
+    private enum CodingKeys: String, CodingKey { case recordName, recordType, op, ownerOnly, metadataOnly }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         recordName = try c.decode(String.self, forKey: .recordName)
         recordType = try c.decode(String.self, forKey: .recordType)
         op = try c.decode(Op.self, forKey: .op)
         ownerOnly = try c.decodeIfPresent(Bool.self, forKey: .ownerOnly) ?? false
+        metadataOnly = try c.decodeIfPresent(Bool.self, forKey: .metadataOnly) ?? false
     }
 }
 
