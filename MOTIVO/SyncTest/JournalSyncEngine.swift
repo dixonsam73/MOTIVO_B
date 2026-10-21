@@ -13,6 +13,17 @@
 //  rules (`JournalOwnership`) and upload eligibility by ownership. Still out
 //  of scope: Scores, profile, attachment privacy map, Instrument/Tag links.
 //
+//  Stage E: ONE account guard (`JournalAccountGuard`) decides whether this
+//  device syncs right now, asked by sends, fetched changes (imports and
+//  remote deletions), list imports and the manual controls. When it refuses,
+//  the CKSyncEngine instance is DROPPED, not merely ignored, so nothing is
+//  fetched from or sent to a non-bound account and its state serialization
+//  is never saved; on return to the bound account a new instance is built
+//  from the last state saved while bound. Account changes reach one
+//  `reconcile` path from the engine's own event and from the system's
+//  CKAccountChanged notification. Unlink and local removal are persisted
+//  (`JournalLocalRemoval`) and need an explicit re-enable.
+//
 
 #if SYNCTEST
 import Foundation
@@ -54,13 +65,16 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     let store: JournalSyncStateStore
     let tracker: JournalChangeTracker
     let status: JournalSyncStatus
-    private(set) var engine: CKSyncEngine!
+    /// The live CKSyncEngine, or nil while dormant (guard refused). Guarded by
+    /// `stateLock`; delegate callbacks from a dropped instance are ignored.
+    private var engineInstance: CKSyncEngine?
     private let importContext: NSManagedObjectContext
     private var saveObserver: NSObjectProtocol?
     private var stampObserver: NSObjectProtocol?
+    private var accountObserver: NSObjectProtocol?
     private let stateLock = NSLock()
-    private var paused = false
     private var currentUserRecordName: String?
+    private var lastRefusal: String?
     let importer: JournalImporter
     /// This install's K2, read once on the main actor (see `JournalSyncCoordinator`).
     let customOwner: String?
@@ -68,11 +82,13 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     var fetchCycleCompleted: (@MainActor () -> Void)?
     private var listObserver: NSObjectProtocol?
     private var listScanScheduled = false
-    /// The part of `start()` after the iCloud check has run once.
-    private var started = false
-    private var startAttempts = 0
-    private var waitingForICloud = false
-    private var startInFlight = false
+    private var observersInstalled = false
+    private var retryAttempts = 0
+    /// A refusal that can clear on its own (no account yet) is retried on a
+    /// backoff and when the network path is satisfied.
+    private var retryPending = false
+    private var reconcileInFlight = false
+    private var reconcileQueued = false
     private var pathMonitor: NWPathMonitor?
 
     init(containerIdentifier: String, persistence: NSPersistentContainer, store: JournalSyncStateStore, status: JournalSyncStatus, customOwner: String?) {
@@ -94,67 +110,167 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         super.init()
         importer.queue = self
         importer.log = { [weak self] in self?.log($0) }
-        var configuration = CKSyncEngine.Configuration(
-            database: container.privateCloudDatabase,
-            stateSerialization: store.state.engineState,
-            delegate: self
-        )
-        configuration.automaticallySync = true
-        engine = CKSyncEngine(configuration)
+    }
+
+    deinit {
+        for o in [saveObserver, stampObserver, accountObserver, listObserver].compactMap({ $0 }) {
+            NotificationCenter.default.removeObserver(o)
+        }
+        pathMonitor?.cancel()
     }
 
     // MARK: Lifecycle
 
     func start() async {
         if stampObserver == nil { stampObserver = JournalUserEditStamp.install() }
-        await attemptStart()
+        if accountObserver == nil {
+            // The system's account notification, independent of any engine
+            // instance: while dormant there is no engine to tell us.
+            accountObserver = NotificationCenter.default.addObserver(forName: .CKAccountChanged, object: nil, queue: nil) { [weak self] _ in
+                Task { await self?.reconcile(trigger: "iCloud account changed (system)") }
+            }
+        }
+        if !observersInstalled {
+            // Local saves feed the durable outbox in EVERY state (paused,
+            // unlinked, waiting for iCloud); only transport waits for an engine.
+            observersInstalled = true
+            installSaveObserver()
+            installListObserver()
+        }
+        await reconcile(trigger: "launch")
     }
 
-    /// The iCloud check, then the one-time remainder of start-up. A failed
-    /// check (offline, or no iCloud account yet) is NOT an account change: the
-    /// journal and pending work are kept and the check is retried on a backoff
-    /// and as soon as the network path is satisfied, with no relaunch needed.
-    /// A bound-account mismatch still pauses and is not retried here.
-    private func attemptStart() async {
-        guard !started, !startInFlight else { return }
-        startInFlight = true
-        defer { startInFlight = false }
-        await publish { $0.phase = "Checking iCloud account" }
-        do {
-            let me = try await container.userRecordID()
-            currentUserRecordName = me.recordName
-            if let bound = store.state.boundUserRecordName {
-                if bound != me.recordName {
-                    waitingForICloud = false
-                    pause("This journal is linked to a different iCloud account. Nothing is uploaded.")
-                    return
-                }
-            } else {
-                store.update { $0.boundUserRecordName = me.recordName }
-                log("Bound journal to iCloud user \(me.recordName)")
-            }
-        } catch {
-            scheduleStartRetry(after: error)
+    /// The current engine instance, or nil while dormant.
+    var engine: CKSyncEngine? { stateLock.lock(); defer { stateLock.unlock() }; return engineInstance }
+
+    private func isCurrent(_ e: CKSyncEngine) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return engineInstance === e
+    }
+
+    /// The one rule every data path asks (`JournalAccountGuard`).
+    func currentDecision() -> JournalAccountGuard.Decision {
+        let st = store.state
+        stateLock.lock(); let current = currentUserRecordName; stateLock.unlock()
+        return JournalAccountGuard.decide(bound: st.boundUserRecordName, current: current, unlinked: st.unlinked,
+                                          localRemovalInProgress: st.localRemovalInProgress, localCopyRemoved: st.localCopyRemoved)
+    }
+
+    /// THE path that decides whether this device syncs right now: at launch,
+    /// on every account change (engine event or system notification), on a
+    /// retry, and after unlink / re-enable / removal. Serialised; a call that
+    /// arrives mid-run queues one more run.
+    func reconcile(trigger: String) async {
+        stateLock.lock()
+        if reconcileInFlight { reconcileQueued = true; stateLock.unlock(); return }
+        reconcileInFlight = true
+        stateLock.unlock()
+        defer {
+            stateLock.lock()
+            reconcileInFlight = false
+            let again = reconcileQueued
+            reconcileQueued = false
+            stateLock.unlock()
+            if again { Task { await self.reconcile(trigger: "queued") } }
+        }
+
+        let st = store.state
+        if st.localRemovalInProgress || st.unlinked {
+            // Persisted refusals: no iCloud check needed, and no engine.
+            goDormant(currentDecision(), trigger: trigger)
             return
         }
-        if waitingForICloud { log("iCloud reachable again; starting without a relaunch") }
-        waitingForICloud = false
-        stateLock.lock(); paused = false; stateLock.unlock()
-        await publish { $0.pausedReason = nil }
-        started = true
+        await publish { $0.phase = "Checking iCloud account" }
+        var me: String?
+        var checkError: String?
+        do { me = try await container.userRecordID().recordName } catch { checkError = error.localizedDescription }
+        stateLock.lock(); currentUserRecordName = me; stateLock.unlock()
+        if let me, store.state.boundUserRecordName == nil {
+            store.update { $0.boundUserRecordName = me }
+            log("Bound journal to iCloud user \(me)")
+        }
+        let decision = currentDecision()
+        if let checkError, !decision.allowed {
+            // Logged on the first failure and then every fifth retry, so the
+            // diagnostics log stays readable while signed out.
+            stateLock.lock(); let n = retryAttempts; stateLock.unlock()
+            if n == 0 || n % 5 == 0 { log("iCloud check failed (\(checkError)); retry \(n)") }
+        }
+        guard decision.allowed else { goDormant(decision, trigger: trigger); return }
+        await activate(trigger: trigger)
+    }
 
-        engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
+    /// Drop the engine (if any), remember why, and retry only when the
+    /// refusal can clear on its own.
+    private func goDormant(_ decision: JournalAccountGuard.Decision, trigger: String) {
+        guard case .refuse(let reason, let retry) = decision else { return }
+        stateLock.lock()
+        let hadEngine = engineInstance != nil
+        engineInstance = nil
+        retryPending = retry
+        let changed = lastRefusal != reason
+        lastRefusal = reason
+        stateLock.unlock()
+        if changed || hadEngine { log("PAUSED (\(trigger)): \(reason)\(hadEngine ? " — engine dropped" : "")") }
+        Task { @MainActor in self.status.pausedReason = reason; self.status.phase = retry ? "Waiting for iCloud" : "Paused" }
+        if retry { scheduleRetry() } else { stateLock.lock(); retryAttempts = 0; stateLock.unlock() }
+        refreshCounts()
+    }
+
+    /// The guard allowed: build an engine from the last state saved while
+    /// bound (or none, after a removal), queue the outbox and anything
+    /// history holds, and run. Idempotent for an engine already running.
+    private func activate(trigger: String) async {
+        stateLock.lock()
+        let wasDormant = engineInstance == nil
+        if wasDormant {
+            var configuration = CKSyncEngine.Configuration(database: container.privateCloudDatabase,
+                                                           stateSerialization: store.state.engineState, delegate: self)
+            configuration.automaticallySync = true
+            engineInstance = CKSyncEngine(configuration)
+        }
+        retryPending = false
+        retryAttempts = 0
+        lastRefusal = nil
+        stateLock.unlock()
+        if wasDormant { log("Engine \(store.state.engineState == nil ? "built fresh" : "built from saved state") (\(trigger))") }
+        await publish { $0.pausedReason = nil }
+
+        queueToEngine(databaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
         let bootstrapped = tracker.bootstrapIfNeeded()
         if bootstrapped > 0 { log("Queued \(bootstrapped) existing record(s)") }
         let customs = tracker.bootstrapCustomsIfNeeded(customOwner: customOwner)
         if customs > 0 { log("Queued \(customs) custom row(s)") }
-        tracker.processHistory()
+        let caughtUp = tracker.processHistory()
+        if !caughtUp.isEmpty { log("Queued \(caughtUp.count) change(s) made while not syncing") }
         await scanLists()
         requeueOutbox()
-        installSaveObserver()
-        installListObserver()
         await publish { $0.phase = "Running" }
         refreshCounts()
+    }
+
+    // MARK: Stage E controls
+
+    /// Unlink: persisted; the journal and its pending work stay, history keeps
+    /// feeding the outbox, and nothing reaches an engine until re-enabled.
+    func unlink() async {
+        JournalLocalRemoval.unlink(store: store)
+        await reconcile(trigger: "unlink")
+    }
+
+    /// Step 1 of a local removal, BEFORE any row is deleted. Synchronous and
+    /// durable: the marker and the emptied outbox are on disk, and the engine
+    /// is dropped, when this returns.
+    func beginLocalRemoval(reason: String) {
+        let ok = JournalLocalRemoval.begin(store: store, reason: reason)
+        if !ok { logger.error("Local removal marker could NOT be written; relying on the in-memory engine drop only") }
+        goDormant(currentDecision(), trigger: "local removal")
+    }
+
+    /// Step 2, after the cleanup. Leaves sync off until re-enabled.
+    func finishLocalRemoval() {
+        JournalLocalRemoval.finish(store: store, container: persistence)
+        goDormant(currentDecision(), trigger: "local removal finished")
     }
 
     /// Any local save (author ≠ sync) feeds history → outbox → engine.
@@ -167,17 +283,25 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
     }
 
-    private func scheduleStartRetry(after error: Error) {
-        waitingForICloud = true
-        startAttempts += 1
-        let delay = JournalSyncStartRetry.delay(attempt: startAttempts)
-        log("iCloud check failed (\(error.localizedDescription)); journal and pending changes kept; retrying in \(Int(delay)) s")
-        Task { @MainActor in self.status.pausedReason = "Waiting for iCloud (retrying)"; self.status.phase = "Waiting for iCloud" }
+    /// A failed iCloud check (offline, signed out, or no account yet) is NOT
+    /// an account change: the journal and pending work are kept and the check
+    /// is retried on a 5/10/20/40/60 s backoff and as soon as the network
+    /// path is satisfied, with no relaunch needed.
+    private var retryTimerArmed = false
+    private func scheduleRetry() {
+        stateLock.lock()
+        if retryTimerArmed { stateLock.unlock(); return }   // one timer at a time
+        retryTimerArmed = true
+        retryAttempts += 1
+        let delay = JournalSyncStartRetry.delay(attempt: retryAttempts)
+        stateLock.unlock()
         installPathMonitorIfNeeded()
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard let self, self.waitingForICloud else { return }
-            await self.attemptStart()
+            guard let self else { return }
+            self.stateLock.lock(); self.retryTimerArmed = false; let pending = self.retryPending; self.stateLock.unlock()
+            guard pending else { return }
+            await self.reconcile(trigger: "retry")
         }
     }
 
@@ -186,8 +310,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         guard pathMonitor == nil else { return }
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
-            guard let self, path.status == .satisfied, self.waitingForICloud else { return }
-            Task { await self.attemptStart() }
+            guard let self, path.status == .satisfied else { return }
+            self.stateLock.lock(); let pending = self.retryPending; self.stateLock.unlock()
+            guard pending else { return }
+            Task { await self.reconcile(trigger: "network path satisfied") }
         }
         monitor.start(queue: DispatchQueue(label: "com.samueldixon.motivo.synctest.path"))
         pathMonitor = monitor
@@ -206,10 +332,13 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
     }
 
+    /// Lists are scanned only while syncing: after an erase the wiped library
+    /// would otherwise read as "every list deleted".
     func scanLists() async {
+        guard engine != nil, currentDecision().allowed else { return }
         let added = await MainActor.run { JournalSavedListSync.scan(store: store) }
         guard !added.isEmpty else { return }
-        engine.state.add(pendingRecordZoneChanges: added.map(pendingChange))
+        queueToEngine(zoneChanges: added.map(pendingChange))
         log("Queued \(added.count) list change(s)")
         refreshCounts()
     }
@@ -218,7 +347,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     func ownerChanged() {
         let added = tracker.requeueUnsent()
         if !added.isEmpty {
-            engine.state.add(pendingRecordZoneChanges: added.map(pendingChange))
+            queueToEngine(zoneChanges: added.map(pendingChange))
             log("Owner changed: queued \(added.count) entr\(added.count == 1 ? "y" : "ies") not yet uploaded")
         }
         Task { await scanLists() }
@@ -229,21 +358,23 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     func enqueueSave(_ recordName: String, recordType: String, ownerOnly: Bool) {
         let change = JournalSyncPendingChange(recordName: recordName, recordType: recordType, op: .save, ownerOnly: ownerOnly)
         store.update { JournalChangeTracker.merge([change], into: &$0.outbox) }
-        engine.state.add(pendingRecordZoneChanges: [pendingChange(change)])
+        queueToEngine(zoneChanges: [pendingChange(change)])
     }
 
     func enqueueDelete(_ recordName: String, recordType: String) {
         let change = JournalSyncPendingChange(recordName: recordName, recordType: recordType, op: .delete)
         store.update { JournalChangeTracker.merge([change], into: &$0.outbox) }
-        engine.state.add(pendingRecordZoneChanges: [pendingChange(change)])
+        queueToEngine(zoneChanges: [pendingChange(change)])
     }
 
     func removePendingSave(_ recordName: String) { dropPendingSave(recordName) }
 
+    /// Local saves always reach the OUTBOX (durable, kept while paused or
+    /// unlinked); they reach an engine only while one exists.
     func noteLocalChanges() {
         let added = tracker.processHistory()
         guard !added.isEmpty else { return }
-        engine.state.add(pendingRecordZoneChanges: added.map(pendingChange))
+        queueToEngine(zoneChanges: added.map(pendingChange))
         log("Queued \(added.count) local change(s)")
         refreshCounts()
     }
@@ -251,7 +382,16 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private func requeueOutbox() {
         let outbox = store.state.outbox
         guard !outbox.isEmpty else { return }
-        engine.state.add(pendingRecordZoneChanges: outbox.map(pendingChange))
+        queueToEngine(zoneChanges: outbox.map(pendingChange))
+    }
+
+    /// No engine (dormant) means nothing is queued for transport; the outbox
+    /// is the durable record and is requeued on activation.
+    private func queueToEngine(zoneChanges: [CKSyncEngine.PendingRecordZoneChange] = [],
+                               databaseChanges: [CKSyncEngine.PendingDatabaseChange] = []) {
+        guard let engine else { return }
+        if !zoneChanges.isEmpty { engine.state.add(pendingRecordZoneChanges: zoneChanges) }
+        if !databaseChanges.isEmpty { engine.state.add(pendingDatabaseChanges: databaseChanges) }
     }
 
     private func pendingChange(_ c: JournalSyncPendingChange) -> CKSyncEngine.PendingRecordZoneChange {
@@ -259,29 +399,15 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         return c.op == .save ? .saveRecord(id) : .deleteRecord(id)
     }
 
-    private func pause(_ reason: String) {
-        stateLock.lock(); paused = true; stateLock.unlock()
-        log("PAUSED: \(reason)")
-        Task { @MainActor in self.status.pausedReason = reason; self.status.phase = "Paused" }
-    }
-
-    private func resume() {
-        stateLock.lock(); paused = false; stateLock.unlock()
-        log("Resumed")
-        requeueOutbox()
-        Task { @MainActor in self.status.pausedReason = nil; self.status.phase = "Running" }
-    }
-
-    private var isPaused: Bool { stateLock.lock(); defer { stateLock.unlock() }; return paused }
-
     // MARK: Manual controls (diagnostics screen)
 
     func fetchNow() async {
+        guard let engine, currentDecision().allowed else { log("Fetch refused: \(currentDecision().reason ?? "no engine")"); return }
         do { try await engine.fetchChanges() } catch { log("fetchChanges failed: \(error.localizedDescription)") }
     }
 
     func sendNow() async {
-        guard !isPaused else { return }
+        guard let engine, currentDecision().allowed else { log("Send refused: \(currentDecision().reason ?? "no engine")"); return }
         noteLocalChanges()
         do { try await engine.sendChanges() } catch { log("sendChanges failed: \(error.localizedDescription)") }
     }
@@ -338,7 +464,9 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// real entries removed from the full-history copy). Pauses first so
     /// nothing is re-created or resent by this engine afterwards.
     func deleteServerZone() async {
-        pause("Server zone deleted for a trial reset; uninstall this app next")
+        stateLock.lock(); engineInstance = nil; stateLock.unlock()
+        log("PAUSED: server zone deleted for a trial reset; engine dropped; uninstall this app next")
+        await publish { $0.pausedReason = "Server zone deleted for a trial reset; uninstall this app next"; $0.phase = "Paused" }
         let op = CKModifyRecordZonesOperation(recordZonesToSave: nil, recordZoneIDsToDelete: [JournalRecordMapping.zoneID])
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             op.modifyRecordZonesResultBlock = { result in
@@ -355,21 +483,37 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     // MARK: CKSyncEngineDelegate
 
     func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
+        // A dropped instance may still finish an operation: nothing it reports
+        // is applied, and its state is never saved.
+        guard isCurrent(syncEngine) else {
+            if case .accountChange = event { Task { await reconcile(trigger: "account change from a dropped engine") } }
+            else { log("Event from a dropped engine ignored (\("\(event)".components(separatedBy: "(").first ?? ""))") }
+            return
+        }
         switch event {
         case .stateUpdate(let e):
             store.update { $0.engineState = e.stateSerialization }
 
         case .accountChange(let e):
-            handleAccountChange(e)
+            log("Engine account change: \(String(describing: e.changeType).components(separatedBy: "(").first ?? "")")
+            Task { await reconcile(trigger: "engine account change") }
 
         case .fetchedDatabaseChanges(let e):
+            // The account guard covers downloads too, not just uploads.
+            let decision = currentDecision()
+            guard decision.allowed else { log("Database changes ignored: \(decision.reason ?? "")"); return }
             log("Database changes: \(e.modifications.count) zone(s) changed \(e.modifications.map { $0.zoneID.zoneName }), \(e.deletions.count) deleted")
             for deletion in e.deletions where deletion.zoneID == JournalRecordMapping.zoneID {
                 log("Server zone deleted (\(deletion.reason)). Local data kept; re-creating zone on next send.")
-                engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
+                queueToEngine(databaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
             }
 
         case .fetchedRecordZoneChanges(let e):
+            let decision = currentDecision()
+            guard decision.allowed else {
+                log("Zone changes NOT imported (\(e.modifications.count) modified, \(e.deletions.count) deleted): \(decision.reason ?? "")")
+                return
+            }
             log("Zone changes: \(e.modifications.count) modified \(e.modifications.map { $0.record.recordType }), \(e.deletions.count) deleted")
             let records = e.modifications.map(\.record)
             importModifications(records.filter { $0.recordType != JournalSyncRecordType.savedList })
@@ -416,11 +560,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     }
 
     func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
-        guard !isPaused else { return nil }
+        guard isCurrent(syncEngine) else { return nil }
         // The guard that stops one account's journal entering another: no batch
         // unless the user we are talking to is the one the journal is bound to.
-        guard let bound = store.state.boundUserRecordName, bound == currentUserRecordName else {
-            log("Send refused: current iCloud user is not the bound user")
+        let decision = currentDecision()
+        guard decision.allowed else {
+            log("Send refused: \(decision.reason ?? "")")
             return nil
         }
         let scope = context.options.scope
@@ -543,41 +688,6 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         return result
     }
 
-    // MARK: Account
-
-    private func handleAccountChange(_ e: CKSyncEngine.Event.AccountChange) {
-        if !started {
-            // The first iCloud check never passed (offline, or signed in later):
-            // this is the start we were waiting for, not a change of account.
-            if case .signOut = e.changeType { return }
-            Task { await attemptStart() }
-            return
-        }
-        switch e.changeType {
-        case .signIn(let user):
-            currentUserRecordName = user.recordName
-            if store.state.boundUserRecordName == nil {
-                store.update { $0.boundUserRecordName = user.recordName }
-                log("Signed in; bound to \(user.recordName)")
-                resume()
-            } else if store.state.boundUserRecordName == user.recordName {
-                log("Signed back in to the bound account")
-                resume()
-            } else {
-                pause("Signed in to a different iCloud account; journal kept, sync paused")
-            }
-        case .signOut:
-            currentUserRecordName = nil
-            pause("Signed out of iCloud; journal and pending changes kept")
-        case .switchAccounts(_, let current):
-            currentUserRecordName = current.recordName
-            if store.state.boundUserRecordName == current.recordName { resume() }
-            else { pause("Switched to a different iCloud account; journal kept, sync paused") }
-        @unknown default:
-            pause("Unknown account change")
-        }
-    }
-
     // MARK: Import (see JournalImporter)
 
     private func importModifications(_ records: [CKRecord]) {
@@ -656,15 +766,15 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             importContext.performAndWait {
                 resend = importer.resolveSendConflict(recordType: record.recordType, recordName: name, server: server)
             }
-            if resend { engine.state.add(pendingRecordZoneChanges: [.saveRecord(record.recordID)]) }
+            if resend { queueToEngine(zoneChanges: [.saveRecord(record.recordID)]) }
         case .zoneNotFound:
-            engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
-            engine.state.add(pendingRecordZoneChanges: [.saveRecord(record.recordID)])
+            queueToEngine(zoneChanges: [.saveRecord(record.recordID)],
+                          databaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
             log("Zone missing; re-creating and resending \(name)")
         case .unknownItem:
             // The server no longer has it: resend as a new record.
             store.update { $0.lastKnownRecords.removeValue(forKey: name) }
-            engine.state.add(pendingRecordZoneChanges: [.saveRecord(record.recordID)])
+            queueToEngine(zoneChanges: [.saveRecord(record.recordID)])
         case .networkFailure, .networkUnavailable, .serviceUnavailable, .requestRateLimited, .zoneBusy, .notAuthenticated:
             log("Save of \(name) deferred: \(failure.error.localizedDescription)") // the engine retries
         default:
@@ -681,7 +791,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private func dropPendingSave(_ recordName: String) {
         store.update { $0.outbox.removeAll { $0.recordName == recordName && $0.op == .save } }
         let id = CKRecord.ID(recordName: recordName, zoneID: JournalRecordMapping.zoneID)
-        engine.state.remove(pendingRecordZoneChanges: [.saveRecord(id)])
+        engine?.state.remove(pendingRecordZoneChanges: [.saveRecord(id)])
     }
 
     private func fetch(entity: String, id: UUID, in ctx: NSManagedObjectContext) -> NSManagedObject? {
@@ -736,12 +846,43 @@ final class JournalSyncCoordinator {
         self.persistence = persistence
         let store = JournalSyncStateStore(fileURL: JournalSyncStateStore.defaultURL())
         self.store = store
+        // Before any engine exists: a local removal the previous run did not
+        // finish is completed here, so nothing it deleted can be queued.
+        _ = JournalLocalRemoval.recoverIfInterrupted(store: store, container: persistence) {
+            AttachmentStore.wipeDocumentsAttachmentsForFactoryReset()
+        }
         let ownership = JournalOwnershipCoordinator(store: store, persistence: persistence, auth: auth)
         self.ownership = ownership
         makeEngine(persistence: persistence, store: store)
         // Finishes an interrupted adoption; a new adoption still waits for the
         // first complete fetch.
         ownership.evaluate(reason: "launch")
+    }
+
+    // MARK: Stage E
+
+    /// Bracket of the production erase (`LocalFactoryReset.perform`, SYNCTEST
+    /// only) and of the diagnostics control. Synchronous and durable before
+    /// the first row is deleted.
+    func beginLocalRemoval(reason: String) {
+        guard let store else { return }
+        if let engine { engine.beginLocalRemoval(reason: reason) } else { JournalLocalRemoval.begin(store: store, reason: reason) }
+    }
+
+    func finishLocalRemoval() {
+        guard let store, let persistence else { return }
+        if let engine { engine.finishLocalRemoval() } else { JournalLocalRemoval.finish(store: store, container: persistence) }
+    }
+
+    func unlink() async { await engine?.unlink() }
+
+    /// Re-enable after an unlink or a removal. The JournalSyncEngine object is
+    /// rebuilt: after an erase the install key (K2) and the import context
+    /// are stale, and a removed copy needs a fresh CKSyncEngine anyway.
+    func reenable() {
+        guard let store, let persistence else { return }
+        JournalLocalRemoval.reenable(store: store)
+        makeEngine(persistence: persistence, store: store)
     }
 
     private func makeEngine(persistence: NSPersistentContainer, store: JournalSyncStateStore) {
@@ -761,6 +902,22 @@ final class JournalSyncCoordinator {
         store.update { $0.engineState = nil }
         store.log("Engine state reset; fresh engine")
         makeEngine(persistence: persistence, store: store)
+    }
+
+    /// Diagnostic for the interrupted-removal case: begins a removal, deletes
+    /// the journal rows the way an erase would (tracked history, no finish),
+    /// then exits. The next launch must recover and send no deletions.
+    func simulateInterruptedLocalRemoval() {
+        guard let persistence else { return }
+        beginLocalRemoval(reason: "simulated interruption")
+        let ctx = persistence.viewContext
+        for entity in [JournalSyncRecordType.attachment, JournalSyncRecordType.session] {
+            let request = NSFetchRequest<NSManagedObject>(entityName: entity)
+            for row in (try? ctx.fetch(request)) ?? [] { ctx.delete(row) }
+        }
+        try? ctx.save()
+        store?.log("Simulated interruption: journal rows deleted, exiting before finish")
+        exit(0)
     }
 }
 #endif

@@ -705,6 +705,81 @@ the join.
   sends. Untested: a mid-transfer cut on an unthrottled link long enough
   to fail an operation (the ~15 s cut did not); recovery after a device
   restart rather than an app force-quit.
+  **Stage E, account change and erase/unlink: built and unit/simulator
+  tested 2026-10-21; device run pending (script in the side-session notes).**
+  One account guard (`JournalAccountGuard`: bound user, current user,
+  unlinked, removal flags) is asked by outgoing batches, fetched zone and
+  database changes (imports AND remote deletions), list imports and the
+  manual Fetch/Send controls; until now only sends were guarded (C-122).
+  When it refuses, the `CKSyncEngine` instance is dropped, not merely
+  ignored: nothing is fetched from or sent to a non-bound account, its
+  state serialization is never saved, and events from a dropped instance
+  are discarded; on return to the bound account a new instance is built
+  from the last state saved while bound. Account changes reach one
+  `reconcile` path from the engine's event and the system `CKAccountChanged`
+  notification; a failed check retries on the stage-C backoff (one timer)
+  and on network return. Paused states, all keeping the journal and the
+  outbox: Waiting for iCloud (no account, signed out, or iCloud off for the
+  app; retried), Linked to a different iCloud account (not retried;
+  re-evaluated on the next account change), Unlinked (persisted; explicit
+  re-enable), Local copy removed (persisted; explicit re-enable), Local
+  removal in progress. Local saves reach the durable outbox in every state;
+  only transport waits for an engine. **Unlink** persists; the outbox is
+  kept and history keeps feeding it. **Local removal** (`JournalLocalRemoval`):
+  the production erase `LocalFactoryReset.perform` is bracketed under
+  `#if SYNCTEST` (no third caller): *begin* writes the marker, empties the
+  outbox and drops the engine in one atomic write before the first row is
+  deleted; the change tracker discards history while the marker is set;
+  *finish* fast-forwards the history token recording nothing, clears server
+  knowledge, hashes, held files, list fingerprints, aliases and engine
+  state, and leaves sync off. An interrupted removal is completed at the
+  next launch before any engine exists. **Re-enable**: retained copy on the
+  bound account resumes with the outbox and history; removed copy gets a
+  fresh engine that fetches the cloud journal again (binding kept, so a
+  different account still stays paused); the `JournalSyncEngine` object is
+  rebuilt so the post-erase install key is current. Connected account
+  deletion runs through the same bracket, so its local reset cannot reach
+  the private iCloud journal. 9 unit tests (`SyncTestAccountAndEraseTests`;
+  54 SyncTest tests green): the guard for every state; the erase's batch
+  deletes DO reach persistent history as deletions without the marker
+  (C-121, the hazard demonstrated) and are discarded with it, before and
+  after a relaunch; an interrupted removal recovered at launch queues
+  nothing; re-enable after removal imports the cloud journal once; unlink
+  persists with pending work and edits made while unlinked; pending work
+  survives sign-out, switch and relaunch and resumes only for the bound
+  account; a wiped list library infers no deletions. Debug, Release and
+  SyncTest build. **Simulator run (iPhone 17 Pro simulator, no iCloud
+  account, fresh Sync Test install):** a Thought made while "Waiting for
+  iCloud" sat in the outbox and survived relaunch; Unlink persisted across
+  relaunch with the outbox intact, a session made while unlinked joined it,
+  Re-enable kept all three; Simulate interrupted removal then relaunch:
+  recovered at launch, outbox empty, "Local copy removed", Re-enable
+  returned to Waiting for iCloud with nothing stale; Profile → Erase All
+  Études Data with a pending Thought: bracket logged begin/finish, outbox
+  emptied, no deletion queued, sync off, app at first launch. **Fixed on
+  the way:** the first failed iCloud check scheduled two retry timers (the
+  path monitor's initial callback), and the diagnostics list was
+  re-identified on every status change, resetting its scroll (C-123).
+  **Device coverage still needed (Samuel, script in the notes folder):**
+  per-app iCloud toggle with pending work and an edit while paused;
+  unlink/reconnect across the two devices; interrupted removal and the
+  production erase on the iPad's disposable copy with the cloud and iPhone
+  checked unchanged and the journal fetched back. **Coverage unavailable
+  without a second iCloud account:** a real account switch and return. Not
+  done on his devices by instruction; options are a Mac simulator signed
+  into a test Apple ID beside one on his account, or Device A if it has its
+  own account. Unit tests cover the guard sequence; CloudKit's real
+  account-change delivery with a second account is the untested part.
+  **Limitations/decisions:** no automatic migration or merge between
+  accounts; after a removal the binding is kept (a new account on an erased
+  device needs the binding cleared, not built); whether CloudKit completes
+  an upload in flight when the engine is dropped is not observable, and the
+  outbox re-sends it (same record id, tie goes to the server, no duplicate);
+  the per-app iCloud toggle's exact CloudKit error is to be observed on
+  device; "Delete my journal everywhere" is outside this stage.
+  Hands-on: agent ≈ 15 min reading and design, ≈ 20 min code and tests,
+  ≈ 20 min simulator run and the two fixes; ≈ 12 min waiting on builds and
+  test runs beyond what overlapped with the simulator work. Samuel: none yet.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

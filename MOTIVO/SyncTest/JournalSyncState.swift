@@ -27,6 +27,9 @@ enum JournalSyncAuthor {
     static let app = "app"
     /// The import context only. Its transactions never re-enter the outbox.
     static let sync = "sync"
+    /// Stage E: the recovery of an interrupted local removal. Its deletions
+    /// are local cleanup and never become server deletions.
+    static let localRemoval = "localRemoval"
 }
 
 struct JournalSyncPendingChange: Codable, Hashable {
@@ -139,6 +142,19 @@ struct JournalSyncPersistedState: Codable {
     /// moved the scope and the empty new scope was sent as two deletions).
     var listScope: String?
 
+    // Stage E (account change, unlink, local removal).
+    /// The user unlinked this device (or a local removal finished): nothing
+    /// is sent or fetched until sync is explicitly re-enabled. Survives relaunch.
+    var unlinked = false
+    /// Written BEFORE any local cleanup starts, in the same write that empties
+    /// the outbox. While set, history is discarded (never queued) and no
+    /// engine exists. Cleared only when the removal has finished.
+    var localRemovalInProgress = false
+    /// The local copy was explicitly removed; re-enabling fetches the cloud
+    /// journal again with a fresh engine.
+    var localCopyRemoved = false
+    var localRemovalReason: String?
+
     init() {}
 
     init(from decoder: Decoder) throws {
@@ -172,6 +188,10 @@ struct JournalSyncPersistedState: Codable {
         assetUploads = try c.decodeIfPresent(Int.self, forKey: .assetUploads) ?? 0
         assetBytesDownloaded = try c.decodeIfPresent(Int64.self, forKey: .assetBytesDownloaded) ?? 0
         attachmentRecordsSentWithoutMedia = try c.decodeIfPresent(Int.self, forKey: .attachmentRecordsSentWithoutMedia) ?? 0
+        unlinked = try c.decodeIfPresent(Bool.self, forKey: .unlinked) ?? false
+        localRemovalInProgress = try c.decodeIfPresent(Bool.self, forKey: .localRemovalInProgress) ?? false
+        localCopyRemoved = try c.decodeIfPresent(Bool.self, forKey: .localCopyRemoved) ?? false
+        localRemovalReason = try c.decodeIfPresent(String.self, forKey: .localRemovalReason)
     }
 }
 

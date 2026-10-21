@@ -58,7 +58,7 @@ final class JournalChangeTracker {
     /// same write that records the work.
     @discardableResult
     func bootstrapIfNeeded() -> Int {
-        guard store.state.bootstrapQueued == false else { return 0 }
+        guard store.state.bootstrapQueued == false, !store.state.localRemovalInProgress else { return 0 }
         let token = container.persistentStoreCoordinator.currentPersistentHistoryToken(fromStores: nil)
         var pending: [JournalSyncPendingChange] = []
         context.performAndWait {
@@ -92,7 +92,7 @@ final class JournalChangeTracker {
     /// left alone.
     @discardableResult
     func bootstrapCustomsIfNeeded(customOwner: String?) -> Int {
-        guard let customOwner else { return 0 }
+        guard let customOwner, !store.state.localRemovalInProgress else { return 0 }
         let customs = store.state.customsBootstrapQueued == false
         let instruments = store.state.instrumentsBootstrapQueued == false
         guard customs || instruments else { return 0 }
@@ -140,6 +140,7 @@ final class JournalChangeTracker {
     /// entries held back as ineligible may now be eligible.
     @discardableResult
     func requeueUnsent() -> [JournalSyncPendingChange] {
+        guard !store.state.localRemovalInProgress else { return [] }
         var pending: [JournalSyncPendingChange] = []
         let known = Set(store.state.lastKnownRecords.keys)
         let queued = Set(store.state.outbox.map(\.recordName))
@@ -162,6 +163,11 @@ final class JournalChangeTracker {
     /// Reads history after the saved token, converts local transactions to
     /// outbox entries and advances the token, all in one durable write.
     /// Returns the entries added (already merged into the store's outbox).
+    ///
+    /// Stage E: while a local removal is in progress the history is DISCARDED
+    /// (the token advances, nothing is queued), so an erase, interrupted or
+    /// not, can never become server deletions. Transactions by the removal
+    /// recovery's own author are skipped like the import context's.
     @discardableResult
     func processHistory() -> [JournalSyncPendingChange] {
         let after = JournalSyncStateStore.decodeToken(store.state.historyToken)
@@ -170,6 +176,7 @@ final class JournalChangeTracker {
         var namesAdded: [String: String] = [:]
         var urisRemoved: [String] = []
         let knownCustomNames = store.state.customRecordNames
+        let discard = store.state.localRemovalInProgress
 
         context.performAndWait {
             let request = NSPersistentHistoryChangeRequest.fetchHistory(after: after)
@@ -178,7 +185,8 @@ final class JournalChangeTracker {
                   let transactions = result.result as? [NSPersistentHistoryTransaction] else { return }
             for transaction in transactions {
                 newToken = transaction.token
-                if transaction.author == JournalSyncAuthor.sync { continue }
+                if discard { continue }
+                if transaction.author == JournalSyncAuthor.sync || transaction.author == JournalSyncAuthor.localRemoval { continue }
                 for change in transaction.changes ?? [] {
                     guard let entity = change.changedObjectID.entity.name,
                           JournalSyncRecordType.tracked.contains(entity) else { continue }

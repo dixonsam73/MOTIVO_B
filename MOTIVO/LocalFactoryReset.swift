@@ -39,6 +39,14 @@ enum LocalFactoryReset {
 
         NSLog("[LocalFactoryReset] begin (stage 5c) reason=\(reason)")
 
+        #if SYNCTEST
+        // Sync trial, stage E: the batch deletes below are tracked by persistent
+        // history and would otherwise be queued as SERVER deletions. The marker
+        // is written and the engine dropped before the first row goes; the
+        // bracket closes at the end. Not a third caller of this function.
+        JournalSyncCoordinator.shared.beginLocalRemoval(reason: reason)
+        #endif
+
         // Prevent any background publish attempts while we reset.
         SessionSyncQueue.shared.stopForFactoryReset()
 
@@ -139,6 +147,12 @@ enum LocalFactoryReset {
             BackendFeedStore.shared.resetForSignOut()
             FollowStore.shared.resetForSignOut()
         }
+
+        #if SYNCTEST
+        // Closes the bracket opened above: history fast-forwarded with nothing
+        // queued, server knowledge cleared, sync off until re-enabled.
+        JournalSyncCoordinator.shared.finishLocalRemoval()
+        #endif
 
         // C-91. Re-arm the publish queue LAST, once everything it could reach has
         // been wiped. It was stopped at the start of this reset and used to stay

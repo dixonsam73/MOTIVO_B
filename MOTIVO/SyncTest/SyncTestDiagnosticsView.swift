@@ -13,11 +13,15 @@ import SwiftUI
 struct SyncTestDiagnosticsView: View {
     @ObservedObject private var status = JournalSyncCoordinator.shared.status
     @State private var refreshTick = 0
+    @State private var showInterruptConfirm = false
 
     private var state: JournalSyncPersistedState? { JournalSyncCoordinator.shared.store?.state }
 
     var body: some View {
         List {
+            // Read so the body re-evaluates (the state file is not observable)
+            // WITHOUT re-identifying the list, which would reset its scroll.
+            let _ = refreshTick
             Section("Engine") {
                 row("Phase", status.phase)
                 if let reason = status.pausedReason { row("Paused", reason) }
@@ -40,6 +44,28 @@ struct SyncTestDiagnosticsView: View {
                 }
                 Button("Delete server zone (trial reset)") { Task { await JournalSyncCoordinator.shared.engine?.deleteServerZone(); refreshTick += 1 } }
                     .foregroundStyle(.red)
+            }
+            Section("Account and link (stage E)") {
+                row("Link", linkText)
+                row("Local removal", state?.localRemovalInProgress == true ? "IN PROGRESS" : (state?.localCopyRemoved == true ? "done (\(state?.localRemovalReason ?? ""))" : "none"))
+                row("History token", state?.historyToken == nil ? "none" : "set")
+                row("Engine state", state?.engineState == nil ? "none (fresh engine on activation)" : "saved")
+                row("Server records known", "\(state?.lastKnownRecords.count ?? 0)")
+                if state?.unlinked == true {
+                    Button("Re-enable sync") { JournalSyncCoordinator.shared.reenable(); refreshTick += 1 }
+                } else {
+                    Button("Unlink this device (keep local journal)") { Task { await JournalSyncCoordinator.shared.unlink(); refreshTick += 1 } }
+                        .foregroundStyle(.orange)
+                }
+                Button("Re-check account") { Task { await JournalSyncCoordinator.shared.engine?.reconcile(trigger: "manual"); refreshTick += 1 } }
+                // The clean removal is the production erase: Profile → Erase All
+                // Études Data on THIS Sync Test install (disposable data only).
+                Button("Simulate interrupted local removal (exits app)") { showInterruptConfirm = true }
+                    .foregroundStyle(.red)
+                    .confirmationDialog("Delete this install's journal rows and exit before the removal finishes? Sync Test only.",
+                                        isPresented: $showInterruptConfirm, titleVisibility: .visible) {
+                        Button("Delete rows and exit", role: .destructive) { JournalSyncCoordinator.shared.simulateInterruptedLocalRemoval() }
+                    }
             }
             Section("Ownership (stage B)") {
                 row("Owner key (K1)", ownerKeyText)
@@ -106,9 +132,15 @@ struct SyncTestDiagnosticsView: View {
                 }
             }
         }
-        .id(refreshTick)
         .navigationTitle("Sync Test")
         .onReceive(status.objectWillChange) { _ in refreshTick += 1 }
+    }
+
+    private var linkText: String {
+        guard let state else { return "—" }
+        if state.localRemovalInProgress { return "removal in progress" }
+        if state.unlinked { return state.localCopyRemoved ? "off (local copy removed)" : "unlinked by the user" }
+        return "linked"
     }
 
     private var ownerKeyText: String {
