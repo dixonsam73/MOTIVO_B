@@ -884,6 +884,10 @@ return AttachmentViewerView(
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             _refreshTick &+= 1
+            if let sid = sessionUUID {
+                let now = FeedInteractionStore.isSaved(sid, viewerUserID: effectiveViewerUserID ?? "unknown")
+                if now != isSavedLocal { isSavedLocal = now }
+            }
         }
         .onAppear {
             if viewerIsOwner {

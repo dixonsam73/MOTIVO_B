@@ -216,6 +216,13 @@ struct ThoughtRow: View {
                 isSavedLocal = false
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            // See ContentViewSessionRow: a favourite changed elsewhere shows without a rebuild.
+            if context == .journalWeek, let sessionUUID, let viewerUserID {
+                let now = FeedInteractionStore.isSaved(sessionUUID, viewerUserID: viewerUserID)
+                if now != isSavedLocal { isSavedLocal = now }
+            }
+        }
     }
 
 

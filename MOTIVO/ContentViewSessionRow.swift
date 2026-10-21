@@ -828,6 +828,12 @@ struct SessionRow: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             _refreshTick &+= 1
+            // The favourite lives in UserDefaults; a change made elsewhere
+            // (another screen, or a sync import) must show without rebuilding the row.
+            if let sid = sessionUUID, let vid = viewerUserID {
+                let now = FeedInteractionStore.isSaved(sid, viewerUserID: vid)
+                if now != isSavedLocal { isSavedLocal = now }
+            }
         }
         .task(id: sessionUUID) {
             if let sid = sessionUUID {
