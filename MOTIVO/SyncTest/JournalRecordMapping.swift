@@ -71,6 +71,10 @@ enum JournalConflictRule {
     }
 }
 
+extension CKRecord: CKRecordLike {
+    func set(_ key: String, _ value: NSObject?) { self[key] = value as? CKRecordValue }
+}
+
 enum JournalRecordMapping {
     static let zoneID = CKRecordZone.ID(zoneName: "Journal", ownerName: CKCurrentUserDefaultName)
 
@@ -109,7 +113,7 @@ enum JournalRecordMapping {
     /// whether an attachment record carries its file (and `fileHash`); when
     /// it does not, the server keeps the asset it has.
     static func record(for object: NSManagedObject, base: CKRecord?, ownerOnly: Bool = false,
-                       includeAsset: Bool = true, fileHash: String? = nil) -> CKRecord? {
+                       includeAsset: Bool = true, fileHash: String? = nil, viewerScope: String? = nil) -> CKRecord? {
         guard let entity = object.entity.name, let id = object.value(forKey: "id") as? UUID else { return nil }
         let record = base ?? CKRecord(recordType: entity, recordID: recordID(for: id))
         guard record.recordType == entity else { return nil }
@@ -121,6 +125,7 @@ enum JournalRecordMapping {
             }
             for key in sessionKeys { record[key] = ckValue(object.value(forKey: key)) }
             setInstrumentLink(record, object.value(forKey: "instrument") as? NSManagedObject)
+            if let viewerScope { JournalMetadataFields.setSessionFields(on: record, id: id, viewerScope: viewerScope) }
         case JournalSyncRecordType.instrument:
             for key in instrumentKeys { record[key] = ckValue(object.value(forKey: key)) }
         case JournalSyncRecordType.userInstrument:
@@ -130,6 +135,7 @@ enum JournalRecordMapping {
             for key in userActivityKeys { record[key] = ckValue(object.value(forKey: key)) }
         case JournalSyncRecordType.attachment:
             for key in attachmentKeys { record[key] = ckValue(object.value(forKey: key)) }
+            JournalMetadataFields.setAttachmentFields(on: record, id: id)
             if let session = object.value(forKey: "session") as? NSManagedObject,
                let sid = session.value(forKey: "id") as? UUID {
                 record[sessionRefKey] = CKRecord.Reference(recordID: recordID(for: sid), action: .none)

@@ -33,8 +33,8 @@ struct StagedAttachment: Identifiable {
 enum PDFSelectedPagesStore {
     static let key = "pdfSelectedPages_v1"
 
-    static func load() -> [String: [Int]] {
-        let raw = UserDefaults.standard.dictionary(forKey: key) ?? [:]
+    static func load(defaults: UserDefaults = .standard) -> [String: [Int]] {
+        let raw = defaults.dictionary(forKey: key) ?? [:]
         var output: [String: [Int]] = [:]
 
         for (key, value) in raw {
@@ -52,7 +52,7 @@ enum PDFSelectedPagesStore {
         load()[id.uuidString]
     }
 
-    static func setPages(_ pages: [Int]?, for id: UUID) {
+    static func setPages(_ pages: [Int]?, for id: UUID, mirror: Bool = true) {
         var map = load()
         if let sanitized = sanitized(pages), !sanitized.isEmpty {
             map[id.uuidString] = sanitized
@@ -60,6 +60,10 @@ enum PDFSelectedPagesStore {
             map.removeValue(forKey: id.uuidString)
         }
         UserDefaults.standard.set(map, forKey: key)
+        #if SYNCTEST
+        // Sync trial: a page selection is a user edit of the attachment.
+        if mirror { JournalMetadataMirror.attachmentChanged(id) }
+        #endif
     }
 
     static func migratePages(from stagedID: UUID, stagedPages: [Int]?, to persistedID: UUID?) {

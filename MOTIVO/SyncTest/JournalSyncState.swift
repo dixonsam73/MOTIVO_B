@@ -30,6 +30,12 @@ enum JournalSyncAuthor {
     /// Stage E: the recovery of an interrupted local removal. Its deletions
     /// are local cleanup and never become server deletions.
     static let localRemoval = "localRemoval"
+    /// Stage F: a metadata write point touching its row (a user edit; a
+    /// stamp-only change under this author IS queued).
+    static let metadata = "metadata"
+    /// Stage F: the one-off move of titles into `displayName`. Not stamped,
+    /// so a device-local value never becomes a newer edit; still queued.
+    static let migration = "migration"
 }
 
 struct JournalSyncPendingChange: Codable, Hashable {
@@ -160,6 +166,8 @@ struct JournalSyncPersistedState: Codable {
     /// running (a push consumed with nobody to act on it); if so the engine
     /// is rebuilt fresh instead of trusting the daemon's "no changes" cache.
     var catchUpToken: Data?
+    /// Stage F: side-store values queued once with their existing stamps.
+    var metadataMigrationDone = false
 
     init() {}
 
@@ -199,6 +207,7 @@ struct JournalSyncPersistedState: Codable {
         localCopyRemoved = try c.decodeIfPresent(Bool.self, forKey: .localCopyRemoved) ?? false
         localRemovalReason = try c.decodeIfPresent(String.self, forKey: .localRemovalReason)
         catchUpToken = try c.decodeIfPresent(Data.self, forKey: .catchUpToken)
+        metadataMigrationDone = try c.decodeIfPresent(Bool.self, forKey: .metadataMigrationDone) ?? false
     }
 }
 

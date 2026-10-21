@@ -55,7 +55,8 @@ enum AttachmentTitlePersistenceKeys {
     static func writeLocalTitle(_ title: String?,
                                 kind: Kind,
                                 attachmentID: UUID,
-                                defaults: UserDefaults = .standard) {
+                                defaults: UserDefaults = .standard,
+                                mirror: Bool = true) {
         let id = attachmentID.uuidString
         let trimmed = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -75,5 +76,10 @@ enum AttachmentTitlePersistenceKeys {
             scoped.removeValue(forKey: id)
             defaults.set(scoped, forKey: key)
         }
+        #if SYNCTEST
+        // Sync trial: the title also lands on Attachment.displayName, the
+        // synced field. `mirror: false` is the import writing this store.
+        if mirror { JournalMetadataMirror.titleChanged(attachmentID, title: trimmed) }
+        #endif
     }
 }

@@ -38,8 +38,8 @@ struct FeedInteractionStore {
     // MARK: - Saves (❤️)
 
     /// Viewer-local Save (bookmark). This MUST NOT reflect other users on the same device.
-    static func isSaved(_ id: UUID, viewerUserID: String) -> Bool {
-        UserDefaults.standard.bool(forKey: saveKey(id, viewerUserID: viewerUserID))
+    static func isSaved(_ id: UUID, viewerUserID: String, defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: saveKey(id, viewerUserID: viewerUserID))
     }
 
     /// Toggle Save. Returns the new state.
@@ -49,7 +49,16 @@ struct FeedInteractionStore {
         let was = UserDefaults.standard.bool(forKey: key)
         let now = !was
         UserDefaults.standard.set(now, forKey: key)
+        #if SYNCTEST
+        // Sync trial: a favourite is a user edit of the session.
+        JournalMetadataMirror.sessionChanged(id)
+        #endif
         return now
+    }
+
+    /// Store-only write (the sync import). No hook fires.
+    static func setSaved(_ value: Bool, _ id: UUID, viewerUserID: String, defaults: UserDefaults = .standard) {
+        defaults.set(value, forKey: saveKey(id, viewerUserID: viewerUserID))
     }
 
 // MARK: - Hearts (legacy shims)

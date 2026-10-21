@@ -73,7 +73,7 @@ public enum AttachmentPrivacy {
     }
 
     @inline(__always)
-    public static func setPrivate(id: UUID?, url: URL?, _ value: Bool) {
+    public static func setPrivate(id: UUID?, url: URL?, _ value: Bool, mirror: Bool = true) {
         guard let key = privacyKey(id: id, url: url) else { return }
         queue.sync {
             var map = cache ?? loadMap()
@@ -82,6 +82,10 @@ public enum AttachmentPrivacy {
             cache = map
             NotificationCenter.default.post(name: didChangeNotification, object: nil)
         }
+        #if SYNCTEST
+        // Sync trial: a privacy choice is a user edit of the attachment.
+        if mirror, let id { JournalMetadataMirror.attachmentChanged(id) }
+        #endif
     }
 
     @inline(__always)

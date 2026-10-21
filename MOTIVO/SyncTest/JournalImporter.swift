@@ -45,6 +45,22 @@ final class JournalImporter {
     /// This install's K2 (`PersistenceController.ownerIDForCustoms`), read once
     /// on the main actor by the owner of this importer; it never changes.
     let customOwner: String?
+    /// Stage F: the viewer scope favourites are keyed by, refreshed by the
+    /// engine on the main actor before each fetch cycle.
+    var viewerScope: () -> String = { "unknown" }
+
+    private func applySideStores(_ record: CKRecord, id: UUID) {
+        switch record.recordType {
+        case JournalSyncRecordType.session:
+            JournalMetadataFields.applySession(isSaved: record[JournalMetadataKeys.isSaved] as? NSNumber, id: id, viewerScope: viewerScope())
+        case JournalSyncRecordType.attachment:
+            JournalMetadataFields.applyAttachment(isPrivate: record[JournalMetadataKeys.isPrivate] as? NSNumber,
+                                                  pages: record[JournalMetadataKeys.selectedPages] as? String,
+                                                  displayName: record["displayName"] as? String,
+                                                  kind: record["kind"] as? String, id: id)
+        default: break
+        }
+    }
 
     init(context: NSManagedObjectContext, store: JournalSyncStateStore, customOwner: String?) {
         self.context = context
@@ -140,6 +156,7 @@ final class JournalImporter {
         }
         let object = existing ?? NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.session, into: context)
         _ = JournalRecordMapping.apply(record, to: object)
+        applySideStores(record, id: id)
         let link = JournalRecordMapping.instrumentLink(of: record)
         object.setValue(resolveInstrument(recordName: link.recordName, name: link.name), forKey: "instrument")
         let merged = JournalOwnership.mergedOwner(local: localOwner, server: serverOwner)
@@ -201,6 +218,7 @@ final class JournalImporter {
         }
         let object = existing ?? NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.attachment, into: context)
         _ = JournalRecordMapping.apply(record, to: object)
+        applySideStores(record, id: id)
         object.setValue(session, forKey: "session")
         object.setValue(session.value(forKey: "ownerUserID") as? String, forKey: "ownerUserID")
 
@@ -455,6 +473,7 @@ final class JournalImporter {
             // Only the owner key was being sent: take the server's content, keep
             // the owner, and send the owner again on top of the new change tag.
             _ = JournalRecordMapping.apply(server, to: local)
+            applySideStores(server, id: id)
             let link = JournalRecordMapping.instrumentLink(of: server)
             local.setValue(resolveInstrument(recordName: link.recordName, name: link.name), forKey: "instrument")
             let merged = JournalOwnership.mergedOwner(local: localOwner, server: serverOwner)
@@ -473,6 +492,7 @@ final class JournalImporter {
         if decision == .server {
             recordConflict(server, winner: .server, local: local)
             _ = JournalRecordMapping.apply(server, to: local)
+            applySideStores(server, id: id)
             var resend = false
             if recordType == JournalSyncRecordType.session {
                 let link = JournalRecordMapping.instrumentLink(of: server)

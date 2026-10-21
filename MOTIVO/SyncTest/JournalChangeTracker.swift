@@ -198,11 +198,15 @@ final class JournalChangeTracker {
                               let id = object.value(forKey: "id") as? UUID else { continue }
                         var ownerOnly = false
                         if change.changeType == .update, let keys = change.updatedProperties.map({ Set($0.map(\.name)) }) {
-                            // A save whose only changed key is the stamp itself is not a user edit.
-                            if keys == ["userModifiedAt"] { continue }
+                            // A save whose only changed key is the stamp itself is not a user
+                            // edit, unless a metadata write point made it (stage F): then the
+                            // edit lives in a side store and the stamp is its clock.
+                            if keys == ["userModifiedAt"], transaction.author != JournalSyncAuthor.metadata { continue }
                             // An attachment's owner is not synced (it follows its session).
                             if entity == JournalSyncRecordType.attachment, JournalOwnership.isOwnershipOnly(keys) { continue }
+                            // A metadata write point's touch is a full-record user edit, not owner-only.
                             ownerOnly = entity == JournalSyncRecordType.session && JournalOwnership.isOwnershipOnly(keys)
+                                && transaction.author != JournalSyncAuthor.metadata
                         }
                         if JournalSyncRecordType.directory.contains(entity) { namesAdded[uri] = id.uuidString }
                         added.append(.init(recordName: id.uuidString, recordType: entity, op: .save, ownerOnly: ownerOnly))
@@ -257,7 +261,8 @@ enum JournalUserEditStamp {
     static func install() -> NSObjectProtocol {
         NotificationCenter.default.addObserver(forName: .NSManagedObjectContextWillSave, object: nil, queue: nil) { note in
             guard let ctx = note.object as? NSManagedObjectContext,
-                  ctx.transactionAuthor != JournalSyncAuthor.sync else { return }
+                  ctx.transactionAuthor != JournalSyncAuthor.sync,
+                  ctx.transactionAuthor != JournalSyncAuthor.migration else { return }
             let now = Date()
             for object in ctx.insertedObjects.union(ctx.updatedObjects) {
                 guard let name = object.entity.name, JournalSyncRecordType.stamped.contains(name) else { continue }

@@ -116,6 +116,16 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         super.init()
         importer.queue = self
         importer.log = { [weak self] in self?.log($0) }
+        importer.viewerScope = { [weak self] in self?.viewerScope ?? "unknown" }
+    }
+
+    /// Stage F: favourites are keyed by the viewer; read on the main actor
+    /// before each fetch and send cycle.
+    private var viewerScopeValue = "unknown"
+    private var viewerScope: String { stateLock.lock(); defer { stateLock.unlock() }; return viewerScopeValue }
+    private func refreshViewerScope() async {
+        let scope = await MainActor.run { JournalMetadataCodec.viewerScope(currentUserID: PersistenceController.shared.currentUserID) }
+        stateLock.lock(); viewerScopeValue = scope; stateLock.unlock()
     }
 
     deinit {
@@ -277,6 +287,17 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         if customs > 0 { log("Queued \(customs) custom row(s)") }
         let caughtUp = tracker.processHistory()
         if !caughtUp.isEmpty { log("Queued \(caughtUp.count) change(s) made while not syncing") }
+        await refreshViewerScope()
+        if !store.state.metadataMigrationDone {
+            // Stage F, once: side-store values join their records with the
+            // rows' existing stamps. Idempotent; the flag is set last.
+            let outcome = JournalMetadataMigration.run(container: persistence, privacyMap: AttachmentPrivacy.currentMap(),
+                                                       pagesMap: PDFSelectedPagesStore.load(), viewerScope: viewerScope) { name, type in
+                self.enqueueSave(name, recordType: type, ownerOnly: false)
+            }
+            store.update { $0.metadataMigrationDone = true }
+            log("Metadata migration: \(outcome.titles) title(s) moved to displayName, \(outcome.privacy) privacy choice(s), \(outcome.pages) page selection(s), \(outcome.saves) favourite(s) queued")
+        }
         await scanLists()
         requeueOutbox()
         await publish { $0.phase = "Running" }
@@ -620,6 +641,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             log("Will fetch zone \(e.zoneID.zoneName)")
         case .willFetchChanges(let e):
             log("Will fetch changes (\(e.context.reason))")
+            await refreshViewerScope()
         case .willSendChanges, .didSendChanges:
             await publish { $0.lastEvent = "\(event)".components(separatedBy: "(").first ?? "\(event)" }
 
@@ -652,6 +674,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         let bases = store.state.lastKnownRecords
         let listRecords = listNames.isEmpty ? [:] : await MainActor.run { JournalSavedListSync.records(for: listNames, bases: bases) }
         let eligibility = currentEligibility()
+        await refreshViewerScope()
         return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: pending) { recordID in
             if typeByName[recordID.recordName] == JournalSyncRecordType.savedList {
                 if let record = listRecords[recordID.recordName] { return record }
@@ -744,7 +767,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                     log("Attachment \(name) sent without its file (not found locally)")
                 }
             } else {
-                result = JournalRecordMapping.record(for: object, base: base, ownerOnly: ownerOnly)
+                result = JournalRecordMapping.record(for: object, base: base, ownerOnly: ownerOnly, viewerScope: viewerScope)
             }
         }
         if result == nil {
