@@ -151,13 +151,13 @@ final class SyncTestAccountAndEraseTests: XCTestCase {
         makeAttachment(session: s, in: ctx, fileURL: "/tmp/x.jpg")
         try ctx.save()
         tracker.bootstrapIfNeeded()
-        XCTAssertEqual(store.state.outbox.count, 2)
+        XCTAssertEqual(store.state.outbox.count, 3, "session, attachment, meta record")
 
         try batchDeleteAll(["Attachment", "Session"])
         let added = tracker.processHistory()
         XCTAssertEqual(Set(added.map(\.op)), [.delete], "the production erase's batch deletes reach history as deletions")
-        XCTAssertEqual(added.count, 2)
-        XCTAssertEqual(store.state.outbox.map(\.op), [.delete, .delete], "…and would be uploaded: the hazard the marker closes")
+        XCTAssertEqual(added.count, 3, "attachment, its meta record, session")
+        XCTAssertEqual(store.state.outbox.map(\.op), [.delete, .delete, .delete], "…and would be uploaded: the hazard the marker closes")
     }
 
     func testLocalRemovalMarkerEmptiesOutboxAndDiscardsCleanupAcrossRelaunch() throws {
@@ -173,7 +173,7 @@ final class SyncTestAccountAndEraseTests: XCTestCase {
             st.lastKnownRecords["x"] = Data([1]); st.assetHashes["x"] = "h"; st.listFingerprints["l"] = "f"; st.listScope = "device"
             st.engineState = nil; st.initialFetchComplete = true
         }
-        XCTAssertEqual(store.state.outbox.count, 3, "pending work exists before the erase")
+        XCTAssertEqual(store.state.outbox.count, 4, "pending work exists before the erase (two sessions, an attachment, its meta record)")
 
         // An ordinary deletion while linked still propagates (not a removal).
         let bg = container.newBackgroundContext()
@@ -351,7 +351,7 @@ final class SyncTestAccountAndEraseTests: XCTestCase {
         try ctx.save()
         tracker.bootstrapIfNeeded()
         let before = store.state.outbox
-        XCTAssertEqual(before.count, 2)
+        XCTAssertEqual(before.count, 3, "session, attachment and its meta record (stage G)")
 
         // Sign-out: paused, retried, nothing dropped.
         XCTAssertFalse(decision(current: nil).allowed)
@@ -359,14 +359,14 @@ final class SyncTestAccountAndEraseTests: XCTestCase {
         s.setValue("Edited while signed out", forKey: "title")
         try ctx.save()
         tracker.processHistory()
-        XCTAssertEqual(store.state.outbox.count, 2, "the edit merges into the pending save")
+        XCTAssertEqual(store.state.outbox.count, 3, "the edit merges into the pending save")
         // Switch to another account: refused; outbox untouched.
         XCTAssertFalse(decision(current: userB).allowed)
         XCTAssertEqual(store.state.outbox, store.state.outbox)
         // Relaunch under the other account: still refused, still pending.
         let relaunched = JournalSyncStateStore(fileURL: store.fileURL)
         XCTAssertFalse(decision(current: userB, store: relaunched).allowed)
-        XCTAssertEqual(relaunched.state.outbox.count, 2)
+        XCTAssertEqual(relaunched.state.outbox.count, 3)
         XCTAssertEqual(relaunched.state.boundUserRecordName, userA, "the binding never moves to the new account")
         // Back to the original: allowed, same two pending changes, nothing added or doubled.
         XCTAssertTrue(decision(current: userA, store: relaunched).allowed)

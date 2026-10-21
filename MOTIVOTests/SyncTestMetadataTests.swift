@@ -137,7 +137,7 @@ final class SyncTestMetadataTests: XCTestCase {
         FeedInteractionStore.setSaved(true, sid, viewerUserID: scope)
         defer { PDFSelectedPagesStore.setPages(nil, for: aid, mirror: false); FeedInteractionStore.setSaved(false, sid, viewerUserID: scope) }
 
-        let ar = try XCTUnwrap(JournalRecordMapping.record(for: a, base: nil))
+        let ar = try XCTUnwrap(JournalRecordMapping.metaRecord(for: a, base: nil))
         XCTAssertEqual((ar[JournalMetadataKeys.isPrivate] as? NSNumber)?.boolValue, false)
         XCTAssertEqual(ar[JournalMetadataKeys.selectedPages] as? String, "[2,5]")
         let sr = try XCTUnwrap(JournalRecordMapping.record(for: s, base: nil, viewerScope: scope))
@@ -148,7 +148,7 @@ final class SyncTestMetadataTests: XCTestCase {
         // No explicit privacy choice: the field is absent, not false.
         let b = makeAttachment(session: s, in: ctx)
         try ctx.save()
-        let br = try XCTUnwrap(JournalRecordMapping.record(for: b, base: nil))
+        let br = try XCTUnwrap(JournalRecordMapping.metaRecord(for: b, base: nil))
         XCTAssertNil(br[JournalMetadataKeys.isPrivate])
         XCTAssertEqual(br[JournalMetadataKeys.selectedPages] as? String, "[]")
     }
@@ -214,14 +214,15 @@ final class SyncTestMetadataTests: XCTestCase {
         let aid = a.value(forKey: "id") as! UUID
         let tracker = JournalChangeTracker(container: container, store: store)
         tracker.bootstrapIfNeeded()
+        store.update { $0.outbox.removeAll() }   // the bootstrap queued the meta record too
         let before = a.value(forKey: "userModifiedAt") as? Date
 
         AttachmentTitlePersistenceKeys.writeLocalTitle("Named on this device", kind: .audio, attachmentID: aid, defaults: defaults)
-        wait(for: { !tracker.processHistory().isEmpty || self.store.state.outbox.contains { $0.recordName == aid.uuidString } })
+        wait(for: { tracker.processHistory(); return self.store.state.outbox.contains { $0.recordName == JournalSyncRecordType.metaName(for: aid.uuidString) } })
         ctx.refreshAllObjects()
         XCTAssertEqual(a.value(forKey: "displayName") as? String, "Named on this device")
         XCTAssertGreaterThan(a.value(forKey: "userModifiedAt") as? Date ?? .distantPast, before ?? .distantPast, "a user edit")
-        XCTAssertTrue(store.state.outbox.contains { $0.recordName == aid.uuidString && $0.op == .save })
+        XCTAssertTrue(store.state.outbox.contains { $0.recordName == JournalSyncRecordType.metaName(for: aid.uuidString) && $0.op == .save })
 
         // Clearing writes "".
         AttachmentTitlePersistenceKeys.writeLocalTitle("", kind: .audio, attachmentID: aid, defaults: defaults)
@@ -295,16 +296,17 @@ final class SyncTestMetadataTests: XCTestCase {
         let aid = a.value(forKey: "id") as! UUID
         let tracker = JournalChangeTracker(container: container, store: store)
         tracker.bootstrapIfNeeded(); store.update { $0.outbox.removeAll() }
+        let metaName = JournalSyncRecordType.metaName(for: aid.uuidString)
         AttachmentPrivacy.setPrivate(id: aid, url: nil, true)   // the hook touches the row
-        wait(for: { tracker.processHistory(); return self.store.state.outbox.contains { $0.recordName == aid.uuidString } })
-        let pending = try XCTUnwrap(store.state.outbox.first { $0.recordName == aid.uuidString })
+        wait(for: { tracker.processHistory(); return self.store.state.outbox.contains { $0.recordName == metaName } })
+        let pending = try XCTUnwrap(store.state.outbox.first { $0.recordName == metaName })
         XCTAssertTrue(pending.metadataEdit); XCTAssertTrue(pending.assetFree); XCTAssertFalse(pending.ownerOnly)
         // A real content save (any other key) absorbs it and may carry the file.
-        a.setValue("image", forKey: "kind"); a.setValue("video", forKey: "kind")
+        a.setValue("video", forKey: "kind")
         try ctx.save()
         tracker.processHistory()
         let merged = try XCTUnwrap(store.state.outbox.first { $0.recordName == aid.uuidString })
-        XCTAssertFalse(merged.assetFree)
+        XCTAssertFalse(merged.assetFree, "a content change queues the content record, which may carry the file")
     }
 
     func testMergeKeepsAContentSaveOverAMetadataOnlyOne() {
@@ -320,7 +322,7 @@ final class SyncTestMetadataTests: XCTestCase {
         let s = makeSession(in: ctx)
         let a = makeAttachment(session: s, in: ctx)
         try ctx.save()
-        let r = try XCTUnwrap(JournalRecordMapping.record(for: a, base: nil))
+        let r = try XCTUnwrap(JournalRecordMapping.metaRecord(for: a, base: nil))
         XCTAssertEqual(r["displayName"] as? String, "", "nil locally is sent as the explicit empty name")
     }
 

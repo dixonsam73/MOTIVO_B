@@ -260,7 +260,7 @@ final class SyncTestIdentityTests: XCTestCase {
         try ctx.save()
         let tracker = JournalChangeTracker(container: container, store: store)
         tracker.bootstrapIfNeeded()
-        XCTAssertEqual(store.state.outbox.count, 2)
+        XCTAssertEqual(store.state.outbox.count, 3, "session, attachment and its meta record (stage G)")
         store.update { $0.outbox.removeAll() }
 
         // Owner-only on the attachment: nothing to send (the owner is not a synced field).

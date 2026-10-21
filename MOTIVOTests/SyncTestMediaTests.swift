@@ -151,7 +151,9 @@ final class SyncTestMediaTests: XCTestCase {
 
         let metadataOnly = try XCTUnwrap(JournalRecordMapping.record(for: a, base: base, includeAsset: false))
         XCTAssertNil(metadataOnly["file"]); XCTAssertNil(metadataOnly["fileExt"]); XCTAssertNil(metadataOnly["fileHash"])
-        XCTAssertEqual(metadataOnly["displayName"] as? String, "Original name", "a rename travels")
+        // Stage G: the name travels on the meta record, never on the content record.
+        XCTAssertNil(metadataOnly["displayName"])
+        XCTAssertEqual(JournalRecordMapping.metaRecord(for: a, base: nil)?["displayName"] as? String, "Original name", "a rename travels")
 
         let withFile = try XCTUnwrap(JournalRecordMapping.record(for: a, base: base, includeAsset: true, fileHash: "h"))
         XCTAssertNotNil(withFile["file"] as? CKAsset); XCTAssertEqual(withFile["fileExt"] as? String, "jpg"); XCTAssertEqual(withFile["fileHash"] as? String, "h")

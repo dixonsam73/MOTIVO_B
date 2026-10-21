@@ -60,6 +60,11 @@ struct SyncTestDiagnosticsView: View {
                 row("Server records known", "\(state?.lastKnownRecords.count ?? 0)")
                 row("Catch-up baseline", state?.catchUpToken == nil ? "none (set after the next fetch)" : "set")
                 row("Metadata migration (stage F)", state?.metadataMigrationDone == true ? "done" : "pending")
+                row("Meta record transition (stage G)", state?.metaTransitionDone == true ? "done" : "pending")
+                row("Catch-up zone token", state?.catchUpZoneToken == nil ? "none" : "set")
+                row("Catch-up totals", "\(state?.catchUpRecords ?? 0) record(s), \(state?.catchUpAssets ?? 0) file(s) fetched")
+                row("Last catch-up", state?.lastCatchUp ?? "—")
+                row("Held metadata records", "\(state?.awaitingMeta.count ?? 0)")
                 // Solo has no privacy toggle in the UI (Connected only), so the
                 // trial flips the newest attachment's choice from here.
                 row("Newest attachment privacy", newestAttachmentPrivacyText)

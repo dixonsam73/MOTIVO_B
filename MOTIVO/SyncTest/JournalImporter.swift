@@ -53,13 +53,66 @@ final class JournalImporter {
         switch record.recordType {
         case JournalSyncRecordType.session:
             JournalMetadataFields.applySession(isSaved: record[JournalMetadataKeys.isSaved] as? NSNumber, id: id, viewerScope: viewerScope())
-        case JournalSyncRecordType.attachment:
+        case JournalSyncRecordType.attachment, JournalSyncRecordType.attachmentMeta:
+            let kind = record["kind"] as? String ?? fetch(entity: JournalSyncRecordType.attachment, id: id)?.value(forKey: "kind") as? String
             JournalMetadataFields.applyAttachment(isPrivate: record[JournalMetadataKeys.isPrivate] as? NSNumber,
                                                   pages: record[JournalMetadataKeys.selectedPages] as? String,
                                                   displayName: record["displayName"] as? String,
-                                                  kind: record["kind"] as? String, id: id)
+                                                  kind: kind, id: id)
         default: break
         }
+    }
+
+    /// Stage G: a meta record for this attachment has been seen (or is held),
+    /// so the legacy metadata fields on its Attachment record are stale.
+    private func metaKnown(_ attachmentName: String) -> Bool {
+        let meta = JournalSyncRecordType.metaName(for: attachmentName)
+        return store.state.lastKnownRecords[meta] != nil || store.state.awaitingMeta[meta] != nil
+    }
+
+    // MARK: Attachment metadata records (stage G)
+
+    /// Applies a meta record to its attachment, or holds it until the
+    /// attachment arrives. Conflicts use the attachment row's stamp.
+    @discardableResult
+    func importAttachmentMeta(_ record: CKRecord) -> Bool {
+        let name = record.recordID.recordName
+        guard let attachmentName = JournalSyncRecordType.attachmentName(fromMeta: name),
+              let id = UUID(uuidString: attachmentName) else { return false }
+        guard let attachment = fetch(entity: JournalSyncRecordType.attachment, id: id) else {
+            if let data = JournalSyncStateStore.encodeWholeRecord(record) {
+                store.update { $0.awaitingMeta[name] = data }
+                log("Holding metadata \(name) until its attachment arrives")
+            }
+            return false
+        }
+        if let pending = pendingSave(name), !pending.metadataOnly {
+            let local = attachment.value(forKey: "userModifiedAt") as? Date
+            let server = JournalRecordMapping.userModifiedAt(of: record)
+            if JournalConflictRule.decide(localUserModifiedAt: local, serverUserModifiedAt: server) == .local {
+                store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+                recordConflict(record, winner: .local, local: attachment)
+                return false
+            }
+            recordConflict(record, winner: .server, local: attachment)
+            queue?.removePendingSave(name)
+        } else if pendingSave(name)?.metadataOnly == true {
+            // The transition's copy meets a real one: the server's stands.
+            queue?.removePendingSave(name)
+        }
+        JournalRecordMapping.applyMeta(record, to: attachment)
+        applySideStores(record, id: id)
+        store.update { st in
+            st.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
+            st.awaitingMeta.removeValue(forKey: name)
+        }
+        return true
+    }
+
+    private func applyHeldMeta(for attachmentName: String) {
+        let name = JournalSyncRecordType.metaName(for: attachmentName)
+        guard let data = store.state.awaitingMeta[name], let record = JournalSyncStateStore.decodeWholeRecord(data) else { return }
+        if importAttachmentMeta(record) { log("Applied held metadata \(name)") }
     }
 
     init(context: NSManagedObjectContext, store: JournalSyncStateStore, customOwner: String?) {
@@ -78,6 +131,7 @@ final class JournalImporter {
         var summary = Summary()
         let sessions = records.filter { $0.recordType == JournalSyncRecordType.session }
         let attachments = records.filter { $0.recordType == JournalSyncRecordType.attachment }
+        let metas = records.filter { $0.recordType == JournalSyncRecordType.attachmentMeta }
         let customs = records.filter { JournalSyncRecordType.customs.contains($0.recordType) }
         let instruments = records.filter { $0.recordType == JournalSyncRecordType.instrument }
         // Instruments first, so sessions and custom rows resolve them by id.
@@ -89,6 +143,7 @@ final class JournalImporter {
             if outcome.imported { summary.received += 1 }
             summary.bytes += outcome.bytes
         }
+        for record in metas { if importAttachmentMeta(record) { summary.received += 1 } }
         // Any held attachment whose session has now arrived.
         for (name, held) in store.state.awaitingParent {
             guard let sid = UUID(uuidString: held.sessionRecordName),
@@ -224,8 +279,11 @@ final class JournalImporter {
             queue?.removePendingSave(name)
         }
         let object = existing ?? NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.attachment, into: context)
-        _ = JournalRecordMapping.apply(record, to: object)
-        applySideStores(record, id: id)
+        // Legacy metadata on the content record counts only until this
+        // attachment has a meta record (the stage G transition).
+        let legacy = !metaKnown(name)
+        _ = JournalRecordMapping.apply(record, to: object, legacyMetadata: legacy)
+        if legacy { applySideStores(record, id: id) }
         object.setValue(session, forKey: "session")
         object.setValue(session.value(forKey: "ownerUserID") as? String, forKey: "ownerUserID")
 
@@ -275,6 +333,7 @@ final class JournalImporter {
         }
         if heldFile != nil, let sourceURL { try? FileManager.default.removeItem(at: sourceURL) }
         store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+        applyHeldMeta(for: name)
         return (true, bytes)
     }
 
@@ -425,6 +484,15 @@ final class JournalImporter {
 
     func importDeletions(_ deletions: [(CKRecord.ID, CKRecord.RecordType)]) {
         for (recordID, type) in deletions where type != JournalSyncRecordType.savedList {
+            if type == JournalSyncRecordType.attachmentMeta {
+                // The attachment's own deletion removes the row; its meta just stops being known.
+                store.update {
+                    $0.lastKnownRecords.removeValue(forKey: recordID.recordName)
+                    $0.awaitingMeta.removeValue(forKey: recordID.recordName)
+                    $0.outbox.removeAll { $0.recordName == recordID.recordName }
+                }
+                continue
+            }
             guard let id = UUID(uuidString: recordID.recordName) else { continue }
             if let object = fetch(entity: type, id: id) {
                 if type == JournalSyncRecordType.session {
@@ -445,6 +513,12 @@ final class JournalImporter {
                 $0.lastKnownRecords.removeValue(forKey: recordID.recordName)
                 $0.outbox.removeAll { $0.recordName == recordID.recordName }
                 $0.awaitingParent.removeValue(forKey: recordID.recordName)
+                if type == JournalSyncRecordType.attachment {
+                    let meta = JournalSyncRecordType.metaName(for: recordID.recordName)
+                    $0.lastKnownRecords.removeValue(forKey: meta)
+                    $0.awaitingMeta.removeValue(forKey: meta)
+                    $0.outbox.removeAll { $0.recordName == meta }
+                }
                 $0.instrumentAliases.removeValue(forKey: recordID.recordName)
                 $0.assetHashes.removeValue(forKey: recordID.recordName)
                 $0.fileStampCache.removeValue(forKey: recordID.recordName)
@@ -464,6 +538,24 @@ final class JournalImporter {
     /// Resolves a rejected save against the server copy. Returns true when the
     /// local record should be resent (on top of the server's change tag).
     func resolveSendConflict(recordType: String, recordName: String, server: CKRecord) -> Bool {
+        if recordType == JournalSyncRecordType.attachmentMeta {
+            store.update { $0.lastKnownRecords[recordName] = JournalSyncStateStore.encodeSystemFields(server) }
+            guard let attachmentName = JournalSyncRecordType.attachmentName(fromMeta: recordName), let id = UUID(uuidString: attachmentName),
+                  let local = freshObject(entity: JournalSyncRecordType.attachment, id: id) else { return false }
+            if pendingSave(recordName)?.metadataOnly != true,
+               JournalConflictRule.decide(localUserModifiedAt: local.value(forKey: "userModifiedAt") as? Date,
+                                          serverUserModifiedAt: JournalRecordMapping.userModifiedAt(of: server)) == .local {
+                recordConflict(server, winner: .local, local: local)
+                log("Conflict on metadata \(recordName): local kept, resending")
+                return true
+            }
+            JournalRecordMapping.applyMeta(server, to: local)
+            applySideStores(server, id: id)
+            save()
+            queue?.removePendingSave(recordName)
+            log("Conflict on metadata \(recordName): server kept")
+            return false
+        }
         guard let id = UUID(uuidString: recordName), let local = freshObject(entity: recordType, id: id) else { return false }
         store.update { $0.lastKnownRecords[recordName] = JournalSyncStateStore.encodeSystemFields(server) }
         if JournalSyncRecordType.customs.contains(recordType) || recordType == JournalSyncRecordType.instrument {

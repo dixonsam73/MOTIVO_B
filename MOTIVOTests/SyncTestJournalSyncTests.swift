@@ -75,9 +75,9 @@ final class SyncTestJournalSyncTests: XCTestCase {
         try ctx.save()
 
         let tracker = JournalChangeTracker(container: container, store: store)
-        XCTAssertEqual(tracker.bootstrapIfNeeded(), 2)
+        XCTAssertEqual(tracker.bootstrapIfNeeded(), 3, "session, attachment and its meta record (stage G)")
         XCTAssertTrue(store.state.bootstrapQueued)
-        XCTAssertEqual(store.state.outbox.count, 2)
+        XCTAssertEqual(store.state.outbox.count, 3)
         XCTAssertEqual(tracker.bootstrapIfNeeded(), 0, "bootstrap runs once")
         // The pre-bootstrap save is NOT replayed by history (token captured before enumeration covers it).
         XCTAssertEqual(tracker.processHistory().count, 0)

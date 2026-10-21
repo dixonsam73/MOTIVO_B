@@ -124,7 +124,14 @@ enum AttachmentCommitService {
             request.predicate = NSPredicate(format: "session == %@", session.objectID)
             for a in try ctx.fetch(request) {
                 let id = a.value(forKey: "id") as? UUID
-                a.setValue(id != nil && id == finalThumbnailID, forKey: "isThumbnail")
+                let wanted = id != nil && id == finalThumbnailID
+                // Only a real change: setting the value it already has marks the
+                // row changed, which the sync trial then treats as an edit of
+                // every attachment in the session (six records for one rename,
+                // 2026-10-21).
+                if (a.value(forKey: "isThumbnail") as? Bool) != wanted {
+                    a.setValue(wanted, forKey: "isThumbnail")
+                }
             }
         } catch {
             print("Failed to update thumbnail flags: ", error)

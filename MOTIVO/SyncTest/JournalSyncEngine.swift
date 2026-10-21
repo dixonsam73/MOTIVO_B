@@ -248,12 +248,21 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             // is consumed with nobody to act on it, and CloudKit's daemon
             // then answers an engine built from saved state with "no
             // changes" from its cache. Ask the server ourselves; if the zone
-            // moved since our own last check, build the engine fresh.
+            // moved since our own last check, import the delta with the app's
+            // own zone token (stage G) and keep the engine's saved state. A
+            // fresh engine is the fallback, with its reason logged.
             switch await catchUpCheck() {
             case .some(true):
-                store.update { $0.engineState = nil }
-                log("Catch-up: the zone changed while no engine was running; building a fresh engine to refetch it")
-            case .some(false): break
+                let ok = await deltaCatchUp(reason: "the zone changed while no engine was running")
+                if !ok {
+                    store.update { $0.engineState = nil }
+                    log("Full recovery: the delta catch-up could not run (\(store.state.lastCatchUp ?? "")); building a fresh engine")
+                }
+            case .some(false):
+                if store.state.catchUpZoneToken == nil {
+                    // One-time: establish the zone token with a records-only pass.
+                    _ = await deltaCatchUp(reason: "establishing the zone token")
+                }
             case .none: log("Catch-up check failed; engine built from saved state regardless")
             }
             // The check awaited: the state may have moved (unlink, removal,
@@ -289,6 +298,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         if !caughtUp.isEmpty { log("Queued \(caughtUp.count) change(s) made while not syncing") }
         await refreshViewerScope()
         runMetadataMigrationIfNeeded()
+        runMetaTransitionIfNeeded()
         await scanLists()
         requeueOutbox()
         await publish { $0.phase = "Running" }
@@ -336,13 +346,135 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         guard !store.state.metadataMigrationDone else { return }
         let outcome = JournalMetadataMigration.run(container: persistence, privacyMap: AttachmentPrivacy.currentMap(),
                                                    pagesMap: PDFSelectedPagesStore.load(), viewerScope: viewerScope) { name, type in
-            let change = JournalSyncPendingChange(recordName: name, recordType: type, op: .save, metadataOnly: true)
+            // Stage G: attachment metadata lives on the meta record.
+            let change = type == JournalSyncRecordType.attachment
+                ? JournalSyncPendingChange(recordName: JournalSyncRecordType.metaName(for: name), recordType: JournalSyncRecordType.attachmentMeta,
+                                           op: .save, metadataOnly: true)
+                : JournalSyncPendingChange(recordName: name, recordType: type, op: .save, metadataOnly: true)
             self.store.update { JournalChangeTracker.merge([change], into: &$0.outbox) }
             self.queueToEngine(zoneChanges: [self.pendingChange(change)])
         }
         store.update { $0.metadataMigrationDone = true }
         log("Metadata migration: \(outcome.titles) title(s) moved to displayName, \(outcome.privacy) privacy choice(s), \(outcome.pages) page selection(s), \(outcome.saves) favourite(s) queued")
         refreshCounts()
+    }
+
+    /// Stage G, once per device: every attachment gets its meta record
+    /// (small, no media), queued as metadata-only so a copy from the other
+    /// device wins a tie and an older build's content record never does.
+    func runMetaTransitionIfNeeded() {
+        guard !store.state.metaTransitionDone else { return }
+        var changes: [JournalSyncPendingChange] = []
+        importContext.performAndWait {
+            let request = NSFetchRequest<NSManagedObject>(entityName: JournalSyncRecordType.attachment)
+            for row in (try? importContext.fetch(request)) ?? [] {
+                guard let id = row.value(forKey: "id") as? UUID else { continue }
+                changes.append(.init(recordName: JournalSyncRecordType.metaName(for: id.uuidString),
+                                     recordType: JournalSyncRecordType.attachmentMeta, op: .save, metadataOnly: true))
+            }
+        }
+        store.update { st in
+            JournalChangeTracker.merge(changes, into: &st.outbox)
+            st.metaTransitionDone = true
+        }
+        queueToEngine(zoneChanges: changes.map(pendingChange))
+        log("Metadata record transition: \(changes.count) attachment(s) queued their meta record (no media)")
+        refreshCounts()
+    }
+
+    /// Stage G: fetch the zone's changes since the app's own zone token,
+    /// without the asset field, import them through the importer, and fetch
+    /// the file only for attachment records whose hash this device does not
+    /// already hold. Returns false when only a fresh engine can recover
+    /// (expired token, zone gone); the reason is in `lastCatchUp`.
+    func deltaCatchUp(reason: String) async -> Bool {
+        let previous = store.state.catchUpZoneToken.flatMap {
+            try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: $0)
+        }
+        let zone = JournalRecordMapping.zoneID
+        let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration(previousServerChangeToken: previous, resultsLimit: nil,
+                                                                          desiredKeys: JournalRecordMapping.keysWithoutAsset)
+        let op = CKFetchRecordZoneChangesOperation(recordZoneIDs: [zone], configurationsByRecordZoneID: [zone: config])
+        op.configuration.timeoutIntervalForRequest = 30
+        op.configuration.timeoutIntervalForResource = 120
+        var modified: [CKRecord] = []
+        var deleted: [(CKRecord.ID, CKRecord.RecordType)] = []
+        var newToken: CKServerChangeToken?
+        var failure: CKError?
+        op.recordWasChangedBlock = { _, result in if case .success(let r) = result { modified.append(r) } }
+        op.recordWithIDWasDeletedBlock = { id, type in deleted.append((id, type)) }
+        op.recordZoneChangeTokensUpdatedBlock = { _, token, _ in newToken = token }
+        op.recordZoneFetchResultBlock = { _, result in
+            switch result {
+            case .success(let r): newToken = r.serverChangeToken
+            case .failure(let error): failure = error as? CKError
+            }
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            op.fetchRecordZoneChangesResultBlock = { result in
+                if case .failure(let error) = result, failure == nil { failure = error as? CKError }
+                continuation.resume()
+            }
+            container.privateCloudDatabase.add(op)
+        }
+        if let failure {
+            let code = failure.code
+            let text = "Delta catch-up failed: \(failure.localizedDescription)"
+            store.update { $0.lastCatchUp = text }
+            log(text)
+            // Only these need the whole zone again; anything else is retried next time.
+            return !(code == .changeTokenExpired || code == .zoneNotFound || code == .userDeletedZone)
+        }
+
+        // The file only where it is needed.
+        var assetsFetched = 0
+        let needing = modified.filter { record in
+            guard record.recordType == JournalSyncRecordType.attachment else { return false }
+            let name = record.recordID.recordName
+            var exists = false
+            importContext.performAndWait {
+                if let id = UUID(uuidString: name), let object = importer.fetch(entity: JournalSyncRecordType.attachment, id: id),
+                   let url = AttachmentPathResolver.resolve(object.value(forKey: "fileURL") as? String) {
+                    exists = FileManager.default.fileExists(atPath: url.path)
+                }
+            }
+            return JournalCatchUp.needsAsset(serverHash: record[JournalRecordMapping.fileHashKey] as? String,
+                                             knownHash: store.state.assetHashes[name], fileExists: exists)
+        }.map(\.recordID)
+        if !needing.isEmpty {
+            let fetch = CKFetchRecordsOperation(recordIDs: needing)
+            fetch.configuration.timeoutIntervalForResource = 600
+            var full: [CKRecord.ID: CKRecord] = [:]
+            fetch.perRecordResultBlock = { id, result in if case .success(let r) = result { full[id] = r } }
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                fetch.fetchRecordsResultBlock = { _ in continuation.resume() }
+                container.privateCloudDatabase.add(fetch)
+            }
+            modified = modified.map { full[$0.recordID] ?? $0 }
+            assetsFetched = full.count
+            if full.count < needing.count { log("Catch-up: \(needing.count - full.count) file(s) could not be fetched; their records wait for the next fetch") }
+        }
+
+        // Import exactly as a fetched batch would be.
+        let records = modified.filter { $0.recordType != JournalSyncRecordType.savedList }
+        let lists = modified.filter { $0.recordType == JournalSyncRecordType.savedList }
+        importModifications(records)
+        if !lists.isEmpty { _ = await MainActor.run { JournalSavedListSync.apply(lists, store: store) } }
+        importDeletions(deleted)
+        let listDeletions = deleted.filter { $0.1 == JournalSyncRecordType.savedList }.map(\.0.recordName)
+        if !listDeletions.isEmpty { _ = await MainActor.run { JournalSavedListSync.applyDeletions(listDeletions, store: store) } }
+        let summary = "Catch-up (\(reason)): \(modified.count) changed record(s), \(deleted.count) deletion(s), \(assetsFetched) file(s) fetched"
+        store.update { st in
+            if let newToken, let data = try? NSKeyedArchiver.archivedData(withRootObject: newToken, requiringSecureCoding: true) {
+                st.catchUpZoneToken = data
+            }
+            st.catchUpRecords += modified.count
+            st.catchUpAssets += assetsFetched
+            st.lastCatchUp = summary
+        }
+        log(summary)
+        if let fetchCycleCompleted { await MainActor.run { fetchCycleCompleted() } }
+        return true
     }
 
     // MARK: Stage E controls
@@ -724,6 +856,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             switch types[id.recordName] {
             case JournalSyncRecordType.instrument: return 0
             case JournalSyncRecordType.attachment: return 2
+            case JournalSyncRecordType.attachmentMeta: return 2
             default: return 1
             }
         case .deleteRecord: return 3
@@ -735,11 +868,23 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// Entries this device's ownership rules make ineligible stay local.
     private func record(for recordID: CKRecord.ID, type: String?, eligibility: Eligibility, ownerOnly: Bool = false,
                         assetFree: Bool = false) -> CKRecord? {
-        guard let id = UUID(uuidString: recordID.recordName) else { return nil }
         let name = recordID.recordName
+        let isMeta = type == JournalSyncRecordType.attachmentMeta || JournalSyncRecordType.attachmentName(fromMeta: name) != nil
+        guard let id = UUID(uuidString: isMeta ? (JournalSyncRecordType.attachmentName(fromMeta: name) ?? "") : name) else { return nil }
         var result: CKRecord?
         var ineligible = false
         importContext.performAndWait {
+            if isMeta {
+                // Stage G: the small record; eligibility follows the attachment's session.
+                guard let object = self.importer.freshObject(entity: JournalSyncRecordType.attachment, id: id) else { return }
+                let session = object.value(forKey: "session") as? NSManagedObject
+                ineligible = session == nil || !JournalOwnership.isEligible(owner: session?.value(forKey: "ownerUserID") as? String,
+                                                                             journalOwner: eligibility.journalOwner)
+                if ineligible { return }
+                let base = store.state.lastKnownRecords[name].flatMap(JournalSyncStateStore.recordFromSystemFields)
+                result = JournalRecordMapping.metaRecord(for: object, base: base)
+                return
+            }
             let entities = type.map { [$0] } ?? [JournalSyncRecordType.session, JournalSyncRecordType.attachment,
                                                  JournalSyncRecordType.userInstrument, JournalSyncRecordType.userActivity,
                                                  JournalSyncRecordType.instrument]

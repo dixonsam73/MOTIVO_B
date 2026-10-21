@@ -68,6 +68,15 @@ enum JournalCatchUp {
         guard hadToken else { return false }
         return changedZones.contains(zoneName) || deletedZones.contains(zoneName)
     }
+
+    /// Stage G: whether a changed attachment record needs its file fetched.
+    /// Not when this device already holds a usable file whose hash matches
+    /// what the server reports (or the server reports none: an old record).
+    static func needsAsset(serverHash: String?, knownHash: String?, fileExists: Bool) -> Bool {
+        guard fileExists else { return true }
+        guard let serverHash else { return false }
+        return knownHash != serverHash
+    }
 }
 
 /// The local-removal lifecycle on the state file and the store. Every step
@@ -111,6 +120,9 @@ enum JournalLocalRemoval {
             st.conflicts.removeAll()
             st.engineState = nil
             st.catchUpToken = nil
+            st.catchUpZoneToken = nil
+            st.awaitingMeta.removeAll()
+            st.metaTransitionDone = false
             st.initialFetchComplete = false
             st.pendingOwnerAdoption = nil
             st.ownershipReport = nil

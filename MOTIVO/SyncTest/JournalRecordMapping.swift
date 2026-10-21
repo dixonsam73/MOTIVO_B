@@ -85,8 +85,13 @@ enum JournalRecordMapping {
                               "mood", "effort", "threadLabel", "userInstrumentLabel", "userActivityLabel",
                               "areNotesPrivate", "isPublic", "ownerUserID", "userModifiedAt"]
     /// No `ownerUserID`: an attachment's owner follows its session locally, so
-    /// giving a journal its owner never re-sends media.
-    static let attachmentKeys = ["kind", "displayName", "createdAt", "isThumbnail", "userModifiedAt"]
+    /// giving a journal its owner never re-sends media. Stage G: content only;
+    /// name and star live on the meta record.
+    static let attachmentKeys = ["kind", "createdAt", "userModifiedAt"]
+    /// Fields older builds wrote on the Attachment record; applied on import
+    /// only until a meta record for that attachment has been seen.
+    static let legacyAttachmentMetaKeys = ["displayName", "isThumbnail"]
+    static let metaKeys = ["displayName", "isThumbnail", "userModifiedAt"]
     /// Custom rows: no owner either; an import is stamped with this install's K2.
     static let userInstrumentKeys = ["displayName", "normalizedName", "displayOrder", "isVisibleOnProfile"]
     static let userActivityKeys = ["displayName", "normalizedName", "coreActivityCode"]
@@ -103,6 +108,15 @@ enum JournalRecordMapping {
     /// SHA-256 of the media; set only together with the asset.
     static let fileHashKey = "fileHash"
     static let sessionRefKey = "session"
+    /// Every field the importer reads, except the asset: the catch-up fetch
+    /// asks for these so a changed record never brings its file along unless
+    /// the hash says the file changed.
+    static var keysWithoutAsset: [String] {
+        Array(Set(sessionKeys + attachmentKeys + legacyAttachmentMetaKeys + metaKeys + instrumentKeys + userInstrumentKeys
+                  + userActivityKeys + [instrumentRefKey, instrumentNameKey, savedListNameKey, savedListItemsKey,
+                                        fileExtKey, fileHashKey, sessionRefKey,
+                                        JournalMetadataKeys.isPrivate, JournalMetadataKeys.selectedPages, JournalMetadataKeys.isSaved]))
+    }
 
     static func recordID(for id: UUID) -> CKRecord.ID {
         CKRecord.ID(recordName: id.uuidString, zoneID: zoneID)
@@ -138,9 +152,6 @@ enum JournalRecordMapping {
             for key in userActivityKeys { record[key] = ckValue(object.value(forKey: key)) }
         case JournalSyncRecordType.attachment:
             for key in attachmentKeys { record[key] = ckValue(object.value(forKey: key)) }
-            // Always present once written by this build: "" is "no name / cleared".
-            if record["displayName"] == nil { record["displayName"] = "" as CKRecordValue }
-            JournalMetadataFields.setAttachmentFields(on: record, id: id)
             if let session = object.value(forKey: "session") as? NSManagedObject,
                let sid = session.value(forKey: "id") as? UUID {
                 record[sessionRefKey] = CKRecord.Reference(recordID: recordID(for: sid), action: .none)
@@ -161,6 +172,29 @@ enum JournalRecordMapping {
             return nil
         }
         return record
+    }
+
+    /// Stage G: the small record a metadata edit sends. `base` is the last
+    /// server copy of the META record.
+    static func metaRecord(for attachment: NSManagedObject, base: CKRecord?) -> CKRecord? {
+        guard attachment.entity.name == JournalSyncRecordType.attachment,
+              let id = attachment.value(forKey: "id") as? UUID else { return nil }
+        let name = JournalSyncRecordType.metaName(for: id.uuidString)
+        let record = base ?? CKRecord(recordType: JournalSyncRecordType.attachmentMeta,
+                                      recordID: CKRecord.ID(recordName: name, zoneID: zoneID))
+        guard record.recordType == JournalSyncRecordType.attachmentMeta else { return nil }
+        for key in metaKeys { record[key] = ckValue(attachment.value(forKey: key)) }
+        // Always present once written by this build: "" is "no name / cleared".
+        if record["displayName"] == nil { record["displayName"] = "" as CKRecordValue }
+        JournalMetadataFields.setAttachmentFields(on: record, id: id)
+        return record
+    }
+
+    /// Applies a meta record's Core Data part (name and star). An absent
+    /// displayName is no information. Side stores are the importer's.
+    static func applyMeta(_ record: CKRecord, to attachment: NSManagedObject) {
+        if let name = record["displayName"] as? String { attachment.setValue(name, forKey: "displayName") }
+        if let star = record["isThumbnail"] as? NSNumber { attachment.setValue(star.boolValue, forKey: "isThumbnail") }
     }
 
     private static func setInstrumentLink(_ record: CKRecord, _ instrument: NSManagedObject?) {
@@ -196,11 +230,11 @@ enum JournalRecordMapping {
 
     /// Writes the record's fields onto an existing or new object. Returns false
     /// when the record is of an unknown type.
-    static func apply(_ record: CKRecord, to object: NSManagedObject) -> Bool {
+    static func apply(_ record: CKRecord, to object: NSManagedObject, legacyMetadata: Bool = false) -> Bool {
         let keys: [String]
         switch record.recordType {
         case JournalSyncRecordType.session: keys = sessionKeys
-        case JournalSyncRecordType.attachment: keys = attachmentKeys
+        case JournalSyncRecordType.attachment: keys = legacyMetadata ? attachmentKeys + legacyAttachmentMetaKeys : attachmentKeys
         case JournalSyncRecordType.userInstrument: keys = userInstrumentKeys
         case JournalSyncRecordType.userActivity: keys = userActivityKeys
         case JournalSyncRecordType.instrument: keys = instrumentKeys

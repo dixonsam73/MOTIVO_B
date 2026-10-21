@@ -184,6 +184,16 @@ struct JournalSyncPersistedState: Codable {
     var catchUpToken: Data?
     /// Stage F: side-store values queued once with their existing stamps.
     var metadataMigrationDone = false
+    // Stage G.
+    /// Meta records that arrived before their attachment (whole record).
+    var awaitingMeta: [String: Data] = [:]
+    /// Every attachment queued a meta record once (small, no media).
+    var metaTransitionDone = false
+    /// The app's own zone change token for the delta catch-up.
+    var catchUpZoneToken: Data?
+    var catchUpRecords = 0
+    var catchUpAssets = 0
+    var lastCatchUp: String?
 
     init() {}
 
@@ -224,6 +234,12 @@ struct JournalSyncPersistedState: Codable {
         localRemovalReason = try c.decodeIfPresent(String.self, forKey: .localRemovalReason)
         catchUpToken = try c.decodeIfPresent(Data.self, forKey: .catchUpToken)
         metadataMigrationDone = try c.decodeIfPresent(Bool.self, forKey: .metadataMigrationDone) ?? false
+        awaitingMeta = try c.decodeIfPresent([String: Data].self, forKey: .awaitingMeta) ?? [:]
+        metaTransitionDone = try c.decodeIfPresent(Bool.self, forKey: .metaTransitionDone) ?? false
+        catchUpZoneToken = try c.decodeIfPresent(Data.self, forKey: .catchUpZoneToken)
+        catchUpRecords = try c.decodeIfPresent(Int.self, forKey: .catchUpRecords) ?? 0
+        catchUpAssets = try c.decodeIfPresent(Int.self, forKey: .catchUpAssets) ?? 0
+        lastCatchUp = try c.decodeIfPresent(String.self, forKey: .lastCatchUp)
     }
 }
 

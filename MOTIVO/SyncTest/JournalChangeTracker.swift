@@ -22,6 +22,17 @@ import CoreData
 enum JournalSyncRecordType {
     static let session = "Session"
     static let attachment = "Attachment"
+    /// Stage G: an attachment's frequently edited metadata (name, star,
+    /// privacy, page selection) as its own small record, named "<id>-meta",
+    /// so a metadata edit never makes a receiver download the file.
+    static let attachmentMeta = "AttachmentMeta"
+    static let metaSuffix = "-meta"
+    static func metaName(for attachmentName: String) -> String { attachmentName + metaSuffix }
+    static func attachmentName(fromMeta name: String) -> String? {
+        name.hasSuffix(metaSuffix) ? String(name.dropLast(metaSuffix.count)) : nil
+    }
+    /// Attachment keys whose change is a content change (the record that carries the file).
+    static let attachmentContentKeys: Set<String> = ["kind", "fileURL", "createdAt", "session"]
     static let userInstrument = "UserInstrument"
     static let userActivity = "UserActivity"
     /// The profile's instruments, which sessions point at (`Session.instrument`).
@@ -74,6 +85,8 @@ final class JournalChangeTracker {
             for a in (try? context.fetch(attachments)) ?? [] {
                 if let id = a.value(forKey: "id") as? UUID {
                     pending.append(.init(recordName: id.uuidString, recordType: JournalSyncRecordType.attachment, op: .save))
+                    pending.append(.init(recordName: JournalSyncRecordType.metaName(for: id.uuidString),
+                                         recordType: JournalSyncRecordType.attachmentMeta, op: .save, metadataEdit: true))
                 }
             }
         }
@@ -150,8 +163,15 @@ final class JournalChangeTracker {
                 for row in (try? context.fetch(request)) ?? [] {
                     guard let id = row.value(forKey: "id") as? UUID else { continue }
                     let name = id.uuidString
-                    if known.contains(name) || queued.contains(name) { continue }
-                    pending.append(.init(recordName: name, recordType: entity, op: .save))
+                    if !(known.contains(name) || queued.contains(name)) {
+                        pending.append(.init(recordName: name, recordType: entity, op: .save))
+                    }
+                    if entity == JournalSyncRecordType.attachment {
+                        let meta = JournalSyncRecordType.metaName(for: name)
+                        if !(known.contains(meta) || queued.contains(meta)) {
+                            pending.append(.init(recordName: meta, recordType: JournalSyncRecordType.attachmentMeta, op: .save, metadataEdit: true))
+                        }
+                    }
                 }
             }
         }
@@ -199,6 +219,8 @@ final class JournalChangeTracker {
                         var ownerOnly = false
                         // A metadata write point's save (a touch, or displayName): the file is unchanged.
                         let metadataEdit = change.changeType == .update && transaction.author == JournalSyncAuthor.metadata
+                        var attachmentContentChanged = change.changeType == .insert
+                        var attachmentMetaChanged = change.changeType == .insert
                         if change.changeType == .update, let keys = change.updatedProperties.map({ Set($0.map(\.name)) }) {
                             // A save whose only changed key is the stamp itself is not a user
                             // edit, unless a metadata write point made it (stage F): then the
@@ -211,12 +233,30 @@ final class JournalChangeTracker {
                             // A metadata write point's touch is a full-record user edit, not owner-only.
                             ownerOnly = entity == JournalSyncRecordType.session && JournalOwnership.isOwnershipOnly(keys)
                                 && transaction.author != JournalSyncAuthor.metadata
+                            // Stage G: which of an attachment's two records changed.
+                            attachmentContentChanged = !keys.intersection(JournalSyncRecordType.attachmentContentKeys).isEmpty
+                            attachmentMetaChanged = !attachmentContentChanged
+                                || !keys.intersection(["displayName", "isThumbnail"]).isEmpty
                         }
                         if JournalSyncRecordType.directory.contains(entity) { namesAdded[uri] = id.uuidString }
+                        if entity == JournalSyncRecordType.attachment {
+                            if attachmentContentChanged {
+                                added.append(.init(recordName: id.uuidString, recordType: entity, op: .save))
+                            }
+                            if attachmentMetaChanged {
+                                added.append(.init(recordName: JournalSyncRecordType.metaName(for: id.uuidString),
+                                                   recordType: JournalSyncRecordType.attachmentMeta, op: .save, metadataEdit: true))
+                            }
+                            continue
+                        }
                         added.append(.init(recordName: id.uuidString, recordType: entity, op: .save, ownerOnly: ownerOnly, metadataEdit: metadataEdit))
                     case .delete:
                         if let id = change.tombstone?["id"] as? UUID {
                             added.append(.init(recordName: id.uuidString, recordType: entity, op: .delete))
+                            if entity == JournalSyncRecordType.attachment {
+                                added.append(.init(recordName: JournalSyncRecordType.metaName(for: id.uuidString),
+                                                   recordType: JournalSyncRecordType.attachmentMeta, op: .delete))
+                            }
                         } else if let name = namesAdded[uri] ?? knownCustomNames[uri] {
                             // Custom rows keep no id after deletion; the URI map has it.
                             added.append(.init(recordName: name, recordType: entity, op: .delete))
@@ -266,6 +306,19 @@ final class JournalChangeTracker {
 /// and so is an ownership-only change (stage B: giving an entry its owner is
 /// not a user edit and must not beat one under the conflict rule).
 enum JournalUserEditStamp {
+    /// Value equality for Core Data attribute and to-one relationship values.
+    static func equal(_ a: Any?, _ b: Any?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case (nil, _), (_, nil):
+            if let n = (a ?? b) as? NSNull { _ = n; return true }
+            return false
+        case (let x as NSManagedObject, let y as NSManagedObject): return x.objectID == y.objectID
+        case (let x as NSObject, let y as NSObject): return x.isEqual(y)
+        default: return false
+        }
+    }
+
     static func install() -> NSObjectProtocol {
         NotificationCenter.default.addObserver(forName: .NSManagedObjectContextWillSave, object: nil, queue: nil) { note in
             guard let ctx = note.object as? NSManagedObjectContext,
@@ -274,6 +327,17 @@ enum JournalUserEditStamp {
             let now = Date()
             for object in ctx.insertedObjects.union(ctx.updatedObjects) {
                 guard let name = object.entity.name, JournalSyncRecordType.stamped.contains(name) else { continue }
+                if !object.isInserted {
+                    // A key set to the value it already holds is not a change:
+                    // drop such keys, and the whole update when nothing is left,
+                    // so history never records an edit that did not happen.
+                    let changes = object.changedValues()
+                    let committed = object.committedValues(forKeys: Array(changes.keys))
+                    let real = changes.filter { key, value in
+                        !JournalUserEditStamp.equal(value, committed[key] as Any?)
+                    }
+                    if real.isEmpty { ctx.refresh(object, mergeChanges: false); continue }
+                }
                 let changed = Set(object.changedValues().keys)
                 if object.isInserted || !changed.subtracting(JournalOwnership.ownershipOnlyKeys).isEmpty {
                     object.setValue(now, forKey: "userModifiedAt")
