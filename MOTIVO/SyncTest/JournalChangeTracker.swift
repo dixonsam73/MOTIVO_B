@@ -197,6 +197,8 @@ final class JournalChangeTracker {
                         guard let object = try? context.existingObject(with: change.changedObjectID),
                               let id = object.value(forKey: "id") as? UUID else { continue }
                         var ownerOnly = false
+                        // A metadata write point's save (a touch, or displayName): the file is unchanged.
+                        let metadataEdit = change.changeType == .update && transaction.author == JournalSyncAuthor.metadata
                         if change.changeType == .update, let keys = change.updatedProperties.map({ Set($0.map(\.name)) }) {
                             // A save whose only changed key is the stamp itself is not a user
                             // edit, unless a metadata write point made it (stage F): then the
@@ -209,7 +211,7 @@ final class JournalChangeTracker {
                                 && transaction.author != JournalSyncAuthor.metadata
                         }
                         if JournalSyncRecordType.directory.contains(entity) { namesAdded[uri] = id.uuidString }
-                        added.append(.init(recordName: id.uuidString, recordType: entity, op: .save, ownerOnly: ownerOnly))
+                        added.append(.init(recordName: id.uuidString, recordType: entity, op: .save, ownerOnly: ownerOnly, metadataEdit: metadataEdit))
                     case .delete:
                         if let id = change.tombstone?["id"] as? UUID {
                             added.append(.init(recordName: id.uuidString, recordType: entity, op: .delete))
@@ -244,8 +246,10 @@ final class JournalChangeTracker {
                 outbox.removeAll { $0.recordName == change.recordName }
             }
             if let i = outbox.firstIndex(where: { $0.recordName == change.recordName && $0.op == change.op }) {
-                let existingPartial = outbox[i].ownerOnly || outbox[i].metadataOnly
-                let incomingPartial = change.ownerOnly || change.metadataOnly
+                // Partial or asset-free saves never downgrade a content save; a
+                // content save absorbs them (and will carry the file if it changed).
+                let existingPartial = outbox[i].ownerOnly || outbox[i].metadataOnly || outbox[i].metadataEdit
+                let incomingPartial = change.ownerOnly || change.metadataOnly || change.metadataEdit
                 if existingPartial && !incomingPartial { outbox[i] = change }
             } else {
                 outbox.append(change)

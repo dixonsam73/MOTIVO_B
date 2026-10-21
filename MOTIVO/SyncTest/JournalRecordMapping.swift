@@ -55,7 +55,10 @@ enum JournalAssetHash {
 enum JournalAssetPolicy {
     /// A new record (no server copy) always carries it; otherwise only when
     /// the server's hash is unknown or differs from the local file's.
-    static func includeAsset(hasServerCopy: Bool, serverHash: String?, localHash: String?) -> Bool {
+    static func includeAsset(hasServerCopy: Bool, serverHash: String?, localHash: String?, assetFree: Bool = false) -> Bool {
+        // Stage F: a metadata change never carries the file, whatever this
+        // device knows about the server's hash; the server keeps its asset.
+        if assetFree, hasServerCopy { return false }
         guard hasServerCopy, let serverHash, let localHash else { return true }
         return serverHash != localHash
     }

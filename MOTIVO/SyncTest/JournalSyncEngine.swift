@@ -673,6 +673,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         let outbox = store.state.outbox
         let typeByName = Dictionary(outbox.map { ($0.recordName, $0.recordType) }, uniquingKeysWith: { a, _ in a })
         let ownerOnlyNames = Set(outbox.filter { $0.op == .save && $0.ownerOnly }.map(\.recordName))
+        let assetFreeNames = Set(outbox.filter { $0.op == .save && $0.assetFree }.map(\.recordName))
         pending.sort { a, b in rank(a, typeByName) < rank(b, typeByName) }
         let listNames = pending.compactMap { change -> String? in
             if case .saveRecord(let id) = change, typeByName[id.recordName] == JournalSyncRecordType.savedList { return id.recordName }
@@ -689,7 +690,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 return nil
             }
             return self.record(for: recordID, type: typeByName[recordID.recordName], eligibility: eligibility,
-                               ownerOnly: ownerOnlyNames.contains(recordID.recordName))
+                               ownerOnly: ownerOnlyNames.contains(recordID.recordName),
+                               assetFree: assetFreeNames.contains(recordID.recordName))
         }
     }
 
@@ -731,7 +733,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     /// Builds the outgoing record from Core Data; nil removes the pending change.
     /// Entries this device's ownership rules make ineligible stay local.
-    private func record(for recordID: CKRecord.ID, type: String?, eligibility: Eligibility, ownerOnly: Bool = false) -> CKRecord? {
+    private func record(for recordID: CKRecord.ID, type: String?, eligibility: Eligibility, ownerOnly: Bool = false,
+                        assetFree: Bool = false) -> CKRecord? {
         guard let id = UUID(uuidString: recordID.recordName) else { return nil }
         let name = recordID.recordName
         var result: CKRecord?
@@ -768,7 +771,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                     store.update { $0.fileStampCache[name] = cached.entry }
                 }
                 let include = JournalAssetPolicy.includeAsset(hasServerCopy: base != nil,
-                                                              serverHash: store.state.assetHashes[name], localHash: localHash)
+                                                              serverHash: store.state.assetHashes[name], localHash: localHash,
+                                                              assetFree: assetFree)
                 result = JournalRecordMapping.record(for: object, base: base, includeAsset: include, fileHash: localHash)
                 if include, result?[JournalRecordMapping.assetKey] == nil {
                     log("Attachment \(name) sent without its file (not found locally)")

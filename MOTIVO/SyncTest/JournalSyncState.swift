@@ -51,12 +51,21 @@ struct JournalSyncPendingChange: Codable, Hashable {
     /// (written by an older build) it is kept, not dropped: that copy has
     /// less information, not newer information.
     var metadataOnly: Bool = false
+    /// Stage F: a user's metadata edit (a write point's touch, or a rename).
+    /// Normal conflict semantics, but the send never carries the file: a
+    /// metadata change must not re-upload an unchanged attachment, even one
+    /// whose server hash this device never learned.
+    var metadataEdit: Bool = false
 
-    init(recordName: String, recordType: String, op: Op, ownerOnly: Bool = false, metadataOnly: Bool = false) {
-        self.recordName = recordName; self.recordType = recordType; self.op = op; self.ownerOnly = ownerOnly; self.metadataOnly = metadataOnly
+    /// Sends without the asset.
+    var assetFree: Bool { metadataOnly || metadataEdit }
+
+    init(recordName: String, recordType: String, op: Op, ownerOnly: Bool = false, metadataOnly: Bool = false, metadataEdit: Bool = false) {
+        self.recordName = recordName; self.recordType = recordType; self.op = op; self.ownerOnly = ownerOnly
+        self.metadataOnly = metadataOnly; self.metadataEdit = metadataEdit
     }
 
-    private enum CodingKeys: String, CodingKey { case recordName, recordType, op, ownerOnly, metadataOnly }
+    private enum CodingKeys: String, CodingKey { case recordName, recordType, op, ownerOnly, metadataOnly, metadataEdit }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         recordName = try c.decode(String.self, forKey: .recordName)
@@ -64,6 +73,7 @@ struct JournalSyncPendingChange: Codable, Hashable {
         op = try c.decode(Op.self, forKey: .op)
         ownerOnly = try c.decodeIfPresent(Bool.self, forKey: .ownerOnly) ?? false
         metadataOnly = try c.decodeIfPresent(Bool.self, forKey: .metadataOnly) ?? false
+        metadataEdit = try c.decodeIfPresent(Bool.self, forKey: .metadataEdit) ?? false
     }
 }
 

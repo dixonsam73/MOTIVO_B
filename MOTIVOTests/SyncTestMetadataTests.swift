@@ -278,6 +278,35 @@ final class SyncTestMetadataTests: XCTestCase {
         ctx.performAndWait { XCTAssertEqual(imp.fetch(entity: "Attachment", id: aid)?.value(forKey: "displayName") as? String, "Their name") }
     }
 
+    func testMetadataSendsNeverCarryTheFileEvenWithoutAKnownServerHash() {
+        XCTAssertFalse(JournalAssetPolicy.includeAsset(hasServerCopy: true, serverHash: nil, localHash: "abc", assetFree: true))
+        XCTAssertFalse(JournalAssetPolicy.includeAsset(hasServerCopy: true, serverHash: "x", localHash: "y", assetFree: true),
+                       "a metadata change is not a file change; a content save will carry it")
+        XCTAssertTrue(JournalAssetPolicy.includeAsset(hasServerCopy: false, serverHash: nil, localHash: "abc", assetFree: true),
+                      "a record new to the server always carries its file")
+        XCTAssertTrue(JournalAssetPolicy.includeAsset(hasServerCopy: true, serverHash: nil, localHash: "abc"), "stage D rule unchanged")
+    }
+
+    func testAWritePointTouchIsAnAssetFreeEditAndAContentSaveAbsorbsIt() throws {
+        let ctx = container.viewContext
+        let s = makeSession(in: ctx)
+        let a = makeAttachment(session: s, in: ctx)
+        try ctx.save()
+        let aid = a.value(forKey: "id") as! UUID
+        let tracker = JournalChangeTracker(container: container, store: store)
+        tracker.bootstrapIfNeeded(); store.update { $0.outbox.removeAll() }
+        AttachmentPrivacy.setPrivate(id: aid, url: nil, true)   // the hook touches the row
+        wait(for: { tracker.processHistory(); return self.store.state.outbox.contains { $0.recordName == aid.uuidString } })
+        let pending = try XCTUnwrap(store.state.outbox.first { $0.recordName == aid.uuidString })
+        XCTAssertTrue(pending.metadataEdit); XCTAssertTrue(pending.assetFree); XCTAssertFalse(pending.ownerOnly)
+        // A real content save (any other key) absorbs it and may carry the file.
+        a.setValue("image", forKey: "kind"); a.setValue("video", forKey: "kind")
+        try ctx.save()
+        tracker.processHistory()
+        let merged = try XCTUnwrap(store.state.outbox.first { $0.recordName == aid.uuidString })
+        XCTAssertFalse(merged.assetFree)
+    }
+
     func testMergeKeepsAContentSaveOverAMetadataOnlyOne() {
         var outbox: [JournalSyncPendingChange] = [.init(recordName: "A", recordType: "Session", op: .save, metadataOnly: true)]
         JournalChangeTracker.merge([.init(recordName: "A", recordType: "Session", op: .save)], into: &outbox)
