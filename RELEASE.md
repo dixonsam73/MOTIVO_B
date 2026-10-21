@@ -705,9 +705,10 @@ the join.
   sends. Untested: a mid-transfer cut on an unthrottled link long enough
   to fail an operation (the ~15 s cut did not); recovery after a device
   restart rather than an app force-quit.
-  **Stage E, account change and erase/unlink: passed 2026-10-21** (unit
-  tests, simulator, Device A account switch, iPad/iPhone sections 1–4; one
-  defect found on device and fixed, C-124).
+  **Stage E, account change and erase/unlink: passed and accepted
+  2026-10-21; final build 1833 (`32d9075`)** (unit tests, simulator, Device A
+  account switch, iPad/iPhone sections 1–4, final erase check on 1833; two
+  defects found on device and fixed, C-124 and C-127).
   One account guard (`JournalAccountGuard`: bound user, current user,
   unlinked, removal flags) is asked by outgoing batches, fetched zone and
   database changes (imports AND remote deletions), list imports and the
@@ -832,9 +833,10 @@ the join.
   engine was running; building a fresh engine", 35 records refetched by id,
   no duplicates, the Thought present with no further push. Cost: a full
   refetch (records and, unless CloudKit's asset cache still has them, their
-  files) on the rare activation that follows a missed change; a delta
-  catch-up through the app's own zone fetch is the better long-term shape
-  and belongs with the receiver-download inventory. (3) Interrupted removal
+  files) on an activation that follows a missed change; how often that
+  happens in use is not known, so it is not called rare. A delta catch-up
+  through the app's own zone fetch is the better long-term shape and is
+  kept beside the receiver-download optimisation item. (3) Interrupted removal
   on the iPad: rows deleted and the app exited before finish; relaunch
   recovered it ("2 leftover row(s) removed locally", finished, outbox 0,
   sync off); the iPhone's zone unchanged at 35 with the database probe
@@ -863,6 +865,32 @@ the join.
   ≈ 8 min waiting during the device runs. Samuel: ≈ 35 min at Device A and
   the iPhone plus ≈ 15 min on iCloud sign-out/sign-in prompts; ≈ 40 min at
   the iPad and iPhone plus ≈ 10 min waiting on the C-124 fix and fetches.
+  **Final check (build 1832, then 1833 `32d9075`, iPad, corrected offline
+  sequence):** on 1832 the erase ran with no ownership line between "Local
+  removal begun" and "finished" (C-126 held), queued no deletion, left sync
+  off; the iPhone's zone unchanged (36, no E7). The log also showed an
+  activation that had stalled in the catch-up check during an offline
+  relaunch, completing when the network returned and building an engine on
+  the removed copy for ~20 ms before the queued re-check dropped it; it
+  fetched and sent nothing (C-127, fixed in 1833: an activation that awaited
+  abandons itself when a dormancy generation or the guard's decision moved
+  meanwhile; the catch-up call is time-boxed at 15/20 s). Repeated on 1833
+  with the offline relaunch included: the relaunch settled on Running after
+  the time-out, the erase dropped the live engine, nothing between begin
+  and finish, outbox only the setup instrument, back online no send, the
+  iPhone's zone 37 with no E8, Re-enable rebuilt fresh, Journal matching
+  (38 records both sides), owner adopted after the first complete fetch.
+  **Qualifications kept for the shipping record (Samuel, 2026-10-21):**
+  dropping an engine does not immediately stop all its activity (a dropped
+  instance attempted a scheduled fetch five minutes later); the account
+  guards and the rejection of stale-engine callbacks remain essential, and
+  a focused code review of those protections and the durable erase
+  sequence is required before enabling production sync (no broad review
+  commissioned). The catch-up performs a full refetch in some
+  circumstances; it stays beside receiver-download optimisation and is not
+  described as rare without evidence from use. Final-check time: agent
+  ≈ 20 min including the C-127 fix, ≈ 7 min waiting; Samuel ≈ 25 min at
+  the devices, ≈ 10 min waiting on the 1833 build.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
