@@ -204,8 +204,10 @@ final class JournalChangeTracker {
                             // edit, unless a metadata write point made it (stage F): then the
                             // edit lives in a side store and the stamp is its clock.
                             if keys == ["userModifiedAt"], transaction.author != JournalSyncAuthor.metadata { continue }
-                            // An attachment's owner is not synced (it follows its session).
-                            if entity == JournalSyncRecordType.attachment, JournalOwnership.isOwnershipOnly(keys) { continue }
+                            // An attachment's owner is not synced (it follows its session);
+                            // a metadata write point's touch, though, is a user edit (stage F).
+                            if entity == JournalSyncRecordType.attachment, JournalOwnership.isOwnershipOnly(keys),
+                               transaction.author != JournalSyncAuthor.metadata { continue }
                             // A metadata write point's touch is a full-record user edit, not owner-only.
                             ownerOnly = entity == JournalSyncRecordType.session && JournalOwnership.isOwnershipOnly(keys)
                                 && transaction.author != JournalSyncAuthor.metadata
