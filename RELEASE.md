@@ -891,6 +891,84 @@ the join.
   described as rare without evidence from use. Final-check time: agent
   ≈ 20 min including the C-127 fix, ≈ 7 min waiting; Samuel ≈ 25 min at
   the devices, ≈ 10 min waiting on the 1833 build.
+  **Stage F, journal metadata: passed 2026-10-21; final build 1840
+  (`8fe4a28`).** Already synced before: session fields (incl. `isPublic`,
+  `areNotesPrivate`), PDF `displayName`, the thumbnail star, media by hash,
+  instruments, lists. Not synced: audio/video titles (per-device UserDefaults
+  store, C-47), the attachment privacy map (file), favourites (saves in
+  UserDefaults per viewer), selected PDF pages (UserDefaults). **Design:** the
+  side store becomes a field of the owning record and Core Data stays the
+  clock. Under SYNCTEST each write point (the single title writer,
+  `AttachmentPrivacy.setPrivate`, `PDFSelectedPagesStore.setPages`,
+  `FeedInteractionStore.toggleSaved`) also touches its row through the
+  `metadata` author, so `userModifiedAt` stamps as a user edit, history
+  queues the row (a stamp-only change under that author counts and is never
+  owner-only), and the record builder reads the side store; a title also
+  lands on `Attachment.displayName`. Fields: `isPrivate` 0/1, `selectedPages`
+  JSON ("[]" = whole document), `isSaved` 0/1, `displayName` ("" = no name /
+  cleared); an absent field is no information and leaves the receiving store
+  alone, so private-by-default still applies where no choice exists. Imports
+  write the stores store-only (no hook, no loop), and the title import
+  removes per-device overrides so an older local name cannot hide a synced
+  one. Metadata sends never carry the file. **Migration** once per device,
+  idempotent, flag last: rows with side-store values are queued as
+  `metadataOnly` with their existing stamps (titles moved to `displayName`
+  under the unstamped `migration` author); meeting a server copy without
+  the fields they stay queued and go on top of its change tag, meeting one
+  with the fields they yield; a later real edit elsewhere still wins. The
+  trial's Solo installs have no privacy toggle in the UI (Connected only), so
+  diagnostics flips the newest attachment's choice; the privacy entries
+  themselves exist in Solo (every attachment gets an explicit "shared" at
+  creation). 13 unit tests (`SyncTestMetadataTests`), 69 SyncTest tests
+  green; Debug, Release and SyncTest build. **Device run (iPhone and iPad
+  Sync Test installs, disposable entries, state files read over the cable):**
+  (1) migration, fixture made on 1833 (a Thought with an audio clip renamed
+  `MIG audio name`, its PDF set to page 1, the row hearted): on 1836 the
+  iPhone queued 1 title, 11 privacy choices, 1 page selection, 1 favourite
+  and sent them metadata only; the iPad showed the name, "Page 1", the heart,
+  and the Journal cards that had had no thumbnail since Checkpoint 2 now show
+  one (the explicit privacy entries arrived). (2) Titles both ways on 1838,
+  metadata only (media uploads unchanged at 15 files); a cleared video name
+  arrived as the default label; names survived relaunch. The viewer treats
+  an empty audio name as "leave it" by design (video and the editor's
+  attachments card can clear), so audio clearing was exercised through the
+  video. (3) Privacy both ways on 1839 through the diagnostics control.
+  (4) Favourites both ways. (5) PDF pages both ways including the return to
+  the entire document. (6) Offline on the iPad: rename, heart, privacy flip
+  and page selection made in Airplane Mode, kept across a relaunch while
+  offline, sent on reconnect as 3 records with 0 media uploads, all four
+  present on the iPhone. **Defects found and fixed during the run:** (a) on
+  first launch of 1835 the migration's 15 queued rows were all dropped: the
+  same launch refetched the whole zone and every refetched copy met its
+  queued row with an identical stamp (tie → server), and old-format records
+  without `displayName` wiped the migrated names; fixed in 1836
+  (`metadataOnly` rows survive a copy without the fields; absent
+  `displayName` is no information; this build always writes it). (b) The
+  migration's sends re-uploaded 3 files, 10.9 MB, whose server hash the
+  iPhone had never learned (pre-stage-D attachments); fixed in 1837
+  (metadata sends are asset-free whatever the device knows). (c) A privacy or
+  page touch on an attachment was discarded by the tracker's
+  ownership-only rule; caught by a unit test, fixed in 1838. (d) Journal rows
+  showed a favourite written by the import only once rebuilt; the rows and
+  the detail screen now re-read it on the store change (1840). **Measured:**
+  one rename on the iPad re-saved the session's 6 attachment records
+  (metadata only on the sender) and the iPhone fetched **267 MB** of
+  unchanged asset data for them and wrote 0 bytes (C-130: the receiver
+  fetches the asset of every changed attachment record; stays a separate
+  inventory item). The catch-up's full refetch ran on **every relaunch after
+  the other device had written while this app was closed**: three times on
+  the iPhone and once on the iPad today, 39–41 records each, up to 203 MB of
+  asset transport when the daemon's cache was cold (C-131). **Limitations:**
+  whole-record conflict rule, so two devices editing different metadata of
+  the same row at the same moment keep only the later record; two devices
+  holding different per-device titles for the same clip at migration keep
+  whichever migrated first; privacy is not a user action in Solo; hearts and
+  titles sync under the viewer scope of the owner key (an un-owned journal
+  syncs favourites under "unknown"). Hands-on: agent ≈ 20 min reading and
+  design, ≈ 35 min code and tests, ≈ 30 min fixes during the device run,
+  ≈ 25 min guiding and reading state files; ≈ 25 min waiting on builds and
+  tests. Samuel: ≈ 50 min at the devices (fixture, migration, six sections,
+  the isolated measurement), ≈ 25 min waiting on the five builds.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
