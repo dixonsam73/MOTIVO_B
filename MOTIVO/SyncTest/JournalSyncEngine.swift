@@ -89,6 +89,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private var retryPending = false
     private var reconcileInFlight = false
     private var reconcileQueued = false
+    /// Bumped by every `goDormant`. An activation that awaited (the catch-up
+    /// check) must find it unchanged before it builds an engine: seen
+    /// 2026-10-21, an offline launch stalled in that check, an erase ran
+    /// underneath it, and the stalled activation then built an engine for
+    /// 20 ms on a removed copy.
+    private var dormantGeneration = 0
     private var pathMonitor: NWPathMonitor?
 
     init(containerIdentifier: String, persistence: NSPersistentContainer, store: JournalSyncStateStore, status: JournalSyncStatus, customOwner: String?) {
@@ -207,6 +213,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         stateLock.lock()
         let hadEngine = engineInstance != nil
         engineInstance = nil
+        dormantGeneration += 1
         retryPending = retry
         let changed = lastRefusal != reason
         lastRefusal = reason
@@ -223,6 +230,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private func activate(trigger: String) async {
         stateLock.lock()
         let wasDormant = engineInstance == nil
+        let generation = dormantGeneration
         stateLock.unlock()
         if wasDormant, store.state.engineState != nil {
             // Seen twice on 2026-10-21: a push that arrives while no engine
@@ -237,6 +245,15 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 log("Catch-up: the zone changed while no engine was running; building a fresh engine to refetch it")
             case .some(false): break
             case .none: log("Catch-up check failed; engine built from saved state regardless")
+            }
+            // The check awaited: the state may have moved (unlink, removal,
+            // account change) while it ran.
+            stateLock.lock(); let moved = dormantGeneration != generation; stateLock.unlock()
+            let decision = currentDecision()
+            if moved || !decision.allowed {
+                log("Activation abandoned (\(trigger)): the state changed during the catch-up check")
+                if case .refuse = decision { goDormant(decision, trigger: trigger) }
+                return
             }
         }
         stateLock.lock()
@@ -274,6 +291,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: $0)
         }
         let op = CKFetchDatabaseChangesOperation(previousServerChangeToken: previous)
+        // Offline this would otherwise wait for the network indefinitely and
+        // hold the activation open across whatever happens meanwhile.
+        op.configuration.timeoutIntervalForRequest = 15
+        op.configuration.timeoutIntervalForResource = 20
         var changed: [String] = []
         var deleted: [String] = []
         op.recordZoneWithIDChangedBlock = { changed.append($0.zoneName) }
