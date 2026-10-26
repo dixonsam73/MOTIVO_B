@@ -530,6 +530,9 @@ struct ProfileNameDraftState: Equatable {
     /// `onChange` handlers so they schedule no directory write for them.
     @State private var syncHydratedValues: Set<String> = []
     #endif
+    /// C-137: the name is mandatory (set-up cannot finish without one), so an
+    /// emptied field keeps the last committed name and says so on blur.
+    @State private var nameNotice: String? = nil
  
      // Primary Activity (Stage 1 persisted in AppStorage; Stage 2 UX hardening)
      // Format: "core:<raw>" or "custom:<name>"
@@ -913,7 +916,16 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                              // a member can pause while STILL FOCUSED, which is
                              // why the debounced path commits locally too.
                              .onChange(of: isNameFocused) { was, now in
-                                 if was && !now { persistProfileEdits() }
+                                 if was && !now {
+                                     persistProfileEdits()
+                                     // C-137: finishing an edit with an empty
+                                     // field: the committed name stays and the
+                                     // field shows it again.
+                                     if let kept = ProfileNameCommitPolicy.restoredDraft(draft: name, stored: profile?.name) {
+                                         name = kept
+                                         nameNotice = "A name is needed, so the previous one was kept."
+                                     }
+                                 }
                                  #if SYNCTEST
                                  JournalProfileMirror.setEditingHold(now || isLocationFocused)
                                  #endif
@@ -961,6 +973,9 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  // C-70. The LOCAL save failure, on its own surface. It is shown
                  // regardless of Connected state, because the local record is the
                  // account-free one and its failure concerns every member.
+                 if let nameNotice {
+                     Text(nameNotice).font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
+                 }
                  if let localMsg = localSaveMessage {
                      HStack(spacing: 8) {
                          Text(localMsg)
@@ -1995,7 +2010,9 @@ private var sessionSetupSection: some View {
          if p.value(forKey: "id") == nil {
              p.setValue(UUID(), forKey: "id")
          }
-         p.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+         // C-137: an emptied field never commits "" over an established name;
+         // the set-up gate reads this row and would open onboarding.
+         p.name = ProfileNameCommitPolicy.committedName(draft: name, stored: p.name)
          p.primaryInstrument = primaryInstrumentName.trimmingCharacters(in: .whitespacesAndNewlines)
          p.defaultPrivacy = defaultPrivacy
          // C-70. The empty catch is gone. A swallowed Core Data failure was the
@@ -2153,7 +2170,8 @@ private var sessionSetupSection: some View {
 
     @MainActor
     private func currentDirectorySnapshot(backendID: String) -> DirectorySyncSnapshot {
-         let display = name.trimmingCharacters(in: .whitespacesAndNewlines)
+         // C-137: the directory gets the committed name, never a transient empty field.
+         let display = ProfileNameCommitPolicy.committedName(draft: name, stored: profile?.name)
          // Connected discovery is always enabled. Relationship privacy is handled by explicit follow approval.
          let locTrim = locationText.trimmingCharacters(in: .whitespacesAndNewlines)
          let locOrNil: String? = locTrim.isEmpty ? nil : locTrim
@@ -2931,6 +2949,7 @@ private func initials(from string: String) -> String {
                  // this device's edit and schedules no directory write.
                  if syncHydratedValues.remove(newValue) != nil { return }
                  #endif
+                 nameNotice = nil
                  scheduleDirectorySyncDebounced()
              }
              #if SYNCTEST
