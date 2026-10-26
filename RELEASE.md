@@ -1039,26 +1039,34 @@ the join.
   fetches with a token that predates its own sends and gets them back with
   their files. Recurring, not one-time: after any relaunch that follows a
   content send with no fetch in between; metadata echoes are small. **Fix
-  (build 1846):** after a send that saved content records the engine fetches
-  once ~3 s later while the app is alive, so the persisted state passes its
-  own writes; and a delivered record whose change tag this device already
-  holds is skipped (no import work) and counted in diagnostics as "Own-write
-  echoes" with the asset bytes that came with it. **Acceptance 2026-10-26
-  (iPhone and iPad on 1846, counters read over the cable):** three renames
-  of the same clip in a row, then a force-quit and relaunch of the iPhone:
-  three meta records sent, the relaunch catch-up imported 2 changed records
-  with 0 files, no content record fetched, 0 asset bytes delivered on either
-  device, the iPad showing the last name; a new photo: 1 upload (3.44 MB),
-  "Fetch after own content send" three seconds later with no echo, the
-  relaunch catch-up 3 changed records with 0 files, the engine's own fetch
-  after the relaunch empty, 0 asset bytes delivered on the iPhone, the iPad
-  delivered and wrote 3 444 289 bytes once (and its Journal row now shows the
-  thumbnail, the privacy choice having travelled with the meta record); a
-  delete-and-add of the photo (the editor's replacement flow for photos):
-  2 deletions and 1 upload (1.33 MB), the same clean sequence, the iPad
-  delivered and wrote 1 330 146 bytes once. The iPad logged one own-write
-  echo of a small record, skipped, 0 bytes. The engine's post-relaunch echo
-  of content records did not recur. **Limitations:**
+  (build 1846), as first built:** after a send that saved content records the
+  engine fetched once ~3 s later while the app was alive, so the persisted
+  state passed its own writes; and a delivered record whose change tag this
+  device already holds is skipped (no import work) and counted in diagnostics
+  as "Own-write echoes" with the asset bytes that came with it. **Acceptance
+  2026-10-26 (iPhone and iPad on 1846), CORRECTED the same day (C-135):**
+  the post-send `fetchChanges()` trapped inside CloudKit on every call, so
+  the "relaunches" in that acceptance after the photo send (12:20) and the
+  delete-and-add (12:24) were the app ending (crash reports 12:20:17 and
+  12:24:22), not deliberate relaunches, and the "no echo" seen on the
+  engine's fetch after them was partly the catch-up's doing. What that
+  acceptance did demonstrate stands: three renames of the same clip then a
+  force-quit and relaunch of the iPhone gave three meta records, a relaunch
+  catch-up of 2 changed records with 0 files, no content record fetched, 0
+  asset bytes delivered on either device; the new photo (3.44 MB) and the
+  delete-and-add (1.33 MB) were each delivered and written once by the iPad.
+  **Replacement behaviour, build 1854 (`22c89b3`) on device:** the manual
+  post-send fetch is gone (C-135); the engine's own push-triggered fetch
+  after a send covers the common case and the echo skip the rest. The same
+  three checks: three renames (`F1`–`F3`) then force-quit and relaunch:
+  catch-up 2 records, 0 files, the iPhone's asset bytes delivered unchanged;
+  a new photo (7.62 MB, 1 upload) then force-quit and relaunch: catch-up 4
+  records, 0 files, no echo bytes on the iPhone, the iPad's asset bytes up by
+  exactly the photo; a replacement (3.44 MB, 1 upload, 2 deletions) then
+  force-quit and relaunch: catch-up 3 records, 2 deletions, 0 files, the
+  iPad's asset bytes up by exactly the file, one attachment, no duplicate.
+  No crash report on either device after 14:20. The iPad's two own-write
+  echoes were small records with 0 bytes. **Limitations:**
   after a relaunch the engine may re-deliver changes the catch-up already
   imported (idempotent; costs assets only for content records); the
   catch-up's zone token advances only when a catch-up runs, so each one
@@ -1177,6 +1185,71 @@ the join.
   ≈ 50 min fixes and state-file analysis during the device run, ≈ 15 min
   records; ≈ 35 min waiting on builds and tests. Samuel: ≈ 60 min at the
   devices, ≈ 20 min waiting on the four builds and installs.
+  **Stage H follow-up (Samuel's five items): passed 2026-10-26; final
+  build 1856 (`26d9cd0`).** (1) *C-134 corrected* (text above and C-134's
+  row) and the three checks repeated on 1854: renames, new media and a
+  replacement, each followed by a force-quit and relaunch of the sender:
+  no crash, the intended content on the receiver once, the sender's asset
+  bytes delivered unchanged throughout. (2) *Primary instrument alone:* a
+  tap in the instrument list is recorded as a choice (`profilePrimaryChosen`
+  in the state file; an erase clears it) and from then on a primary change
+  is an edit even with no name or location; a pre-existing primary-only
+  profile goes up at first sight without a clock. The app's own default on a
+  never-filled profile is still not an edit. Unit-tested (upload, record,
+  import onto an empty device resolving by name without a duplicate row);
+  on device a chosen primary travelled both ways with no duplicate. A bug
+  the new test caught before any build: after an import whose primary
+  resolved to this device's own row (`oud` arriving where `Oud` exists) the
+  fingerprint recorded the record's spelling, so the next scan saw a phantom
+  edit; the fingerprint now comes from what the device holds. (3) *C-137,
+  production, separate commits `3e85cc6` and `dfa9361`:* the name is
+  mandatory (set-up cannot finish without one), so `ProfileNameCommitPolicy`
+  commits the stored name for an empty draft, the typed name otherwise;
+  `save()` and the directory snapshot use it and the field shows the kept
+  name again when an edit ends empty (a notice was tried and dropped: it
+  never displayed, and the instant reappearance is preferred). The set-up
+  gate is unchanged; its input can no longer read empty for an established
+  person. Tests: `C137ProfileNameCommitTests` (clear, retype, relaunch as a
+  fresh read; set-up still validates), plus a SyncTest test that the emptied
+  field never reaches a record. On the iPhone (Sync Test install, the same
+  production code): the name cleared and left for 5 s came straight back,
+  no onboarding, the iPad unchanged, intact after a relaunch; cleared and
+  retyped went up as one record. (4) *Connected isolation with an identity:*
+  `SyncTestConnectedIsolationTests` arranges a valid-looking identity on
+  the real `AuthManager` (Apple id, access token, backend id, Connected
+  mode, a loopback base URL with a URLProtocol stub that records and fails
+  every request): an imported profile and avatar leave no pending marker,
+  the avatar promotion makes no request, the screen's hydration filter
+  publishes nothing for the hydrated values, an unrelated session save and
+  the location rewritten on close change none of that, and the member's
+  own avatar edit still attempts its upload (one request to the avatars
+  path, marker kept on failure). The screen itself is not mounted; its
+  `onChange` wiring is represented by the pure filter it consults. Device
+  coverage had no identity at all ("Connected writes attempted" 0 on both
+  devices throughout, including after every step of this follow-up). (5)
+  *Merge rule narrowed in wording, confirmed in code:* the longer-value
+  tie-break is reachable only when neither side has a clock (the one-time
+  meeting of two pre-existing profiles) and is an arbitrary tie-breaker,
+  not a judgement of correctness; displaced values stay in the conflict
+  log and a displaced avatar in a file. A test asserts a newer shorter
+  value wins and an unclocked profile yields to any clocked record. Also
+  closed: the redundant send after a lost conflict survived in one path
+  (the conflict resolved by the relaunch catch-up before any engine existed;
+  the engine then restored its own pending list and sent the record once
+  more); an engine built from saved state now drops any pending change the
+  outbox no longer holds (`JournalPendingReconcile`, pure, unit-tested); on
+  device the iPad, force-quit offline with a pending name and reopened,
+  logged "Dropped 1 pending change(s)…" and its records-sent count did not
+  move. 94 SyncTest tests green (the C-137 tests also green under the Debug
+  scheme); Debug, Release and SyncTest build. No crash report on either
+  device since 14:20. **Limitations unchanged:** whole-record conflicts;
+  the full-size avatar is not synced; iPhone avatar PNGs 1–2.7 MB (recorded,
+  not optimised); an imported empty name cannot arise any more, but a
+  deliberate change of the setup gate remains Samuel's call. Hands-on:
+  agent ≈ 25 min reading and design, ≈ 55 min code and tests, ≈ 30 min
+  fixes and state-file analysis during the device run, ≈ 15 min records;
+  ≈ 40 min waiting on builds, tests and installs. Samuel: ≈ 35 min at the
+  devices, ≈ 25 min waiting on the three builds and the iPhone reconnect.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
