@@ -2746,6 +2746,7 @@ private func loadPracticeDefaultsIfNeeded() {
 
     private func openScoreFromTimer(_ item: ScoreLibraryItem) {
         scoreLibraryStore.markOpened(item)
+        scoreLibraryStore.viewerDidOpen(item.id)
         recordScoreUsedThisSessionIfNeeded(item)
 
         scoreViewerRequest = TimerScoreViewerRequest(

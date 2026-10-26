@@ -227,11 +227,22 @@ final class ScoreLibraryStore: ObservableObject {
         persist(.library)
     }
 
-    /// The timer's score viewer closed: the reading position is final for now.
-    /// Production: nothing; the private sync trial sends the position.
+    /// The score whose viewer is on screen right now (not persisted). While it
+    /// is open, a reading position from another device is not written into
+    /// its saved page: the page on screen is the truth, and it is published
+    /// when the viewer is dismissed or the app goes to the background.
+    private(set) var openViewerID: UUID?
+
+    func viewerDidOpen(_ itemID: UUID) {
+        openViewerID = itemID
+    }
+
+    /// The timer's score viewer was dismissed: the reading position is final
+    /// for now. Production: nothing more; the private sync trial sends it.
     func viewerDidClose(_ itemID: UUID) {
+        if openViewerID == itemID { openViewerID = nil }
         #if SYNCTEST
-        JournalScoreMirror.viewerClosed()
+        JournalScoreMirror.viewerClosed(itemID)
         #endif
     }
 
@@ -269,11 +280,14 @@ final class ScoreLibraryStore: ObservableObject {
     }
 
     /// Writes a reading position from the other device, clamped to the
-    /// document. The open viewer holds the page it was opened with, so this
-    /// never moves a page someone is reading. Returns the page applied.
+    /// document. Nil while that score's viewer is open: the page on screen
+    /// stays the saved page and is published at the next boundary (seen on
+    /// device 2026-10-26: imported pages overwrote the saved page under an
+    /// open viewer, so the dismissal published the other device's page).
+    /// Returns the page applied.
     @discardableResult
     func applyImportedPosition(id: UUID, page: Int) -> Int? {
-        guard !indexDamaged, let index = items.firstIndex(where: { $0.id == id }) else { return nil }
+        guard !indexDamaged, openViewerID != id, let index = items.firstIndex(where: { $0.id == id }) else { return nil }
         let bounded = min(max(page, 1), max(items[index].pageCount, 1))
         if items[index].lastViewedPage != bounded {
             items[index].lastViewedPage = bounded

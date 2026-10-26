@@ -400,6 +400,38 @@ final class SyncTestScoreSyncTests: XCTestCase {
         XCTAssertNil(library.activeScoreID, "the currently open score is never set by an import")
     }
 
+    /// Seen on device 2026-10-26: with the viewer open on page 1, remote
+    /// pages 3 then 2 were written into the saved page, and the dismissal
+    /// published 2. Now an open viewer's score ignores imported positions and
+    /// the dismissal publishes the page on screen even if unchanged.
+    func testAnOpenViewerKeepsItsPageAndTheDismissalPublishesIt() throws {
+        let library = makeLibrary()
+        let a = try library.importPDF(from: try makePDF("a.pdf"), displayName: "Score")
+        _ = scan(library)
+        store.update { $0.outbox.removeAll() }
+        library.viewerDidOpen(a.id)
+        library.updateLastViewedPage(for: a.id, page: 1)
+        _ = scan(library)                          // page 1 known
+        store.update { $0.outbox.removeAll() }
+
+        let t = Date()
+        let outcome = apply([serverPosition(id: a.id, page: 3, stamp: t.addingTimeInterval(60))], library)
+        XCTAssertEqual(outcome.applied, 0)
+        XCTAssertEqual(library.items[0].lastViewedPage, 1, "the page on screen stays")
+        XCTAssertNil(library.applyImportedPosition(id: a.id, page: 2))
+
+        library.viewerDidClose(a.id)
+        XCTAssertNil(library.openViewerID)
+        let pending = JournalScoreSync.scan(snapshot: library.snapshot(), store: store, positions: true, force: [a.id], now: t.addingTimeInterval(120))
+        XCTAssertEqual(pending.map(\.recordName), [names(a).position], "the dismissal publishes page 1 although it is unchanged")
+        XCTAssertEqual(store.state.scorePositionStamps[a.id.uuidString], t.addingTimeInterval(120))
+        let record = try XCTUnwrap(self.record(names(a).position, library))
+        XCTAssertEqual((record[JournalScoreKeys.lastViewedPage] as? NSNumber)?.intValue, 1)
+        // Closed now: the same remote page is applied as usual.
+        _ = apply([serverPosition(id: a.id, page: 3, stamp: t.addingTimeInterval(180))], library)
+        XCTAssertEqual(library.items[0].lastViewedPage, 3)
+    }
+
     func testAPositionImportNeverTouchesMetadataOrTheCurrentlyOpenScore() throws {
         let library = makeLibrary()
         let a = try library.importPDF(from: try makePDF("a.pdf"), displayName: "Score")

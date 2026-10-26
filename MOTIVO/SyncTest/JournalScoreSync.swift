@@ -100,10 +100,10 @@ enum JournalScoreKeys {
 enum JournalScoreMirror {
     nonisolated(unsafe) static var suppressed = false
     nonisolated(unsafe) static var onChange: ((ScoreLibraryChange) -> Void)?
-    nonisolated(unsafe) static var onViewerClosed: (() -> Void)?
+    nonisolated(unsafe) static var onViewerClosed: ((UUID) -> Void)?
 
     static func changed(_ change: ScoreLibraryChange) { guard !suppressed else { return }; onChange?(change) }
-    static func viewerClosed() { onViewerClosed?() }
+    static func viewerClosed(_ itemID: UUID) { onViewerClosed?(itemID) }
 }
 
 /// PURE pieces of the stage: fingerprints and the position rule.
@@ -142,11 +142,14 @@ enum JournalScoreSync {
 
     /// Compares the library with what was last sent or received and queues what
     /// changed, recording fingerprints, clocks and the outbox in one write.
-    /// `positions` includes reading positions (their own cadence). A damaged
-    /// index sends nothing and infers no deletion.
+    /// `positions` includes reading positions; `force` names items whose
+    /// position is published with a fresh clock even if unchanged (the viewer
+    /// just dismissed, or open when the app went to the background: the
+    /// latest boundary wins). A damaged index sends nothing and infers no
+    /// deletion.
     @discardableResult
-    static func scan(snapshot: ScoreLibrarySnapshot, store: JournalSyncStateStore, positions: Bool, now: Date = Date(),
-                     log: (String) -> Void = { _ in }) -> [JournalSyncPendingChange] {
+    static func scan(snapshot: ScoreLibrarySnapshot, store: JournalSyncStateStore, positions: Bool, force: Set<UUID> = [],
+                     now: Date = Date(), log: (String) -> Void = { _ in }) -> [JournalSyncPendingChange] {
         let st = store.state
         guard !st.localRemovalInProgress else { return [] }
         if snapshot.indexDamaged {
@@ -195,7 +198,7 @@ enum JournalScoreSync {
             if positions, let page = item.lastViewedPage {
                 let positionName = JournalSyncRecordType.scorePositionName(for: id)
                 if let known = positionsKnown[id] {
-                    if known != page {
+                    if known != page || force.contains(item.id) {
                         positionStamps[id] = now
                         positionsKnown[id] = page
                         pending.append(.init(recordName: positionName, recordType: JournalSyncRecordType.scorePosition, op: .save, metadataEdit: true))
@@ -579,6 +582,15 @@ enum JournalScoreSync {
             log("Score position \(parsed.id.prefix(8))…: local newer; kept")
         case .takeServer:
             guard let serverPage else { return outcome }
+            if library.openViewerID == uuid {
+                // The page on screen stays; the dismissal publishes it.
+                store.update { s in
+                    s.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
+                    s.awaitingScore.removeValue(forKey: name)
+                }
+                log("Score position \(parsed.id.prefix(8))…: page \(serverPage) from the other device not applied; its viewer is open here")
+                return outcome
+            }
             JournalScoreMirror.suppressed = true
             let applied = library.applyImportedPosition(id: uuid, page: serverPage)
             JournalScoreMirror.suppressed = false

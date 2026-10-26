@@ -190,14 +190,17 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 case .position: break
                 }
             }
-            JournalScoreMirror.onViewerClosed = { [weak self] in
+            JournalScoreMirror.onViewerClosed = { [weak self] id in
                 guard let self else { return }
-                Task { await self.scanScores(reason: "viewer dismissed", positions: true) }
+                Task { await self.scanScores(reason: "viewer dismissed", positions: true, force: [id]) }
             }
             #if canImport(UIKit)
             backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
                 guard let self else { return }
-                Task { await self.scanScores(reason: "background", positions: true) }
+                Task {
+                    let open = await MainActor.run { ScoreLibraryStore.shared.openViewerID }
+                    await self.scanScores(reason: "background", positions: true, force: open.map { [$0] } ?? [])
+                }
             }
             #endif
         }
@@ -651,10 +654,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     /// Runs in every state except a local removal (the outbox is durable and
     /// an offline edit keeps its clock). A damaged index sends nothing.
-    func scanScores(reason: String, positions: Bool) async {
+    func scanScores(reason: String, positions: Bool, force: Set<UUID> = []) async {
         guard !store.state.localRemovalInProgress else { return }
         let snapshot = await MainActor.run { ScoreLibraryStore.shared.snapshot() }
-        let added = JournalScoreSync.scan(snapshot: snapshot, store: store, positions: positions) { self.log($0) }
+        let added = JournalScoreSync.scan(snapshot: snapshot, store: store, positions: positions, force: force) { self.log($0) }
         guard !added.isEmpty else { return }
         queueToEngine(zoneChanges: added.map(pendingChange))
         log("Queued \(added.count) score change(s) (\(reason))")
