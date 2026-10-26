@@ -530,9 +530,6 @@ struct ProfileNameDraftState: Equatable {
     /// `onChange` handlers so they schedule no directory write for them.
     @State private var syncHydration = ProfileSyncHydrationFilter()
     #endif
-    /// C-137: the name is mandatory (set-up cannot finish without one), so an
-    /// emptied field keeps the last committed name and says so on blur.
-    @State private var nameNotice: String? = nil
  
      // Primary Activity (Stage 1 persisted in AppStorage; Stage 2 UX hardening)
      // Format: "core:<raw>" or "custom:<name>"
@@ -920,10 +917,10 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                                      persistProfileEdits()
                                      // C-137: finishing an edit with an empty
                                      // field: the committed name stays and the
-                                     // field shows it again.
+                                     // field shows it again, without a notice
+                                     // (the instant reappearance is the message).
                                      if let kept = ProfileNameCommitPolicy.restoredDraft(draft: name, stored: profile?.name) {
                                          name = kept
-                                         nameNotice = "A name is needed, so the previous one was kept."
                                      }
                                  }
                                  #if SYNCTEST
@@ -973,9 +970,6 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  // C-70. The LOCAL save failure, on its own surface. It is shown
                  // regardless of Connected state, because the local record is the
                  // account-free one and its failure concerns every member.
-                 if let nameNotice {
-                     Text(nameNotice).font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
-                 }
                  if let localMsg = localSaveMessage {
                      HStack(spacing: 8) {
                          Text(localMsg)
@@ -2949,7 +2943,6 @@ private func initials(from string: String) -> String {
                  // this device's edit and schedules no directory write.
                  if !syncHydration.shouldPublish(newValue) { return }
                  #endif
-                 nameNotice = nil
                  scheduleDirectorySyncDebounced()
              }
              #if SYNCTEST
