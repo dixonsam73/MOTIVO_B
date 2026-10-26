@@ -35,6 +35,27 @@ import os
 import UIKit
 #endif
 
+#if canImport(UIKit)
+/// A little background time, so a send started as the app leaves the
+/// foreground can finish. Ended by the caller or by the system's expiry.
+@MainActor
+final class JournalBackgroundTask {
+    private var id: UIBackgroundTaskIdentifier = .invalid
+    static func begin(_ name: String) -> JournalBackgroundTask {
+        let task = JournalBackgroundTask()
+        task.id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak task] in
+            Task { @MainActor in task?.end() }
+        }
+        return task
+    }
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+    }
+}
+#endif
+
 /// Backoff for a failed first iCloud check: 5, 10, 20, 40 s, then every 60 s.
 enum JournalSyncStartRetry {
     static func delay(attempt: Int) -> TimeInterval {
@@ -198,8 +219,18 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
                 guard let self else { return }
                 Task {
+                    // The app is about to be suspended: without background time
+                    // the queued position only leaves at the next foreground
+                    // (1861 on device: queued, not sent; the other device opened
+                    // on its own page). Ask iOS for the seconds a send needs.
                     let open = await MainActor.run { ScoreLibraryStore.shared.openViewerID }
+                    let task = await MainActor.run { JournalBackgroundTask.begin("score position") }
                     await self.scanScores(reason: "background", positions: true, force: open.map { [$0] } ?? [])
+                    if open != nil, let engine = self.engine, self.currentDecision().allowed {
+                        do { try await engine.sendChanges(); self.log("Background send finished") }
+                        catch { self.log("Background send failed: \(error.localizedDescription) (sent at the next foreground)") }
+                    }
+                    await MainActor.run { task.end() }
                 }
             }
             #endif
