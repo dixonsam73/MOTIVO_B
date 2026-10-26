@@ -161,9 +161,13 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             installSaveObserver()
             installListObserver()
             // Stage H: location and avatar write points (ProfileStore).
-            JournalProfileMirror.onChange = { [weak self] avatarRemoved in
+            JournalProfileMirror.onChange = { [weak self] event in
                 guard let self else { return }
-                if avatarRemoved { self.store.update { $0.avatarRemovedAt = Date() } }
+                switch event {
+                case .avatarRemoved: self.store.update { $0.avatarRemovedAt = Date() }
+                case .primaryChosen: self.store.update { $0.profilePrimaryChosen = true }
+                case .changed: break
+                }
                 self.scheduleProfileScan()
             }
         }

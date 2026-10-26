@@ -140,6 +140,7 @@ enum JournalLocalRemoval {
             st.profileFingerprint = JournalProfileValues().fingerprint
             st.profileStamp = nil
             st.avatarRemovedAt = nil
+            st.profilePrimaryChosen = false
             st.initialFetchComplete = false
             st.pendingOwnerAdoption = nil
             st.ownershipReport = nil

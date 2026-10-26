@@ -209,6 +209,10 @@ struct JournalSyncPersistedState: Codable {
     var avatarRemovedAt: Date?
     var avatarUploads = 0
     var avatarAssetBytesDelivered: Int64 = 0
+    /// The person tapped a primary instrument in the instrument list on this
+    /// device: from then on a primary change is an edit even on a profile with
+    /// no name or location.
+    var profilePrimaryChosen = false
 
     init() {}
 
@@ -262,6 +266,7 @@ struct JournalSyncPersistedState: Codable {
         avatarRemovedAt = try c.decodeIfPresent(Date.self, forKey: .avatarRemovedAt)
         avatarUploads = try c.decodeIfPresent(Int.self, forKey: .avatarUploads) ?? 0
         avatarAssetBytesDelivered = try c.decodeIfPresent(Int64.self, forKey: .avatarAssetBytesDelivered) ?? 0
+        profilePrimaryChosen = try c.decodeIfPresent(Bool.self, forKey: .profilePrimaryChosen) ?? false
     }
 }
 

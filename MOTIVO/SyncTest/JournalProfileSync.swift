@@ -81,9 +81,13 @@ struct JournalProfileValues: Equatable {
     var location = ""
     var primaryInstrument = ""
 
-    /// A profile with no name and no location is the app's default: the primary
-    /// instrument alone is written by the app itself.
-    var isMeaningful: Bool { !name.isEmpty || !location.isEmpty }
+    /// Text the person typed. The primary instrument alone is ambiguous: the
+    /// app writes a default one by itself (`ProfileView.load`, the instrument
+    /// list), and only a tap in the instrument list is a choice.
+    var textMeaningful: Bool { !name.isEmpty || !location.isEmpty }
+    /// Worth uploading: any value, including a primary instrument alone (a
+    /// pre-existing one goes up without a clock; a chosen one as an edit).
+    var isMeaningful: Bool { textMeaningful || !primaryInstrument.isEmpty }
 
     private static let separator = "\u{1F}"
     var fingerprint: String { ["v1", name, location, primaryInstrument].joined(separator: Self.separator) }
@@ -191,17 +195,20 @@ enum JournalProfileMerge {
     }
 
     /// PURE. Whether a change found by the scan is a user edit. The app's own
-    /// default primary instrument on a profile nobody has filled in is not.
-    static func isEdit(previous: JournalProfileValues?, current: JournalProfileValues, everEdited: Bool) -> Bool {
-        everEdited || current.isMeaningful || (previous?.isMeaningful ?? false)
+    /// default primary instrument on a profile nobody has filled in is not;
+    /// a primary the person tapped in the instrument list (`primaryChosen`) is,
+    /// so a profile with only that preference still travels.
+    static func isEdit(previous: JournalProfileValues?, current: JournalProfileValues, everEdited: Bool, primaryChosen: Bool) -> Bool {
+        everEdited || primaryChosen || current.textMeaningful || (previous?.textMeaningful ?? false)
     }
 }
 
 /// The app's write points call this (SYNCTEST only). Installed by the engine.
 enum JournalProfileMirror {
     /// Set by the sync import while it writes, so its own writes do not scan.
+    enum Event { case changed, avatarRemoved, primaryChosen }
     nonisolated(unsafe) static var suppressed = false
-    nonisolated(unsafe) static var onChange: ((_ avatarRemoved: Bool) -> Void)?
+    nonisolated(unsafe) static var onChange: ((Event) -> Void)?
     /// True while the Profile screen's name or location field has focus: the
     /// scan waits, so a typing pause (or the field emptied before retyping)
     /// never becomes a record. Seen 2026-10-26: an emptied name went up and
@@ -211,12 +218,25 @@ enum JournalProfileMirror {
     static func setEditingHold(_ held: Bool) {
         let was = editingHold
         editingHold = held
-        if was, !held { onChange?(false) }   // the edit is finished: scan now
+        if was, !held { onChange?(.changed) }   // the edit is finished: scan now
     }
 
-    static func locationChanged() { guard !suppressed else { return }; onChange?(false) }
-    static func avatarChanged() { guard !suppressed else { return }; onChange?(false) }
-    static func avatarRemoved() { guard !suppressed else { return }; onChange?(true) }
+    static func locationChanged() { guard !suppressed else { return }; onChange?(.changed) }
+    static func avatarChanged() { guard !suppressed else { return }; onChange?(.changed) }
+    static func avatarRemoved() { guard !suppressed else { return }; onChange?(.avatarRemoved) }
+    /// The instrument list's row tap: a deliberate primary-instrument choice.
+    static func primaryChosen() { guard !suppressed else { return }; onChange?(.primaryChosen) }
+}
+
+/// PURE. Values the private sync put on the Profile screen, so the
+/// screen's `onChange` handlers schedule no directory publish for them. A
+/// value is consumed once; the person typing exactly that text later skips
+/// one debounce, which the next keystroke restores.
+struct ProfileSyncHydrationFilter: Equatable {
+    private var hydrated: Set<String> = []
+    mutating func noteHydrated(_ value: String) { hydrated.insert(value) }
+    /// True when the screen should publish this new value (a person's edit).
+    mutating func shouldPublish(_ newValue: String) -> Bool { hydrated.remove(newValue) == nil }
 }
 
 /// SYNCTEST only: counts every attempt to write the Connected directory or the
@@ -326,7 +346,8 @@ enum JournalProfileSync {
         } else if st.profileFingerprint != values.fingerprint {
             let previous = JournalProfileValues(fingerprint: st.profileFingerprint)
             newFingerprint = values.fingerprint
-            if JournalProfileMerge.isEdit(previous: previous, current: values, everEdited: st.profileStamp != nil) {
+            if JournalProfileMerge.isEdit(previous: previous, current: values, everEdited: st.profileStamp != nil,
+                                          primaryChosen: st.profilePrimaryChosen) {
                 newStamp = now
                 pending.append(.init(recordName: profileName, recordType: JournalSyncRecordType.profile, op: .save))
                 note = "Profile edited: \(values.describe())"
@@ -453,7 +474,11 @@ enum JournalProfileSync {
             JournalProfileMirror.suppressed = false
             outcome.applied = 1
         }
-        let applied = decision.apply ?? local
+        // The fingerprint describes what this device now HOLDS: the primary is
+        // stored under this device's row name, which may differ in case from
+        // the record's (caught by test: "oud" arriving where "Oud" exists made
+        // the next scan see a phantom edit and would have bounced the case).
+        let applied = decision.apply == nil ? local : currentValues(context: context, scope: scope)
         if decision.send {
             outcome.resend.append(.init(recordName: profileName, recordType: JournalSyncRecordType.profile, op: .save,
                                         metadataOnly: st.profileStamp == nil && serverStamp == nil))

@@ -528,7 +528,7 @@ struct ProfileNameDraftState: Equatable {
     #if SYNCTEST
     /// Stage H: values the private sync assigned to the screen, consumed by the
     /// `onChange` handlers so they schedule no directory write for them.
-    @State private var syncHydratedValues: Set<String> = []
+    @State private var syncHydration = ProfileSyncHydrationFilter()
     #endif
     /// C-137: the name is mandatory (set-up cannot finish without one), so an
     /// emptied field keeps the last committed name and says so on blur.
@@ -2947,7 +2947,7 @@ private func initials(from string: String) -> String {
                  #if SYNCTEST
                  // Stage H: a value the private sync just put on screen is not
                  // this device's edit and schedules no directory write.
-                 if syncHydratedValues.remove(newValue) != nil { return }
+                 if !syncHydration.shouldPublish(newValue) { return }
                  #endif
                  nameNotice = nil
                  scheduleDirectorySyncDebounced()
@@ -2963,11 +2963,11 @@ private func initials(from string: String) -> String {
                  if nameDraft.mayHydrate {
                      let before = name
                      load()
-                     if name != before { syncHydratedValues.insert(name) }
+                     if name != before { syncHydration.noteHydrated(name) }
                  }
                  if !isLocationFocused {
                      let presented = ProfileStore.presentedLocation(for: auth.backendUserID)
-                     if presented != locationText { syncHydratedValues.insert(presented); locationText = presented }
+                     if presented != locationText { syncHydration.noteHydrated(presented); locationText = presented }
                  }
                  refreshAvatarDisplay()
              }
@@ -2984,7 +2984,7 @@ private func initials(from string: String) -> String {
              .onChange(of: locationText) { _, newValue in
                  // C-70. Same reasoning as `name` above: no untracked outer Task.
                  #if SYNCTEST
-                 if syncHydratedValues.remove(newValue) != nil { return }
+                 if !syncHydration.shouldPublish(newValue) { return }
                  #endif
                  scheduleDirectorySyncDebounced()
              }

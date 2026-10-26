@@ -217,10 +217,22 @@ final class SyncTestProfileTests: XCTestCase {
 
         // What counts as an edit: never a default-only change on a profile nobody filled in.
         let empty = JournalProfileValues(), defaulted = JournalProfileValues(primaryInstrument: "Cello")
-        XCTAssertFalse(JournalProfileMerge.isEdit(previous: empty, current: defaulted, everEdited: false))
-        XCTAssertTrue(JournalProfileMerge.isEdit(previous: empty, current: JournalProfileValues(name: "S"), everEdited: false))
-        XCTAssertTrue(JournalProfileMerge.isEdit(previous: b, current: empty, everEdited: false), "clearing an established profile is an edit")
-        XCTAssertTrue(JournalProfileMerge.isEdit(previous: empty, current: defaulted, everEdited: true))
+        XCTAssertFalse(JournalProfileMerge.isEdit(previous: empty, current: defaulted, everEdited: false, primaryChosen: false))
+        XCTAssertTrue(JournalProfileMerge.isEdit(previous: empty, current: defaulted, everEdited: false, primaryChosen: true),
+                      "a primary the person tapped is an edit even with no name or location")
+        XCTAssertTrue(JournalProfileMerge.isEdit(previous: empty, current: JournalProfileValues(name: "S"), everEdited: false, primaryChosen: false))
+        XCTAssertTrue(JournalProfileMerge.isEdit(previous: b, current: empty, everEdited: false, primaryChosen: false), "clearing an established profile is an edit")
+        XCTAssertTrue(JournalProfileMerge.isEdit(previous: empty, current: defaulted, everEdited: true, primaryChosen: false))
+        XCTAssertTrue(defaulted.isMeaningful, "a primary alone is worth uploading"); XCTAssertFalse(defaulted.textMeaningful)
+        // Item 5: the length tie-break exists ONLY for two unclocked profiles. With a
+        // clock on either side the stated policy decides, whatever the lengths.
+        let shortNewer = JournalProfileValues(name: "Sam", location: "", primaryInstrument: "Oud")
+        let longOlder = JournalProfileValues(name: "Samuel Dixon", location: "London", primaryInstrument: "Viola")
+        XCTAssertEqual(JournalProfileMerge.decide(local: longOlder, localStamp: t1, localPending: false, server: shortNewer, serverStamp: t2).apply, shortNewer,
+                       "the newer, shorter value wins; nothing prefers longer text once a clock exists")
+        XCTAssertNil(JournalProfileMerge.decide(local: shortNewer, localStamp: t2, localPending: true, server: longOlder, serverStamp: t1).apply)
+        XCTAssertEqual(JournalProfileMerge.decide(local: longOlder, localStamp: nil, localPending: false, server: shortNewer, serverStamp: t1).apply, shortNewer,
+                       "an unclocked local profile yields to any clocked record")
         // The fingerprint round-trips, including empties.
         XCTAssertEqual(JournalProfileValues(fingerprint: b.fingerprint), b)
         XCTAssertEqual(JournalProfileValues(fingerprint: empty.fingerprint), empty)
@@ -345,7 +357,7 @@ final class SyncTestProfileTests: XCTestCase {
         let image = UIImage(data: pngData(0.3))!
         // The editor's writer: the hook fires; the scan queues the avatar record.
         var hooks = 0
-        JournalProfileMirror.onChange = { removed in XCTAssertFalse(removed); hooks += 1 }
+        JournalProfileMirror.onChange = { event in XCTAssertEqual(event, .changed); hooks += 1 }
         ProfileStore.saveAvatarDerived(image, for: scope.avatarUserID)
         XCTAssertEqual(hooks, 1)
         let queued = scan()
@@ -366,7 +378,7 @@ final class SyncTestProfileTests: XCTestCase {
         // Removing the avatar: the hook says so; the record carries no asset, hash "", and a clock.
         store.update { $0.outbox.removeAll() }
         var removed = false
-        JournalProfileMirror.onChange = { r in removed = removed || r }
+        JournalProfileMirror.onChange = { event in removed = removed || event == .avatarRemoved }
         ProfileStore.deleteAvatar(for: scope.avatarUserID)
         XCTAssertTrue(removed)
         store.update { $0.avatarRemovedAt = Date(timeIntervalSince1970: 7_000) }   // what the engine's hook does
@@ -494,6 +506,66 @@ final class SyncTestProfileTests: XCTestCase {
         // A deliberate local edit keeps its legitimate marker (existing Solo→Connected behaviour is untouched).
         ProfileStore.saveAvatarDerived(UIImage(data: pngData(0.8))!, for: nil)
         XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload())
+    }
+
+    // MARK: a primary instrument alone (item 2)
+
+    func testAPrimaryInstrumentChosenAloneTravelsAndTheAppsDefaultDoesNot() throws {
+        // Fresh device, empty profile: the app's default primary is not an edit.
+        _ = scan()
+        makeProfile(name: "", primary: "Cello", instruments: ["Cello", "Oud"])
+        XCTAssertTrue(scan().isEmpty); XCTAssertNil(store.state.profileStamp)
+        // The person taps Oud in the instrument list: the engine records the choice; the change is an edit.
+        store.update { $0.profilePrimaryChosen = true }   // what the engine does on `.primaryChosen`
+        let p = try XCTUnwrap(try container.viewContext.fetch(NSFetchRequest<NSManagedObject>(entityName: "Profile")).first)
+        p.setValue("Oud", forKey: "primaryInstrument"); try container.viewContext.save()
+        let now = Date(timeIntervalSince1970: 4_000)
+        XCTAssertEqual(scan(now: now).map(\.recordName), [JournalProfileSync.profileName])
+        XCTAssertEqual(store.state.profileStamp, now)
+        let record = profileRecordBuilt()
+        XCTAssertEqual(record["name"] as? String, ""); XCTAssertEqual(record[JournalRecordMapping.instrumentNameKey] as? String, "Oud")
+        XCTAssertNotNil(record[JournalRecordMapping.instrumentRefKey])
+        // A pre-existing profile with only a primary is uploaded at first sight (unclocked).
+        let other = JournalSyncStateStore(fileURL: tempDir.appendingPathComponent("other.json"))
+        var first: [JournalSyncPendingChange] = []
+        importerContext.performAndWait { first = JournalProfileSync.scan(context: importerContext, scope: scope, store: other) }
+        XCTAssertEqual(first.map(\.recordName), [JournalProfileSync.profileName]); XCTAssertNil(other.state.profileStamp)
+        // Receiving a primary-only record on a device with no name: applied, resolved by name, no duplicate row.
+        for row in try container.viewContext.fetch(NSFetchRequest<NSManagedObject>(entityName: "Profile")) { row.setValue("", forKey: "primaryInstrument") }
+        try container.viewContext.save()
+        store.update { $0.profileStamp = nil; $0.outbox.removeAll() }
+        let incoming = serverProfile(name: "", location: "", primary: "oud", primaryID: UUID(), stamp: Date(timeIntervalSince1970: 5_000))
+        XCTAssertEqual(applyProfile(incoming).applied, 1)
+        XCTAssertEqual(values(), JournalProfileValues(primaryInstrument: "Oud"))
+        XCTAssertEqual(try container.viewContext.count(for: NSFetchRequest<NSManagedObject>(entityName: "Instrument")), 2)
+        XCTAssertTrue(scan().isEmpty)
+    }
+
+    // MARK: C-137 through the sync (item 3)
+
+    func testAnEmptiedNameFieldNeverReachesTheRecordAndRetypingSendsTheNewName() throws {
+        makeProfile(name: "Samuel")
+        _ = scan(); store.update { $0.outbox.removeAll(); $0.profileStamp = Date(timeIntervalSince1970: 1_000) }
+        let p = try XCTUnwrap(try container.viewContext.fetch(NSFetchRequest<NSManagedObject>(entityName: "Profile")).first)
+        // The field is emptied before retyping and the 650 ms commit runs: the policy keeps the stored name.
+        p.setValue(ProfileNameCommitPolicy.committedName(draft: "", stored: p.value(forKey: "name") as? String), forKey: "name")
+        try container.viewContext.save()
+        XCTAssertEqual(p.value(forKey: "name") as? String, "Samuel", "the row still holds Samuel")
+        XCTAssertTrue(scan().isEmpty, "no record for the emptied field, so the other device is never reset")
+        // Retyped: the new name commits and goes up once.
+        p.setValue(ProfileNameCommitPolicy.committedName(draft: " Samuel D ", stored: p.value(forKey: "name") as? String), forKey: "name")
+        try container.viewContext.save()
+        XCTAssertEqual(scan(now: Date(timeIntervalSince1970: 2_000)).map(\.recordName), [JournalProfileSync.profileName])
+        XCTAssertEqual(profileRecordBuilt()["name"] as? String, "Samuel D")
+        // A relaunch (a new scan from the saved state) sends nothing more.
+        store.update { $0.outbox.removeAll() }
+        XCTAssertTrue(scan().isEmpty)
+        // The screen's hydration filter: a value the sync put on screen publishes nothing; a person's edit does.
+        var filter = ProfileSyncHydrationFilter()
+        filter.noteHydrated("Samuel D")
+        XCTAssertFalse(filter.shouldPublish("Samuel D"))
+        XCTAssertTrue(filter.shouldPublish("Samuel D"), "consumed once")
+        XCTAssertTrue(filter.shouldPublish("Samuel Dixon"))
     }
 
     // MARK: erase and the account boundary
