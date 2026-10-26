@@ -684,6 +684,28 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     private func requeueOutbox() {
         let outbox = store.state.outbox
+        // An engine restored from saved state brings its own pending list; a
+        // change the outbox no longer holds (dropped by the relaunch catch-up)
+        // must not go up again (JournalPendingReconcile).
+        if let engine {
+            var saves: [String] = []
+            var deletes: [String] = []
+            for change in engine.state.pendingRecordZoneChanges {
+                switch change {
+                case .saveRecord(let id): saves.append(id.recordName)
+                case .deleteRecord(let id): deletes.append(id.recordName)
+                @unknown default: break
+                }
+            }
+            let stale = JournalPendingReconcile.stale(engineSaves: saves, engineDeletes: deletes, outbox: outbox)
+            let removals: [CKSyncEngine.PendingRecordZoneChange] =
+                stale.saves.map { .saveRecord(CKRecord.ID(recordName: $0, zoneID: JournalRecordMapping.zoneID)) }
+                + stale.deletes.map { .deleteRecord(CKRecord.ID(recordName: $0, zoneID: JournalRecordMapping.zoneID)) }
+            if !removals.isEmpty {
+                engine.state.remove(pendingRecordZoneChanges: removals)
+                log("Dropped \(removals.count) pending change(s) the engine restored but the outbox no longer holds")
+            }
+        }
         guard !outbox.isEmpty else { return }
         queueToEngine(zoneChanges: outbox.map(pendingChange))
     }

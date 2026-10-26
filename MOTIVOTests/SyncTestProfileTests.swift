@@ -568,6 +568,17 @@ final class SyncTestProfileTests: XCTestCase {
         XCTAssertTrue(filter.shouldPublish("Samuel Dixon"))
     }
 
+    // MARK: the engine's restored pending list against the outbox
+
+    func testAnEngineRestoredPendingSaveTheOutboxNoLongerHoldsIsDropped() {
+        let outbox = [JournalSyncPendingChange(recordName: "keep", recordType: "Session", op: .save),
+                      JournalSyncPendingChange(recordName: "gone", recordType: "Session", op: .delete)]
+        let stale = JournalPendingReconcile.stale(engineSaves: ["keep", JournalProfileSync.profileName], engineDeletes: ["gone", "other"], outbox: outbox)
+        XCTAssertEqual(stale.saves, [JournalProfileSync.profileName], "the lost conflict's save goes; the outbox's stays")
+        XCTAssertEqual(stale.deletes, ["other"])
+        XCTAssertEqual(JournalPendingReconcile.stale(engineSaves: [], engineDeletes: [], outbox: outbox).saves, [])
+    }
+
     // MARK: erase and the account boundary
 
     func testLocalRemovalResetsWhatTheScanKnowsAndTheErasedProfileIsNotSent() throws {

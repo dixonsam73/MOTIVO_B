@@ -79,6 +79,20 @@ enum JournalCatchUp {
     }
 }
 
+/// PURE. The outbox is the durable record of pending work; an engine built
+/// from its saved state restores its own pending list too, which may hold a
+/// save the catch-up dropped meanwhile (a lost conflict resolved before the
+/// engine existed: on 2026-10-26 the iPad then sent the record once more with
+/// the values it had just taken). Returns the record names to remove from the
+/// engine's list: saves not pending in the outbox, deletes likewise.
+enum JournalPendingReconcile {
+    static func stale(engineSaves: [String], engineDeletes: [String], outbox: [JournalSyncPendingChange]) -> (saves: [String], deletes: [String]) {
+        let saves = Set(outbox.filter { $0.op == .save }.map(\.recordName))
+        let deletes = Set(outbox.filter { $0.op == .delete }.map(\.recordName))
+        return (engineSaves.filter { !saves.contains($0) }, engineDeletes.filter { !deletes.contains($0) })
+    }
+}
+
 /// C-134: a record the server hands back whose change tag this device already
 /// holds (its own last send, or a copy already imported) carries nothing new.
 enum JournalEcho {
