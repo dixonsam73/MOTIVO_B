@@ -1112,6 +1112,13 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             st.assetBytesDownloaded += avatarBytes
         }
         if !resend.isEmpty { queueToEngine(zoneChanges: resend.map(pendingChange)) }
+        // A pending save the import dropped must leave the engine's own list
+        // too, or the record goes up again with the values just taken (iPad,
+        // 14:43:32: one redundant send after a lost conflict).
+        let stillPending = Set(store.state.outbox.filter { $0.op == .save }.map(\.recordName))
+        for name in [JournalProfileSync.profileName, JournalProfileSync.avatarName] where !stillPending.contains(name) {
+            engine?.state.remove(pendingRecordZoneChanges: [.saveRecord(CKRecord.ID(recordName: name, zoneID: JournalRecordMapping.zoneID))])
+        }
         if applied > 0 || avatarChanged {
             Task { @MainActor in
                 if avatarChanged { JournalSyncCoordinator.shared.auth?.noteAvatarChangedBySync() }

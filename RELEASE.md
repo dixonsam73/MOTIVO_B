@@ -1070,6 +1070,113 @@ the join.
   order), ≈ 35 min guiding and reading state files; ≈ 40 min waiting on
   builds and tests. Samuel: ≈ 70 min at the devices, ≈ 20 min waiting on
   the four builds.
+  **Stage H, private profile: passed 2026-10-26; final build 1851
+  (`0c455b6` plus the record commit).** Scope: name, location, primary
+  instrument and avatar through the bound private journal, no Connected
+  login. Already synced before: profile instruments (stage C); the stage B
+  owner-store merge only copied location and avatar between scopes on one
+  device. **Design.** Two fixed-name records in the Journal zone: `Profile`
+  ("profile": `name`, `location`, the primary as the stage C instrument link
+  `instrumentRef` + `instrumentName`, `userModifiedAt`) and `ProfileAvatar`
+  ("profile-avatar": the derived 256 pt PNG as `file` with `fileHash`,
+  clocked by the file's modification date, which the import also sets). A
+  text edit queues only the Profile record, so it never carries or delivers
+  the avatar. Clears are explicit ("" for a field; the avatar record saved
+  with no asset and `fileHash ""`); the avatar record is never deleted, so a
+  removal always has a clock. Change detection is a fingerprint scan as for
+  saved Lists (the Profile row has no stamp attribute; location and avatar
+  live outside Core Data): `ProfileStore.setLocation`, the avatar writers and
+  a save touching Profile schedule one (3 s debounce, held while a Profile
+  text field has focus), every activation runs one. A profile nobody has
+  filled in (name and location empty) is never uploaded and a change to it
+  is not an edit, so the app's automatic default primary instrument never
+  beats an established profile. Conflicts: the existing rule, whole record,
+  newer clock wins, ties to the server, displaced values in the conflict
+  log. A profile that predates the build is sent WITHOUT a clock; two such
+  profiles merge field by field (a blank never displaces a value; two values
+  resolve to the longer, equal length by Unicode order), independent of
+  arrival order, so both devices compute the same result and converge in one
+  round; a displaced avatar is kept as a file with a Restore button in
+  diagnostics (restoring is a clocked edit). Imports write the avatar byte
+  for byte (a re-encode would change the hash and bounce it) through writers
+  that set no Solo→Connected pending marker; `ProfileView` re-reads name,
+  location, primary and avatar on the import notification so a stale screen
+  is not written back on close, and values the sync put on screen schedule
+  no directory write. Connected isolation: the only remote paths need a
+  Connected identity (`ProfileMaintenancePolicy`, directory hydration); a
+  SYNCTEST-only `ConnectedWriteWitness` counts every attempt at the four
+  entry points (directory upsert, avatar-key patch, avatar upload, avatar
+  delete) and diagnostics shows it. An erase resets the scan baseline to the
+  empty profile (nothing erased is sent; anything typed before re-enable is
+  a clocked edit). 10 unit tests (`SyncTestProfileTests`): the merge rule
+  (deterministic, symmetric, displaced values), default profile never sent
+  and an established one arriving (row created when absent), clocked edits
+  and explicit clears, imported clears staying cleared, primary resolution
+  by alias/name without duplicates, avatar by hash on its own record with
+  text edits carrying none, verbatim avatar import with no Connected marker
+  and clocked removal/conflicts, migration yielding to a real edit and two
+  established profiles converging, no Connected write and the remote paths
+  refusing without an identity, erase reset. 87 SyncTest tests green;
+  Debug, Release and SyncTest build. **Device run (iPhone and iPad Sync
+  Test installs, disposable values, state files read over the cable;
+  builds 1848 → 1851):** (1) transition with two different established
+  profiles (`H-Phone`/Bristol/avatar A/Oud vs `H-Pad`/no location/avatar
+  B set later/Viola): both devices converged in one round to
+  `H-phone · Bristol · Viola` and avatar B (newer file); the iPad logged
+  "merged field by field" with "displaced: name (this device): H-Pad ·
+  instrument (this device): Oud", the iPhone kept avatar A as a displaced
+  copy with its Restore button. (2) Name, location and primary instrument
+  edited in both directions, each one small record, instrument list without
+  duplicates, all values intact after force-quit of both. (3) New avatar
+  from the iPhone (1 upload, iPad delivered and showed it in Profile and on
+  the home button), removal from the iPad (iPhone's gone, "none (removed)"
+  on both, still gone after relaunch), set again (arrived once). (4) Name
+  and location edits with avatar uploads and avatar bytes delivered
+  unchanged on both devices. (5) Location cleared on the iPad: empty on the
+  iPhone, still empty after relaunching both and reopening Profile. (6)
+  iPad offline: name and location edited, app force-quit and reopened
+  offline (values kept, "save Profile" in the outbox), one record sent on
+  reconnect, both values on the iPhone. (7) Clocked conflict: iPad offline
+  `H16-pad`, iPhone `H16-phone` ~2 min later, iPad online: `H16-phone` on
+  both, iPad conflict "displaced: name (this device): H16-pad". (8)
+  "Connected writes attempted" 0 on both devices throughout; Connected
+  identity "no". (9) Existing journal, media and instruments intact.
+  **Verified in tests only:** the merge rule's symmetry over every field
+  combination, the erase reset, the policy refusal without an identity. On
+  device the isolation evidence is the witness counter and the absence of a
+  pending avatar marker; no real Connected identity was involved.
+  **Defects found and fixed during the run:** (a) every post-send
+  `fetchChanges()` from C-134 trapped inside CloudKit 3 s after a send with a
+  file, seven of seven today including the two photo sends of the C-134
+  acceptance on 1846 (the app relaunched each time; the acceptance's
+  "relaunch" was partly that); 1849's deferral until no engine fetch was in
+  flight did not help; removed in 1850, the echo skip stays (C-135). The
+  manual Fetch now on an idle engine does not trap. (b) Profile commits
+  locally on every 650 ms typing pause, so one name edit went up as five
+  records with intermediate values logged as displaced on the other device,
+  and an emptied name field (cleared before retyping, then a pause) went up
+  as `name ""` and opened onboarding on both devices (the setup gate is "no
+  name"); debounce 3 s in 1849, scan held while a Profile field has focus in
+  1851, after which a typed name is one record (C-136). (c) A pending save
+  dropped by an import stayed in the engine's own list and went up once more
+  with the values just taken (one redundant record); fixed after the run,
+  not device-verified. **Found, not fixed (production, not sync):** clearing
+  the name in Profile sends a Debug or Release build to onboarding after the
+  650 ms local commit, because the setup gate is evaluated live (C-137).
+  **Measured:** the avatar PNG is 241 KB from the iPad and 1.0–2.7 MB from
+  the iPhone (the 256 pt downscale renders at the screen scale), so avatar
+  sends are not small; the engine re-delivered the iPad's own avatar record
+  once (241 KB, skipped as an echo). **Limitations:** whole-record
+  conflicts (a later edit of one field carries the other device's whole
+  profile); the original full-size avatar is not synced, the other device
+  re-crops from the 256 pt copy; a profile with only a primary instrument
+  (no name or location) does not travel; the app's automatic primary default
+  is a profile edit once the profile is established; an imported empty name
+  opens onboarding on the receiving device by the app's existing gate.
+  Hands-on: agent ≈ 35 min reading and design, ≈ 50 min code and tests,
+  ≈ 50 min fixes and state-file analysis during the device run, ≈ 15 min
+  records; ≈ 35 min waiting on builds and tests. Samuel: ≈ 60 min at the
+  devices, ≈ 20 min waiting on the four builds and installs.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
