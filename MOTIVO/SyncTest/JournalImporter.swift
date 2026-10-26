@@ -313,7 +313,8 @@ final class JournalImporter {
                     catch { log("Could not materialise \(name): \(error.localizedDescription)") }
                 }
                 if replaced, let old = existingFile, old.path != destination.path {
-                    try? FileManager.default.removeItem(at: old)
+                    // Never a library PDF (C-138): a score attached from the library is its file.
+                    if !AttachmentStore.isLibraryScoreFile(old) { try? FileManager.default.removeItem(at: old) }
                     log("Replaced media for \(name) from the other device")
                 }
                 let hash = serverHash ?? JournalAssetHash.hash(of: destination)
@@ -527,9 +528,13 @@ final class JournalImporter {
         save()
     }
 
+    /// Through the guarded deletion: nothing outside Documents, and never a
+    /// library PDF (`Documents/Scores`), which a score attachment made from the
+    /// library points at directly. Before stage I a remote deletion of such an
+    /// attachment deleted the library's file.
     private func removeFile(of attachment: NSManagedObject) {
         if let url = AttachmentPathResolver.resolve(attachment.value(forKey: "fileURL") as? String) {
-            try? FileManager.default.removeItem(at: url)
+            AttachmentStore.deleteAttachmentFile(at: url)
         }
     }
 

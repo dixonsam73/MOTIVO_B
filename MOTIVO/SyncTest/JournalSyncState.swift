@@ -213,6 +213,25 @@ struct JournalSyncPersistedState: Codable {
     /// device: from then on a primary change is an edit even on a profile with
     /// no name or location.
     var profilePrimaryChosen = false
+    // Stage I (Scores library).
+    /// The first scan (the transition) has run; later first sights are new items.
+    var scoreScanDone = false
+    /// Item id → metadata fingerprint (title, favourite, cover) last sent or received.
+    var scoreFingerprints: [String: String] = [:]
+    /// Item id → clock of this device's metadata; absent = predates sync, unclocked.
+    var scoreStamps: [String: Date] = [:]
+    /// Item id → reading position last sent or received, and its clock.
+    var scorePositions: [String: Int] = [:]
+    var scorePositionStamps: [String: Date] = [:]
+    /// Meta and position records (whole) held until their item exists here.
+    var awaitingScore: [String: Data] = [:]
+    var scoreUploads = 0
+    var scoreAssetBytesDelivered: Int64 = 0
+    var scoreRecordsSentWithoutFile = 0
+    var scorePositionsSent = 0
+    var scorePositionsDisplaced = 0
+    /// C-139 logged once per damaged index.
+    var scoreIndexDamagedNoted = false
 
     init() {}
 
@@ -267,6 +286,18 @@ struct JournalSyncPersistedState: Codable {
         avatarUploads = try c.decodeIfPresent(Int.self, forKey: .avatarUploads) ?? 0
         avatarAssetBytesDelivered = try c.decodeIfPresent(Int64.self, forKey: .avatarAssetBytesDelivered) ?? 0
         profilePrimaryChosen = try c.decodeIfPresent(Bool.self, forKey: .profilePrimaryChosen) ?? false
+        scoreScanDone = try c.decodeIfPresent(Bool.self, forKey: .scoreScanDone) ?? false
+        scoreFingerprints = try c.decodeIfPresent([String: String].self, forKey: .scoreFingerprints) ?? [:]
+        scoreStamps = try c.decodeIfPresent([String: Date].self, forKey: .scoreStamps) ?? [:]
+        scorePositions = try c.decodeIfPresent([String: Int].self, forKey: .scorePositions) ?? [:]
+        scorePositionStamps = try c.decodeIfPresent([String: Date].self, forKey: .scorePositionStamps) ?? [:]
+        awaitingScore = try c.decodeIfPresent([String: Data].self, forKey: .awaitingScore) ?? [:]
+        scoreUploads = try c.decodeIfPresent(Int.self, forKey: .scoreUploads) ?? 0
+        scoreAssetBytesDelivered = try c.decodeIfPresent(Int64.self, forKey: .scoreAssetBytesDelivered) ?? 0
+        scoreRecordsSentWithoutFile = try c.decodeIfPresent(Int.self, forKey: .scoreRecordsSentWithoutFile) ?? 0
+        scorePositionsSent = try c.decodeIfPresent(Int.self, forKey: .scorePositionsSent) ?? 0
+        scorePositionsDisplaced = try c.decodeIfPresent(Int.self, forKey: .scorePositionsDisplaced) ?? 0
+        scoreIndexDamagedNoted = try c.decodeIfPresent(Bool.self, forKey: .scoreIndexDamagedNoted) ?? false
     }
 }
 

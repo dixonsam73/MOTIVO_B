@@ -18,6 +18,19 @@ enum ScoreLibraryError: LocalizedError {
     }
 }
 
+/// What a write to the library changed, for the private sync trial's scan
+/// cadence: a reading position has its own.
+enum ScoreLibraryChange { case library, position }
+
+/// A value copy of the library for work off the main actor (hashing files,
+/// building records).
+struct ScoreLibrarySnapshot {
+    let items: [ScoreLibraryItem]
+    let indexDamaged: Bool
+    let directory: URL
+    func url(for item: ScoreLibraryItem) -> URL { directory.appendingPathComponent(item.fileName, isDirectory: false) }
+}
+
 @MainActor
 final class ScoreLibraryStore: ObservableObject {
     static let shared = ScoreLibraryStore()
@@ -123,7 +136,7 @@ final class ScoreLibraryStore: ObservableObject {
         )
 
         items.append(item)
-        persist()
+        persist(.library)
         return item
     }
 
@@ -148,7 +161,7 @@ final class ScoreLibraryStore: ObservableObject {
         )
 
         items.append(item)
-        persist()
+        persist(.library)
         return item
     }
 
@@ -156,12 +169,12 @@ final class ScoreLibraryStore: ObservableObject {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[index].lastOpenedAt = Date()
         activeScoreID = item.id
-        persist()
+        persist(nil)
     }
 
     func clearActiveScore() {
         activeScoreID = nil
-        persist()
+        persist(nil)
     }
 
     func updateLastViewedPage(for itemID: UUID, page: Int) {
@@ -169,7 +182,7 @@ final class ScoreLibraryStore: ObservableObject {
         let boundedPage = min(max(page, 1), max(items[index].pageCount, 1))
         guard items[index].lastViewedPage != boundedPage else { return }
         items[index].lastViewedPage = boundedPage
-        persist()
+        persist(.position)
     }
 
     func rename(_ item: ScoreLibraryItem, to newTitle: String) {
@@ -177,13 +190,13 @@ final class ScoreLibraryStore: ObservableObject {
         let cleaned = cleanedTitle(newTitle, fallback: items[index].title)
         guard !cleaned.isEmpty, cleaned != items[index].title else { return }
         items[index].title = cleaned
-        persist()
+        persist(.library)
     }
 
     func toggleFavourite(_ item: ScoreLibraryItem) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[index].isFavourite.toggle()
-        persist()
+        persist(.library)
     }
 
     /// The page the library's thumbnail shows. No screen offers this choice yet;
@@ -193,7 +206,7 @@ final class ScoreLibraryStore: ObservableObject {
         let bounded = min(max(page, 1), max(items[index].pageCount, 1))
         guard items[index].thumbnailPage != bounded else { return }
         items[index].thumbnailPage = bounded
-        persist()
+        persist(.library)
     }
 
     /// Removes the item from the library. C-138: a journal attachment made from
@@ -211,7 +224,77 @@ final class ScoreLibraryStore: ObservableObject {
         if activeScoreID == item.id {
             activeScoreID = nil
         }
-        persist()
+        persist(.library)
+    }
+
+    /// The timer's score viewer closed: the reading position is final for now.
+    /// Production: nothing; the private sync trial sends the position.
+    func viewerDidClose(_ itemID: UUID) {
+        #if SYNCTEST
+        JournalScoreMirror.viewerClosed()
+        #endif
+    }
+
+    // MARK: - Private sync trial (imports write the library without firing a change)
+
+    func snapshot() -> ScoreLibrarySnapshot {
+        ScoreLibrarySnapshot(items: items, indexDamaged: indexDamaged, directory: scoresDirectory())
+    }
+
+    /// Appends the item or replaces the one with its id (keeping what is
+    /// device-local: the last-opened date). False when the index is damaged.
+    @discardableResult
+    func applyImported(_ item: ScoreLibraryItem) -> Bool {
+        guard !indexDamaged else { return false }
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            var merged = item
+            merged.lastOpenedAt = items[index].lastOpenedAt
+            items[index] = merged
+        } else {
+            items.append(item)
+        }
+        persist(nil)
+        return true
+    }
+
+    @discardableResult
+    func applyImportedMetadata(id: UUID, title: String, isFavourite: Bool, thumbnailPage: Int) -> Bool {
+        guard !indexDamaged, let index = items.firstIndex(where: { $0.id == id }) else { return false }
+        let cleaned = cleanedTitle(title, fallback: items[index].title)
+        items[index].title = cleaned
+        items[index].isFavourite = isFavourite
+        items[index].thumbnailPage = min(max(thumbnailPage, 1), max(items[index].pageCount, 1))
+        persist(nil)
+        return true
+    }
+
+    /// Writes a reading position from the other device, clamped to the
+    /// document. The open viewer holds the page it was opened with, so this
+    /// never moves a page someone is reading. Returns the page applied.
+    @discardableResult
+    func applyImportedPosition(id: UUID, page: Int) -> Int? {
+        guard !indexDamaged, let index = items.firstIndex(where: { $0.id == id }) else { return nil }
+        let bounded = min(max(page, 1), max(items[index].pageCount, 1))
+        if items[index].lastViewedPage != bounded {
+            items[index].lastViewedPage = bounded
+            persist(nil)
+        }
+        return bounded
+    }
+
+    /// A deletion from the other device: the same rule as a local delete
+    /// (C-138 keeps a file a journal attachment refers to).
+    @discardableResult
+    func removeImported(id: UUID) -> Bool {
+        guard !indexDamaged, let index = items.firstIndex(where: { $0.id == id }) else { return false }
+        let url = self.url(for: items[index])
+        if !isReferencedByAttachment(url) {
+            try? fileManager.removeItem(at: url)
+        }
+        items.remove(at: index)
+        if activeScoreID == id { activeScoreID = nil }
+        persist(nil)
+        return true
     }
 
     /// Whether any persisted attachment's stored path refers to `url`, resolved
@@ -338,7 +421,9 @@ final class ScoreLibraryStore: ObservableObject {
     }
 
     /// Writes the index. C-139: never over an index that could not be read.
-    private func persist() {
+    /// `change` names what a person changed (nil: device-local state or an
+    /// import), so the private sync trial can scan at the right cadence.
+    private func persist(_ change: ScoreLibraryChange?) {
         guard !indexDamaged else { return }
         if let data = try? encoder.encode(items) {
             defaults.set(data, forKey: storageKey)
@@ -349,6 +434,9 @@ final class ScoreLibraryStore: ObservableObject {
         } else {
             defaults.removeObject(forKey: activeScoreKey)
         }
+        #if SYNCTEST
+        if let change { JournalScoreMirror.changed(change) }
+        #endif
     }
 
     private var storageKey: String {

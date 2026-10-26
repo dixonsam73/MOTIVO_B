@@ -115,7 +115,8 @@ enum JournalRecordMapping {
         Array(Set(sessionKeys + attachmentKeys + legacyAttachmentMetaKeys + metaKeys + instrumentKeys + userInstrumentKeys
                   + userActivityKeys + [instrumentRefKey, instrumentNameKey, savedListNameKey, savedListItemsKey,
                                         fileExtKey, fileHashKey, sessionRefKey, JournalProfileKeys.location,
-                                        JournalMetadataKeys.isPrivate, JournalMetadataKeys.selectedPages, JournalMetadataKeys.isSaved]))
+                                        JournalMetadataKeys.isPrivate, JournalMetadataKeys.selectedPages, JournalMetadataKeys.isSaved]
+                  + JournalScoreKeys.all))
     }
 
     static func recordID(for id: UUID) -> CKRecord.ID {

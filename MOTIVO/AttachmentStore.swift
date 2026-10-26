@@ -419,6 +419,11 @@ struct AttachmentStore {
 
     // MARK: - Helpers
 
+    /// Whether `url` is a Scores-library PDF (`Documents/Scores`), which no
+    /// attachment cleanup may remove: a score attached from the library points
+    /// at the library's own file (C-138).
+    static func isLibraryScoreFile(_ url: URL) -> Bool { isProtectedScoreLibraryURL(url) }
+
     private static func isProtectedScoreLibraryURL(_ url: URL) -> Bool {
         guard let documents = try? ensureDocumentsDir().standardizedFileURL else { return false }
         let target = url.standardizedFileURL

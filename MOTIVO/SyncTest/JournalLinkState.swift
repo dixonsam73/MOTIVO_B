@@ -131,6 +131,7 @@ enum JournalLocalRemoval {
         let token = container.persistentStoreCoordinator.currentPersistentHistoryToken(fromStores: nil)
         clearHeldFiles()
         JournalProfileSync.clearDisplacedAvatars()
+        JournalScoreSync.clearDisplacedScores()
         return store.update { st in
             st.historyToken = JournalSyncStateStore.encode(token: token)
             st.outbox.removeAll()
@@ -155,6 +156,15 @@ enum JournalLocalRemoval {
             st.profileStamp = nil
             st.avatarRemovedAt = nil
             st.profilePrimaryChosen = false
+            // Stage I: the erased library is the baseline (nothing erased is
+            // sent; a score added before re-enable is a clocked new item).
+            st.scoreFingerprints.removeAll()
+            st.scoreStamps.removeAll()
+            st.scorePositions.removeAll()
+            st.scorePositionStamps.removeAll()
+            st.awaitingScore.removeAll()
+            st.scoreScanDone = true
+            st.scoreIndexDamagedNoted = false
             st.initialFetchComplete = false
             st.pendingOwnerAdoption = nil
             st.ownershipReport = nil

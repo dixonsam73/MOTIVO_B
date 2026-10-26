@@ -31,6 +31,9 @@ import CloudKit
 import CoreData
 import Network
 import os
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Backoff for a failed first iCloud check: 5, 10, 20, 40 s, then every 60 s.
 enum JournalSyncStartRetry {
@@ -96,6 +99,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// 20 ms on a removed copy.
     private var dormantGeneration = 0
     private var pathMonitor: NWPathMonitor?
+    /// Stage I: the Scores library scans on two cadences.
+    private var scoreScanScheduled = false
+    private var scorePositionScanScheduled = false
+    private var scorePositionScanGeneration = 0
+    private var backgroundObserver: NSObjectProtocol?
 
     init(containerIdentifier: String, persistence: NSPersistentContainer, store: JournalSyncStateStore, status: JournalSyncStatus, customOwner: String?) {
         self.container = CKContainer(identifier: containerIdentifier)
@@ -137,7 +145,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     }
 
     deinit {
-        for o in [saveObserver, stampObserver, accountObserver, listObserver].compactMap({ $0 }) {
+        for o in [saveObserver, stampObserver, accountObserver, listObserver, backgroundObserver].compactMap({ $0 }) {
             NotificationCenter.default.removeObserver(o)
         }
         pathMonitor?.cancel()
@@ -170,6 +178,28 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 }
                 self.scheduleProfileScan()
             }
+            // Stage I: the Scores library's write points. Metadata after a short
+            // pause; a reading position after an idle pause, on the viewer's
+            // close and when the app goes to the background, never per page turn.
+            JournalScoreMirror.onChange = { [weak self] change in
+                guard let self else { return }
+                switch change {
+                case .library: self.scheduleScoreScan()
+                case .position: self.scheduleScorePositionScan()
+                }
+            }
+            JournalScoreMirror.onViewerClosed = { [weak self] in
+                guard let self else { return }
+                self.stateLock.lock(); self.scorePositionScanGeneration += 1; self.stateLock.unlock()
+                Task { await self.scanScores(reason: "viewer closed", positions: true) }
+            }
+            #if canImport(UIKit)
+            backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
+                guard let self else { return }
+                self.stateLock.lock(); self.scorePositionScanGeneration += 1; self.stateLock.unlock()
+                Task { await self.scanScores(reason: "background", positions: true) }
+            }
+            #endif
         }
         await reconcile(trigger: "launch")
     }
@@ -323,6 +353,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         runMetaTransitionIfNeeded()
         await scanLists()
         scanProfile(reason: "activation")
+        await scanScores(reason: "activation", positions: true)
         requeueOutbox()
         await publish { $0.phase = "Running" }
         refreshCounts()
@@ -451,7 +482,18 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
         // The file only where it is needed.
         var assetsFetched = 0
+        let library = await MainActor.run { ScoreLibraryStore.shared.snapshot() }
         let needing = modified.filter { record in
+            if record.recordType == JournalSyncRecordType.score {
+                // Stage I: the PDF only when this device has no file for the
+                // item, or the server's hash differs from what it last knew.
+                let name = record.recordID.recordName
+                guard let parsed = JournalSyncRecordType.scoreRecord(fromName: name), let uuid = UUID(uuidString: parsed.id),
+                      let item = library.items.first(where: { $0.id == uuid }) else { return true }
+                let exists = FileManager.default.fileExists(atPath: library.url(for: item).path)
+                return JournalCatchUp.needsAsset(serverHash: record[JournalRecordMapping.fileHashKey] as? String,
+                                                 knownHash: store.state.assetHashes[name], fileExists: exists)
+            }
             if record.recordType == JournalSyncRecordType.profileAvatar {
                 // Stage H: the avatar's file only when its hash is new here.
                 let serverHash = record[JournalRecordMapping.fileHashKey] as? String ?? ""
@@ -484,14 +526,17 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
 
         // Import exactly as a fetched batch would be.
-        let records = modified.filter { $0.recordType != JournalSyncRecordType.savedList && !JournalSyncRecordType.profileTypes.contains($0.recordType) }
+        let records = modified.filter { $0.recordType != JournalSyncRecordType.savedList && !JournalSyncRecordType.profileTypes.contains($0.recordType)
+                                        && !JournalSyncRecordType.scoreTypes.contains($0.recordType) }
         let lists = modified.filter { $0.recordType == JournalSyncRecordType.savedList }
         importModifications(records)
         importProfileRecords(modified.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) })
         if !lists.isEmpty { _ = await MainActor.run { JournalSavedListSync.apply(lists, store: store) } }
+        await importScoreRecords(modified.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) })
         importDeletions(deleted)
         let listDeletions = deleted.filter { $0.1 == JournalSyncRecordType.savedList }.map(\.0.recordName)
         if !listDeletions.isEmpty { _ = await MainActor.run { JournalSavedListSync.applyDeletions(listDeletions, store: store) } }
+        await applyScoreDeletions(deleted.filter { JournalSyncRecordType.scoreTypes.contains($0.1) }.map(\.0.recordName))
         let summary = "Catch-up (\(reason)): \(modified.count) changed record(s), \(deleted.count) deletion(s), \(assetsFetched) file(s) fetched"
         store.update { st in
             if let newToken, let data = try? NSKeyedArchiver.archivedData(withRootObject: newToken, requiringSecureCoding: true) {
@@ -583,6 +628,50 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         guard !added.isEmpty else { return }
         queueToEngine(zoneChanges: added.map(pendingChange))
         log("Queued \(added.count) profile change(s) (\(reason)): \(added.map(\.recordName))")
+        refreshCounts()
+    }
+
+    // MARK: Stage I: Scores library scan
+
+    /// One scan per burst of metadata writes (rename, favourite, cover, add, delete).
+    func scheduleScoreScan() {
+        stateLock.lock()
+        if scoreScanScheduled { stateLock.unlock(); return }
+        scoreScanScheduled = true
+        stateLock.unlock()
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self else { return }
+            self.stateLock.lock(); self.scoreScanScheduled = false; self.stateLock.unlock()
+            await self.scanScores(reason: "write point", positions: false)
+        }
+    }
+
+    /// Reading positions: each page turn restarts a 10 s idle timer, so a
+    /// read-through sends one record, not one per page.
+    func scheduleScorePositionScan() {
+        stateLock.lock()
+        scorePositionScanGeneration += 1
+        let generation = scorePositionScanGeneration
+        stateLock.unlock()
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard let self else { return }
+            self.stateLock.lock(); let current = self.scorePositionScanGeneration; self.stateLock.unlock()
+            guard current == generation else { return }   // a later turn, close or background took over
+            await self.scanScores(reason: "idle", positions: true)
+        }
+    }
+
+    /// Runs in every state except a local removal (the outbox is durable and
+    /// an offline edit keeps its clock). A damaged index sends nothing.
+    func scanScores(reason: String, positions: Bool) async {
+        guard !store.state.localRemovalInProgress else { return }
+        let snapshot = await MainActor.run { ScoreLibraryStore.shared.snapshot() }
+        let added = JournalScoreSync.scan(snapshot: snapshot, store: store, positions: positions) { self.log($0) }
+        guard !added.isEmpty else { return }
+        queueToEngine(zoneChanges: added.map(pendingChange))
+        log("Queued \(added.count) score change(s) (\(reason))")
         refreshCounts()
     }
 
@@ -737,6 +826,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         scanProfile(reason: "re-run")
     }
 
+    /// Stage I: forget what was exchanged for the library and send it again.
+    func rerunScoreTransition() {
+        JournalScoreSync.rerunTransition(store: store)
+        Task { await scanScores(reason: "re-run", positions: true) }
+    }
+
     func fetchNow() async {
         guard let engine, currentDecision().allowed else { log("Fetch refused: \(currentDecision().reason ?? "no engine")"); return }
         do { try await engine.fetchChanges() } catch { log("fetchChanges failed: \(error.localizedDescription)") }
@@ -873,19 +968,22 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 store.update { $0.echoRecords += echoCount; $0.echoAssetBytes += echoBytes; $0.assetBytesDownloaded += echoBytes }
                 log("Own-write echo: \(echoCount) record(s) already held, skipped; \(echoBytes) asset bytes delivered with them")
             }
-            importModifications(records.filter { $0.recordType != JournalSyncRecordType.savedList && !JournalSyncRecordType.profileTypes.contains($0.recordType) })
+            importModifications(records.filter { $0.recordType != JournalSyncRecordType.savedList && !JournalSyncRecordType.profileTypes.contains($0.recordType)
+                                                 && !JournalSyncRecordType.scoreTypes.contains($0.recordType) })
             importProfileRecords(records.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) })
             let lists = records.filter { $0.recordType == JournalSyncRecordType.savedList }
             if !lists.isEmpty {
                 let n = await MainActor.run { JournalSavedListSync.apply(lists, store: store) }
                 log("Imported \(n) list(s)")
             }
+            await importScoreRecords(records.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) })
             importDeletions(e.deletions.map { ($0.recordID, $0.recordType) })
             let listDeletions = e.deletions.filter { $0.recordType == JournalSyncRecordType.savedList }.map(\.recordID.recordName)
             if !listDeletions.isEmpty {
                 let n = await MainActor.run { JournalSavedListSync.applyDeletions(listDeletions, store: store) }
                 log("Applied \(n) list deletion(s)")
             }
+            await applyScoreDeletions(e.deletions.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) }.map(\.recordID.recordName))
             await publish { $0.lastFetchAt = Date() }
 
         case .sentRecordZoneChanges(let e):
@@ -944,11 +1042,21 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
         let bases = store.state.lastKnownRecords
         let listRecords = listNames.isEmpty ? [:] : await MainActor.run { JournalSavedListSync.records(for: listNames, bases: bases) }
+        // Stage I: a value copy of the library; files are hashed as records are built.
+        let hasScores = pending.contains { if case .saveRecord(let id) = $0 { return JournalSyncRecordType.isScoreRecordName(id.recordName) }; return false }
+        let library = hasScores ? await MainActor.run { ScoreLibraryStore.shared.snapshot() } : nil
         let eligibility = currentEligibility()
         await refreshViewerScope()
         return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: pending) { recordID in
             if typeByName[recordID.recordName] == JournalSyncRecordType.savedList {
                 if let record = listRecords[recordID.recordName] { return record }
+                self.store.update { $0.outbox.removeAll { $0.recordName == recordID.recordName && $0.op == .save } }
+                return nil
+            }
+            if JournalSyncRecordType.isScoreRecordName(recordID.recordName) {
+                if let library, let record = JournalScoreSync.record(for: recordID.recordName, snapshot: library, store: self.store, log: { self.log($0) }) {
+                    return record
+                }
                 self.store.update { $0.outbox.removeAll { $0.recordName == recordID.recordName && $0.op == .save } }
                 return nil
             }
@@ -989,6 +1097,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             case JournalSyncRecordType.attachment: return 2
             case JournalSyncRecordType.attachmentMeta: return 2
             case JournalSyncRecordType.profileAvatar: return 2
+            case JournalSyncRecordType.score: return 2
             default: return 1
             }
         case .deleteRecord: return 3
@@ -1094,7 +1203,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     private func importDeletions(_ deletions: [(CKRecord.ID, CKRecord.RecordType)]) {
         guard !deletions.isEmpty else { return }
-        importContext.performAndWait { importer.importDeletions(deletions) }
+        let journal = deletions.filter { !JournalSyncRecordType.scoreTypes.contains($0.1) }
+        if !journal.isEmpty { importContext.performAndWait { importer.importDeletions(journal) } }
         // Stage H: a deleted profile record (a reset elsewhere) is forgotten,
         // never applied; the next scan sends this device's profile afresh.
         let profileNames = deletions.map(\.0.recordName).filter(JournalSyncRecordType.isProfileRecordName)
@@ -1153,6 +1263,37 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
     }
 
+    // MARK: Stage I: Scores library records
+
+    private func importScoreRecords(_ records: [CKRecord], localPending: Bool? = nil) async {
+        guard !records.isEmpty else { return }
+        let outcome = await MainActor.run {
+            JournalScoreSync.apply(records, store: store, library: ScoreLibraryStore.shared, localPending: localPending) { self.log($0) }
+        }
+        store.update { st in
+            st.recordsReceived += outcome.applied
+            st.scoreAssetBytesDelivered += outcome.assetBytes
+            st.assetBytesDownloaded += outcome.assetBytes
+            st.bytesReceived += outcome.bytesWritten
+        }
+        if !outcome.resend.isEmpty { queueToEngine(zoneChanges: outcome.resend.map(pendingChange)) }
+        // A pending save the import settled must leave the engine's own list too.
+        for name in outcome.settled {
+            engine?.state.remove(pendingRecordZoneChanges: [.saveRecord(CKRecord.ID(recordName: name, zoneID: JournalRecordMapping.zoneID))])
+        }
+        if outcome.applied > 0 || outcome.held > 0 {
+            log("Scores: \(outcome.applied) record(s) applied, \(outcome.held) held, \(outcome.bytesWritten) bytes written")
+        }
+    }
+
+    private func applyScoreDeletions(_ names: [String]) async {
+        guard !names.isEmpty else { return }
+        let removed = await MainActor.run {
+            JournalScoreSync.applyDeletions(names, store: store, library: ScoreLibraryStore.shared) { self.log($0) }
+        }
+        log("Applied \(names.count) score record deletion(s): \(removed) item(s) removed")
+    }
+
     // MARK: Sent
 
     private func handleSent(_ e: CKSyncEngine.Event.SentRecordZoneChanges) {
@@ -1172,6 +1313,19 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 } else {
                     withoutMedia += 1
                 }
+            } else if record.recordType == JournalSyncRecordType.score {
+                // Stage I: the PDF, once; metadata and positions never carry it.
+                if let hash = record[JournalRecordMapping.fileHashKey] as? String,
+                   let asset = record[JournalRecordMapping.assetKey] as? CKAsset, let url = asset.fileURL {
+                    bytes += JournalAssetHash.stamp(of: url)?.size ?? 0
+                    store.update { $0.scoreUploads += 1; $0.assetHashes[name] = hash }
+                } else {
+                    store.update { $0.scoreRecordsSentWithoutFile += 1 }
+                }
+            } else if record.recordType == JournalSyncRecordType.scoreMeta {
+                store.update { $0.scoreRecordsSentWithoutFile += 1 }
+            } else if record.recordType == JournalSyncRecordType.scorePosition {
+                store.update { $0.scorePositionsSent += 1 }
             } else if record.recordType == JournalSyncRecordType.profileAvatar {
                 // Stage H: the server now holds this hash ("" after a removal).
                 let hash = record[JournalRecordMapping.fileHashKey] as? String ?? ""
@@ -1244,6 +1398,16 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                         if outcome.avatarChanged { JournalSyncCoordinator.shared.auth?.noteAvatarChangedBySync() }
                         NotificationCenter.default.post(name: JournalProfileSync.didApplyNotification, object: nil)
                     }
+                }
+                return
+            }
+            if JournalSyncRecordType.isScoreRecordName(name) {
+                // Stage I: the same rule as the import, with our save known to be pending.
+                Task {
+                    await self.importScoreRecords([server], localPending: true)
+                    let stillPending = self.store.state.outbox.contains { $0.recordName == name && $0.op == .save }
+                    if stillPending { self.queueToEngine(zoneChanges: [.saveRecord(record.recordID)]) }
+                    else { self.engine?.state.remove(pendingRecordZoneChanges: [.saveRecord(record.recordID)]) }
                 }
                 return
             }

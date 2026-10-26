@@ -1992,6 +1992,7 @@ private func loadPracticeDefaultsIfNeeded() {
                     // late page report can reopen tracking after this flush.
                     onClose: {
                         flushMeaningfulScorePageTracking(for: request.id)
+                        scoreLibraryStore.viewerDidClose(request.id)
                     }
                 )
                     .toolbar(.hidden, for: .navigationBar)

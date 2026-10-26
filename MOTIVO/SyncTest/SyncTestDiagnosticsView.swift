@@ -144,6 +144,33 @@ struct SyncTestDiagnosticsView: View {
                     JournalSyncCoordinator.shared.engine?.rerunProfileTransition(); refreshTick += 1
                 }
             }
+            Section("Scores library (stage I)") {
+                let library = ScoreLibraryStore.shared
+                row("Items here", "\(library.items.count)\(library.indexDamaged ? " · INDEX UNREADABLE (C-139)" : "")")
+                row("Items exchanged", "\(state?.scoreFingerprints.count ?? 0) (transition \(state?.scoreScanDone == true ? "done" : "pending"))")
+                row("Score uploads", "\(state?.scoreUploads ?? 0) file(s)")
+                row("Score asset bytes delivered", bytes(state?.scoreAssetBytesDelivered ?? 0))
+                row("Score records sent, no file", "\(state?.scoreRecordsSentWithoutFile ?? 0)")
+                row("Positions sent / displaced here", "\(state?.scorePositionsSent ?? 0) / \(state?.scorePositionsDisplaced ?? 0)")
+                row("Held score records", "\(state?.awaitingScore.count ?? 0)")
+                row("Newest score", newestScoreText)
+                // No screen offers the cover page yet (the field has always
+                // existed); the trial exercises it from here.
+                Button("Cycle cover page of newest score") {
+                    if let item = newestScore() {
+                        let next = item.thumbnailPage >= item.pageCount ? 1 : item.thumbnailPage + 1
+                        ScoreLibraryStore.shared.setThumbnailPage(next, for: item.id)
+                    }
+                    refreshTick += 1
+                }
+                let displaced = JournalScoreSync.displacedScores()
+                if !displaced.isEmpty {
+                    row("Displaced score files kept", "\(displaced.count)")
+                }
+                Button("Re-send scores (re-run transition)") {
+                    JournalSyncCoordinator.shared.engine?.rerunScoreTransition(); refreshTick += 1
+                }
+            }
             Section("Counts") {
                 row("Outbox (pending)", "\(status.outboxCount)")
                 row("Held attachments", "\(status.heldCount)")
@@ -200,6 +227,15 @@ struct SyncTestDiagnosticsView: View {
         guard let id = newestAttachmentID() else { return "no attachments" }
         let choice = AttachmentPrivacy.currentMap()[AttachmentPrivacy.privacyKey(id: id, url: nil) ?? ""]
         return "\(id.uuidString.prefix(8))… \(choice.map { $0 ? "private" : "shared" } ?? "no choice (private by default)")"
+    }
+
+    private func newestScore() -> ScoreLibraryItem? {
+        ScoreLibraryStore.shared.items.max { $0.createdAt < $1.createdAt }
+    }
+
+    private var newestScoreText: String {
+        guard let item = newestScore() else { return "none" }
+        return "“\(item.title)” · cover \(item.thumbnailPage)/\(item.pageCount) · page \(item.lastViewedPage.map(String.init) ?? "—")\(item.isFavourite ? " · ★" : "")"
     }
 
     private var profileValuesText: String {
