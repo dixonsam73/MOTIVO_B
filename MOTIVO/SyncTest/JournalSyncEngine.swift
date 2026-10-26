@@ -123,9 +123,17 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// before each fetch and send cycle.
     private var viewerScopeValue = "unknown"
     private var viewerScope: String { stateLock.lock(); defer { stateLock.unlock() }; return viewerScopeValue }
+    /// Stage H: the scopes the Profile screen presents (location under the
+    /// backend id, avatar under the owner key), read with the viewer scope.
+    private var profileScopeValue = JournalProfileScope.local
+    var profileScope: JournalProfileScope { stateLock.lock(); defer { stateLock.unlock() }; return profileScopeValue }
     private func refreshViewerScope() async {
-        let scope = await MainActor.run { JournalMetadataCodec.viewerScope(currentUserID: PersistenceController.shared.currentUserID) }
-        stateLock.lock(); viewerScopeValue = scope; stateLock.unlock()
+        let (scope, profile) = await MainActor.run {
+            (JournalMetadataCodec.viewerScope(currentUserID: PersistenceController.shared.currentUserID),
+             JournalProfileScope(locationUserID: JournalSyncCoordinator.shared.auth?.backendUserID,
+                                 avatarUserID: PersistenceController.shared.currentUserID))
+        }
+        stateLock.lock(); viewerScopeValue = scope; profileScopeValue = profile; stateLock.unlock()
     }
 
     deinit {
@@ -152,6 +160,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             observersInstalled = true
             installSaveObserver()
             installListObserver()
+            // Stage H: location and avatar write points (ProfileStore).
+            JournalProfileMirror.onChange = { [weak self] avatarRemoved in
+                guard let self else { return }
+                if avatarRemoved { self.store.update { $0.avatarRemovedAt = Date() } }
+                self.scheduleProfileScan()
+            }
         }
         await reconcile(trigger: "launch")
     }
@@ -304,6 +318,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         runMetadataMigrationIfNeeded()
         runMetaTransitionIfNeeded()
         await scanLists()
+        scanProfile(reason: "activation")
         requeueOutbox()
         await publish { $0.phase = "Running" }
         refreshCounts()
@@ -433,6 +448,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         // The file only where it is needed.
         var assetsFetched = 0
         let needing = modified.filter { record in
+            if record.recordType == JournalSyncRecordType.profileAvatar {
+                // Stage H: the avatar's file only when its hash is new here.
+                let serverHash = record[JournalRecordMapping.fileHashKey] as? String ?? ""
+                return !serverHash.isEmpty && store.state.assetHashes[JournalProfileSync.avatarName] != serverHash
+            }
             guard record.recordType == JournalSyncRecordType.attachment else { return false }
             let name = record.recordID.recordName
             var exists = false
@@ -460,9 +480,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
 
         // Import exactly as a fetched batch would be.
-        let records = modified.filter { $0.recordType != JournalSyncRecordType.savedList }
+        let records = modified.filter { $0.recordType != JournalSyncRecordType.savedList && !JournalSyncRecordType.profileTypes.contains($0.recordType) }
         let lists = modified.filter { $0.recordType == JournalSyncRecordType.savedList }
         importModifications(records)
+        importProfileRecords(modified.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) })
         if !lists.isEmpty { _ = await MainActor.run { JournalSavedListSync.apply(lists, store: store) } }
         importDeletions(deleted)
         let listDeletions = deleted.filter { $0.1 == JournalSyncRecordType.savedList }.map(\.0.recordName)
@@ -512,7 +533,46 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                   ctx.transactionAuthor != JournalSyncAuthor.sync,
                   ctx.persistentStoreCoordinator === self.persistence.persistentStoreCoordinator else { return }
             self.noteLocalChanges()
+            // Stage H: the Profile row (name, primary instrument) has no history
+            // tracking; a save that touched it is scanned.
+            let touchedProfile = [NSInsertedObjectsKey, NSUpdatedObjectsKey].contains { key in
+                ((note.userInfo?[key] as? Set<NSManagedObject>) ?? []).contains { $0.objectID.entity.name == JournalSyncRecordType.profile }
+            }
+            if touchedProfile { self.scheduleProfileScan() }
         }
+    }
+
+    // MARK: Stage H: profile scan
+
+    private var profileScanScheduled = false
+    /// One scan per burst: the editor writes the avatar twice (owner and local
+    /// scope) and a Profile close rewrites the location.
+    func scheduleProfileScan() {
+        stateLock.lock()
+        if profileScanScheduled { stateLock.unlock(); return }
+        profileScanScheduled = true
+        stateLock.unlock()
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard let self else { return }
+            self.stateLock.lock(); self.profileScanScheduled = false; self.stateLock.unlock()
+            await self.refreshViewerScope()
+            self.scanProfile(reason: "write point")
+        }
+    }
+
+    /// Runs in every state except a local removal: the outbox is durable and an
+    /// edit made while paused or unlinked keeps its clock. Transport waits for
+    /// an engine, as for everything else.
+    func scanProfile(reason: String) {
+        guard !store.state.localRemovalInProgress else { return }
+        let scope = profileScope
+        var added: [JournalSyncPendingChange] = []
+        importContext.performAndWait { added = JournalProfileSync.scan(context: importContext, scope: scope, store: store) }
+        guard !added.isEmpty else { return }
+        queueToEngine(zoneChanges: added.map(pendingChange))
+        log("Queued \(added.count) profile change(s) (\(reason)): \(added.map(\.recordName))")
+        refreshCounts()
     }
 
     /// A failed iCloud check (offline, signed out, or no account yet) is NOT
@@ -632,6 +692,17 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     }
 
     // MARK: Manual controls (diagnostics screen)
+
+    /// Stage H: forget what was last exchanged and send the current profile and
+    /// avatar again (clocks kept). Repeatable; nothing local is changed.
+    func rerunProfileTransition() {
+        store.update { st in
+            st.profileFingerprint = nil
+            st.assetHashes.removeValue(forKey: JournalProfileSync.avatarName)
+            st.log.append(.init(at: Date(), text: "Profile transition re-run requested"))
+        }
+        scanProfile(reason: "re-run")
+    }
 
     func fetchNow() async {
         guard let engine, currentDecision().allowed else { log("Fetch refused: \(currentDecision().reason ?? "no engine")"); return }
@@ -769,7 +840,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 store.update { $0.echoRecords += echoCount; $0.echoAssetBytes += echoBytes; $0.assetBytesDownloaded += echoBytes }
                 log("Own-write echo: \(echoCount) record(s) already held, skipped; \(echoBytes) asset bytes delivered with them")
             }
-            importModifications(records.filter { $0.recordType != JournalSyncRecordType.savedList })
+            importModifications(records.filter { $0.recordType != JournalSyncRecordType.savedList && !JournalSyncRecordType.profileTypes.contains($0.recordType) })
+            importProfileRecords(records.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) })
             let lists = records.filter { $0.recordType == JournalSyncRecordType.savedList }
             if !lists.isEmpty {
                 let n = await MainActor.run { JournalSavedListSync.apply(lists, store: store) }
@@ -882,6 +954,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             case JournalSyncRecordType.instrument: return 0
             case JournalSyncRecordType.attachment: return 2
             case JournalSyncRecordType.attachmentMeta: return 2
+            case JournalSyncRecordType.profileAvatar: return 2
             default: return 1
             }
         case .deleteRecord: return 3
@@ -894,6 +967,19 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private func record(for recordID: CKRecord.ID, type: String?, eligibility: Eligibility, ownerOnly: Bool = false,
                         assetFree: Bool = false) -> CKRecord? {
         let name = recordID.recordName
+        if JournalSyncRecordType.isProfileRecordName(name) {
+            // Stage H: fixed-name records read from the stores, not by id.
+            let scope = profileScope
+            var record: CKRecord?
+            importContext.performAndWait {
+                if name == JournalProfileSync.profileName {
+                    record = JournalProfileSync.profileRecord(context: importContext, scope: scope, store: store) { self.importer.instrument(named: $0) }
+                } else {
+                    record = JournalProfileSync.avatarRecord(scope: scope, store: store)
+                }
+            }
+            return record
+        }
         let isMeta = type == JournalSyncRecordType.attachmentMeta || JournalSyncRecordType.attachmentName(fromMeta: name) != nil
         guard let id = UUID(uuidString: isMeta ? (JournalSyncRecordType.attachmentName(fromMeta: name) ?? "") : name) else { return nil }
         var result: CKRecord?
@@ -975,7 +1061,55 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private func importDeletions(_ deletions: [(CKRecord.ID, CKRecord.RecordType)]) {
         guard !deletions.isEmpty else { return }
         importContext.performAndWait { importer.importDeletions(deletions) }
+        // Stage H: a deleted profile record (a reset elsewhere) is forgotten,
+        // never applied; the next scan sends this device's profile afresh.
+        let profileNames = deletions.map(\.0.recordName).filter(JournalSyncRecordType.isProfileRecordName)
+        if !profileNames.isEmpty {
+            store.update { st in
+                for name in profileNames {
+                    st.lastKnownRecords.removeValue(forKey: name)
+                    if name == JournalProfileSync.avatarName { st.assetHashes.removeValue(forKey: name) } else { st.profileFingerprint = nil }
+                }
+            }
+        }
         log("Applied \(deletions.count) remote deletion(s)")
+    }
+
+    /// Stage H: Profile and ProfileAvatar records, after the batch's
+    /// instruments (the primary resolves by id, alias or name).
+    private func importProfileRecords(_ records: [CKRecord]) {
+        guard !records.isEmpty else { return }
+        let scope = profileScope
+        var applied = 0
+        var avatarBytes: Int64 = 0
+        var avatarChanged = false
+        var resend: [JournalSyncPendingChange] = []
+        importContext.performAndWait {
+            for record in records.sorted(by: { $0.recordType == JournalSyncRecordType.profile && $1.recordType != JournalSyncRecordType.profile }) {
+                let outcome: JournalProfileSync.Outcome
+                if record.recordType == JournalSyncRecordType.profile {
+                    outcome = JournalProfileSync.applyProfile(record, context: importContext, scope: scope, store: store, importer: importer) { self.log($0) }
+                } else {
+                    outcome = JournalProfileSync.applyAvatar(record, scope: scope, store: store) { self.log($0) }
+                }
+                applied += outcome.applied
+                avatarBytes += outcome.avatarBytes
+                avatarChanged = avatarChanged || outcome.avatarChanged
+                resend += outcome.resend
+            }
+        }
+        store.update { st in
+            st.recordsReceived += applied
+            st.avatarAssetBytesDelivered += avatarBytes
+            st.assetBytesDownloaded += avatarBytes
+        }
+        if !resend.isEmpty { queueToEngine(zoneChanges: resend.map(pendingChange)) }
+        if applied > 0 || avatarChanged {
+            Task { @MainActor in
+                if avatarChanged { JournalSyncCoordinator.shared.auth?.noteAvatarChangedBySync() }
+                NotificationCenter.default.post(name: JournalProfileSync.didApplyNotification, object: nil)
+            }
+        }
     }
 
     // MARK: Sent
@@ -997,6 +1131,14 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 } else {
                     withoutMedia += 1
                 }
+            } else if record.recordType == JournalSyncRecordType.profileAvatar {
+                // Stage H: the server now holds this hash ("" after a removal).
+                let hash = record[JournalRecordMapping.fileHashKey] as? String ?? ""
+                if let asset = record[JournalRecordMapping.assetKey] as? CKAsset, let url = asset.fileURL {
+                    bytes += JournalAssetHash.stamp(of: url)?.size ?? 0
+                    store.update { $0.avatarUploads += 1 }
+                }
+                store.update { $0.assetHashes[name] = hash }
             }
             store.update {
                 $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
@@ -1019,7 +1161,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
         store.update { $0.recordsSent += sent; $0.bytesSent += bytes; $0.assetUploads += uploads; $0.attachmentRecordsSentWithoutMedia += withoutMedia }
         if sent > 0 { log("Sent \(sent) record(s); \(uploads) media upload(s), \(bytes) bytes; \(withoutMedia) attachment record(s) metadata only") }
-        if e.savedRecords.contains(where: { $0.recordType == JournalSyncRecordType.attachment }) {
+        if e.savedRecords.contains(where: { $0.recordType == JournalSyncRecordType.attachment
+                                            || ($0.recordType == JournalSyncRecordType.profileAvatar && $0[JournalRecordMapping.assetKey] != nil) }) {
             // C-134: move the engine's saved state past this device's own content
             // sends while the app is alive, so a relaunch does not fetch them
             // back with their files. The echo it brings now is skipped above.
@@ -1040,6 +1183,28 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                     self.dropPendingSave(name)
                 }
                 log("Conflict on list \(name): server kept")
+                return
+            }
+            if JournalSyncRecordType.isProfileRecordName(name) {
+                // Stage H: same rule as the import, with our save known to be pending.
+                let scope = profileScope
+                var outcome = JournalProfileSync.Outcome()
+                importContext.performAndWait {
+                    if name == JournalProfileSync.profileName {
+                        outcome = JournalProfileSync.applyProfile(server, context: importContext, scope: scope, store: store, importer: importer,
+                                                                  localPending: true) { self.log("Send conflict — " + $0) }
+                    } else {
+                        outcome = JournalProfileSync.applyAvatar(server, scope: scope, store: store, localPending: true) { self.log("Send conflict — " + $0) }
+                    }
+                }
+                if !outcome.resend.isEmpty { queueToEngine(zoneChanges: [.saveRecord(record.recordID)]) }
+                else { engine?.state.remove(pendingRecordZoneChanges: [.saveRecord(record.recordID)]) }
+                if outcome.applied > 0 || outcome.avatarChanged {
+                    Task { @MainActor in
+                        if outcome.avatarChanged { JournalSyncCoordinator.shared.auth?.noteAvatarChangedBySync() }
+                        NotificationCenter.default.post(name: JournalProfileSync.didApplyNotification, object: nil)
+                    }
+                }
                 return
             }
             var resend = false

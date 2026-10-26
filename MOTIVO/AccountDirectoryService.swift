@@ -635,6 +635,9 @@ public final class AccountDirectoryService {
                               location: String? = nil,
                               instruments: [String]? = nil,
                               authChallenge: (() async -> Bool)? = nil) async -> DirectoryWriteResult {
+        #if SYNCTEST
+        ConnectedWriteWitness.note(ConnectedWriteWitness.directoryUpsert)
+        #endif
         let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !uid.isEmpty else {
             return DirectoryWriteResult(outcome: .failed(NSError(domain: "AccountDirectoryService", code: 1,
@@ -738,6 +741,9 @@ public final class AccountDirectoryService {
     /// - Parameter avatarKey: `users/<uid>/avatar.jpg` or nil to clear.
     /// - Important: This is an owner-only metadata update; no profile sync.
     public func updateSelfAvatarKey(userID: String, avatarKey: String?) async -> Result<Void, Error> {
+        #if SYNCTEST
+        ConnectedWriteWitness.note(ConnectedWriteWitness.directoryAvatarKey)
+        #endif
         let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !uid.isEmpty else {
             return .failure(NSError(domain: "AccountDirectoryService", code: 1, userInfo: [NSLocalizedDescriptionKey: "empty userID"]))

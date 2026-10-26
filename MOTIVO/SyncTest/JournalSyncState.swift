@@ -198,6 +198,17 @@ struct JournalSyncPersistedState: Codable {
     /// (its own sends after a relaunch), and the asset bytes that came with them.
     var echoRecords = 0
     var echoAssetBytes: Int64 = 0
+    // Stage H (private profile).
+    /// The profile values last sent or received (`JournalProfileValues`), nil
+    /// before the first scan (the transition).
+    var profileFingerprint: String?
+    /// The clock of this device's profile text; nil for a profile that predates
+    /// this build and has not been edited since (sent without a clock).
+    var profileStamp: Date?
+    /// When the avatar was removed here (its record's clock while no file exists).
+    var avatarRemovedAt: Date?
+    var avatarUploads = 0
+    var avatarAssetBytesDelivered: Int64 = 0
 
     init() {}
 
@@ -246,6 +257,11 @@ struct JournalSyncPersistedState: Codable {
         lastCatchUp = try c.decodeIfPresent(String.self, forKey: .lastCatchUp)
         echoRecords = try c.decodeIfPresent(Int.self, forKey: .echoRecords) ?? 0
         echoAssetBytes = try c.decodeIfPresent(Int64.self, forKey: .echoAssetBytes) ?? 0
+        profileFingerprint = try c.decodeIfPresent(String.self, forKey: .profileFingerprint)
+        profileStamp = try c.decodeIfPresent(Date.self, forKey: .profileStamp)
+        avatarRemovedAt = try c.decodeIfPresent(Date.self, forKey: .avatarRemovedAt)
+        avatarUploads = try c.decodeIfPresent(Int.self, forKey: .avatarUploads) ?? 0
+        avatarAssetBytesDelivered = try c.decodeIfPresent(Int64.self, forKey: .avatarAssetBytesDelivered) ?? 0
     }
 }
 

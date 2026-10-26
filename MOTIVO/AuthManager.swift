@@ -1388,6 +1388,10 @@ final class AuthManager: NSObject, ObservableObject {
             .notice("Adopted local owner key from the journal (Solo; no Connected services)")
     }
 
+    /// Stage H: the private sync wrote or removed the avatar files; the screens
+    /// key their redraw on this revision (as a Connected replacement does).
+    func noteAvatarChangedBySync() { ownAvatarRevision &+= 1 }
+
     /// Sync trial resets only. The Keychain outlives an uninstall, so a fresh
     /// Sync Test install would otherwise start with the previous trial's owner.
     /// Refused while a Connected identity is held.

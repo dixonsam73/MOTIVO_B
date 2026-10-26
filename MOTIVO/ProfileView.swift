@@ -525,6 +525,11 @@ struct ProfileNameDraftState: Equatable {
 
      @State private var showPhotoPicker: Bool = false
      @State private var locationText: String = ""
+    #if SYNCTEST
+    /// Stage H: values the private sync assigned to the screen, consumed by the
+    /// `onChange` handlers so they schedule no directory write for them.
+    @State private var syncHydratedValues: Set<String> = []
+    #endif
  
      // Primary Activity (Stage 1 persisted in AppStorage; Stage 2 UX hardening)
      // Format: "core:<raw>" or "custom:<name>"
@@ -2895,7 +2900,7 @@ private func initials(from string: String) -> String {
             .onChange(of: primaryActivityRef) {
                 primaryActivityChoice = normalizedPrimaryActivityRef()
             }
-             .onChange(of: name) { _, _ in
+             .onChange(of: name) { _, newValue in
                  // C-70. Dirty is marked in `nameEditingBinding`, NOT here — this
                  // also fires for PROGRAMMATIC assignment, so marking here would
                  // let hydration mark its own result dirty and never clear.
@@ -2905,8 +2910,33 @@ private func initials(from string: String) -> String {
                  // fresh task carrying the old identity's edit. `onChange` is
                  // already on the main actor, so the call is direct and the
                  // cancellation in the identity handler is actually sufficient.
+                 #if SYNCTEST
+                 // Stage H: a value the private sync just put on screen is not
+                 // this device's edit and schedules no directory write.
+                 if syncHydratedValues.remove(newValue) != nil { return }
+                 #endif
                  scheduleDirectorySyncDebounced()
              }
+             #if SYNCTEST
+             // Stage H: the private sync changed the profile (import context, not
+             // this context, so the save observer above never sees it). Re-read
+             // what is not being edited right now; the avatar redraws through
+             // `auth.ownAvatarRevision`. Without this the stale screen would be
+             // written back on close and undo the other device's edit.
+             .onReceive(NotificationCenter.default.publisher(for: JournalProfileSync.didApplyNotification).receive(on: RunLoop.main)) { _ in
+                 guard localStorageIsUsable else { return }
+                 if nameDraft.mayHydrate {
+                     let before = name
+                     load()
+                     if name != before { syncHydratedValues.insert(name) }
+                 }
+                 if !isLocationFocused {
+                     let presented = ProfileStore.presentedLocation(for: auth.backendUserID)
+                     if presented != locationText { syncHydratedValues.insert(presented); locationText = presented }
+                 }
+                 refreshAvatarDisplay()
+             }
+             #endif
              .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: ctx)) { _ in
                  guard showInstrumentManager == false,
                        showActivityManager == false,
@@ -2916,8 +2946,11 @@ private func initials(from string: String) -> String {
                        showPhotoPicker == false else { return }
                  load()
              }
-             .onChange(of: locationText) { _, _ in
+             .onChange(of: locationText) { _, newValue in
                  // C-70. Same reasoning as `name` above: no untracked outer Task.
+                 #if SYNCTEST
+                 if syncHydratedValues.remove(newValue) != nil { return }
+                 #endif
                  scheduleDirectorySyncDebounced()
              }
              // EVENTS 1 AND 3, in ONE observer over BOTH asynchronous inputs.

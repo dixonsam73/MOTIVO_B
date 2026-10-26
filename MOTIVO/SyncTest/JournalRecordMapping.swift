@@ -114,7 +114,7 @@ enum JournalRecordMapping {
     static var keysWithoutAsset: [String] {
         Array(Set(sessionKeys + attachmentKeys + legacyAttachmentMetaKeys + metaKeys + instrumentKeys + userInstrumentKeys
                   + userActivityKeys + [instrumentRefKey, instrumentNameKey, savedListNameKey, savedListItemsKey,
-                                        fileExtKey, fileHashKey, sessionRefKey,
+                                        fileExtKey, fileHashKey, sessionRefKey, JournalProfileKeys.location,
                                         JournalMetadataKeys.isPrivate, JournalMetadataKeys.selectedPages, JournalMetadataKeys.isSaved]))
     }
 

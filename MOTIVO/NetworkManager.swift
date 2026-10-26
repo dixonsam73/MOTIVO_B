@@ -500,6 +500,9 @@ public final class NetworkManager {
     /// Storage key convention (locked): `users/<uid>/avatar.jpg`
     /// - Returns: The `avatar_key` string to store in `account_directory.avatar_key`.
     public func uploadAvatarJPEG(data: Data, backendUserID: String) async -> Result<String, Error> {
+        #if SYNCTEST
+        ConnectedWriteWitness.note(ConnectedWriteWitness.avatarUpload)
+        #endif
         guard let baseURL else {
             return .failure(NetworkError.notConfigured)
         }
@@ -555,6 +558,9 @@ public final class NetworkManager {
     /// Deletes the caller's avatar object from the `avatars` bucket.
     /// Storage key convention (locked): `users/<uid>/avatar.jpg`
     public func deleteAvatarObject(backendUserID: String) async -> Result<Void, Error> {
+        #if SYNCTEST
+        ConnectedWriteWitness.note(ConnectedWriteWitness.avatarDelete)
+        #endif
         guard let baseURL else {
             return .failure(NetworkError.notConfigured)
         }

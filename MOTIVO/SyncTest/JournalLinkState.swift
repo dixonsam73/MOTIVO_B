@@ -116,6 +116,7 @@ enum JournalLocalRemoval {
     static func finish(store: JournalSyncStateStore, container: NSPersistentContainer) -> Bool {
         let token = container.persistentStoreCoordinator.currentPersistentHistoryToken(fromStores: nil)
         clearHeldFiles()
+        JournalProfileSync.clearDisplacedAvatars()
         return store.update { st in
             st.historyToken = JournalSyncStateStore.encode(token: token)
             st.outbox.removeAll()
@@ -133,6 +134,12 @@ enum JournalLocalRemoval {
             st.catchUpZoneToken = nil
             st.awaitingMeta.removeAll()
             st.metaTransitionDone = false
+            // Stage H: the erased profile is empty; the baseline is the EMPTY
+            // profile (not "never scanned"), so anything typed before re-enable
+            // is a clocked edit, and the wiped avatar is not a removal.
+            st.profileFingerprint = JournalProfileValues().fingerprint
+            st.profileStamp = nil
+            st.avatarRemovedAt = nil
             st.initialFetchComplete = false
             st.pendingOwnerAdoption = nil
             st.ownershipReport = nil

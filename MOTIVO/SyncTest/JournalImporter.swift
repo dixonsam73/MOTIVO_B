@@ -419,7 +419,7 @@ final class JournalImporter {
         return created
     }
 
-    private func instrument(named name: String) -> NSManagedObject? {
+    func instrument(named name: String) -> NSManagedObject? {
         let wanted = PersistenceController.normalized(name)
         let request = NSFetchRequest<NSManagedObject>(entityName: JournalSyncRecordType.instrument)
         let rows = (try? context.fetch(request)) ?? []

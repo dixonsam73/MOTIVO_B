@@ -154,7 +154,15 @@ struct ProfileStore {
     static func setLocation(_ value: String, for userID: String?) {
         let uid = profileStorageID(for: userID)
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        #if SYNCTEST
+        // Stage H: a changed value is a profile edit; the same value written
+        // again (every Profile blur and close rewrites it) is not.
+        let previous = UserDefaults.standard.string(forKey: locationKey(for: uid))
+        #endif
         UserDefaults.standard.set(trimmed, forKey: locationKey(for: uid))
+        #if SYNCTEST
+        if previous != trimmed { JournalProfileMirror.locationChanged() }
+        #endif
     }
 
     /// C-27 — at sign-out the local Études profile keeps the location the signed-in
@@ -418,7 +426,48 @@ struct ProfileStore {
         if markPendingLocalSync {
             markPendingLocalAvatarUploadIfNeeded(for: userID)
         }
+        #if SYNCTEST
+        JournalProfileMirror.avatarChanged()
+        #endif
     }
+
+    #if SYNCTEST
+    // MARK: - Stage H: the private-sync writers
+    //
+    // An avatar received from the other device is written byte for byte (a
+    // re-encode would change its hash and the two devices would send it back
+    // and forth) and clocked with the sender's file time. Neither writer sets
+    // the Solo→Connected pending marker: the image is not a local edit.
+
+    @discardableResult
+    static func writeSyncedAvatar(pngData: Data, for userID: String?, modifiedAt: Date) -> Bool {
+        guard let image = UIImage(data: pngData) else { return false }
+        var ok = true
+        for scope in Set([profileStorageID(for: userID), localProfileStorageID]) {
+            guard let derived = avatarDerivedURL(for: scope), let original = avatarOriginalURL(for: scope) else { ok = false; continue }
+            let fm = FileManager.default
+            if !fm.fileExists(atPath: derived.deletingLastPathComponent().path) {
+                try? fm.createDirectory(at: derived.deletingLastPathComponent(), withIntermediateDirectories: true)
+            }
+            do {
+                try pngData.write(to: derived, options: .atomic)
+                try fm.setAttributes([.modificationDate: modifiedAt], ofItemAtPath: derived.path)
+            } catch { ok = false; continue }
+            cache.setObject(image, forKey: derived.path as NSString)
+            if let jpeg = image.jpegData(compressionQuality: 0.9) {
+                try? jpeg.write(to: original, options: .atomic)
+                cache.setObject(image, forKey: original.path as NSString)
+            }
+        }
+        return ok
+    }
+
+    /// Both scopes, no marker (the removal is the other device's edit).
+    static func removeSyncedAvatar(for userID: String?) {
+        deleteAvatarFiles(for: userID)
+        deleteAvatarFiles(for: nil)
+    }
+    #endif
 
     /// Backwards-compatibility: treat this as saving the derived/display avatar.
     static func saveAvatarImage(_ image: UIImage, for userID: String?) {
@@ -440,6 +489,9 @@ struct ProfileStore {
             try? fm.removeItem(at: url)
             cache.removeObject(forKey: url.path as NSString)
         }
+        #if SYNCTEST
+        JournalProfileMirror.avatarRemoved()
+        #endif
     }
 
     /// The ONE place a backend avatar becomes the local copy. It writes the

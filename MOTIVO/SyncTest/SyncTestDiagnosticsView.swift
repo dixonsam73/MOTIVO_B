@@ -117,6 +117,33 @@ struct SyncTestDiagnosticsView: View {
                 }
                 .foregroundStyle(.orange)
             }
+            Section("Private profile (stage H)") {
+                row("Profile here", profileValuesText)
+                row("Profile clock", state?.profileStamp.map(format) ?? "none (predates this build, or never edited)")
+                row("Last exchanged", state?.profileFingerprint == nil ? "nothing yet (transition pending)"
+                    : (JournalProfileValues(fingerprint: state?.profileFingerprint)?.describe() ?? "?"))
+                row("Avatar here", avatarHereText)
+                row("Avatar the server holds", avatarServerText)
+                row("Avatar uploads", "\(state?.avatarUploads ?? 0) file(s)")
+                row("Avatar asset bytes delivered", bytes(state?.avatarAssetBytesDelivered ?? 0))
+                // Every attempt at the four Connected write entry points since
+                // launch, whatever the outcome. Private sync must leave these at 0.
+                row("Connected writes attempted", connectedWritesText)
+                let displaced = JournalProfileSync.displacedAvatars()
+                if !displaced.isEmpty {
+                    ForEach(displaced, id: \.self) { url in
+                        Button("Restore displaced avatar \(url.deletingPathExtension().lastPathComponent.prefix(12))…") {
+                            let scope = JournalSyncCoordinator.shared.engine?.profileScope ?? .local
+                            _ = JournalProfileSync.restoreDisplacedAvatar(url, scope: scope)
+                            JournalSyncCoordinator.shared.auth?.noteAvatarChangedBySync()
+                            refreshTick += 1
+                        }
+                    }
+                }
+                Button("Re-send profile and avatar (re-run transition)") {
+                    JournalSyncCoordinator.shared.engine?.rerunProfileTransition(); refreshTick += 1
+                }
+            }
             Section("Counts") {
                 row("Outbox (pending)", "\(status.outboxCount)")
                 row("Held attachments", "\(status.heldCount)")
@@ -173,6 +200,32 @@ struct SyncTestDiagnosticsView: View {
         guard let id = newestAttachmentID() else { return "no attachments" }
         let choice = AttachmentPrivacy.currentMap()[AttachmentPrivacy.privacyKey(id: id, url: nil) ?? ""]
         return "\(id.uuidString.prefix(8))… \(choice.map { $0 ? "private" : "shared" } ?? "no choice (private by default)")"
+    }
+
+    private var profileValuesText: String {
+        let ctx = PersistenceController.shared.container.viewContext
+        let scope = JournalSyncCoordinator.shared.engine?.profileScope ?? .local
+        return JournalProfileSync.currentValues(context: ctx, scope: scope).describe()
+    }
+
+    private var avatarHereText: String {
+        guard let store = JournalSyncCoordinator.shared.store else { return "—" }
+        let scope = JournalSyncCoordinator.shared.engine?.profileScope ?? .local
+        let avatar = JournalProfileSync.currentAvatar(scope: scope, store: store)
+        guard let url = avatar.url else { return "none\(state?.avatarRemovedAt.map { " (removed \(format($0)))" } ?? "")" }
+        let size = JournalAssetHash.stamp(of: url)?.size ?? 0
+        return "\(avatar.hash.prefix(12))… \(bytes(size)), \(avatar.modifiedAt.map(format) ?? "—")"
+    }
+
+    private var avatarServerText: String {
+        guard let known = state?.assetHashes[JournalProfileSync.avatarName] else { return "unknown (nothing exchanged yet)" }
+        return known.isEmpty ? "none (removed)" : "\(known.prefix(12))…"
+    }
+
+    private var connectedWritesText: String {
+        let kinds = [ConnectedWriteWitness.directoryUpsert, ConnectedWriteWitness.directoryAvatarKey,
+                     ConnectedWriteWitness.avatarUpload, ConnectedWriteWitness.avatarDelete]
+        return "\(ConnectedWriteWitness.total) (" + kinds.map { "\($0) \(ConnectedWriteWitness.count($0))" }.joined(separator: ", ") + ")"
     }
 
     private var linkText: String {
