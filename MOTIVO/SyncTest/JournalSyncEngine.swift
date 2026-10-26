@@ -546,14 +546,16 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     private var profileScanScheduled = false
     /// One scan per burst: the editor writes the avatar twice (owner and local
-    /// scope) and a Profile close rewrites the location.
+    /// scope), a Profile close rewrites the location, and Profile commits the
+    /// name on every 650 ms typing pause (on device 2026-10-26 one name edit
+    /// went up as five records, one per pause); 3 s makes a burst one record.
     func scheduleProfileScan() {
         stateLock.lock()
         if profileScanScheduled { stateLock.unlock(); return }
         profileScanScheduled = true
         stateLock.unlock()
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 800_000_000)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard let self else { return }
             self.stateLock.lock(); self.profileScanScheduled = false; self.stateLock.unlock()
             await self.refreshViewerScope()
@@ -866,6 +868,9 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             log("Did fetch zone \(e.zoneID.zoneName): \(e.error.map { "error \($0.localizedDescription)" } ?? "ok")")
         case .didFetchChanges(let e):
             log("Did fetch changes (\(e.context.reason))")
+            // Any complete fetch moves the engine's saved state past this
+            // device's own sends: a post-send fetch still owed is no longer needed.
+            stateLock.lock(); engineFetchInFlight = false; ownSendFetchOwed = false; stateLock.unlock()
             if !store.state.initialFetchComplete {
                 store.update { $0.initialFetchComplete = true }
                 log("First complete fetch finished")
@@ -877,6 +882,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             log("Will fetch zone \(e.zoneID.zoneName)")
         case .willFetchChanges(let e):
             log("Will fetch changes (\(e.context.reason))")
+            stateLock.lock(); engineFetchInFlight = true; stateLock.unlock()
             await refreshViewerScope()
         case .willSendChanges, .didSendChanges:
             await publish { $0.lastEvent = "\(event)".components(separatedBy: "(").first ?? "\(event)" }
@@ -1228,16 +1234,39 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     }
 
     private var ownSendFetchScheduled = false
+    /// Set by a send that carried a file; cleared by any complete engine fetch.
+    private var ownSendFetchOwed = false
+    /// Between the engine's willFetchChanges and didFetchChanges.
+    private var engineFetchInFlight = false
+    /// Calling `fetchChanges()` while the engine's own fetch is in flight traps
+    /// inside CloudKit (five crashes on 2026-10-26, each 3–4 s after a send
+    /// with a file, right behind the engine's own "Will fetch changes
+    /// (scheduled)"). So the fetch is only made when nothing is in flight, and
+    /// not at all when the engine has fetched since the send, which already
+    /// moved its saved state past our write.
     private func scheduleFetchAfterOwnContentSend() {
         stateLock.lock()
+        ownSendFetchOwed = true
         if ownSendFetchScheduled { stateLock.unlock(); return }
         ownSendFetchScheduled = true
         stateLock.unlock()
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard let self else { return }
-            self.stateLock.lock(); self.ownSendFetchScheduled = false; self.stateLock.unlock()
+            self.stateLock.lock()
+            let owed = self.ownSendFetchOwed
+            let inFlight = self.engineFetchInFlight
+            self.ownSendFetchScheduled = false
+            self.stateLock.unlock()
+            guard owed else { self.log("Post-send fetch not needed: the engine fetched since the send"); return }
+            if inFlight {
+                // Wait for the engine's fetch to finish; it clears the debt itself.
+                self.log("Post-send fetch deferred: the engine is fetching")
+                self.scheduleFetchAfterOwnContentSend()
+                return
+            }
             guard let engine = self.engine, self.currentDecision().allowed else { return }
+            self.stateLock.lock(); self.ownSendFetchOwed = false; self.stateLock.unlock()
             self.log("Fetch after own content send (so the saved state passes it)")
             do { try await engine.fetchChanges() } catch { self.log("Fetch after own send failed: \(error.localizedDescription)") }
         }
