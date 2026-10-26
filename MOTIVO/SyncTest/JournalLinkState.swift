@@ -163,6 +163,7 @@ enum JournalLocalRemoval {
             st.scorePositions.removeAll()
             st.scorePositionStamps.removeAll()
             st.awaitingScore.removeAll()
+            st.scoreAwaitingFirstMeta.removeAll()
             st.scoreScanDone = true
             st.scoreIndexDamagedNoted = false
             st.initialFetchComplete = false

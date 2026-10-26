@@ -22,8 +22,9 @@
 //
 //  Change detection is a fingerprint scan (as for Lists and the profile): the
 //  store's write points call `JournalScoreMirror`; the engine scans after a
-//  3 s pause for metadata and a 10 s idle pause, the viewer's close or the
-//  app going to the background for positions. The first scan is the
+//  3 s pause for metadata, and for positions only at the viewer's dismissal
+//  or the app going to the background (page turns are saved locally and
+//  never published on their own). The first scan is the
 //  transition: every existing item is queued with its file, its metadata
 //  without a clock (a real edit anywhere beats it) and its position likewise.
 //
@@ -447,6 +448,7 @@ enum JournalScoreSync {
                 s.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
                 s.scoreFingerprints[parsed.id] = JournalScoreValues.metaFingerprint(item)
                 s.scoreScanDone = true
+                if heldMeta == nil, !s.scoreAwaitingFirstMeta.contains(parsed.id) { s.scoreAwaitingFirstMeta.append(parsed.id) }
                 if let heldMeta {
                     s.lastKnownRecords[metaName] = JournalSyncStateStore.encodeSystemFields(heldMeta)
                     if let stamp = heldMeta[JournalScoreKeys.stamp] as? Date { s.scoreStamps[parsed.id] = stamp }
@@ -486,13 +488,19 @@ enum JournalScoreSync {
             store.update { s in
                 s.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
                 s.scoreFingerprints[parsed.id] = localFP
+                s.scoreAwaitingFirstMeta.removeAll { $0 == parsed.id }
                 if !pending || transitionCopy { s.scoreStamps[parsed.id] = serverStamp; s.outbox.removeAll { $0.recordName == name && $0.op == .save } }
                 s.awaitingScore.removeValue(forKey: name)
             }
             if !pending || transitionCopy { outcome.settled.append(name) }
             return outcome
         }
-        let winner: JournalConflictWinner = transitionCopy ? .server
+        // An item made here from the content record alone (its title at
+        // creation, no star, cover 1) has no metadata of its own yet: the first
+        // meta record is simply applied, not a conflict (seen on device
+        // 2026-10-26: a spurious "no clock on either side" entry).
+        let firstMeta = st.scoreAwaitingFirstMeta.contains(parsed.id)
+        let winner: JournalConflictWinner = (transitionCopy || firstMeta) ? .server
             : JournalConflictRule.decide(localUserModifiedAt: localStamp, serverUserModifiedAt: serverStamp)
         switch winner {
         case .local:
@@ -522,13 +530,18 @@ enum JournalScoreSync {
                 s.scoreStamps[parsed.id] = serverStamp
                 s.outbox.removeAll { $0.recordName == name && $0.op == .save }
                 s.awaitingScore.removeValue(forKey: name)
-                s.conflicts.append(JournalSyncConflict(at: Date(), recordName: name, recordType: JournalSyncRecordType.scoreMeta, winner: "server",
-                                                       localUserModifiedAt: localStamp, serverUserModifiedAt: serverStamp,
-                                                       losingTitle: "displaced (this device): " + describe(title: item.title, favourite: item.isFavourite, cover: item.thumbnailPage),
-                                                       losingNotes: nil))
+                s.scoreAwaitingFirstMeta.removeAll { $0 == parsed.id }
+                if !firstMeta {
+                    s.conflicts.append(JournalSyncConflict(at: Date(), recordName: name, recordType: JournalSyncRecordType.scoreMeta, winner: "server",
+                                                           localUserModifiedAt: localStamp, serverUserModifiedAt: serverStamp,
+                                                           losingTitle: "displaced (this device): " + describe(title: item.title, favourite: item.isFavourite, cover: item.thumbnailPage),
+                                                           losingNotes: nil))
+                }
             }
             outcome.settled.append(name)
-            log("Score metadata \(parsed.id.prefix(8))…: \(transitionCopy ? "transition copy met a real one; server" : (localStamp == nil && serverStamp == nil ? "no clock on either side; server" : "server newer")) → \(describe(title: serverTitle, favourite: serverFavourite, cover: serverCover))")
+            let how = firstMeta ? "first metadata for an item made from its file" : (transitionCopy ? "transition copy met a real one; server"
+                : (localStamp == nil && serverStamp == nil ? "no clock on either side; server" : "server newer"))
+            log("Score metadata \(parsed.id.prefix(8))…: \(how) → \(describe(title: serverTitle, favourite: serverFavourite, cover: serverCover))")
         }
         return outcome
     }
@@ -608,6 +621,7 @@ enum JournalScoreSync {
                     s.scoreStamps.removeValue(forKey: parsed.id)
                     s.scorePositions.removeValue(forKey: parsed.id)
                     s.scorePositionStamps.removeValue(forKey: parsed.id)
+                    s.scoreAwaitingFirstMeta.removeAll { $0 == parsed.id }
                     for n in [name, JournalSyncRecordType.scoreMetaName(for: parsed.id), JournalSyncRecordType.scorePositionName(for: parsed.id)] {
                         s.lastKnownRecords.removeValue(forKey: n)
                         s.awaitingScore.removeValue(forKey: n)

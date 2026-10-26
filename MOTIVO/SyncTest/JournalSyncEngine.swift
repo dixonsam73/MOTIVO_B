@@ -99,10 +99,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// 20 ms on a removed copy.
     private var dormantGeneration = 0
     private var pathMonitor: NWPathMonitor?
-    /// Stage I: the Scores library scans on two cadences.
+    /// Stage I: the Scores library's metadata scan debounce.
     private var scoreScanScheduled = false
-    private var scorePositionScanScheduled = false
-    private var scorePositionScanGeneration = 0
     private var backgroundObserver: NSObjectProtocol?
 
     init(containerIdentifier: String, persistence: NSPersistentContainer, store: JournalSyncStateStore, status: JournalSyncStatus, customOwner: String?) {
@@ -179,24 +177,26 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 self.scheduleProfileScan()
             }
             // Stage I: the Scores library's write points. Metadata after a short
-            // pause; a reading position after an idle pause, on the viewer's
-            // close and when the app goes to the background, never per page turn.
+            // pause. A reading position is saved locally on every page turn but
+            // shared only at an explicit boundary: the viewer's dismissal or the
+            // app going to the background (Samuel, 2026-10-26: no idle publishing,
+            // so a page someone is sitting on never reaches the other device
+            // until they leave it). The latest boundary wins; reopening reads
+            // the latest synced page; an open viewer is never moved.
             JournalScoreMirror.onChange = { [weak self] change in
                 guard let self else { return }
                 switch change {
                 case .library: self.scheduleScoreScan()
-                case .position: self.scheduleScorePositionScan()
+                case .position: break
                 }
             }
             JournalScoreMirror.onViewerClosed = { [weak self] in
                 guard let self else { return }
-                self.stateLock.lock(); self.scorePositionScanGeneration += 1; self.stateLock.unlock()
-                Task { await self.scanScores(reason: "viewer closed", positions: true) }
+                Task { await self.scanScores(reason: "viewer dismissed", positions: true) }
             }
             #if canImport(UIKit)
             backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
                 guard let self else { return }
-                self.stateLock.lock(); self.scorePositionScanGeneration += 1; self.stateLock.unlock()
                 Task { await self.scanScores(reason: "background", positions: true) }
             }
             #endif
@@ -353,7 +353,9 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         runMetaTransitionIfNeeded()
         await scanLists()
         scanProfile(reason: "activation")
-        await scanScores(reason: "activation", positions: true)
+        // Positions only at the transition (the pre-existing last-read pages,
+        // once); afterwards they leave only at a dismissal or backgrounding.
+        await scanScores(reason: "activation", positions: !store.state.scoreScanDone)
         requeueOutbox()
         await publish { $0.phase = "Running" }
         refreshCounts()
@@ -644,22 +646,6 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             guard let self else { return }
             self.stateLock.lock(); self.scoreScanScheduled = false; self.stateLock.unlock()
             await self.scanScores(reason: "write point", positions: false)
-        }
-    }
-
-    /// Reading positions: each page turn restarts a 10 s idle timer, so a
-    /// read-through sends one record, not one per page.
-    func scheduleScorePositionScan() {
-        stateLock.lock()
-        scorePositionScanGeneration += 1
-        let generation = scorePositionScanGeneration
-        stateLock.unlock()
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
-            guard let self else { return }
-            self.stateLock.lock(); let current = self.scorePositionScanGeneration; self.stateLock.unlock()
-            guard current == generation else { return }   // a later turn, close or background took over
-            await self.scanScores(reason: "idle", positions: true)
         }
     }
 

@@ -232,6 +232,9 @@ struct JournalSyncPersistedState: Codable {
     var scorePositionsDisplaced = 0
     /// C-139 logged once per damaged index.
     var scoreIndexDamagedNoted = false
+    /// Items made here from their content record alone (no meta record yet):
+    /// their first meta record is applied, never a conflict.
+    var scoreAwaitingFirstMeta: [String] = []
 
     init() {}
 
@@ -298,6 +301,7 @@ struct JournalSyncPersistedState: Codable {
         scorePositionsSent = try c.decodeIfPresent(Int.self, forKey: .scorePositionsSent) ?? 0
         scorePositionsDisplaced = try c.decodeIfPresent(Int.self, forKey: .scorePositionsDisplaced) ?? 0
         scoreIndexDamagedNoted = try c.decodeIfPresent(Bool.self, forKey: .scoreIndexDamagedNoted) ?? false
+        scoreAwaitingFirstMeta = try c.decodeIfPresent([String].self, forKey: .scoreAwaitingFirstMeta) ?? []
     }
 }
 

@@ -252,6 +252,18 @@ final class SyncTestScoreSyncTests: XCTestCase {
         XCTAssertFalse(pending.contains { $0.recordName.contains(d1.id.uuidString) })
     }
 
+    func testTheFirstMetaRecordForAnItemMadeFromItsFileIsNotAConflict() throws {
+        let phone = makeLibrary("phone")
+        let id = UUID()
+        _ = apply([serverContent(id: id, fileURL: try makePDF("c.pdf"), fileName: "c.pdf", title: "Initial")], phone)
+        XCTAssertEqual(phone.items.first?.title, "Initial")
+        let before = store.state.conflicts.count
+        _ = apply([serverMeta(id: id, title: "Real title", favourite: true, cover: 1, stamp: nil)], phone)
+        XCTAssertEqual(phone.items.first?.title, "Real title")
+        XCTAssertTrue(phone.items.first!.isFavourite)
+        XCTAssertEqual(store.state.conflicts.count, before, "the item had no metadata of its own yet")
+    }
+
     func testHeldMetadataAndPositionLandWhenTheItemArrives() throws {
         let phone = makeLibrary("phone")
         let id = UUID()
