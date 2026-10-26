@@ -1039,16 +1039,26 @@ the join.
   fetches with a token that predates its own sends and gets them back with
   their files. Recurring, not one-time: after any relaunch that follows a
   content send with no fetch in between; metadata echoes are small. **Fix
-  (built, device acceptance pending):** after a send that saved content
-  records the engine fetches once ~3 s later while the app is alive, so the
-  persisted state passes its own writes; and a delivered record whose change
-  tag this device already holds is skipped (no import work) and counted in
-  diagnostics as "Own-write echoes" with the asset bytes that came with it,
-  so the acceptance shows whether a live post-send fetch itself carries the
-  file. Acceptance to run (script section 8): repeated renames then relaunch
-  deliver the latest title with 0 media delivered; a new photo then relaunch
-  delivers no echo, or shows its cost in the echo counter; new and replaced
-  media still arrive once. **Limitations:**
+  (build 1846):** after a send that saved content records the engine fetches
+  once ~3 s later while the app is alive, so the persisted state passes its
+  own writes; and a delivered record whose change tag this device already
+  holds is skipped (no import work) and counted in diagnostics as "Own-write
+  echoes" with the asset bytes that came with it. **Acceptance 2026-10-26
+  (iPhone and iPad on 1846, counters read over the cable):** three renames
+  of the same clip in a row, then a force-quit and relaunch of the iPhone:
+  three meta records sent, the relaunch catch-up imported 2 changed records
+  with 0 files, no content record fetched, 0 asset bytes delivered on either
+  device, the iPad showing the last name; a new photo: 1 upload (3.44 MB),
+  "Fetch after own content send" three seconds later with no echo, the
+  relaunch catch-up 3 changed records with 0 files, the engine's own fetch
+  after the relaunch empty, 0 asset bytes delivered on the iPhone, the iPad
+  delivered and wrote 3 444 289 bytes once (and its Journal row now shows the
+  thumbnail, the privacy choice having travelled with the meta record); a
+  delete-and-add of the photo (the editor's replacement flow for photos):
+  2 deletions and 1 upload (1.33 MB), the same clean sequence, the iPad
+  delivered and wrote 1 330 146 bytes once. The iPad logged one own-write
+  echo of a small record, skipped, 0 bytes. The engine's post-relaunch echo
+  of content records did not recur. **Limitations:**
   after a relaunch the engine may re-deliver changes the catch-up already
   imported (idempotent; costs assets only for content records); the
   catch-up's zone token advances only when a catch-up runs, so each one
