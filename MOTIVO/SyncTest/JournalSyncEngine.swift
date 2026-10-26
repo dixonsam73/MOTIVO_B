@@ -558,6 +558,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard let self else { return }
             self.stateLock.lock(); self.profileScanScheduled = false; self.stateLock.unlock()
+            if JournalProfileMirror.editingHold {
+                // A field is still being edited; the blur triggers the scan.
+                self.scheduleProfileScan()
+                return
+            }
             await self.refreshViewerScope()
             self.scanProfile(reason: "write point")
         }

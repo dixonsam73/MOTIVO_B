@@ -914,6 +914,9 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                              // why the debounced path commits locally too.
                              .onChange(of: isNameFocused) { was, now in
                                  if was && !now { persistProfileEdits() }
+                                 #if SYNCTEST
+                                 JournalProfileMirror.setEditingHold(now || isLocationFocused)
+                                 #endif
                              }
                              .scaleEffect(isNameFocused ? 0.995 : 1)
                              .overlay(alignment: .bottomLeading) {
@@ -941,6 +944,9 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                              .onSubmit { isLocationFocused = false }
                              .onChange(of: isLocationFocused) { was, now in
                                  if was && !now { persistProfileEdits() }
+                                 #if SYNCTEST
+                                 JournalProfileMirror.setEditingHold(now || isNameFocused)
+                                 #endif
                              }
                      }
                      .padding(.vertical, Theme.Spacing.s)
@@ -2765,12 +2771,22 @@ private func initials(from string: String) -> String {
          var view = AnyView(base)
          view = AnyView(view
             .onAppear(perform: onAppearLoad)
-            .onDisappear { persistProfileEdits() }
+            .onDisappear {
+                persistProfileEdits()
+                #if SYNCTEST
+                JournalProfileMirror.setEditingHold(false)
+                #endif
+            }
             // C-70. Backgrounding is a commit point. Without it an app killed
             // while Profile is on screen loses the edit entirely — the pending
             // change is NOT on disk (measured, M4 proxy).
             .onChange(of: scenePhase) { _, phase in
-                if phase != .active { persistProfileEdits() }
+                if phase != .active {
+                    persistProfileEdits()
+                    #if SYNCTEST
+                    JournalProfileMirror.setEditingHold(false)
+                    #endif
+                }
             }
             // C-24: sign-in completion is an event, not a change of identity. On a
             // reinstall the Keychain still holds the Apple user ID, so `currentUserID`

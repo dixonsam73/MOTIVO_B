@@ -202,6 +202,17 @@ enum JournalProfileMirror {
     /// Set by the sync import while it writes, so its own writes do not scan.
     nonisolated(unsafe) static var suppressed = false
     nonisolated(unsafe) static var onChange: ((_ avatarRemoved: Bool) -> Void)?
+    /// True while the Profile screen's name or location field has focus: the
+    /// scan waits, so a typing pause (or the field emptied before retyping)
+    /// never becomes a record. Seen 2026-10-26: an emptied name went up and
+    /// sent both devices to onboarding, whose gate is "no name".
+    nonisolated(unsafe) static var editingHold = false
+
+    static func setEditingHold(_ held: Bool) {
+        let was = editingHold
+        editingHold = held
+        if was, !held { onChange?(false) }   // the edit is finished: scan now
+    }
 
     static func locationChanged() { guard !suppressed else { return }; onChange?(false) }
     static func avatarChanged() { guard !suppressed else { return }; onChange?(false) }
