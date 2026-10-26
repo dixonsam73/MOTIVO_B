@@ -118,7 +118,7 @@ struct ScoresLibraryView: View {
                     do {
                         _ = try store.importPDF(from: url)
                     } catch {
-                        errorMessage = "Couldn’t import that PDF."
+                        errorMessage = (error as? ScoreLibraryError)?.errorDescription ?? "Couldn’t import that PDF."
                     }
                 case .failure:
                     errorMessage = "Couldn’t import that PDF."
@@ -285,7 +285,9 @@ struct ScoresLibraryView: View {
                 }
             }
 
-            if visibleItems.isEmpty {
+            if store.indexDamaged {
+                damagedState
+            } else if visibleItems.isEmpty {
                 emptyState
             } else {
                 VStack(spacing: Theme.Spacing.s) {
@@ -295,6 +297,27 @@ struct ScoresLibraryView: View {
                 }
             }
         }
+    }
+
+    /// C-139: the saved index could not be read by this build. Nothing is
+    /// replaced; the files stay where they are.
+    private var damagedState: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 28, weight: .medium))
+                .foregroundStyle(Theme.Colors.secondaryText)
+
+            Text("Scores couldn’t be read")
+                .font(Theme.Text.body.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            Text("Your scores could not be read by this version of Études. Nothing has been replaced; your files are still on this device.")
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
     }
 
     private var emptyState: some View {
@@ -439,7 +462,7 @@ struct ScoresLibraryView: View {
             scannedPDFDataPendingName = nil
             scannedScoreTitle = ""
         } catch {
-            errorMessage = "Couldn’t save that scanned score."
+            errorMessage = (error as? ScoreLibraryError)?.errorDescription ?? "Couldn’t save that scanned score."
         }
     }
 }

@@ -4,6 +4,19 @@
 
 import Foundation
 import Combine
+import CoreData
+
+enum ScoreLibraryError: LocalizedError {
+    /// C-139: the saved index could not be decoded. Nothing is replaced until
+    /// a build that can read it runs; adding a score would persist over it.
+    case indexDamaged
+
+    var errorDescription: String? {
+        switch self {
+        case .indexDamaged: return "Your scores could not be read. Nothing has been replaced."
+        }
+    }
+}
 
 @MainActor
 final class ScoreLibraryStore: ObservableObject {
@@ -11,13 +24,29 @@ final class ScoreLibraryStore: ObservableObject {
 
     @Published private(set) var items: [ScoreLibraryItem] = []
     @Published private(set) var activeScoreID: UUID?
+    /// C-139: the index exists but could not be decoded. The library reads as
+    /// empty, every write is refused, and the stored bytes are left exactly as
+    /// they are so a later build can still read them.
+    @Published private(set) var indexDamaged = false
 
     private let fileManager: FileManager
+    private let defaults: UserDefaults
+    private let directoryOverride: URL?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    /// C-138: whether a journal attachment still refers to a library PDF.
+    /// Injected so the rule is unit-tested without the app's store.
+    var attachmentContext: () -> NSManagedObjectContext? = { PersistenceController.shared.container.viewContext }
 
-    private init(fileManager: FileManager = .default) {
+    private convenience init() {
+        self.init(defaults: .standard, scoresDirectory: nil, fileManager: .default)
+    }
+
+    /// Tests pass their own defaults and directory; the app uses the shared store.
+    init(defaults: UserDefaults, scoresDirectory: URL?, fileManager: FileManager = .default) {
         self.fileManager = fileManager
+        self.defaults = defaults
+        self.directoryOverride = scoresDirectory
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         load()
     }
@@ -48,6 +77,7 @@ final class ScoreLibraryStore: ObservableObject {
         displayName: String? = nil,
         sourceAttachmentID: UUID? = nil
     ) throws -> ScoreLibraryItem {
+        guard !indexDamaged else { throw ScoreLibraryError.indexDamaged }
         // C-5 — adopting the same received attachment again returns its Score untouched,
         // but only while that Score's file still exists: a Score (or file) the member
         // removed does not block re-adoption. Manual imports pass no id and are unchanged.
@@ -99,6 +129,7 @@ final class ScoreLibraryStore: ObservableObject {
 
     @discardableResult
     func addScannedPDF(data: Data, title: String) throws -> ScoreLibraryItem {
+        guard !indexDamaged else { throw ScoreLibraryError.indexDamaged }
         let cleaned = cleanedTitle(title, fallback: "Scanned Score")
         let destination = try uniqueScoreFileURL()
         try data.write(to: destination, options: [.atomic])
@@ -133,7 +164,6 @@ final class ScoreLibraryStore: ObservableObject {
         persist()
     }
 
-
     func updateLastViewedPage(for itemID: UUID, page: Int) {
         guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
         let boundedPage = min(max(page, 1), max(items[index].pageCount, 1))
@@ -145,7 +175,7 @@ final class ScoreLibraryStore: ObservableObject {
     func rename(_ item: ScoreLibraryItem, to newTitle: String) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         let cleaned = cleanedTitle(newTitle, fallback: items[index].title)
-        guard !cleaned.isEmpty else { return }
+        guard !cleaned.isEmpty, cleaned != items[index].title else { return }
         items[index].title = cleaned
         persist()
     }
@@ -156,15 +186,52 @@ final class ScoreLibraryStore: ObservableObject {
         persist()
     }
 
+    /// The page the library's thumbnail shows. No screen offers this choice yet;
+    /// the field has always existed and is kept within the document.
+    func setThumbnailPage(_ page: Int, for itemID: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        let bounded = min(max(page, 1), max(items[index].pageCount, 1))
+        guard items[index].thumbnailPage != bounded else { return }
+        items[index].thumbnailPage = bounded
+        persist()
+    }
+
+    /// Removes the item from the library. C-138: a journal attachment made from
+    /// this score points at the SAME file (`AttachmentStore.addAttachment` with
+    /// the library path; no copy), so the file is deleted only when no
+    /// attachment refers to it. The attachment deletion paths protect library
+    /// files in the other direction (`isProtectedScoreLibraryURL`).
     func delete(_ item: ScoreLibraryItem) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         let url = self.url(for: items[index])
-        try? fileManager.removeItem(at: url)
+        if !isReferencedByAttachment(url) {
+            try? fileManager.removeItem(at: url)
+        }
         items.remove(at: index)
         if activeScoreID == item.id {
             activeScoreID = nil
         }
         persist()
+    }
+
+    /// Whether any persisted attachment's stored path refers to `url`, resolved
+    /// the way the deletion-safety guards resolve it (so a container move after
+    /// a restore still matches). Unreadable store → treated as referenced, so a
+    /// doubt never deletes.
+    func isReferencedByAttachment(_ url: URL) -> Bool {
+        guard let context = attachmentContext() else { return true }
+        return Self.isReferencedByAttachment(url, in: context)
+    }
+
+    nonisolated static func isReferencedByAttachment(_ url: URL, in context: NSManagedObjectContext) -> Bool {
+        var referenced = false
+        context.performAndWait {
+            let request = NSFetchRequest<NSManagedObject>(entityName: "Attachment")
+            request.predicate = NSPredicate(format: "kind == %@", AttachmentKind.pdf.rawValue)
+            guard let rows = try? context.fetch(request) else { referenced = true; return }
+            referenced = rows.contains { AttachmentPathResolver.storedPath($0.value(forKey: "fileURL") as? String, refersTo: url) }
+        }
+        return referenced
     }
 
     // MARK: - Delete Account v2 (Local Factory Reset)
@@ -183,7 +250,6 @@ final class ScoreLibraryStore: ObservableObject {
     func wipeOnDiskAndCacheForFactoryReset() {
         try? fileManager.removeItem(at: scoresDirectory())
 
-        let defaults = UserDefaults.standard
         defaults.removeObject(forKey: storageKey)
         defaults.removeObject(forKey: activeScoreKey)
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("scoreLibrary_") {
@@ -192,17 +258,24 @@ final class ScoreLibraryStore: ObservableObject {
 
         items = []
         activeScoreID = nil
+        indexDamaged = false
     }
 
     private func load() {
-        let defaults = UserDefaults.standard
         migrateLegacyIdentityScopedLibraryIfNeeded(in: defaults)
 
-        if let data = defaults.data(forKey: storageKey),
-           let decoded = try? decoder.decode([ScoreLibraryItem].self, from: data) {
-            items = decoded
+        if let data = defaults.data(forKey: storageKey) {
+            if let decoded = try? decoder.decode([ScoreLibraryItem].self, from: data) {
+                items = decoded
+                indexDamaged = false
+            } else {
+                // C-139: an index this build cannot read is not an empty library.
+                items = []
+                indexDamaged = true
+            }
         } else {
             items = []
+            indexDamaged = false
         }
 
         if let rawActive = defaults.string(forKey: activeScoreKey),
@@ -264,8 +337,9 @@ final class ScoreLibraryStore: ObservableObject {
         }
     }
 
+    /// Writes the index. C-139: never over an index that could not be read.
     private func persist() {
-        let defaults = UserDefaults.standard
+        guard !indexDamaged else { return }
         if let data = try? encoder.encode(items) {
             defaults.set(data, forKey: storageKey)
         }
@@ -286,13 +360,19 @@ final class ScoreLibraryStore: ObservableObject {
     }
 
     private func scoresDirectory() -> URL {
-        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
-        let directory = documents.appendingPathComponent("Scores", isDirectory: true)
+        let directory = directoryOverride ?? Self.defaultScoresDirectory(fileManager: fileManager)
         if !fileManager.fileExists(atPath: directory.path) {
             try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             try? excludeFromBackup(directory)
         }
         return directory
+    }
+
+    /// `Documents/Scores`, the one place library PDFs live (`AttachmentPathResolver`,
+    /// `BackupPolicy` and the attachment deletion guards all name it).
+    nonisolated static func defaultScoresDirectory(fileManager: FileManager = .default) -> URL {
+        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
+        return documents.appendingPathComponent("Scores", isDirectory: true)
     }
 
     private func uniqueScoreFileURL() throws -> URL {
