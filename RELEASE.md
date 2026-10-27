@@ -1250,6 +1250,155 @@ the join.
   fixes and state-file analysis during the device run, ≈ 15 min records;
   ≈ 40 min waiting on builds, tests and installs. Samuel: ≈ 35 min at the
   devices, ≈ 25 min waiting on the three builds and the iPhone reconnect.
+  **Stage I, Scores library: passed 2026-10-27; final build 1862
+  (`075d123`).** Scope (Samuel, 2026-10-26): the whole library,
+  including documents no entry refers to: PDFs, titles, favourites, the
+  cover-page field (exercised through diagnostics; no chooser screen
+  exists), additions, deletions and the reading position. Scores stay in
+  their UserDefaults index and `Documents/Scores` files; no move into Core
+  Data. **Design.** Three records per item, named from its id: `Score`
+  ("score-<id>": the PDF as `file` with `fileHash`, file name, page count,
+  created date, the C-5 source id and the title at creation; written once,
+  a library PDF never changes), `ScoreMeta` ("score-<id>-meta": title,
+  favourite, cover page, `userModifiedAt`) and `ScorePosition`
+  ("score-<id>-position": last viewed page with its own clock, so a page
+  turn can never displace a rename under the whole-record rule). A rename,
+  favourite or cover change queues the meta record alone (asset-free, by
+  the stage F/G rules), so no unchanged PDF is uploaded or delivered.
+  Change detection is a fingerprint scan (`JournalScoreSync`, the Lists and
+  profile pattern): the store's write points call `JournalScoreMirror`; the
+  engine scans 3 s after a metadata write; a reading position is saved
+  locally on every page turn but shared only at an explicit boundary, the
+  viewer's dismissal (`ScoreLibraryStore.viewerDidClose`) or the app going
+  to the background (Samuel's clarification during the device run,
+  2026-10-26: no idle publishing; build 1859 had a 10 s idle rule, and the
+  iPad resumed on the page the iPhone was sitting on); every activation
+  scans metadata, and positions once at the transition. The first scan is the transition: every item queued
+  with its file, its metadata and position without a clock, so a real edit
+  anywhere beats them. **Combining libraries:** union by id; ids and file
+  names are UUIDs minted at import, so two libraries are disjoint and
+  nothing is merged, whatever the titles or bytes; the same id (a restored
+  copy) meets the existing rule: newer clock wins the whole meta record,
+  ties (two unclocked copies) to the server, the displaced values in the
+  conflict log; a differing file for the same id takes the server's and
+  keeps the local one in `Application Support/SyncTest/DisplacedScores`
+  by hash; a repeated import of the same id updates the one item. Imports
+  write the file first, then the index entry through the store (no hook,
+  so no loop); meta and position records arriving before their item are
+  held (`awaitingScore`) and land with it. The catch-up fetches a Score's
+  file only when the item or its file is missing here or the hash differs.
+  **Reading position (approved behaviour):** opening a score reads the
+  latest synced page; the open viewer holds the page it was opened with
+  (`TimerScoreViewerRequest` is immutable, the restore runs once), so a
+  remote page never moves someone's reading; the currently open score and
+  the last-opened date stay device-local, so opening here opens nothing
+  there; both devices reading the same score each keep their page and the
+  later dismissal or backgrounding becomes the saved position; imported
+  pages are clamped to the page count; a displaced page is counted, not
+  logged as a conflict. Found on 1860: with the iPhone's viewer open on
+  page 1, the iPad's pages 3 and 2 were written into the iPhone's saved
+  page and the dismissal published 2; now the store knows which score's
+  viewer is on screen (`openViewerID`), a remote position for it is
+  recorded but not written, and the dismissal or backgrounding publishes
+  the page on screen with a fresh clock even if unchanged (1861). Found on
+  1861: backgrounding queued the position but the app was suspended before
+  the engine sent it; the background handler now takes background time
+  around the scan and a manual `sendChanges()` (1862). An item made here from its content record alone
+  (title at creation) takes its first meta record quietly; two genuinely
+  pre-existing copies still log the displaced values.
+  **Journal attachments (C-138, both directions):** a library delete keeps
+  a PDF any pdf attachment's stored path resolves to (production fix
+  `b4ea8bf`, a dependency of this stage); the importer's remote attachment
+  deletion now goes through the guarded `AttachmentStore.deleteAttachmentFile`,
+  so an attachment deleted elsewhere never removes this device's library
+  PDF; a remote library deletion uses the same keep rule. On the receiving
+  device a PDF that is both a library item and an attachment is two
+  files, so deleting either never affects the other; the PDF travels
+  twice (once per record), accepted for the trial and recorded as a later
+  optimisation. **Damaged index (C-139):** reported once, nothing sent, no
+  deletion inferred, imports and remote deletions refused, bytes
+  untouched. An erase resets the baseline (nothing erased is sent; a
+  score added before re-enable is a clocked new item). Diagnostics
+  section "Scores library (stage I)": items, exchanged, uploads, asset
+  bytes delivered, records sent without a file, positions sent/displaced,
+  held records, the newest score with a cover-page control, and a re-send.
+  15 unit tests (`SyncTestScoreSyncTests`) plus 5 production
+  (`C138ScoreLibraryTests`): transition and edits, cadences, union by id
+  with equal titles and no duplicate on repeat, held records, the same id
+  with different metadata (unclocked tie, newer local kept and resent,
+  newer server applied, displaced values logged) and with a different
+  file, damaged index (no send, no deletion, no overwrite), position
+  clamp/newer/older with no conflict entry and no touch on metadata or
+  the open score, deletions both ways with a referenced file kept, the
+  importer's guarded removal, erase baseline, send conflict. 17 tests in `SyncTestScoreSyncTests` after the device
+  run; 143 SyncTest tests green; Debug, Release and SyncTest build.
+  **Device run (iPhone and iPad Sync Test installs, 2026-10-26 evening and
+  2026-10-27, builds 1859 → 1862, both state files read over the cable
+  after every step, deltas against the previous read; "asset bytes
+  delivered" is what CloudKit handed the app, never network traffic):**
+  (1) transition with differing fixtures made on 1856 (iPhone 3 items
+  incl. a scan, a rename, a star and a page-2 position; iPad 2 items, one
+  with the same title as an iPhone one): 3 and 2 files uploaded once,
+  both libraries 5 items with both `I-Mozart` present, files open, no
+  duplicate after relaunching both (one-time cost: each device's own
+  records came back as own-write echoes after its first relaunch, 4.0 and
+  9.9 MB delivered and skipped, 0 written). (2) Rename, favourite each
+  way and the cover page from diagnostics: one `ScoreMeta` each, 0
+  uploads, 0 asset bytes delivered either way; the cover thumbnail changed
+  on both. (3) A 5 KB import and a 9.56 MB three-page scan each delivered
+  and written once; a deletion applied as three record deletions and one
+  item removed. (4) C-138 both ways: the attachment deleted on the iPad,
+  the iPhone's library file still on disk (27,290 bytes, read over the
+  cable) and the item opening; the library item deleted on the iPhone,
+  the entry's PDF still opening on both devices. (5) Offline on the iPad:
+  import, rename and star made in Airplane Mode, kept across an offline
+  relaunch, sent on reconnect as 3 records with 1 upload, present once on
+  the iPhone. (6) Reading position on 1862: iPad dismissed on page 3 →
+  iPhone opened on 3; iPhone sat on page 1 with the viewer open while the
+  iPad resumed on 3, moved to 2 and dismissed → the iPhone's viewer never
+  moved; the iPhone dismissed on 1 → both reopened on 1; the iPad moved to
+  2 and went to the background → "Background send finished", the iPhone
+  opened on 2; no "Currently Open" card for a score opened only on the
+  other device. (7) Three imports with a force-quit before the third was
+  sent: the outbox held it, uploads +3 exactly, the iPad's relaunch
+  catch-up fetched the three files once (45,314 bytes, their exact total),
+  no duplicate after a further relaunch. (8) Erase on the iPad: outbox
+  emptied, no deletion queued, the iPhone untouched; re-enable refetched
+  the zone (journal and media included, several minutes) and the restored
+  library equalled the iPhone's item by item: same 9 ids, favourites,
+  cover pages and positions, each file written once. (9) Journal, media,
+  profile and lists intact on both; Connected writes attempted 0; no crash
+  on either device. **Defects found and fixed during the run:** (a) with
+  the viewer open on page 1, the iPad's pages 3 and 2 were written into
+  the iPhone's saved page and its dismissal published 2 (1861, see
+  above); (b) backgrounding queued the position but the app was suspended
+  before the send (1862, see above); (c) the first meta record for an
+  item made from its content record was logged as a conflict (1861).
+  Clarified by Samuel during the run: no idle publishing (1859 had a 10 s
+  idle rule; 1860 removed it). **Measured costs, not faults:** the own-write
+  echo after a relaunch or a fetch that follows a send re-delivers this
+  device's own score files (C-134; up to 9.9 MB in one fetch here),
+  skipped and never written; a re-enable after an erase refetches the
+  whole zone with every file. Hands-on (estimated from the state-file
+  timestamps; Samuel did not report times): agent ≈ 2 h 40 min design,
+  code and tests, ≈ 1 h 40 min fixes during the device run, ≈ 1 h 30 min
+  reading state files and guiding, ≈ 30 min records; ≈ 1 h 45 min waiting
+  on builds, tests and installs. Samuel ≈ 2 h 25 min at the devices over
+  the two days (fixture included), ≈ 50 min waiting on the four builds,
+  the re-enable fetch and my reads.
+  **Limitations:** whole-record conflicts on the meta record (a later
+  edit of one field carries the other device's title, star and cover);
+  a PDF held as both a library item and a journal attachment is uploaded
+  and delivered once per record (later: cross-record reuse by hash); a
+  scanned score embeds its page images and can be large, and C-120 applies
+  to it in full: on a link too slow for CloudKit's per-operation timeout
+  it stays pending, retried from the start each cycle, until the link
+  improves, so a sufficiently large scan may not arrive at all while the
+  connection stays poor (recorded; no size cap, no transfer work in this
+  stage); the cover page has no chooser screen; a library item whose file
+  is missing here is not sent; a remote deletion that arrives while the
+  index is unreadable leaves the item here, and it is uploaded again once
+  the index reads.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
