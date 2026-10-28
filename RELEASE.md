@@ -1441,7 +1441,13 @@ the join.
   last rendered (Journal: the whole journal; Insights: the sessions in
   the chosen range), a pre-existing quirk sync does not change. The instrument map is one
   `TintMap` record ("tint-instrument": label → slot) merged by UNION with
-  the server's slot standing where both assign the same label; removals are
+  the server's slot standing where both assign the same label, and a label
+  only this device has that sits on a slot a server label holds moved to the
+  next free colour before the sanitiser runs (device run 2026-10-28: Sitar
+  and Tabla were both given slot 3 offline, and the sanitiser's name order
+  had moved the FIRST upload's label; now only the later device's own new
+  label moves, and when all four visible colours are taken two labels share
+  one, as production already allows); removals are
   never sent (a label a device drops, its primary or a sanitiser move, is
   not a change), so existing assignments are kept wherever possible, a
   clash is settled once and both devices, running the same deterministic

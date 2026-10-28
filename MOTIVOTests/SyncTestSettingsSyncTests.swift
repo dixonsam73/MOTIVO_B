@@ -262,6 +262,17 @@ final class SyncTestSettingsSyncTests: XCTestCase {
         XCTAssertEqual(merged["viola"], 4, "existing assignment kept")
         XCTAssertEqual(outcome.resend.map(\.recordName), [JournalSyncRecordType.tintMapRecordName], "the union goes back up")
         XCTAssertEqual(store.state.tintMapExchanged, ["oud": 3, "cello": 5, "viola": 4])
+        // Two devices each gave a NEW label the same slot (seen on device
+        // 2026-10-28: Sitar and Tabla both on 3): the first upload's label
+        // keeps it and only this device's own label moves, whatever the names.
+        // (Four visible colours exist; with one free, the mover takes it.)
+        Theme.InstrumentTint.storeSlotMap(["oud": 3, "cello": 5, "sitar": 2], ownerID: owner, defaults: defaults)
+        store.update { $0.tintMapExchanged = ["oud": 3, "cello": 5] }
+        _ = apply([tintRecord(["oud": 3, "cello": 5, "tabla": 2])])
+        let settled = Theme.InstrumentTint.storedSlotMap(ownerID: owner, defaults: defaults)
+        XCTAssertEqual(settled["tabla"], 2, "the first upload stands")
+        XCTAssertEqual(settled["sitar"], 4, "only this device's own new label moves, to the free colour")
+        XCTAssertEqual(Set(settled.values).count, settled.count)
         // A local removal is not a change.
         Theme.InstrumentTint.storeSlotMap(["oud": 3, "cello": 5], ownerID: owner, defaults: defaults)
         store.update { $0.tintMapQueuedFingerprint = nil; $0.outbox.removeAll() }
@@ -277,14 +288,17 @@ final class SyncTestSettingsSyncTests: XCTestCase {
         var a: [String: Int] = ["oud": 2, "viola": 4, "harp": 3]
         var b: [String: Int] = ["viola": 2, "cello": 4]
         func sanitise(_ m: [String: Int]) -> [String: Int] { Theme.InstrumentTint.sanitized(m, primaryLabel: nil) }
+        func merge(_ l: [String: Int], _ s: [String: Int]) -> [String: Int] {
+            JournalTintMapMerge.merge(local: l, server: s, freeSlot: { Theme.InstrumentTint.nextFreeSlot(from: $0) })
+        }
         var server = a                                  // A uploaded first
         for _ in 0..<4 {
             // B imports.
-            let mergedB = JournalTintMapMerge.merge(local: b, server: server)
+            let mergedB = merge(b, server)
             b = sanitise(mergedB)
             if mergedB != server { server = b }         // B sends its (sanitised) map; server-wins semantics on A's next import
             // A imports.
-            let mergedA = JournalTintMapMerge.merge(local: a, server: server)
+            let mergedA = merge(a, server)
             a = sanitise(mergedA)
             if mergedA != server { server = a }
         }
@@ -292,11 +306,12 @@ final class SyncTestSettingsSyncTests: XCTestCase {
         XCTAssertEqual(Set(a.keys), ["oud", "viola", "harp", "cello"], "nothing lost")
         XCTAssertEqual(a["oud"], 2, "A's existing assignment kept where no clash")
         XCTAssertEqual(a["harp"], 3, "A's existing assignment kept where no clash")
-        XCTAssertEqual(a["cello"], 4, "B's existing assignment kept where no clash")
-        // viola clashed (A 4, B 2): the first upload's slot stood, and because
-        // cello already held 4 the sanitiser moved viola once, on both devices.
+        // viola clashed (A 4, B 2): the first upload's slot stands; B's cello sat
+        // on 4 too, so B's own label moved, once, and A kept everything.
+        XCTAssertEqual(a["viola"], 4, "the first upload's assignment stands")
+        XCTAssertNotEqual(a["cello"], 4, "the later device moved only its own label")
         XCTAssertEqual(Set(a.values).count, a.count, "no two labels on one slot after the sanitiser")
-        let again = sanitise(JournalTintMapMerge.merge(local: a, server: server))
+        let again = sanitise(merge(a, server))
         XCTAssertEqual(again, a, "stable: a further round changes nothing")
     }
 

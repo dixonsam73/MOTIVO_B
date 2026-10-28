@@ -133,10 +133,19 @@ enum JournalSettingMerge {
 
 /// PURE. The instrument colour map's merge.
 enum JournalTintMapMerge {
-    /// Union; where both assign a label, the server's slot stands.
-    static func merge(local: [String: Int], server: [String: Int]) -> [String: Int] {
+    /// Union; where both assign a label, the server's slot stands. A label
+    /// only this device has that sits on a slot a server label holds is moved
+    /// to `freeSlot(map so far)` (labels in name order), so the other
+    /// device's assignment stands and only this device's own new label moves;
+    /// without `freeSlot` it keeps its slot and the sanitiser decides.
+    static func merge(local: [String: Int], server: [String: Int], freeSlot: (([String: Int]) -> Int)? = nil) -> [String: Int] {
         var result = server
-        for (label, slot) in local where result[label] == nil { result[label] = slot }
+        let taken = Set(server.values)
+        var clashing: [String] = []
+        for (label, slot) in local where result[label] == nil {
+            if freeSlot != nil, taken.contains(slot) { clashing.append(label) } else { result[label] = slot }
+        }
+        if let freeSlot { for label in clashing.sorted() { result[label] = freeSlot(result) } }
         return result
     }
 
@@ -679,7 +688,7 @@ enum JournalSettingsSync {
             return outcome
         }
         let local = Theme.InstrumentTint.storedSlotMap(ownerID: owner, defaults: defaults)
-        let merged = JournalTintMapMerge.merge(local: local, server: server)
+        let merged = JournalTintMapMerge.merge(local: local, server: server, freeSlot: { Theme.InstrumentTint.nextFreeSlot(from: $0) })
         let moved = local.filter { merged[$0.key] != $0.value }
         if merged != local {
             // Written the way this device will read it: without its primary,
