@@ -82,12 +82,48 @@ struct JournalSyncConflict: Codable, Identifiable {
     let at: Date
     let recordName: String
     let recordType: String
-    /// "server" or "local"
+    /// "server", "local" or "merged"
     let winner: String
     let localUserModifiedAt: Date?
     let serverUserModifiedAt: Date?
     let losingTitle: String?
     let losingNotes: String?
+    // Stage J (recovery). Older state files decode these with defaults.
+    /// What the person can read back: field label → the value that lost.
+    var displaced: [String: String] = [:]
+    /// What the entry is, for the recovery screen ("Thought 12 Oct", "Profile").
+    var subject: String = ""
+    /// How a deliberate restoration is applied, or nil when copy is all that
+    /// is offered: "session:<id>", "attachment:<id>", "profile", "score:<id>",
+    /// "avatar:<path>".
+    var restore: String? = nil
+    /// Set when the person restored or dismissed the entry.
+    var resolvedAt: Date? = nil
+
+    var hasRecoverableText: Bool { !displaced.values.allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
+}
+
+extension JournalSyncConflict {
+    private enum CodingKeys: String, CodingKey {
+        case id, at, recordName, recordType, winner, localUserModifiedAt, serverUserModifiedAt, losingTitle, losingNotes
+        case displaced, subject, restore, resolvedAt
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        at = try c.decode(Date.self, forKey: .at)
+        recordName = try c.decode(String.self, forKey: .recordName)
+        recordType = try c.decode(String.self, forKey: .recordType)
+        winner = try c.decode(String.self, forKey: .winner)
+        localUserModifiedAt = try c.decodeIfPresent(Date.self, forKey: .localUserModifiedAt)
+        serverUserModifiedAt = try c.decodeIfPresent(Date.self, forKey: .serverUserModifiedAt)
+        losingTitle = try c.decodeIfPresent(String.self, forKey: .losingTitle)
+        losingNotes = try c.decodeIfPresent(String.self, forKey: .losingNotes)
+        displaced = try c.decodeIfPresent([String: String].self, forKey: .displaced) ?? [:]
+        subject = try c.decodeIfPresent(String.self, forKey: .subject) ?? ""
+        restore = try c.decodeIfPresent(String.self, forKey: .restore)
+        resolvedAt = try c.decodeIfPresent(Date.self, forKey: .resolvedAt)
+    }
 }
 
 struct JournalSyncLogEntry: Codable, Identifiable {
@@ -235,6 +271,37 @@ struct JournalSyncPersistedState: Codable {
     /// Items made here from their content record alone (no meta record yet):
     /// their first meta record is applied, never a conflict.
     var scoreAwaitingFirstMeta: [String] = []
+    // Stage J (settings, list contexts, instrument colours).
+    /// The first settings scan (the transition) has run.
+    var settingsScanDone = false
+    /// Setting key → value last sent or received.
+    var settingFingerprints: [String: String] = [:]
+    /// Setting key → clock of this device's value; absent = unclocked.
+    var settingStamps: [String: Date] = [:]
+    /// List-context record name → fingerprint last sent or received.
+    var listContextFingerprints: [String: String] = [:]
+    var listContextStamps: [String: Date] = [:]
+    /// The owner scope the list-context fingerprints were taken under.
+    var listContextScope: String?
+    /// List-context records (whole) held until their instrument exists here.
+    var awaitingListContext: [String: Data] = [:]
+    /// The instrument colour map as last merged with the server (label → slot).
+    /// nil before the first exchange. Removals are never sent: a label this
+    /// device drops (its primary, or a sanitiser move) is not a change.
+    var tintMapExchanged: [String: Int]?
+    /// The map last queued, so the defaults observer does not requeue it.
+    var tintMapQueuedFingerprint: String?
+    // Stage J (media over mobile data).
+    /// Record name → bytes of a media upload held back for Wi-Fi.
+    var mediaWaitingUpload: [String: Int64] = [:]
+    /// Record names whose file waits for Wi-Fi (records not imported until then).
+    var awaitingMedia: [String] = []
+    /// This app's own silent-push subscription exists on the server.
+    var appSubscriptionSaved = false
+    var mediaUploadsHeld = 0
+    var mediaDownloadsHeld = 0
+    /// Library items without a file on this device at the last scan (not sent).
+    var scoresWithoutFile = 0
 
     init() {}
 
@@ -302,6 +369,21 @@ struct JournalSyncPersistedState: Codable {
         scorePositionsDisplaced = try c.decodeIfPresent(Int.self, forKey: .scorePositionsDisplaced) ?? 0
         scoreIndexDamagedNoted = try c.decodeIfPresent(Bool.self, forKey: .scoreIndexDamagedNoted) ?? false
         scoreAwaitingFirstMeta = try c.decodeIfPresent([String].self, forKey: .scoreAwaitingFirstMeta) ?? []
+        settingsScanDone = try c.decodeIfPresent(Bool.self, forKey: .settingsScanDone) ?? false
+        settingFingerprints = try c.decodeIfPresent([String: String].self, forKey: .settingFingerprints) ?? [:]
+        settingStamps = try c.decodeIfPresent([String: Date].self, forKey: .settingStamps) ?? [:]
+        listContextFingerprints = try c.decodeIfPresent([String: String].self, forKey: .listContextFingerprints) ?? [:]
+        listContextStamps = try c.decodeIfPresent([String: Date].self, forKey: .listContextStamps) ?? [:]
+        listContextScope = try c.decodeIfPresent(String.self, forKey: .listContextScope)
+        awaitingListContext = try c.decodeIfPresent([String: Data].self, forKey: .awaitingListContext) ?? [:]
+        tintMapExchanged = try c.decodeIfPresent([String: Int].self, forKey: .tintMapExchanged)
+        tintMapQueuedFingerprint = try c.decodeIfPresent(String.self, forKey: .tintMapQueuedFingerprint)
+        mediaWaitingUpload = try c.decodeIfPresent([String: Int64].self, forKey: .mediaWaitingUpload) ?? [:]
+        awaitingMedia = try c.decodeIfPresent([String].self, forKey: .awaitingMedia) ?? []
+        appSubscriptionSaved = try c.decodeIfPresent(Bool.self, forKey: .appSubscriptionSaved) ?? false
+        mediaUploadsHeld = try c.decodeIfPresent(Int.self, forKey: .mediaUploadsHeld) ?? 0
+        mediaDownloadsHeld = try c.decodeIfPresent(Int.self, forKey: .mediaDownloadsHeld) ?? 0
+        scoresWithoutFile = try c.decodeIfPresent(Int.self, forKey: .scoresWithoutFile) ?? 0
     }
 }
 

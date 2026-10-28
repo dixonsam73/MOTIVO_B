@@ -167,6 +167,12 @@ enum JournalScoreSync {
         var positionStamps = st.scorePositionStamps
         var present = Set<String>()
         var sentFiles = 0
+        // C-140: items without a file here are counted and shown, never sent.
+        let withoutFile = snapshot.items.filter { !FileManager.default.fileExists(atPath: snapshot.url(for: $0).path) }.count
+        if withoutFile != st.scoresWithoutFile {
+            store.update { $0.scoresWithoutFile = withoutFile }
+            if withoutFile > 0 { log("Scores: \(withoutFile) item(s) have no file on this device; shown as unavailable, not sent") }
+        }
 
         for item in snapshot.items {
             let id = item.id.uuidString
@@ -382,6 +388,7 @@ enum JournalScoreSync {
                 if let sourceURL, FileManager.default.fileExists(atPath: sourceURL.path) {
                     if copy(sourceURL, to: url, log: log) {
                         outcome.bytesWritten = JournalAssetHash.stamp(of: url)?.size ?? 0
+                        library.refreshFileAvailability()
                         log("Score \(parsed.id.prefix(8))…: missing file restored from the other device")
                     }
                 } else {
@@ -510,10 +517,9 @@ enum JournalScoreSync {
             // Kept; sent again on top of the server's change tag.
             store.update { s in
                 s.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
-                s.conflicts.append(JournalSyncConflict(at: Date(), recordName: name, recordType: JournalSyncRecordType.scoreMeta, winner: "local",
-                                                       localUserModifiedAt: localStamp, serverUserModifiedAt: serverStamp,
-                                                       losingTitle: "displaced (other device): " + describe(title: serverTitle, favourite: serverFavourite, cover: serverCover),
-                                                       losingNotes: nil))
+                s.conflicts.append(metaConflict(name: name, winner: "local", localStamp: localStamp, serverStamp: serverStamp, subject: item.title,
+                                                id: parsed.id, side: "other device", kept: (item.title, item.isFavourite, item.thumbnailPage),
+                                                lost: (serverTitle, serverFavourite, serverCover)))
             }
             if !pending {
                 let change = JournalSyncPendingChange(recordName: name, recordType: JournalSyncRecordType.scoreMeta, op: .save, metadataEdit: true)
@@ -535,10 +541,9 @@ enum JournalScoreSync {
                 s.awaitingScore.removeValue(forKey: name)
                 s.scoreAwaitingFirstMeta.removeAll { $0 == parsed.id }
                 if !firstMeta {
-                    s.conflicts.append(JournalSyncConflict(at: Date(), recordName: name, recordType: JournalSyncRecordType.scoreMeta, winner: "server",
-                                                           localUserModifiedAt: localStamp, serverUserModifiedAt: serverStamp,
-                                                           losingTitle: "displaced (this device): " + describe(title: item.title, favourite: item.isFavourite, cover: item.thumbnailPage),
-                                                           losingNotes: nil))
+                    s.conflicts.append(metaConflict(name: name, winner: "server", localStamp: localStamp, serverStamp: serverStamp, subject: serverTitle,
+                                                    id: parsed.id, side: "this device", kept: (serverTitle, serverFavourite, serverCover),
+                                                    lost: (item.title, item.isFavourite, item.thumbnailPage)))
                 }
             }
             outcome.settled.append(name)
@@ -674,6 +679,21 @@ enum JournalScoreSync {
         "“\(title)” · \(favourite ? "favourite" : "not favourite") · cover page \(cover)"
     }
 
+    /// Stage J: the conflict entry with the fields that actually differ, so the
+    /// recovery screen can show and restore exactly what lost.
+    static func metaConflict(name: String, winner: String, localStamp: Date?, serverStamp: Date?, subject: String, id: String, side: String,
+                             kept: (String, Bool, Int), lost: (String, Bool, Int)) -> JournalSyncConflict {
+        var conflict = JournalSyncConflict(at: Date(), recordName: name, recordType: JournalSyncRecordType.scoreMeta, winner: winner,
+                                           localUserModifiedAt: localStamp, serverUserModifiedAt: serverStamp,
+                                           losingTitle: "displaced (\(side)): " + describe(title: lost.0, favourite: lost.1, cover: lost.2), losingNotes: nil)
+        conflict.subject = "Score “\(subject)”"
+        conflict.restore = "score:\(id)"
+        if kept.0 != lost.0 { conflict.displaced["Title (\(side))"] = lost.0 }
+        if kept.1 != lost.1 { conflict.displaced["Favourite (\(side))"] = lost.1 ? "yes" : "no" }
+        if kept.2 != lost.2 { conflict.displaced["Cover page (\(side))"] = String(lost.2) }
+        return conflict
+    }
+
     private static func copy(_ source: URL, to destination: URL, log: (String) -> Void) -> Bool {
         do {
             if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
@@ -700,9 +720,12 @@ enum JournalScoreSync {
         let files = ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
             .sorted { (JournalAssetHash.stamp(of: $0)?.mtime ?? 0) > (JournalAssetHash.stamp(of: $1)?.mtime ?? 0) }
         for old in files.dropFirst(5) { try? FileManager.default.removeItem(at: old) }
-        store.update { $0.conflicts.append(JournalSyncConflict(at: Date(), recordName: recordName, recordType: JournalSyncRecordType.score, winner: "server",
-                                                               localUserModifiedAt: nil, serverUserModifiedAt: nil,
-                                                               losingTitle: "displaced score file kept: \(hash.prefix(12))…", losingNotes: nil)) }
+        var conflict = JournalSyncConflict(at: Date(), recordName: recordName, recordType: JournalSyncRecordType.score, winner: "server",
+                                           localUserModifiedAt: nil, serverUserModifiedAt: nil,
+                                           losingTitle: "displaced score file kept: \(hash.prefix(12))…", losingNotes: nil)
+        conflict.subject = "Score file"
+        conflict.displaced["File kept on this device"] = target.path
+        store.update { $0.conflicts.append(conflict) }
     }
 
     static func displacedScores() -> [URL] {

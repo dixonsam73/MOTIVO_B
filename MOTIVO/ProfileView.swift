@@ -691,9 +691,7 @@ struct ProfileNameDraftState: Equatable {
                          }
                      }
                      #if SYNCTEST
-                     Section {
-                         NavigationLink("Sync Test diagnostics") { SyncTestDiagnosticsView() }
-                     }
+                     SyncTestProfileSection()
                      #endif
                      buildInfoFooter
                         }
@@ -1467,17 +1465,31 @@ private var sessionSetupSection: some View {
      /// Destructive control title. Names account deletion explicitly whenever
      /// there is an account to delete.
      private var destructiveActionTitle: String {
-         auth.hasConnectedIdentity ? "Delete Account & All Études Data" : "Erase All Études Data"
+         #if SYNCTEST
+         // Stage J (Samuel, 2026-10-27): removal is device-only; the private
+         // iCloud journal and other devices are never touched by it.
+         return auth.hasConnectedIdentity ? "Delete Account & Remove Études Data from This Device" : "Remove Études Data from This Device"
+         #else
+         return auth.hasConnectedIdentity ? "Delete Account & All Études Data" : "Erase All Études Data"
+         #endif
      }
 
      /// The word the user must type. Matches the verb in the title so the
      /// confirmation cannot read incongruously against the button.
      private var destructiveConfirmWord: String {
-         auth.hasConnectedIdentity ? "DELETE" : "ERASE"
+         #if SYNCTEST
+         return auth.hasConnectedIdentity ? "DELETE" : "REMOVE"
+         #else
+         return auth.hasConnectedIdentity ? "DELETE" : "ERASE"
+         #endif
      }
 
      private var destructiveInFlightTitle: String {
-         auth.hasConnectedIdentity ? "Deleting…" : "Erasing…"
+         #if SYNCTEST
+         return auth.hasConnectedIdentity ? "Deleting…" : "Removing…"
+         #else
+         return auth.hasConnectedIdentity ? "Deleting…" : "Erasing…"
+         #endif
      }
 
      private var eraseAllEtudesDataButton: some View {
@@ -2457,6 +2469,34 @@ private var sessionSetupSection: some View {
          // deletion of "comments" while B-3 retained them and B-1 preserved sent
          // attachments. Both rules were revised so the promise and the operation
          // now match; if that ever changes again, this string changes with it.
+         #if SYNCTEST
+         // Stage J: the same two paths, with what they do NOT do stated: the
+         // private iCloud journal and the copies on other devices stay.
+         if auth.hasConnectedIdentity {
+             return """
+             This permanently deletes your Études Connected account and the data associated with it — your profile, posts, comments, avatar, follows, and the attachments you have sent.
+
+             This deletes only the Connected account you are signed in to. If you previously used another Connected account on this device, its shared posts are not deleted by this action.
+
+             It also removes everything stored in Études on this device: your Journal, Scores, profile, attachments, instruments, activities and settings. Études will return to its first-launch state on this device.
+
+             It does not erase your private iCloud journal or the copies on your other devices. Sync is turned off on this device; if you enable it again, your journal can be downloaded again.
+
+             Files you have already sent may remain on the devices of people you sent them to.
+
+             Deleting your account does not cancel an App Store subscription.
+
+             Deleting the account can’t be undone.
+             """
+         }
+         return """
+         This removes everything stored in Études on this device: your Journal, Scores, profile, attachments, instruments, activities and settings. Études will return to its first-launch state on this device.
+
+         Your private iCloud journal and your other devices are not changed. Sync is turned off on this device; if you enable it again, your journal can be downloaded again.
+
+         This does not delete posts already shared with Études Connected. Any pending requests to remove shared posts will also be removed. To delete a Connected account and its posts, sign in to that account and use Delete Account.
+         """
+         #else
          if auth.hasConnectedIdentity {
              return """
              This permanently deletes your Études Connected account and the data associated with it — your profile, posts, comments, avatar, follows, and the attachments you have sent.
@@ -2473,6 +2513,7 @@ private var sessionSetupSection: some View {
              """
          }
          return "This permanently erases everything stored in Études on this device, including your Journal, Scores, profile, attachments, instruments, activities, and settings. Études will return to its first-launch state. This does not delete posts already shared with Études Connected. Any pending requests to remove shared posts will also be erased. To delete a Connected account and its posts, sign in to that account and use Delete Account. This can’t be undone."
+         #endif
      }
 
      private var deleteAccountSheet: some View {

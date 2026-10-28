@@ -171,6 +171,24 @@ struct SyncTestDiagnosticsView: View {
                     JournalSyncCoordinator.shared.engine?.rerunScoreTransition(); refreshTick += 1
                 }
             }
+            Section("Settings and colours (stage J)") {
+                row("Journal Tint", JournalSettingKey.describe(JournalSettingKey.tintMode, value: JournalSettingKey.currentValue(JournalSettingKey.tintMode, defaults: .standard)))
+                row("Primary activity", JournalSettingKey.describe(JournalSettingKey.primaryActivity, value: JournalSettingKey.currentValue(JournalSettingKey.primaryActivity, defaults: .standard)))
+                row("List contexts exchanged", "\(state?.listContextFingerprints.count ?? 0), held \(state?.awaitingListContext.count ?? 0)")
+                row("Instrument colours", tintMapText)
+                row("Transition done", state?.settingsScanDone == true ? "yes" : "no")
+                Button("Re-send settings (re-run transition)") { JournalSyncCoordinator.shared.engine?.rerunSettingsTransition(); refreshTick += 1 }
+            }
+            Section("Media over mobile data (stage J)") {
+                row("Option", JournalMediaPreference.allowsCellular() ? "allowed" : "Wi-Fi only")
+                row("Gate", status.mediaGated ? "media waits for Wi-Fi (engine not automatic)" : "media allowed (engine automatic)")
+                row("Waiting", status.mediaWaiting ?? "nothing")
+                row("Uploads held / downloads held", "\(state?.mediaUploadsHeld ?? 0) / \(state?.mediaDownloadsHeld ?? 0)")
+                row("App push subscription", state?.appSubscriptionSaved == true ? "saved" : "not yet")
+                if let held = state?.awaitingMedia, !held.isEmpty {
+                    ForEach(held, id: \.self) { Text($0.prefix(30) + "…").font(.caption.monospaced()) }
+                }
+            }
             Section("Counts") {
                 row("Outbox (pending)", "\(status.outboxCount)")
                 row("Held attachments", "\(status.heldCount)")
@@ -262,6 +280,12 @@ struct SyncTestDiagnosticsView: View {
         let kinds = [ConnectedWriteWitness.directoryUpsert, ConnectedWriteWitness.directoryAvatarKey,
                      ConnectedWriteWitness.avatarUpload, ConnectedWriteWitness.avatarDelete]
         return "\(ConnectedWriteWitness.total) (" + kinds.map { "\($0) \(ConnectedWriteWitness.count($0))" }.joined(separator: ", ") + ")"
+    }
+
+    private var tintMapText: String {
+        let map = Theme.InstrumentTint.storedSlotMap(ownerID: PersistenceController.shared.currentUserID)
+        let exchanged = state?.tintMapExchanged
+        return "\(map.count) here (\(map.keys.sorted().map { "\($0):\(map[$0] ?? 0)" }.joined(separator: " "))) · exchanged \(exchanged.map { String($0.count) } ?? "never")"
     }
 
     private var linkText: String {

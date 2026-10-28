@@ -663,11 +663,31 @@ final class JournalImporter {
             loserTitle = server["title"] as? String ?? server["displayName"] as? String
             loserNotes = server["notes"] as? String
         }
-        let conflict = JournalSyncConflict(at: Date(), recordName: server.recordID.recordName, recordType: server.recordType,
+        var conflict = JournalSyncConflict(at: Date(), recordName: server.recordID.recordName, recordType: server.recordType,
                                            winner: winner == .server ? "server" : "local",
                                            localUserModifiedAt: Self.value(local, "userModifiedAt") as? Date,
                                            serverUserModifiedAt: JournalRecordMapping.userModifiedAt(of: server),
                                            losingTitle: loserTitle, losingNotes: loserNotes)
+        // Stage J: what the person can read back and restore. Only fields that
+        // actually differ are listed, so a restore puts back exactly what lost.
+        let side = winner == .server ? "this device" : "other device"
+        let isSession = server.recordType == JournalSyncRecordType.session
+        let localTitle = Self.value(local, isSession ? "title" : "displayName") as? String ?? ""
+        let serverTitle = server[isSession ? "title" : "displayName"] as? String ?? ""
+        let localNotes = Self.value(local, "notes") as? String ?? ""
+        let serverNotes = server["notes"] as? String ?? ""
+        let losingT = winner == .server ? localTitle : serverTitle
+        let losingN = winner == .server ? localNotes : serverNotes
+        if localTitle != serverTitle, !losingT.isEmpty { conflict.displaced["\(isSession ? "Title" : "Name") (\(side))"] = losingT }
+        if isSession, localNotes != serverNotes, !losingN.isEmpty { conflict.displaced["Notes (\(side))"] = losingN }
+        if isSession {
+            conflict.subject = JournalRecoverySubject.session(local)
+            conflict.restore = "session:\(server.recordID.recordName)"
+        } else {
+            let sessionRow = local.value(forKey: "session") as? NSManagedObject
+            conflict.subject = "Attachment" + (sessionRow.map { " in " + JournalRecoverySubject.session($0) } ?? "")
+            conflict.restore = "attachment:\(server.recordID.recordName)"
+        }
         store.update { $0.conflicts.append(conflict) }
     }
 

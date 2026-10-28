@@ -64,6 +64,10 @@ final class AppRouteStore: ObservableObject {
 
 @main
 struct MOTIVOApp: App {
+    #if SYNCTEST
+    // Stage J: the app's own silent-push path while media waits for Wi-Fi.
+    @UIApplicationDelegateAdaptor(SyncTestAppDelegate.self) private var syncTestDelegate
+    #endif
     let persistenceController = PersistenceController.shared
     private let identityService: IdentityService
     @StateObject private var auth: AuthManager

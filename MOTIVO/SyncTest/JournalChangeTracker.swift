@@ -39,6 +39,26 @@ enum JournalSyncRecordType {
     static let instrument = "Instrument"
     /// Not a Core Data entity: saved Lists live in UserDefaults.
     static let savedList = "SavedList"
+    /// Stage J, all in UserDefaults: one personal choice per record
+    /// ("setting-<key>": Journal Tint, primary activity), the Lists default,
+    /// autofill flag and typed preset of one (activity, instrument) context
+    /// ("listctx-<hash>"), and the instrument colour map ("tint-instrument").
+    static let setting = "Setting"
+    static let listContext = "ListContext"
+    static let tintMap = "TintMap"
+    static let settingPrefix = "setting-"
+    static let listContextPrefix = "listctx-"
+    static let tintMapRecordName = "tint-instrument"
+    static let settingsTypes: Set<String> = [setting, listContext, tintMap]
+    static func isSettingsRecordName(_ name: String) -> Bool {
+        name.hasPrefix(settingPrefix) || name.hasPrefix(listContextPrefix) || name == tintMapRecordName
+    }
+    static func settingsType(forName name: String) -> String? {
+        if name.hasPrefix(settingPrefix) { return setting }
+        if name.hasPrefix(listContextPrefix) { return listContext }
+        if name == tintMapRecordName { return tintMap }
+        return nil
+    }
     static let customs: Set<String> = [userInstrument, userActivity]
     /// Rows without a preserved id: deletions are found through the URI map.
     static let directory: Set<String> = customs.union([instrument])

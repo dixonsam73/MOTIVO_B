@@ -166,6 +166,20 @@ enum JournalLocalRemoval {
             st.scoreAwaitingFirstMeta.removeAll()
             st.scoreScanDone = true
             st.scoreIndexDamagedNoted = false
+            // Stage J: the wiped defaults are the baseline (nothing erased is
+            // sent; a choice made before re-enable is a clocked edit).
+            st.settingsScanDone = true
+            st.settingFingerprints = Dictionary(uniqueKeysWithValues: JournalSettingKey.all.map { ($0, JournalSettingKey.defaultValue($0)) })
+            st.settingStamps.removeAll()
+            st.listContextFingerprints.removeAll()
+            st.listContextStamps.removeAll()
+            st.listContextScope = nil
+            st.awaitingListContext.removeAll()
+            st.tintMapExchanged = nil
+            st.tintMapQueuedFingerprint = nil
+            st.mediaWaitingUpload.removeAll()
+            st.awaitingMedia.removeAll()
+            st.scoresWithoutFile = 0
             st.initialFetchComplete = false
             st.pendingOwnerAdoption = nil
             st.ownershipReport = nil

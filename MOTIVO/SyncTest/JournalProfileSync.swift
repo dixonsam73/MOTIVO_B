@@ -442,10 +442,19 @@ enum JournalProfileSync {
         let serverStamp = record[JournalProfileKeys.stamp] as? Date
         let decision = JournalProfileMerge.decide(local: local, localStamp: st.profileStamp, localPending: pending, server: server, serverStamp: serverStamp)
         if !decision.displaced.isEmpty {
-            let conflict = JournalSyncConflict(at: Date(), recordName: profileName, recordType: JournalSyncRecordType.profile,
+            var conflict = JournalSyncConflict(at: Date(), recordName: profileName, recordType: JournalSyncRecordType.profile,
                                                winner: decision.apply == nil ? "local" : (decision.send ? "merged" : "server"),
                                                localUserModifiedAt: st.profileStamp, serverUserModifiedAt: serverStamp,
                                                losingTitle: "displaced: " + decision.displaced.joined(separator: " · "), losingNotes: nil)
+            // Stage J: "name (this device): H-Pad" → "Name (this device)": "H-Pad".
+            for item in decision.displaced {
+                guard let colon = item.range(of: "): ") else { continue }
+                let key = String(item[..<colon.lowerBound]) + ")"
+                let value = String(item[colon.upperBound...])
+                conflict.displaced[key.prefix(1).uppercased() + key.dropFirst()] = value
+            }
+            conflict.subject = "Profile"
+            conflict.restore = "profile"
             store.update { $0.conflicts.append(conflict) }
         }
         if let apply = decision.apply {
@@ -571,9 +580,11 @@ enum JournalProfileSync {
         let files = ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
             .sorted { (JournalAssetHash.stamp(of: $0)?.mtime ?? 0) > (JournalAssetHash.stamp(of: $1)?.mtime ?? 0) }
         for old in files.dropFirst(5) { try? FileManager.default.removeItem(at: old) }
-        let conflict = JournalSyncConflict(at: Date(), recordName: avatarName, recordType: JournalSyncRecordType.profileAvatar, winner: "server",
+        var conflict = JournalSyncConflict(at: Date(), recordName: avatarName, recordType: JournalSyncRecordType.profileAvatar, winner: "server",
                                            localUserModifiedAt: JournalAssetHash.stamp(of: url).map { Date(timeIntervalSince1970: $0.mtime) },
                                            serverUserModifiedAt: nil, losingTitle: "displaced avatar kept: \(hash.prefix(12))…", losingNotes: nil)
+        conflict.subject = "Profile photo"
+        conflict.restore = "avatar:\(target.path)"
         store.update { $0.conflicts.append(conflict) }
     }
 

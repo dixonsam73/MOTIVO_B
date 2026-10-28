@@ -1399,6 +1399,95 @@ the join.
   is missing here is not sent; a remote deletion that arrives while the
   index is unreadable leaves the item here, and it is uploaded again once
   the index reads.
+  **Stage J, settings, colours, recovery, mobile data, removal wording and
+  the missing-score state: BUILT 2026-10-27, device run pending; build
+  1865 (`3de231a` and the record commit).** Scope (Samuel, 2026-10-27): primary activity; Lists
+  defaults, autofill choices and typed presets per (activity, instrument)
+  context; the Journal Tint preference; consistent thread and instrument
+  colours; a user-facing recovery view for displaced text; media over Wi-Fi
+  by default with a per-device option; device-only removal wording; a
+  visible unavailable state for a score whose file is missing. Tool
+  visibility, layout and working settings (metronome, drone, tuner, tasks
+  pad, strips, hints, insights range) stay per device, as do active timers,
+  drafts and unfinished recordings. **Design.** (1) *Settings*: one small
+  `Setting` record per choice ("setting-tintMode", "setting-primaryActivity":
+  `value`, `userModifiedAt`), so a change to one never displaces the other;
+  a custom primary activity travels as "custom:<name>" and resolves to the
+  receiving device's spelling by normalised name. (2) *Lists contexts*: one
+  `ListContext` record per (activity, instrument) context ("listctx-<hash>"
+  of the activity reference and the instrument's NAME, never its local id,
+  so the same context shares a record on both devices whatever the aliasing
+  of stage C): default list id ("" = none), autofill flag (0/1, absent =
+  never set), typed preset (JSON lines; a legacy `[String]` preset is
+  carried in the typed shape), clock. On arrival the instrument name
+  resolves to this device's row and the settings are written under its id;
+  a record whose instrument is not here yet is held and lands with it.
+  Explicit clears travel as values; absent fields carry no information;
+  deletions are never inferred for contexts. (3) *Colours*: thread colours
+  need no record (`Theme.ThreadTint.primeWeightedSlots` rebuilds the map
+  from thread usage in the journal, which is synced, so two devices with
+  the same journal compute the same colours). The instrument map is one
+  `TintMap` record ("tint-instrument": label → slot) merged by UNION with
+  the server's slot standing where both assign the same label; removals are
+  never sent (a label a device drops, its primary or a sanitiser move, is
+  not a change), so existing assignments are kept wherever possible, a
+  clash is settled once and both devices, running the same deterministic
+  sanitiser, converge (unit-tested with the real sanitiser). (4) *Change
+  detection*: a fingerprint scan on the defaults-change notification
+  (800 ms debounce, with the Lists scan), at activation and after imports;
+  settings and contexts are clocked at the scan that finds the change. (5)
+  *Recovery*: every conflict entry now carries readable fields ("Title
+  (this device)": the value that lost), a subject and a restore handle;
+  Profile → "Displaced by sync" lists unresolved entries with Copy and,
+  for session title/notes, attachment names, profile name/location, score
+  titles and the displaced avatar, Restore, which is a NEW edit through the
+  app's own writers (clocked now, wins everywhere); Dismiss removes an
+  entry; no version history. (6) *Media over mobile data* (C-141): metered
+  = cellular-only, hotspot (`isExpensive`) or Low Data Mode
+  (`isConstrained`); with the per-device option off, outgoing records that
+  would carry a file stay in the outbox ("Media waiting for Wi-Fi: n to
+  send (MB)"), and because `CKSyncEngine` fetches every asset with its
+  record, the engine is rebuilt WITHOUT automatic sync (the stage E path)
+  and the app fetches records itself through the asset-free delta catch-up,
+  holding by name each record whose file it needs ("n to receive"); the
+  app's own `CKDatabaseSubscription` ("etudes-journal-app-wake") brings a
+  push to `SyncTestAppDelegate` while the engine is not automatic;
+  `remote-notification` added to `UIBackgroundModes` (production
+  Info.plist, needed by shipping sync anyway). On Wi-Fi or with the option
+  on, the automatic engine returns, held records are fetched with their
+  files and held uploads are requeued. Text and metadata sync on any link.
+  (7) *Removal wording* (SYNCTEST): "Remove Études Data from This Device",
+  confirm word REMOVE, and the confirmation says the private iCloud
+  journal and other devices are unchanged, sync is turned off on this
+  device and re-enabling can download the journal again; the Connected
+  deletion keeps its backend behaviour and says it does not erase the
+  private iCloud journal or copies on other devices. The binding is kept
+  after removal; "delete everywhere" is not built (Samuel). (8) *Missing
+  score file* (C-140, production): `ScoreLibraryStore.missingFileIDs`; the
+  row says "Unavailable on this device — file missing", a tap explains and
+  does not open, the entry is kept; the Profile sync rows count them; the
+  scan records `scoresWithoutFile`; C-139 unchanged.
+  **Reconciliation rules, for the record.** *Initial* (the first scan after
+  the build, or the first time two existing devices meet): a pre-existing
+  setting or list context goes up without a clock and two unclocked copies
+  go to whichever reached the server first (the other device's values are
+  listed as displaced, copy-only); the instrument map is the union with the
+  first upload standing on a clash; nothing is deleted. *Later edits*: the
+  newer clock wins the whole small record, ties go to the server, the
+  displaced value is kept for recovery; a restoration is a new clocked edit.
+  Unit tests: `SyncTestSettingsSyncTests` (14), `SyncTestTransferGateTests`
+  (4), `C138ScoreLibraryTests` +1 (C-140); 132 SyncTest-suite tests green
+  (the full run also shows the recorded order-dependent sharing tests and
+  C-142, both unrelated);
+  Debug, Release and SyncTest build. **Device run pending** (script
+  `stage-J-device-script.md` in the notes folder): primary activity and
+  list defaults both ways with differing instrument ids; explicit clears
+  surviving relaunch and reconnect; colours preserved, converging and
+  stable; tint syncing while tool toggles stay independent; a displaced
+  value recovered through the view; mobile data with the option off
+  (metadata arriving, media pending both ways, released by the option or
+  Wi-Fi); a missing score file's visible state; device-only removal on the
+  iPad's disposable copy.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

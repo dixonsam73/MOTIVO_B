@@ -79,6 +79,10 @@ final class JournalSyncStatus: ObservableObject {
     @Published var lastEvent: String = "—"
     @Published var lastFetchAt: Date?
     @Published var lastSendAt: Date?
+    /// Stage J: media transfers wait for Wi-Fi right now.
+    @Published var mediaGated = false
+    /// "Media waiting for Wi-Fi: 2 to send (35 MB), 1 to receive", or nil.
+    @Published var mediaWaiting: String?
 }
 
 final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue, @unchecked Sendable {
@@ -123,6 +127,16 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// Stage I: the Scores library's metadata scan debounce.
     private var scoreScanScheduled = false
     private var backgroundObserver: NSObjectProtocol?
+    // Stage J: media over mobile data (JournalTransferPolicy).
+    /// What the path monitor last reported: cellular-only, expensive or constrained.
+    private var pathMetered = false
+    private var mediaGatedValue = false
+    private var manualSendScheduled = false
+    private var preferenceObserver: NSObjectProtocol?
+    private var foregroundObserver: NSObjectProtocol?
+    /// While media waits for Wi-Fi the engine is built without automatic sync:
+    /// the app sends on its own schedule and fetches records itself.
+    var mediaGated: Bool { stateLock.lock(); defer { stateLock.unlock() }; return mediaGatedValue }
 
     init(containerIdentifier: String, persistence: NSPersistentContainer, store: JournalSyncStateStore, status: JournalSyncStatus, customOwner: String?) {
         self.container = CKContainer(identifier: containerIdentifier)
@@ -164,7 +178,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     }
 
     deinit {
-        for o in [saveObserver, stampObserver, accountObserver, listObserver, backgroundObserver].compactMap({ $0 }) {
+        for o in [saveObserver, stampObserver, accountObserver, listObserver, backgroundObserver, preferenceObserver, foregroundObserver].compactMap({ $0 }) {
             NotificationCenter.default.removeObserver(o)
         }
         pathMonitor?.cancel()
@@ -233,8 +247,22 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                     await MainActor.run { task.end() }
                 }
             }
+            // Stage J: media over mobile data. The path is watched from the
+            // start (not only while a failed account check retries), the toggle
+            // re-evaluates the gate, and a foreground while the app drives its
+            // own fetches looks for changes the engine would otherwise fetch.
+            installPathMonitorIfNeeded()
+            preferenceObserver = NotificationCenter.default.addObserver(forName: JournalMediaPreference.changedNotification, object: nil, queue: nil) { [weak self] _ in
+                Task { await self?.recomputeGate(trigger: "mobile data option changed") }
+            }
+            foregroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil) { [weak self] _ in
+                Task { await self?.manualRefresh(trigger: "foreground") }
+            }
             #endif
         }
+        stateLock.lock()
+        mediaGatedValue = JournalMediaGate.waitsForWiFi(metered: pathMetered, allowCellular: JournalMediaPreference.allowsCellular())
+        stateLock.unlock()
         await reconcile(trigger: "launch")
     }
 
@@ -365,14 +393,18 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         if engineInstance == nil {
             var configuration = CKSyncEngine.Configuration(database: container.privateCloudDatabase,
                                                            stateSerialization: store.state.engineState, delegate: self)
-            configuration.automaticallySync = true
+            // Stage J: while media waits for Wi-Fi the engine must not fetch
+            // (it would download every asset with its record), so it runs
+            // without automatic sync and the app drives sends and fetches.
+            configuration.automaticallySync = !mediaGatedValue
             engineInstance = CKSyncEngine(configuration)
         }
+        let gated = mediaGatedValue
         retryPending = false
         retryAttempts = 0
         lastRefusal = nil
         stateLock.unlock()
-        if wasDormant { log("Engine \(store.state.engineState == nil ? "built fresh" : "built from saved state") (\(trigger))") }
+        if wasDormant { log("Engine \(store.state.engineState == nil ? "built fresh" : "built from saved state") (\(trigger))\(gated ? "; automatic sync off, media waits for Wi-Fi" : "")") }
         await publish { $0.pausedReason = nil }
 
         queueToEngine(databaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
@@ -387,12 +419,139 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         runMetaTransitionIfNeeded()
         await scanLists()
         scanProfile(reason: "activation")
+        await scanSettings()
         // Positions only at the transition (the pre-existing last-read pages,
         // once); afterwards they leave only at a dismissal or backgrounding.
         await scanScores(reason: "activation", positions: !store.state.scoreScanDone)
         requeueOutbox()
+        ensureAppSubscription()
+        if gated {
+            scheduleManualSend()
+        } else if !store.state.awaitingMedia.isEmpty {
+            await releaseHeldMedia()
+        }
         await publish { $0.phase = "Running" }
         refreshCounts()
+    }
+
+    // MARK: Stage J: media over mobile data
+
+    /// Re-evaluates the gate from the last path report and the option; when it
+    /// moves, the engine is rebuilt with the matching automatic-sync setting
+    /// (the stage E drop-and-rebuild path) and what waited is released.
+    func recomputeGate(trigger: String) async {
+        let allow = JournalMediaPreference.allowsCellular()
+        stateLock.lock()
+        let next = JournalMediaGate.waitsForWiFi(metered: pathMetered, allowCellular: allow)
+        let changed = next != mediaGatedValue
+        mediaGatedValue = next
+        let hadEngine = engineInstance != nil
+        if changed, hadEngine { engineInstance = nil; dormantGeneration += 1 }
+        stateLock.unlock()
+        guard changed else { return }
+        log("Media transfers now \(next ? "wait for Wi-Fi" : "allowed on this link") (\(trigger))\(hadEngine ? "; engine rebuilt" : "")")
+        if !next { store.update { $0.mediaWaitingUpload.removeAll() } }
+        await publish { $0.mediaGated = next }
+        refreshCounts()
+        guard hadEngine, currentDecision().allowed else { return }
+        await activate(trigger: trigger)
+    }
+
+    /// While the engine does not sync automatically: the app's own records-only
+    /// fetch, then a send. Called from a push and from the foreground.
+    func manualRefresh(trigger: String) async {
+        guard mediaGated, engine != nil, currentDecision().allowed else { return }
+        _ = await deltaCatchUp(reason: "\(trigger) while media waits for Wi-Fi")
+        scheduleManualSend()
+    }
+
+    /// The app's own silent push landed. Returns whether the app acted on it
+    /// (the engine acts for itself while it syncs automatically).
+    func pushReceived() async -> Bool {
+        guard mediaGated else { return false }
+        #if canImport(UIKit)
+        let task = await MainActor.run { JournalBackgroundTask.begin("push while media waits") }
+        defer { Task { @MainActor in task.end() } }
+        #endif
+        await manualRefresh(trigger: "push")
+        return true
+    }
+
+    /// One send per burst while the app drives sends itself.
+    private func scheduleManualSend() {
+        stateLock.lock()
+        guard mediaGatedValue, !manualSendScheduled else { stateLock.unlock(); return }
+        manualSendScheduled = true
+        stateLock.unlock()
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard let self else { return }
+            self.stateLock.lock(); self.manualSendScheduled = false; self.stateLock.unlock()
+            guard let engine = self.engine, self.mediaGated, self.currentDecision().allowed else { return }
+            do { try await engine.sendChanges() } catch { self.log("Send (media waits for Wi-Fi) failed: \(error.localizedDescription); retried at the next change, push or foreground") }
+        }
+    }
+
+    /// Upload side of the gate: a record that would carry a file stays in the
+    /// outbox (not in the engine) while media waits for Wi-Fi. nil here drops
+    /// the pending change from the engine only; `requeueOutbox` restores it.
+    private func gateUpload(_ record: CKRecord?) -> CKRecord? {
+        guard let record, mediaGated, let asset = record[JournalRecordMapping.assetKey] as? CKAsset, let url = asset.fileURL else { return record }
+        let name = record.recordID.recordName
+        let size = JournalAssetHash.stamp(of: url)?.size ?? 0
+        let first = store.state.mediaWaitingUpload[name] == nil
+        store.update { if first { $0.mediaUploadsHeld += 1 }; $0.mediaWaitingUpload[name] = size }
+        if first { log("Upload of \(name.prefix(14))… (\(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) waits for Wi-Fi") }
+        refreshCounts()
+        return nil
+    }
+
+    /// Download side: records held by name while media waited are fetched
+    /// with their files and imported as a fetched batch would be.
+    func releaseHeldMedia() async {
+        let names = store.state.awaitingMedia
+        guard !names.isEmpty, !mediaGated, currentDecision().allowed else { return }
+        let ids = names.map { CKRecord.ID(recordName: $0, zoneID: JournalRecordMapping.zoneID) }
+        let fetch = CKFetchRecordsOperation(recordIDs: ids)
+        fetch.configuration.timeoutIntervalForResource = 600
+        var full: [CKRecord] = []
+        var gone: [String] = []
+        fetch.perRecordResultBlock = { id, result in
+            switch result {
+            case .success(let r): full.append(r)
+            case .failure(let error): if (error as? CKError)?.code == .unknownItem { gone.append(id.recordName) }
+            }
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            fetch.fetchRecordsResultBlock = { _ in continuation.resume() }
+            container.privateCloudDatabase.add(fetch)
+        }
+        importModifications(full.filter { $0.recordType == JournalSyncRecordType.attachment })
+        importProfileRecords(full.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) })
+        await importScoreRecords(full.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) })
+        let done = Set(full.map(\.recordID.recordName)).union(gone)
+        store.update { $0.awaitingMedia.removeAll { done.contains($0) } }
+        log("Media released: \(full.count) record(s) fetched with their files\(gone.isEmpty ? "" : ", \(gone.count) gone from the server"); \(store.state.awaitingMedia.count) still waiting")
+        refreshCounts()
+    }
+
+    /// The app's own database subscription, so a push reaches the app while
+    /// the engine does not sync automatically. Saved once per install.
+    private func ensureAppSubscription() {
+        guard !store.state.appSubscriptionSaved else { return }
+        let subscription = CKDatabaseSubscription(subscriptionID: "etudes-journal-app-wake")
+        let info = CKSubscription.NotificationInfo()
+        info.shouldSendContentAvailable = true
+        subscription.notificationInfo = info
+        let op = CKModifySubscriptionsOperation(subscriptionsToSave: [subscription], subscriptionIDsToDelete: nil)
+        op.modifySubscriptionsResultBlock = { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success: self.store.update { $0.appSubscriptionSaved = true }; self.log("App push subscription saved")
+            case .failure(let error): self.log("App push subscription not saved: \(error.localizedDescription) (retried at the next activation)")
+            }
+        }
+        container.privateCloudDatabase.add(op)
     }
 
     /// Our own database-changes call against the token of our last check.
@@ -547,7 +706,21 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             return JournalCatchUp.needsAsset(serverHash: record[JournalRecordMapping.fileHashKey] as? String,
                                              knownHash: store.state.assetHashes[name], fileExists: exists)
         }.map(\.recordID)
-        if !needing.isEmpty {
+        if !needing.isEmpty, mediaGated {
+            // Stage J: the files wait for Wi-Fi; the records wait with them
+            // (an attachment, score or avatar is never imported without its
+            // file). Everything else in the batch is imported now.
+            let names = needing.map(\.recordName)
+            let heldSet = Set(names)
+            let before = store.state.awaitingMedia.count
+            store.update { s in
+                s.awaitingMedia = JournalMediaHold.adding(names, to: s.awaitingMedia)
+                s.mediaDownloadsHeld += s.awaitingMedia.count - before
+            }
+            modified.removeAll { heldSet.contains($0.recordID.recordName) }
+            log("\(names.count) record(s) with media held for Wi-Fi: \(names.map { $0.prefix(14) })")
+            refreshCounts()
+        } else if !needing.isEmpty {
             let fetch = CKFetchRecordsOperation(recordIDs: needing)
             fetch.configuration.timeoutIntervalForResource = 600
             var full: [CKRecord.ID: CKRecord] = [:]
@@ -563,16 +736,19 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
         // Import exactly as a fetched batch would be.
         let records = modified.filter { $0.recordType != JournalSyncRecordType.savedList && !JournalSyncRecordType.profileTypes.contains($0.recordType)
-                                        && !JournalSyncRecordType.scoreTypes.contains($0.recordType) }
+                                        && !JournalSyncRecordType.scoreTypes.contains($0.recordType) && !JournalSyncRecordType.settingsTypes.contains($0.recordType) }
         let lists = modified.filter { $0.recordType == JournalSyncRecordType.savedList }
         importModifications(records)
         importProfileRecords(modified.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) })
         if !lists.isEmpty { _ = await MainActor.run { JournalSavedListSync.apply(lists, store: store) } }
         await importScoreRecords(modified.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) })
+        await importSettingsRecords(modified.filter { JournalSyncRecordType.settingsTypes.contains($0.recordType) })
         importDeletions(deleted)
         let listDeletions = deleted.filter { $0.1 == JournalSyncRecordType.savedList }.map(\.0.recordName)
         if !listDeletions.isEmpty { _ = await MainActor.run { JournalSavedListSync.applyDeletions(listDeletions, store: store) } }
         await applyScoreDeletions(deleted.filter { JournalSyncRecordType.scoreTypes.contains($0.1) }.map(\.0.recordName))
+        forgetSettings(deleted.filter { JournalSyncRecordType.settingsTypes.contains($0.1) }.map(\.0.recordName))
+        await applyHeldSettings()
         let summary = "Catch-up (\(reason)): \(modified.count) changed record(s), \(deleted.count) deletion(s), \(assetsFetched) file(s) fetched"
         store.update { st in
             if let newToken, let data = try? NSKeyedArchiver.archivedData(withRootObject: newToken, requiringSecureCoding: true) {
@@ -723,7 +899,14 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self, path.status == .satisfied else { return }
-            self.stateLock.lock(); let pending = self.retryPending; self.stateLock.unlock()
+            // Stage J: the link's meteredness decides whether media waits.
+            let metered = JournalMediaGate.metered(path: path)
+            self.stateLock.lock()
+            let pending = self.retryPending
+            let meteredChanged = metered != self.pathMetered
+            self.pathMetered = metered
+            self.stateLock.unlock()
+            if meteredChanged { Task { await self.recomputeGate(trigger: metered ? "network path is mobile data" : "network path is Wi-Fi") } }
             guard pending else { return }
             Task { await self.reconcile(trigger: "network path satisfied") }
         }
@@ -740,6 +923,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 try? await Task.sleep(nanoseconds: 800_000_000)
                 self.listScanScheduled = false
                 await self.scanLists()
+                await self.scanSettings()
             }
         }
     }
@@ -752,6 +936,18 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         guard !added.isEmpty else { return }
         queueToEngine(zoneChanges: added.map(pendingChange))
         log("Queued \(added.count) list change(s)")
+        refreshCounts()
+    }
+
+    /// Stage J: settings, list contexts and the instrument colour map. Runs in
+    /// every state except a local removal (the outbox is durable; an edit made
+    /// while paused or unlinked keeps its clock).
+    func scanSettings() async {
+        guard !store.state.localRemovalInProgress else { return }
+        let added = await MainActor.run { JournalSettingsSync.scan(store: store) }
+        guard !added.isEmpty else { return }
+        queueToEngine(zoneChanges: added.map(pendingChange))
+        log("Queued \(added.count) settings change(s): \(added.map { $0.recordName.prefix(22) })")
         refreshCounts()
     }
 
@@ -826,6 +1022,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         guard let engine else { return }
         if !zoneChanges.isEmpty { engine.state.add(pendingRecordZoneChanges: zoneChanges) }
         if !databaseChanges.isEmpty { engine.state.add(pendingDatabaseChanges: databaseChanges) }
+        // Stage J: without automatic sync the app asks for the send itself.
+        if !zoneChanges.isEmpty || !databaseChanges.isEmpty { scheduleManualSend() }
     }
 
     private func pendingChange(_ c: JournalSyncPendingChange) -> CKSyncEngine.PendingRecordZoneChange {
@@ -854,6 +1052,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     func fetchNow() async {
         guard let engine, currentDecision().allowed else { log("Fetch refused: \(currentDecision().reason ?? "no engine")"); return }
+        if mediaGated {
+            // The engine's fetch would bring every asset; the app's own fetch brings records.
+            _ = await deltaCatchUp(reason: "manual fetch while media waits for Wi-Fi")
+            return
+        }
         do { try await engine.fetchChanges() } catch { log("fetchChanges failed: \(error.localizedDescription)") }
     }
 
@@ -989,7 +1192,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 log("Own-write echo: \(echoCount) record(s) already held, skipped; \(echoBytes) asset bytes delivered with them")
             }
             importModifications(records.filter { $0.recordType != JournalSyncRecordType.savedList && !JournalSyncRecordType.profileTypes.contains($0.recordType)
-                                                 && !JournalSyncRecordType.scoreTypes.contains($0.recordType) })
+                                                 && !JournalSyncRecordType.scoreTypes.contains($0.recordType) && !JournalSyncRecordType.settingsTypes.contains($0.recordType) })
             importProfileRecords(records.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) })
             let lists = records.filter { $0.recordType == JournalSyncRecordType.savedList }
             if !lists.isEmpty {
@@ -997,6 +1200,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 log("Imported \(n) list(s)")
             }
             await importScoreRecords(records.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) })
+            await importSettingsRecords(records.filter { JournalSyncRecordType.settingsTypes.contains($0.recordType) })
             importDeletions(e.deletions.map { ($0.recordID, $0.recordType) })
             let listDeletions = e.deletions.filter { $0.recordType == JournalSyncRecordType.savedList }.map(\.recordID.recordName)
             if !listDeletions.isEmpty {
@@ -1004,6 +1208,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 log("Applied \(n) list deletion(s)")
             }
             await applyScoreDeletions(e.deletions.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) }.map(\.recordID.recordName))
+            forgetSettings(e.deletions.filter { JournalSyncRecordType.settingsTypes.contains($0.recordType) }.map(\.recordID.recordName))
+            await applyHeldSettings()
             await publish { $0.lastFetchAt = Date() }
 
         case .sentRecordZoneChanges(let e):
@@ -1062,28 +1268,47 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
         let bases = store.state.lastKnownRecords
         let listRecords = listNames.isEmpty ? [:] : await MainActor.run { JournalSavedListSync.records(for: listNames, bases: bases) }
+        // Stage J: settings, list contexts and the colour map, read on the main actor.
+        let settingNames = pending.compactMap { change -> String? in
+            if case .saveRecord(let id) = change, JournalSyncRecordType.isSettingsRecordName(id.recordName) { return id.recordName }
+            return nil
+        }
+        let settingRecords = settingNames.isEmpty ? [:] : await MainActor.run { JournalSettingsSync.records(for: settingNames, store: store) }
         // Stage I: a value copy of the library; files are hashed as records are built.
         let hasScores = pending.contains { if case .saveRecord(let id) = $0 { return JournalSyncRecordType.isScoreRecordName(id.recordName) }; return false }
         let library = hasScores ? await MainActor.run { ScoreLibraryStore.shared.snapshot() } : nil
         let eligibility = currentEligibility()
         await refreshViewerScope()
         return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: pending) { recordID in
-            if typeByName[recordID.recordName] == JournalSyncRecordType.savedList {
-                if let record = listRecords[recordID.recordName] { return record }
-                self.store.update { $0.outbox.removeAll { $0.recordName == recordID.recordName && $0.op == .save } }
-                return nil
-            }
-            if JournalSyncRecordType.isScoreRecordName(recordID.recordName) {
-                if let library, let record = JournalScoreSync.record(for: recordID.recordName, snapshot: library, store: self.store, log: { self.log($0) }) {
-                    return record
-                }
-                self.store.update { $0.outbox.removeAll { $0.recordName == recordID.recordName && $0.op == .save } }
-                return nil
-            }
-            return self.record(for: recordID, type: typeByName[recordID.recordName], eligibility: eligibility,
-                               ownerOnly: ownerOnlyNames.contains(recordID.recordName),
-                               assetFree: assetFreeNames.contains(recordID.recordName))
+            self.gateUpload(self.buildRecord(recordID, typeByName: typeByName, listRecords: listRecords, settingRecords: settingRecords,
+                                             library: library, eligibility: eligibility, ownerOnlyNames: ownerOnlyNames, assetFreeNames: assetFreeNames))
         }
+    }
+
+    /// The record for one pending change, or nil (which also drops a stale save
+    /// from the outbox). Stage J gates the result for the link.
+    private func buildRecord(_ recordID: CKRecord.ID, typeByName: [String: String], listRecords: [String: CKRecord], settingRecords: [String: CKRecord],
+                             library: ScoreLibrarySnapshot?, eligibility: Eligibility, ownerOnlyNames: Set<String>, assetFreeNames: Set<String>) -> CKRecord? {
+        let name = recordID.recordName
+        if typeByName[name] == JournalSyncRecordType.savedList {
+            if let record = listRecords[name] { return record }
+            store.update { $0.outbox.removeAll { $0.recordName == name && $0.op == .save } }
+            return nil
+        }
+        if JournalSyncRecordType.isScoreRecordName(name) {
+            if let library, let record = JournalScoreSync.record(for: name, snapshot: library, store: store, log: { self.log($0) }) {
+                return record
+            }
+            store.update { $0.outbox.removeAll { $0.recordName == name && $0.op == .save } }
+            return nil
+        }
+        if JournalSyncRecordType.isSettingsRecordName(name) {
+            if let record = settingRecords[name] { return record }
+            store.update { $0.outbox.removeAll { $0.recordName == name && $0.op == .save } }
+            return nil
+        }
+        return record(for: recordID, type: typeByName[name], eligibility: eligibility,
+                      ownerOnly: ownerOnlyNames.contains(name), assetFree: assetFreeNames.contains(name))
     }
 
     struct Eligibility {
@@ -1314,6 +1539,47 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         log("Applied \(names.count) score record deletion(s): \(removed) item(s) removed")
     }
 
+    // MARK: Stage J: settings records
+
+    private func importSettingsRecords(_ records: [CKRecord], localPending: Bool? = nil) async {
+        guard !records.isEmpty else { return }
+        let outcome = await MainActor.run {
+            JournalSettingsSync.apply(records, store: store, localPending: localPending) { self.log($0) }
+        }
+        settleSettings(outcome)
+        if outcome.applied > 0 || outcome.held > 0 {
+            log("Settings: \(outcome.applied) record(s) applied, \(outcome.held) held")
+        }
+    }
+
+    /// List contexts held for an instrument that has since arrived.
+    private func applyHeldSettings() async {
+        guard !store.state.awaitingListContext.isEmpty else { return }
+        let outcome = await MainActor.run { JournalSettingsSync.retryHeld(store: store) { self.log($0) } }
+        settleSettings(outcome)
+    }
+
+    private func settleSettings(_ outcome: JournalSettingsSync.Outcome) {
+        store.update { $0.recordsReceived += outcome.applied }
+        if !outcome.resend.isEmpty { queueToEngine(zoneChanges: outcome.resend.map(pendingChange)) }
+        // A pending save the import settled must leave the engine's own list too.
+        for name in outcome.settled {
+            engine?.state.remove(pendingRecordZoneChanges: [.saveRecord(CKRecord.ID(recordName: name, zoneID: JournalRecordMapping.zoneID))])
+        }
+    }
+
+    private func forgetSettings(_ names: [String]) {
+        guard !names.isEmpty else { return }
+        JournalSettingsSync.forget(names, store: store)
+        log("Forgot \(names.count) deleted settings record(s); resent at the next scan")
+    }
+
+    /// Stage J diagnostics: send every setting, list context and the colour map again.
+    func rerunSettingsTransition() {
+        JournalSettingsSync.rerunTransition(store: store)
+        Task { await scanSettings() }
+    }
+
     // MARK: Sent
 
     private func handleSent(_ e: CKSyncEngine.Event.SentRecordZoneChanges) {
@@ -1324,6 +1590,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         for record in e.savedRecords {
             sent += 1
             let name = record.recordID.recordName
+            if store.state.mediaWaitingUpload[name] != nil { store.update { $0.mediaWaitingUpload.removeValue(forKey: name) } }
             if record.recordType == JournalSyncRecordType.attachment {
                 if let hash = record[JournalRecordMapping.fileHashKey] as? String,
                    let asset = record[JournalRecordMapping.assetKey] as? CKAsset, let url = asset.fileURL {
@@ -1346,6 +1613,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 store.update { $0.scoreRecordsSentWithoutFile += 1 }
             } else if record.recordType == JournalSyncRecordType.scorePosition {
                 store.update { $0.scorePositionsSent += 1 }
+            } else if record.recordType == JournalSyncRecordType.tintMap {
+                // Stage J: what the server now holds is the baseline for "changed".
+                if let map = JournalTintMapMerge.decode(record[JournalSettingsKeys.map] as? Data) {
+                    store.update { $0.tintMapExchanged = map; $0.tintMapQueuedFingerprint = nil }
+                }
             } else if record.recordType == JournalSyncRecordType.profileAvatar {
                 // Stage H: the server now holds this hash ("" after a removal).
                 let hash = record[JournalRecordMapping.fileHashKey] as? String ?? ""
@@ -1431,6 +1703,16 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 }
                 return
             }
+            if JournalSyncRecordType.isSettingsRecordName(name) {
+                // Stage J: the same rule as the import, with our save known to be pending.
+                Task {
+                    await self.importSettingsRecords([server], localPending: true)
+                    let stillPending = self.store.state.outbox.contains { $0.recordName == name && $0.op == .save }
+                    if stillPending { self.queueToEngine(zoneChanges: [.saveRecord(record.recordID)]) }
+                    else { self.engine?.state.remove(pendingRecordZoneChanges: [.saveRecord(record.recordID)]) }
+                }
+                return
+            }
             var resend = false
             importContext.performAndWait {
                 resend = importer.resolveSendConflict(recordType: record.recordType, recordName: name, server: server)
@@ -1491,6 +1773,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             self.status.bytesSent = st.bytesSent
             self.status.bytesReceived = st.bytesReceived
             self.status.boundUser = st.boundUserRecordName
+            self.status.mediaGated = self.mediaGated
+            self.status.mediaWaiting = JournalMediaHold.summary(uploads: st.mediaWaitingUpload, downloads: st.awaitingMedia)
         }
     }
 }
