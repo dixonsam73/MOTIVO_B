@@ -145,4 +145,25 @@ final class C138ScoreLibraryTests: XCTestCase {
         XCTAssertFalse(reloaded.indexDamaged)
         XCTAssertEqual(reloaded.items.count, 1)
     }
+
+    // MARK: C-140 — an item whose file is missing is shown as unavailable, never removed
+
+    @MainActor
+    func testMissingFileIsReportedAndTheEntryIsKept() throws {
+        let store = makeStore()
+        let item = try store.importPDF(from: try makePDF(), displayName: "Gone")
+        XCTAssertTrue(store.missingFileIDs.isEmpty)
+        try FileManager.default.removeItem(at: store.url(for: item))
+        store.refreshFileAvailability()
+        XCTAssertEqual(store.missingFileIDs, [item.id])
+        XCTAssertTrue(store.isFileMissing(item))
+        XCTAssertEqual(store.items.count, 1, "the entry stays; nothing is inferred from a missing file")
+        // A reload reads the same state; a write recomputes it.
+        let reloaded = ScoreLibraryStore(defaults: defaults, scoresDirectory: tempDir.appendingPathComponent("Scores", isDirectory: true))
+        XCTAssertEqual(reloaded.missingFileIDs, [item.id])
+        try FileManager.default.copyItem(at: try makePDF("again.pdf"), to: store.url(for: item))
+        store.rename(item, to: "Back")
+        XCTAssertTrue(store.missingFileIDs.isEmpty)
+    }
+
 }

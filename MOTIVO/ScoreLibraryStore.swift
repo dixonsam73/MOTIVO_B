@@ -41,6 +41,10 @@ final class ScoreLibraryStore: ObservableObject {
     /// empty, every write is refused, and the stored bytes are left exactly as
     /// they are so a later build can still read them.
     @Published private(set) var indexDamaged = false
+    /// Items whose PDF is not on this device (the index entry exists, the
+    /// file does not). Shown as unavailable; never silently "fully synced".
+    /// Recomputed after every load and write, and on request.
+    @Published private(set) var missingFileIDs: Set<UUID> = []
 
     private let fileManager: FileManager
     private let defaults: UserDefaults
@@ -71,6 +75,14 @@ final class ScoreLibraryStore: ObservableObject {
 
     func url(for item: ScoreLibraryItem) -> URL {
         scoresDirectory().appendingPathComponent(item.fileName, isDirectory: false)
+    }
+
+    func isFileMissing(_ item: ScoreLibraryItem) -> Bool { missingFileIDs.contains(item.id) }
+
+    /// Re-checks which items have their file. Cheap (one stat per item).
+    func refreshFileAvailability() {
+        let missing = Set(items.filter { !fileManager.fileExists(atPath: url(for: $0).path) }.map(\.id))
+        if missing != missingFileIDs { missingFileIDs = missing }
     }
 
     func filteredItems(matching query: String) -> [ScoreLibraryItem] {
@@ -382,6 +394,7 @@ final class ScoreLibraryStore: ObservableObject {
         } else {
             activeScoreID = nil
         }
+        refreshFileAvailability()
     }
 
     private func migrateLegacyIdentityScopedLibraryIfNeeded(in defaults: UserDefaults) {
@@ -442,6 +455,7 @@ final class ScoreLibraryStore: ObservableObject {
         if let data = try? encoder.encode(items) {
             defaults.set(data, forKey: storageKey)
         }
+        refreshFileAvailability()
 
         if let activeScoreID {
             defaults.set(activeScoreID.uuidString, forKey: activeScoreKey)

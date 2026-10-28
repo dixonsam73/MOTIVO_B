@@ -677,7 +677,23 @@ enum Theme {
             slotMap(ownerID: ownerID)
         }
 
-        private static func namespaceKey(ownerID: String?) -> String {
+        /// The stored map as written, before the read-time sanitiser (which drops
+        /// the primary and moves duplicates). Private sync reads and merges this.
+        static func storedSlotMap(ownerID: String?, defaults: UserDefaults = .standard) -> [String: Int] {
+            defaults.dictionary(forKey: namespaceKey(ownerID: ownerID)) as? [String: Int] ?? [:]
+        }
+
+        static func storeSlotMap(_ map: [String: Int], ownerID: String?, defaults: UserDefaults = .standard) {
+            defaults.set(map, forKey: namespaceKey(ownerID: ownerID))
+        }
+
+        /// The sanitiser, exposed so sync can write a map this device will not
+        /// immediately rewrite: no primary label, no two labels on one slot.
+        static func sanitized(_ rawMap: [String: Int], primaryLabel: String?) -> [String: Int] {
+            sanitizedSlotMap(rawMap, primaryLabel: primaryLabel)
+        }
+
+        static func namespaceKey(ownerID: String?) -> String {
             let normalizedOwner = ownerID?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()

@@ -361,6 +361,15 @@ struct ScoresLibraryView: View {
                 Text(pageCountLabel(for: item))
                     .font(Theme.Text.meta)
                     .foregroundStyle(Theme.Colors.secondaryText)
+
+                if store.isFileMissing(item) {
+                    // C-140: the index entry exists but the PDF is not on this
+                    // device. Said plainly; the entry is kept, never removed.
+                    Label("Unavailable on this device — file missing", systemImage: "exclamationmark.triangle")
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .accessibilityLabel("Unavailable on this device, file missing")
+                }
             }
 
             Spacer(minLength: 0)
@@ -437,6 +446,10 @@ struct ScoresLibraryView: View {
     }
 
     private func selectScore(_ item: ScoreLibraryItem) {
+        if store.isFileMissing(item) {
+            errorMessage = "“\(item.title)” can’t be opened: its file isn’t on this device. The entry is kept; the file can arrive from another device or be imported again."
+            return
+        }
         switch mode {
         case .browse:
             openScore(item)
