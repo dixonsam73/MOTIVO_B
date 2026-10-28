@@ -7,7 +7,7 @@
 //  `PersistenceController` traps if the store cannot load, and that is kept
 //  deliberately: it is FAIL-CLOSED — the store file is never touched, so the
 //  local journal survives. The realistic trigger is a model change that Core
-//  Data cannot migrate by inference: 11 shipped model versions, no mapping
+//  Data cannot migrate by inference: 12 shipped model versions, no mapping
 //  models. This test opens a store created from EVERY shipped version with the
 //  model production actually loads, with production's migration options, so an
 //  unmigratable change fails here instead of trapping on a member's device.
@@ -76,13 +76,16 @@ final class StoreMigrationCompatibilityTests: XCTestCase {
 
     func testEveryShippedModelVersionMigratesToTheCurrentModel() throws {
         let versions = try shippedVersions()
-        // 11 `.mom` files: V2, V3 (7.5), V4, V4 HARDENED, V5–V10 and the
+        // 12 `.mom` files: V2, V3 (7.5), V4, V4 HARDENED, V5–V11 and the
         // original unversioned `MOTIVO`. (`MOTIVO V9.omo` is Xcode's optimised
         // copy of V9, not a version — the prediction miscounted it as one.)
         // P6-I-03 / C1 added V10 — V9 plus one optional Binary attribute,
-        // `Session.sharingHandoff` — reviewed deliberately: every OLDER version
-        // is still migrated into it below, and V10 itself is the current model.
-        XCTAssertEqual(versions.count, 11,
+        // `Session.sharingHandoff`. The sync trial's Checkpoint 1 (2026-10-18)
+        // added V11 — V10 plus an optional Date `userModifiedAt` on Session
+        // and Attachment, and `preserveAfterDeletion` on their `id` — reviewed
+        // deliberately (C-142, 2026-10-28): every OLDER version is still
+        // migrated into it below, and V11 itself is the current model.
+        XCTAssertEqual(versions.count, 12,
                        "the shipped version inventory changed — review this test's coverage deliberately")
         var migrated: [String] = []
 
