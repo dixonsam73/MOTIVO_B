@@ -180,8 +180,8 @@ struct SyncTestDiagnosticsView: View {
                 Button("Re-send settings (re-run transition)") { JournalSyncCoordinator.shared.engine?.rerunSettingsTransition(); refreshTick += 1 }
             }
             Section("Media over mobile data (stage J)") {
-                row("Option", JournalMediaPreference.allowsCellular() ? "allowed" : "Wi-Fi only")
-                row("Gate", status.mediaGated ? "media waits for Wi-Fi (engine not automatic)" : "media allowed (engine automatic)")
+                row("Option", JournalMediaPreference.allowsMobileData() ? "mobile data and hotspot allowed" : "Wi-Fi only")
+                row("Hold", status.mediaGated ? "\(status.mediaHold.reason ?? "") (engine not automatic)" : "media allowed (engine automatic)")
                 row("Waiting", status.mediaWaiting ?? "nothing")
                 row("Uploads held / downloads held", "\(state?.mediaUploadsHeld ?? 0) / \(state?.mediaDownloadsHeld ?? 0)")
                 row("App push subscription", state?.appSubscriptionSaved == true ? "saved" : "not yet")

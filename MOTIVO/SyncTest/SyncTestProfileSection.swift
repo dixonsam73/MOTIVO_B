@@ -15,7 +15,7 @@ import SwiftUI
 struct SyncTestProfileSection: View {
     @ObservedObject private var status = JournalSyncCoordinator.shared.status
     @ObservedObject private var library = ScoreLibraryStore.shared
-    @State private var allowCellular = JournalMediaPreference.allowsCellular()
+    @State private var allowMobileData = JournalMediaPreference.allowsMobileData()
     @State private var recoverable = 0
 
     var body: some View {
@@ -25,14 +25,14 @@ struct SyncTestProfileSection: View {
                 Spacer()
                 Text(statusText).font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText).multilineTextAlignment(.trailing)
             }
-            Toggle(isOn: $allowCellular) {
+            Toggle(isOn: $allowMobileData) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Media over mobile data").font(Theme.Text.body)
-                    Text("Photos, recordings, scores and your profile photo are sent and received over Wi-Fi unless this is on. Text and settings always sync. This device only.")
+                    Text("Photos, recordings, scores and your profile photo are sent and received over Wi-Fi only, unless this is on; on also allows a personal hotspot. Low Data Mode always pauses media. Text and settings sync on any connection. This device only.")
                         .font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
                 }
             }
-            .onChange(of: allowCellular) { _, newValue in JournalMediaPreference.setAllowsCellular(newValue) }
+            .onChange(of: allowMobileData) { _, newValue in JournalMediaPreference.setAllowsMobileData(newValue) }
             if let waiting = status.mediaWaiting {
                 Text(waiting).font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
             }
@@ -58,12 +58,12 @@ struct SyncTestProfileSection: View {
     private var statusText: String {
         var text = status.phase
         if let reason = status.pausedReason, !reason.isEmpty { text += " · \(reason)" }
-        if status.mediaGated { text += " · media waits for Wi-Fi" }
+        if let reason = status.mediaHold.reason { text += " · \(reason)" }
         return text
     }
 
     private func reload() {
-        allowCellular = JournalMediaPreference.allowsCellular()
+        allowMobileData = JournalMediaPreference.allowsMobileData()
         if let store = JournalSyncCoordinator.shared.store { recoverable = JournalRecovery.entries(store: store).count }
     }
 }

@@ -1400,8 +1400,8 @@ the join.
   index is unreadable leaves the item here, and it is uploaded again once
   the index reads.
   **Stage J, settings, colours, recovery, mobile data, removal wording and
-  the missing-score state: BUILT 2026-10-27, device run pending; build
-  1865 (`3de231a` and the record commit).** Scope (Samuel, 2026-10-27): primary activity; Lists
+  the missing-score state: BUILT 2026-10-27, clarified 2026-10-28, device run
+  pending; build 1867 (`3de231a`, `3ede45c`, `fe7c0d8` and the record commit).** Scope (Samuel, 2026-10-27): primary activity; Lists
   defaults, autofill choices and typed presets per (activity, instrument)
   context; the Journal Tint preference; consistent thread and instrument
   colours; a user-facing recovery view for displaced text; media over Wi-Fi
@@ -1424,15 +1424,32 @@ the join.
   a record whose instrument is not here yet is held and lands with it.
   Explicit clears travel as values; absent fields carry no information;
   deletions are never inferred for contexts. (3) *Colours*: thread colours
-  need no record (`Theme.ThreadTint.primeWeightedSlots` rebuilds the map
-  from thread usage in the journal, which is synced, so two devices with
-  the same journal compute the same colours). The instrument map is one
+  need no record: production's `Theme.ThreadTint.primeWeightedSlots`
+  already rebuilds the thread map from usage whenever a thread view
+  renders (rank by count, ties by name, slots handed out in rank order
+  from the hero palette first; a label in the old map but not in the
+  counts keeps a slot after the ranked ones), so on a single device a
+  thread's colour already moves when its rank moves, and two devices with
+  the same journal and the same ranking produce the same map in whatever
+  order the entries arrived. The trade-off, stated rather than changed:
+  while the journals merge, each device's ranking changes once, so a
+  thread can change colour once on each device, then both agree and stay;
+  a synced thread record would fight the usage rebuild (ping-pong). The
+  tie-break is a locale-aware name comparison, so two devices in different
+  languages could in principle rank a tie differently (both trial devices
+  are en-GB); and production primes the one map from whichever screen
+  last rendered (Journal: the whole journal; Insights: the sessions in
+  the chosen range), a pre-existing quirk sync does not change. The instrument map is one
   `TintMap` record ("tint-instrument": label → slot) merged by UNION with
   the server's slot standing where both assign the same label; removals are
   never sent (a label a device drops, its primary or a sanitiser move, is
   not a change), so existing assignments are kept wherever possible, a
   clash is settled once and both devices, running the same deterministic
-  sanitiser, converge (unit-tested with the real sanitiser). (4) *Change
+  sanitiser, converge (unit-tested with the real sanitiser). No repeated
+  sends: a map is queued only when it differs from the last exchanged map
+  by an addition or a move AND its fingerprint differs from what is already
+  queued; a sanitiser move after a merge is one further send, after which
+  the exchanged map equals the local one. (4) *Change
   detection*: a fingerprint scan on the defaults-change notification
   (800 ms debounce, with the Lists scan), at activation and after imports;
   settings and contexts are clocked at the scan that finds the change. (5)
@@ -1442,20 +1459,37 @@ the join.
   for session title/notes, attachment names, profile name/location, score
   titles and the displaced avatar, Restore, which is a NEW edit through the
   app's own writers (clocked now, wins everywhere); Dismiss removes an
-  entry; no version history. (6) *Media over mobile data* (C-141): metered
-  = cellular-only, hotspot (`isExpensive`) or Low Data Mode
-  (`isConstrained`); with the per-device option off, outgoing records that
-  would carry a file stay in the outbox ("Media waiting for Wi-Fi: n to
-  send (MB)"), and because `CKSyncEngine` fetches every asset with its
-  record, the engine is rebuilt WITHOUT automatic sync (the stage E path)
-  and the app fetches records itself through the asset-free delta catch-up,
-  holding by name each record whose file it needs ("n to receive"); the
-  app's own `CKDatabaseSubscription` ("etudes-journal-app-wake") brings a
-  push to `SyncTestAppDelegate` while the engine is not automatic;
-  `remote-notification` added to `UIBackgroundModes` (production
-  Info.plist, needed by shipping sync anyway). On Wi-Fi or with the option
-  on, the automatic engine returns, held records are fetched with their
-  files and held uploads are requeued. Text and metadata sync on any link.
+  entry; no version history. (6) *Media over mobile data* (C-141). The
+  rule (Samuel, 2026-10-28): option OFF → media waits on mobile data and on
+  a personal hotspot (`isExpensive`), "Media waiting for Wi-Fi"; option ON
+  → both carry media; Low Data Mode (`isConstrained`, which iOS lets the
+  person set per Wi-Fi network as well as for mobile data) pauses media
+  whatever the option says, "Media paused by Low Data Mode", because
+  allowing mobile data never overrides the person's own system-wide
+  request; ordinary Wi-Fi and wired links carry media whatever the option;
+  text, settings, metadata and deletions sync on any link. While media is
+  held, outgoing records that would carry a file stay in the outbox, and
+  because `CKSyncEngine` fetches every asset with its record, the engine
+  is rebuilt WITHOUT automatic sync (the stage E drop-and-rebuild path:
+  the old instance's later events are ignored, the activation re-asks the
+  account guard) and the app fetches records itself through the asset-free
+  delta catch-up, holding by name each record whose file it needs ("n to
+  receive"); a change of reason alone (mobile data → Low Data Mode) is a
+  status change, no rebuild; the app's own `CKDatabaseSubscription`
+  ("etudes-journal-app-wake") brings a push to `SyncTestAppDelegate` while
+  the engine is not automatic (`remote-notification` in
+  `Info-SyncTest.plist` only; the production `Info.plist` line added in
+  `3de231a` was taken out again, to land with main-build integration —
+  ordinary builds have no CloudKit or push entitlement, no engine, no
+  subscription and no `registerForRemoteNotifications`, all of which are
+  `#if SYNCTEST`). When the hold lifts, the automatic engine returns, held
+  records are fetched with their files and held uploads are requeued. What
+  the app enforces is which records it hands to CloudKit and which it
+  fetches; an operation already in flight on the dropped engine finishes
+  or fails on CloudKit's own schedule, and its result is ignored (the
+  record stays in the outbox and is resent as a normal conflict-checked
+  save), so the device run reads the log, not byte counters, for that
+  case.
   (7) *Removal wording* (SYNCTEST): "Remove Études Data from This Device",
   confirm word REMOVE, and the confirmation says the private iCloud
   journal and other devices are unchanged, sync is turned off on this
@@ -1476,9 +1510,17 @@ the join.
   newer clock wins the whole small record, ties go to the server, the
   displaced value is kept for recovery; a restoration is a new clocked edit.
   Unit tests: `SyncTestSettingsSyncTests` (14), `SyncTestTransferGateTests`
-  (4), `C138ScoreLibraryTests` +1 (C-140); 132 SyncTest-suite tests green
-  (the full run also shows the recorded order-dependent sharing tests and
-  C-142, both unrelated);
+  (5), `C138ScoreLibraryTests` +1 (C-140). Totals reconciled 2026-10-28:
+  stage I's "143" was the ten SyncTest suites plus `C138ScoreLibraryTests`,
+  `C5ScoreAdoptionIdentityTests`, `SchemeConfigurationGuardTests` and
+  `PDFScoreEffectOrderingTests` (30 production score tests); the first
+  stage J count, "132", was the SyncTest suites plus `C138` only, so the
+  drop was a narrower selection, not lost tests. The stage I selection
+  plus the stage J suites and `StoreMigrationCompatibilityTests` is now
+  165 tests green under the SyncTest configuration. The
+  full-target run also shows seven order-dependent sharing tests
+  (`JournalDeleteQueuedPublishTests`, `P6I02…`, `P6I03…`) that pass in
+  isolation, as recorded under "Test hygiene".
   Debug, Release and SyncTest build. **Device run pending** (script
   `stage-J-device-script.md` in the notes folder): primary activity and
   list defaults both ways with differing instrument ids; explicit clears
@@ -1486,8 +1528,13 @@ the join.
   stable; tint syncing while tool toggles stay independent; a displaced
   value recovered through the view; mobile data with the option off
   (metadata arriving, media pending both ways, released by the option or
-  Wi-Fi); a missing score file's visible state; device-only removal on the
-  iPad's disposable copy.
+  Wi-Fi), Wi-Fi → mobile data → Wi-Fi with pending media, an active
+  transfer and a relaunch, an avatar and a score as well as an attachment,
+  no duplicate records or repeat transfers once released, Low Data Mode
+  with the option on; the engine rebuild's guards read from the log; a
+  restoration arriving on the other device as a normal edit; a missing
+  score file's visible state; device-only removal on the iPad's disposable
+  copy.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

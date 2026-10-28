@@ -79,8 +79,9 @@ final class JournalSyncStatus: ObservableObject {
     @Published var lastEvent: String = "—"
     @Published var lastFetchAt: Date?
     @Published var lastSendAt: Date?
-    /// Stage J: media transfers wait for Wi-Fi right now.
+    /// Stage J: media transfers are held right now (and why).
     @Published var mediaGated = false
+    @Published var mediaHold: JournalMediaGate.Hold = .none
     /// "Media waiting for Wi-Fi: 2 to send (35 MB), 1 to receive", or nil.
     @Published var mediaWaiting: String?
 }
@@ -128,15 +129,17 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private var scoreScanScheduled = false
     private var backgroundObserver: NSObjectProtocol?
     // Stage J: media over mobile data (JournalTransferPolicy).
-    /// What the path monitor last reported: cellular-only, expensive or constrained.
-    private var pathMetered = false
-    private var mediaGatedValue = false
+    /// What the path monitor last reported: cellular-only, expensive, constrained.
+    private var pathLink = JournalMediaGate.Link()
+    private var mediaHoldValue: JournalMediaGate.Hold = .none
+    private var mediaGatedValue: Bool { mediaHoldValue.holds }
     private var manualSendScheduled = false
     private var preferenceObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
-    /// While media waits for Wi-Fi the engine is built without automatic sync:
-    /// the app sends on its own schedule and fetches records itself.
+    /// While media is held the engine is built without automatic sync: the
+    /// app sends on its own schedule and fetches records itself.
     var mediaGated: Bool { stateLock.lock(); defer { stateLock.unlock() }; return mediaGatedValue }
+    var mediaHold: JournalMediaGate.Hold { stateLock.lock(); defer { stateLock.unlock() }; return mediaHoldValue }
 
     init(containerIdentifier: String, persistence: NSPersistentContainer, store: JournalSyncStateStore, status: JournalSyncStatus, customOwner: String?) {
         self.container = CKContainer(identifier: containerIdentifier)
@@ -261,7 +264,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             #endif
         }
         stateLock.lock()
-        mediaGatedValue = JournalMediaGate.waitsForWiFi(metered: pathMetered, allowCellular: JournalMediaPreference.allowsCellular())
+        mediaHoldValue = JournalMediaGate.hold(link: pathLink, allowMobileData: JournalMediaPreference.allowsMobileData())
         stateLock.unlock()
         await reconcile(trigger: "launch")
     }
@@ -393,18 +396,19 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         if engineInstance == nil {
             var configuration = CKSyncEngine.Configuration(database: container.privateCloudDatabase,
                                                            stateSerialization: store.state.engineState, delegate: self)
-            // Stage J: while media waits for Wi-Fi the engine must not fetch
-            // (it would download every asset with its record), so it runs
+            // Stage J: while media is held the engine must not fetch (it
+            // would download every asset with its record), so it runs
             // without automatic sync and the app drives sends and fetches.
             configuration.automaticallySync = !mediaGatedValue
             engineInstance = CKSyncEngine(configuration)
         }
         let gated = mediaGatedValue
+        let hold = mediaHoldValue
         retryPending = false
         retryAttempts = 0
         lastRefusal = nil
         stateLock.unlock()
-        if wasDormant { log("Engine \(store.state.engineState == nil ? "built fresh" : "built from saved state") (\(trigger))\(gated ? "; automatic sync off, media waits for Wi-Fi" : "")") }
+        if wasDormant { log("Engine \(store.state.engineState == nil ? "built fresh" : "built from saved state") (\(trigger))\(gated ? "; automatic sync off, \(hold.reason ?? "")" : "")") }
         await publish { $0.pausedReason = nil }
 
         queueToEngine(databaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
@@ -436,24 +440,28 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     // MARK: Stage J: media over mobile data
 
-    /// Re-evaluates the gate from the last path report and the option; when it
-    /// moves, the engine is rebuilt with the matching automatic-sync setting
-    /// (the stage E drop-and-rebuild path) and what waited is released.
+    /// Re-evaluates the hold from the last path report and the option; when
+    /// media goes from allowed to held or back, the engine is rebuilt with the
+    /// matching automatic-sync setting (the stage E drop-and-rebuild path:
+    /// the old instance's later events are ignored by `isCurrent`, the
+    /// activation re-asks the account guard) and what waited is released. A
+    /// change of reason alone (Wi-Fi only → Low Data Mode) is a status change.
     func recomputeGate(trigger: String) async {
-        let allow = JournalMediaPreference.allowsCellular()
+        let allow = JournalMediaPreference.allowsMobileData()
         stateLock.lock()
-        let next = JournalMediaGate.waitsForWiFi(metered: pathMetered, allowCellular: allow)
-        let changed = next != mediaGatedValue
-        mediaGatedValue = next
+        let previous = mediaHoldValue
+        let next = JournalMediaGate.hold(link: pathLink, allowMobileData: allow)
+        let rebuild = JournalMediaGate.rebuildNeeded(from: previous, to: next)
+        mediaHoldValue = next
         let hadEngine = engineInstance != nil
-        if changed, hadEngine { engineInstance = nil; dormantGeneration += 1 }
+        if rebuild, hadEngine { engineInstance = nil; dormantGeneration += 1 }
         stateLock.unlock()
-        guard changed else { return }
-        log("Media transfers now \(next ? "wait for Wi-Fi" : "allowed on this link") (\(trigger))\(hadEngine ? "; engine rebuilt" : "")")
-        if !next { store.update { $0.mediaWaitingUpload.removeAll() } }
-        await publish { $0.mediaGated = next }
+        guard previous != next else { return }
+        log("Media transfers now \(next.reason ?? "allowed on this link") (\(trigger))\(rebuild && hadEngine ? "; engine rebuilt" : "")")
+        if !next.holds { store.update { $0.mediaWaitingUpload.removeAll() } }
+        await publish { $0.mediaGated = next.holds; $0.mediaHold = next }
         refreshCounts()
-        guard hadEngine, currentDecision().allowed else { return }
+        guard rebuild, hadEngine, currentDecision().allowed else { return }
         await activate(trigger: trigger)
     }
 
@@ -461,7 +469,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// fetch, then a send. Called from a push and from the foreground.
     func manualRefresh(trigger: String) async {
         guard mediaGated, engine != nil, currentDecision().allowed else { return }
-        _ = await deltaCatchUp(reason: "\(trigger) while media waits for Wi-Fi")
+        _ = await deltaCatchUp(reason: "\(trigger) while media is held")
         scheduleManualSend()
     }
 
@@ -488,12 +496,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             guard let self else { return }
             self.stateLock.lock(); self.manualSendScheduled = false; self.stateLock.unlock()
             guard let engine = self.engine, self.mediaGated, self.currentDecision().allowed else { return }
-            do { try await engine.sendChanges() } catch { self.log("Send (media waits for Wi-Fi) failed: \(error.localizedDescription); retried at the next change, push or foreground") }
+            do { try await engine.sendChanges() } catch { self.log("Send (media held) failed: \(error.localizedDescription); retried at the next change, push or foreground") }
         }
     }
 
     /// Upload side of the gate: a record that would carry a file stays in the
-    /// outbox (not in the engine) while media waits for Wi-Fi. nil here drops
+    /// outbox (not in the engine) while media is held. nil here drops
     /// the pending change from the engine only; `requeueOutbox` restores it.
     private func gateUpload(_ record: CKRecord?) -> CKRecord? {
         guard let record, mediaGated, let asset = record[JournalRecordMapping.assetKey] as? CKAsset, let url = asset.fileURL else { return record }
@@ -501,7 +509,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         let size = JournalAssetHash.stamp(of: url)?.size ?? 0
         let first = store.state.mediaWaitingUpload[name] == nil
         store.update { if first { $0.mediaUploadsHeld += 1 }; $0.mediaWaitingUpload[name] = size }
-        if first { log("Upload of \(name.prefix(14))… (\(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) waits for Wi-Fi") }
+        if first { log("Upload of \(name.prefix(14))… (\(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) held: \(mediaHold.reason ?? "")") }
         refreshCounts()
         return nil
     }
@@ -707,7 +715,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                                              knownHash: store.state.assetHashes[name], fileExists: exists)
         }.map(\.recordID)
         if !needing.isEmpty, mediaGated {
-            // Stage J: the files wait for Wi-Fi; the records wait with them
+            // Stage J: the files are held; the records wait with them
             // (an attachment, score or avatar is never imported without its
             // file). Everything else in the batch is imported now.
             let names = needing.map(\.recordName)
@@ -718,7 +726,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 s.mediaDownloadsHeld += s.awaitingMedia.count - before
             }
             modified.removeAll { heldSet.contains($0.recordID.recordName) }
-            log("\(names.count) record(s) with media held for Wi-Fi: \(names.map { $0.prefix(14) })")
+            log("\(names.count) record(s) with media held (\(mediaHold.reason ?? "")): \(names.map { $0.prefix(14) })")
             refreshCounts()
         } else if !needing.isEmpty {
             let fetch = CKFetchRecordsOperation(recordIDs: needing)
@@ -899,14 +907,17 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self, path.status == .satisfied else { return }
-            // Stage J: the link's meteredness decides whether media waits.
-            let metered = JournalMediaGate.metered(path: path)
+            // Stage J: the link decides whether media waits.
+            let link = JournalMediaGate.link(path: path)
             self.stateLock.lock()
             let pending = self.retryPending
-            let meteredChanged = metered != self.pathMetered
-            self.pathMetered = metered
+            let linkChanged = link != self.pathLink
+            self.pathLink = link
             self.stateLock.unlock()
-            if meteredChanged { Task { await self.recomputeGate(trigger: metered ? "network path is mobile data" : "network path is Wi-Fi") } }
+            if linkChanged {
+                let description = "network path: \(link.cellularOnly ? "mobile data" : "Wi-Fi or wired")\(link.expensive ? ", expensive (hotspot)" : "")\(link.constrained ? ", Low Data Mode" : "")"
+                Task { await self.recomputeGate(trigger: description) }
+            }
             guard pending else { return }
             Task { await self.reconcile(trigger: "network path satisfied") }
         }
@@ -1054,7 +1065,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         guard let engine, currentDecision().allowed else { log("Fetch refused: \(currentDecision().reason ?? "no engine")"); return }
         if mediaGated {
             // The engine's fetch would bring every asset; the app's own fetch brings records.
-            _ = await deltaCatchUp(reason: "manual fetch while media waits for Wi-Fi")
+            _ = await deltaCatchUp(reason: "manual fetch while media is held")
             return
         }
         do { try await engine.fetchChanges() } catch { log("fetchChanges failed: \(error.localizedDescription)") }
@@ -1773,8 +1784,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             self.status.bytesSent = st.bytesSent
             self.status.bytesReceived = st.bytesReceived
             self.status.boundUser = st.boundUserRecordName
-            self.status.mediaGated = self.mediaGated
-            self.status.mediaWaiting = JournalMediaHold.summary(uploads: st.mediaWaitingUpload, downloads: st.awaitingMedia)
+            let hold = self.mediaHold
+            self.status.mediaGated = hold.holds
+            self.status.mediaHold = hold
+            self.status.mediaWaiting = JournalMediaHold.summary(uploads: st.mediaWaitingUpload, downloads: st.awaitingMedia, hold: hold)
         }
     }
 }
