@@ -790,6 +790,13 @@ enum Theme {
             .lavender
         ]
 
+        /// The slot the allocator would give the next label (sync trial: a
+        /// label that clashes with another device's is moved here before the
+        /// sanitiser runs, so the other device's assignment stands).
+        static func nextFreeSlot(from map: [String: Int]) -> Int {
+            nextAvailableSlot(from: map).rawValue
+        }
+
         private static func nextAvailableSlot(from map: [String: Int]) -> Slot {
             let usedVisibleSlots = visibleAssignmentPriority.filter { usedSlot in
                 Set(map.values).contains(usedSlot.rawValue)
