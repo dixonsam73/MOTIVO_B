@@ -439,6 +439,60 @@ final class SyncTestProfileTests: XCTestCase {
         XCTAssertEqual(JournalAssetHash.hash(of: avatarURL), localHash)
     }
 
+    // MARK: stage J device run (2026-10-28): what the recovery list may offer
+
+    func testOnlyAnUnsentEditIsDisplacedAndASyncedValueReplacedLaterIsAPlainImport() throws {
+        let p = makeProfile(name: "Name B")
+        _ = scan(); store.update { $0.outbox.removeAll(); $0.profileStamp = Date(timeIntervalSince1970: 1_000) }   // exchanged
+        // The other device's later edit over a value the server already held from here: applied, nothing displaced.
+        let later = applyProfile(serverProfile(name: "Name A", location: "", primary: "", stamp: Date(timeIntervalSince1970: 2_000)))
+        XCTAssertEqual(later.applied, 1)
+        XCTAssertEqual(values().name, "Name A")
+        XCTAssertTrue(store.state.conflicts.filter { $0.recordType == JournalSyncRecordType.profile }.isEmpty,
+                      "a later edit from the other device is not a conflict and must not offer Restore")
+        // An edit made here and not yet sent loses to a newer server copy: displaced, with Restore.
+        p.setValue("Name C", forKey: "name"); try container.viewContext.save()
+        XCTAssertEqual(scan(now: Date(timeIntervalSince1970: 3_000)).map(\.recordName), [JournalProfileSync.profileName])
+        let newer = applyProfile(serverProfile(name: "Name D", location: "", primary: "", stamp: Date(timeIntervalSince1970: 4_000)))
+        XCTAssertEqual(newer.applied, 1)
+        XCTAssertEqual(values().name, "Name D")
+        let displaced = store.state.conflicts.filter { $0.recordType == JournalSyncRecordType.profile }
+        XCTAssertEqual(displaced.count, 1)
+        XCTAssertEqual(displaced.first?.displaced["Name (this device)"], "Name C")
+        XCTAssertEqual(displaced.first?.restore, "profile")
+    }
+
+    func testAReplacedSyncedAvatarKeepsNoCopyButAnUnsentOneAndARemovalDo() throws {
+        makeProfile(name: "Samuel")
+        _ = scan(); store.update { $0.outbox.removeAll() }
+        JournalProfileSync.clearDisplacedAvatars()
+        // The server's image, applied here: this device now holds exactly what the server holds.
+        XCTAssertEqual(applyAvatar(serverAvatar(png: pngData(0.3), stamp: Date(timeIntervalSince1970: 1_000))).applied, 1)
+        XCTAssertEqual(JournalProfileSync.displacedAvatars().count, 0)
+        // The other device replaces it later: a plain import, no copy kept, nothing to restore.
+        let replaced = applyAvatar(serverAvatar(png: pngData(0.5), stamp: Date(timeIntervalSince1970: 2_000)))
+        XCTAssertEqual(replaced.applied, 1)
+        XCTAssertEqual(JournalProfileSync.displacedAvatars().count, 0, "a later photo from the other device is not a conflict")
+        XCTAssertTrue(store.state.conflicts.filter { $0.recordType == JournalSyncRecordType.profileAvatar }.isEmpty)
+        // A photo chosen here and not yet sent loses to a newer one: kept, with Restore.
+        ProfileStore.saveAvatarDerived(UIImage(data: pngData(0.7))!, for: scope.avatarUserID)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 8_000)], ofItemAtPath: avatarURL.path)
+        store.update { $0.fileStampCache.removeValue(forKey: JournalProfileSync.avatarName) }
+        XCTAssertEqual(scan().map(\.recordName), [JournalProfileSync.avatarName])
+        let lost = applyAvatar(serverAvatar(png: pngData(0.8), stamp: Date(timeIntervalSince1970: 9_000)))
+        XCTAssertEqual(lost.applied, 1)
+        XCTAssertEqual(JournalProfileSync.displacedAvatars().count, 1)
+        XCTAssertEqual(store.state.conflicts.filter { $0.recordType == JournalSyncRecordType.profileAvatar }.count, 1)
+        // A removal on the other device keeps a copy whatever the state here: the one change choosing the photo again cannot undo.
+        XCTAssertEqual(applyAvatar(serverAvatar(png: nil, stamp: Date(timeIntervalSince1970: 10_000))).applied, 1)
+        XCTAssertEqual(JournalProfileSync.displacedAvatars().count, 2)
+        // The engine never uploads what the server already holds (one photo change reached it as two write points on 2026-10-28).
+        XCTAssertTrue(JournalProfileMerge.avatarSendIsRedundant(localHash: "h", knownHash: "h"))
+        XCTAssertTrue(JournalProfileMerge.avatarSendIsRedundant(localHash: "", knownHash: ""), "a removal the server already holds")
+        XCTAssertFalse(JournalProfileMerge.avatarSendIsRedundant(localHash: "h2", knownHash: "h"))
+        XCTAssertFalse(JournalProfileMerge.avatarSendIsRedundant(localHash: "h", knownHash: nil), "never exchanged: the first send")
+    }
+
     // MARK: migration and two established profiles
 
     func testAnUnclockedMigrationYieldsToARealEditAndTwoEstablishedProfilesConvergeInOneRound() throws {

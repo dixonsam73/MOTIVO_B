@@ -1377,6 +1377,13 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                     record = JournalProfileSync.avatarRecord(scope: scope, store: store)
                 }
             }
+            if name == JournalProfileSync.avatarName, let built = record,
+               JournalProfileMerge.avatarSendIsRedundant(localHash: built[JournalRecordMapping.fileHashKey] as? String ?? "",
+                                                         knownHash: store.state.assetHashes[name]) {
+                log("Avatar already on the server; nothing to send")
+                store.update { $0.outbox.removeAll { $0.recordName == name && $0.op == .save } }
+                return nil
+            }
             return record
         }
         let isMeta = type == JournalSyncRecordType.attachmentMeta || JournalSyncRecordType.attachmentName(fromMeta: name) != nil

@@ -167,9 +167,15 @@ enum JournalProfileMerge {
                 return d
             }
             d.apply = server
-            for (label, l, s) in [("name", local.name, server.name), ("location", local.location, server.location),
-                                  ("instrument", local.primaryInstrument, server.primaryInstrument)] where l != s && !l.isEmpty {
-                d.displaced.append("\(label) (this device): \(l)")
+            // Stage J device run (2026-10-28): only an edit this device had not
+            // sent is displaced. A value the server already held from here,
+            // replaced by the other device's later edit, is an ordinary import;
+            // listing it would offer to undo the other person's deliberate change.
+            if localPending {
+                for (label, l, s) in [("name", local.name, server.name), ("location", local.location, server.location),
+                                      ("instrument", local.primaryInstrument, server.primaryInstrument)] where l != s && !l.isEmpty {
+                    d.displaced.append("\(label) (this device): \(l)")
+                }
             }
             d.summary = "server newer; applied"
         case .local:
@@ -192,6 +198,14 @@ enum JournalProfileMerge {
         case .server: return .takeServer
         case .local: return .keepLocalAndSend
         }
+    }
+
+    /// PURE. The server already holds exactly this file ("" after a removal),
+    /// so a send the engine still has pending would only upload it again. Seen
+    /// on the iPad 2026-10-28: one photo change reached the engine as two
+    /// write points and went up twice, 252 KB each.
+    static func avatarSendIsRedundant(localHash: String, knownHash: String?) -> Bool {
+        knownHash == localHash
     }
 
     /// PURE. Whether a change found by the scan is a user edit. The app's own
@@ -525,7 +539,13 @@ enum JournalProfileSync {
             outcome.resend.append(.init(recordName: avatarName, recordType: JournalSyncRecordType.profileAvatar, op: .save))
             log("Avatar record: local newer; kept and resent")
         case .takeServer:
-            if !local.hash.isEmpty, let url = local.url { keepDisplacedAvatar(from: url, hash: local.hash, store: store) }
+            // A copy is kept when this device's image had not reached the server
+            // (an unsent edit, or never exchanged), and always on a removal, which
+            // is the one change a person cannot undo by choosing the photo again.
+            if !local.hash.isEmpty, let url = local.url,
+               pending || st.assetHashes[avatarName] != local.hash || serverHash.isEmpty {
+                keepDisplacedAvatar(from: url, hash: local.hash, store: store)
+            }
             JournalProfileMirror.suppressed = true
             defer { JournalProfileMirror.suppressed = false }
             if serverHash.isEmpty {
