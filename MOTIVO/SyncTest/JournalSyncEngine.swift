@@ -969,7 +969,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             self.pathLink = link
             self.stateLock.unlock()
             if linkChanged {
-                let description = "network path: \(link.cellularOnly ? "mobile data" : "Wi-Fi or wired")\(link.expensive ? ", expensive (hotspot)" : "")\(link.constrained ? ", Low Data Mode" : "")"
+                let description = "network path: \(link.cellularOnly ? "mobile data" : "Wi-Fi or wired")\(link.expensive ? (link.cellularOnly ? ", expensive" : ", expensive (hotspot)") : "")\(link.constrained ? ", Low Data Mode" : "")"
                 Task { await self.recomputeGate(trigger: description) }
             }
             guard pending else { return }
