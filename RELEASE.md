@@ -1685,7 +1685,8 @@ the join.
   session's then-uncommitted hunks in the shared engine, state, diagnostics
   and Profile-section files and its C-152 row; `e2f394c` completes them.
   **iCloud storage-full handling, built 2026-11-03 (C-152; simulated
-  refusals only; device check is Samuel's call).** `CKSyncEngine` does not
+  refusals only): PASSED on device 2026-11-03, build 1885 (`2812754`),
+  iPhone "SD iPhone" and iPad Sync Test installs.** `CKSyncEngine` does not
   retry `quotaExceeded` and drops the change from its pending list; the
   outbox kept it but nothing re-queued it before the next activation, and
   every refusal was logged twice per attempt. Now: `JournalSendFailure`
@@ -1708,6 +1709,24 @@ the join.
   diagnostics and Profile edits and the C-152 row from the shared
   checkout; the helper and test files landed with the storage-full commit.
   Device script: side-session notes, `storage-full-device-script.md`.
+  *Device evidence (state files over the cable, 17:24–17:34):* with the
+  simulation on, the iPhone's first refused send at 17:25:56 logged ONE
+  episode line (3 saves refused, 3 waiting); three later bursts of edits
+  (eight changes in all: five sessions, a Thought's photo with its meta
+  record, two deletions) added no line; a change 2 min 4 s after the
+  refusal was allowed one attempt (refused, counted as attempt 2, not
+  logged); a foreground 50 s after that did nothing; a foreground 2 min
+  50 s after it made attempt 3; Profile read "Running · iCloud storage
+  full" with the waiting line. End simulation at 17:32:08; the foreground
+  at 17:33:17 (past the 2-minute floor) sent for real: "Sent 6 record(s);
+  1 media upload(s), 2,597,715 bytes" and "iCloud storage available again
+  after 3 refused attempt(s)". Counters: iPhone `recordsSent` +6 (the six
+  saves, once), `assetUploads` +1; iPad `recordsReceived` +6 in one push
+  catch-up with the 2 deletions and 1 file, `assetBytesDownloaded` up by
+  exactly the photo's 2,597,715 bytes, no held attachment (the session
+  arrived with it), no duplicate. The iPad showed no episode. Not
+  exercised: sections 4 (held media under the full state, mobile data)
+  and 5 (zone refusal), both unit-covered only.
   **Follow-ups before main-build integration (agreed 2026-11-03):** the
   bounded C-151 workflow (built, above; device verification pending) and iCloud storage-full handling
   and recovery (local content and pending work preserved, clear status,
