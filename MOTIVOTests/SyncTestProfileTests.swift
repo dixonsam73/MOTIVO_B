@@ -713,7 +713,7 @@ final class SyncTestProfileTests: XCTestCase {
         let local = JournalProfileValues(name: "Temp", location: "", primaryInstrument: "Piano")
         let cloud = JournalProfileValues(name: "Name A", location: "Bristol", primaryInstrument: "Cello")
         let unclockedCloud = JournalProfileMerge.decide(local: local, localStamp: typedAt, localPending: true, server: cloud, serverStamp: nil, localProvisional: true)
-        XCTAssertEqual(unclockedCloud.apply, cloud, "field by field, as two established profiles: the longer name, Unicode order for the instrument")
+        XCTAssertEqual(unclockedCloud.apply, cloud, "every cloud field that holds anything wins outright")
         XCTAssertFalse(unclockedCloud.send, "the merged values are the server's")
         XCTAssertTrue(unclockedCloud.displaced.contains("name (this device): Temp"))
         XCTAssertTrue(unclockedCloud.displaced.contains("instrument (this device): Piano"))
@@ -723,6 +723,35 @@ final class SyncTestProfileTests: XCTestCase {
         store.update { $0.initialFetchComplete = false; $0.profileStampProvisional = true }
         store.update { $0.initialFetchComplete = true; $0.profileStampProvisional = false }
         XCTAssertEqual(store.state.profileStamp, restoredAt)
+    }
+
+    /// A provisional profile against an UNCLOCKED cloud profile (every
+    /// pre-existing profile after the stage H transition, until edited): the
+    /// established profiles' length tie-break must not apply, or a longer name
+    /// typed at set-up would replace the cloud name on both devices.
+    func testAProvisionalNameNeverBeatsAnUnclockedCloudProfileWhateverItsLength() {
+        let typedAt = Date(timeIntervalSince1970: 1_762_170_000)
+        let typed = JournalProfileValues(name: "Samuel Dixon", location: "", primaryInstrument: "Trumpet")
+        let cloud = JournalProfileValues(name: "Name A", location: "Bristol", primaryInstrument: "Cello")
+        // As two established profiles the typed values would win both fields (longer; longer).
+        let established = JournalProfileMerge.decide(local: typed, localStamp: nil, localPending: true, server: cloud, serverStamp: nil)
+        XCTAssertEqual(established.apply?.name, "Samuel Dixon"); XCTAssertEqual(established.apply?.primaryInstrument, "Trumpet")
+        XCTAssertTrue(established.send, "the length rule, unchanged for two established profiles")
+        // Provisional: the cloud keeps every field it holds, nothing is sent, the typed values are listed for recovery.
+        let provisional = JournalProfileMerge.decide(local: typed, localStamp: typedAt, localPending: true, server: cloud, serverStamp: nil, localProvisional: true)
+        XCTAssertEqual(provisional.apply, cloud)
+        XCTAssertFalse(provisional.send, "the cloud profile is not rewritten")
+        XCTAssertEqual(provisional.displaced, ["name (this device): Samuel Dixon", "instrument (this device): Trumpet"])
+        XCTAssertTrue(provisional.summary.hasSuffix("(typed before the first complete fetch: unclocked)"))
+        // The typed values fill only what the cloud lacks: that part goes up, the cloud's own fields untouched.
+        let sparse = JournalProfileValues(name: "Name A", location: "", primaryInstrument: "")
+        let filled = JournalProfileMerge.decide(local: typed, localStamp: typedAt, localPending: true, server: sparse, serverStamp: nil, localProvisional: true)
+        XCTAssertEqual(filled.apply, JournalProfileValues(name: "Name A", location: "", primaryInstrument: "Trumpet"))
+        XCTAssertTrue(filled.send); XCTAssertEqual(filled.displaced, ["name (this device): Samuel Dixon"])
+        // Identical values: nothing to do; an empty typed side: the cloud as it is, nothing sent.
+        XCTAssertNil(JournalProfileMerge.decide(local: cloud, localStamp: typedAt, localPending: true, server: cloud, serverStamp: nil, localProvisional: true).apply)
+        let empty = JournalProfileMerge.decide(local: JournalProfileValues(), localStamp: typedAt, localPending: true, server: cloud, serverStamp: nil, localProvisional: true)
+        XCTAssertEqual(empty.apply, cloud); XCTAssertFalse(empty.send); XCTAssertTrue(empty.displaced.isEmpty)
     }
 
     /// Online restoration: the set-up screen offers the restore before a name

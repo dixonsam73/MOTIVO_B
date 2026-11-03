@@ -158,9 +158,17 @@ enum JournalProfileMerge {
         }
         if localStamp == nil, serverStamp == nil {
             // Two established profiles that predate this build: field by field.
-            let merged = JournalProfileValues(name: fieldMerge(local.name, server.name),
-                                              location: fieldMerge(local.location, server.location),
-                                              primaryInstrument: fieldMerge(local.primaryInstrument, server.primaryInstrument))
+            // A PROVISIONAL local profile (C-151) is not established: a cloud
+            // field that holds anything wins outright, whatever the length
+            // rule would say, so a name typed at set-up never replaces the
+            // established cloud name; the typed values fill only what the
+            // cloud lacks, and the ones that lost are listed for recovery.
+            let merge: (String, String) -> String = localProvisional
+                ? { l, s in s.isEmpty ? l : s }
+                : fieldMerge
+            let merged = JournalProfileValues(name: merge(local.name, server.name),
+                                              location: merge(local.location, server.location),
+                                              primaryInstrument: merge(local.primaryInstrument, server.primaryInstrument))
             for (label, l, s, m) in [("name", local.name, server.name, merged.name),
                                      ("location", local.location, server.location, merged.location),
                                      ("instrument", local.primaryInstrument, server.primaryInstrument, merged.primaryInstrument)] {
@@ -350,8 +358,9 @@ enum JournalProfileSync {
     /// write. The first scan on a device (no fingerprint yet) is the
     /// transition: an established profile is queued UNSTAMPED, an empty one
     /// sets the baseline and sends nothing. An edit found before the first
-    /// complete fetch is clocked but provisional (C-151): the clock stands only
-    /// if the cloud holds no profile. Must be called on `context`'s queue.
+    /// complete fetch, with no cloud profile seen yet, is clocked but provisional
+    /// (C-151): the clock stands only if the cloud holds no profile. Must be
+    /// called on `context`'s queue.
     @discardableResult
     static func scan(context: NSManagedObjectContext, scope: JournalProfileScope, store: JournalSyncStateStore,
                      now: Date = Date()) -> [JournalSyncPendingChange] {
@@ -379,7 +388,10 @@ enum JournalProfileSync {
             if JournalProfileMerge.isEdit(previous: previous, current: values, everEdited: st.profileStamp != nil,
                                           primaryChosen: st.profilePrimaryChosen) {
                 newStamp = now
-                newProvisional = !st.initialFetchComplete
+                // Provisional only while this device has never held a cloud
+                // profile: an edit after one arrived (a rejected send's server
+                // copy, before the first complete fetch) is a real edit.
+                newProvisional = !st.initialFetchComplete && st.lastKnownRecords[profileName] == nil
                 pending.append(.init(recordName: profileName, recordType: JournalSyncRecordType.profile, op: .save))
                 note = "Profile edited: \(values.describe())" + (newProvisional ? " (before the first complete fetch: provisional, yields to a cloud profile)" : "")
             } else {

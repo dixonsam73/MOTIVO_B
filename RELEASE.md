@@ -1640,12 +1640,20 @@ the join.
   offers a retry after a failed catch-up; while sync is paused it names the
   reason; after a complete fetch with no cloud profile it says so. *Offline
   setup:* a profile edit found by the scan before this device's first
-  complete fetch is clocked but **provisional** (`profileStampProvisional`
+  complete fetch, while no cloud profile has reached it (narrowed
+  2026-11-03: an edit after a cloud profile arrived through a rejected
+  send is a real edit), is clocked but **provisional** (`profileStampProvisional`
   in the state file, shown on the diagnostics' Profile clock row): it
   merges as UNCLOCKED, so a clocked cloud profile wins the whole record
   and the typed name and instrument are on the Displaced by sync list with
-  Restore (a new clocked edit, which wins everywhere); an unclocked cloud
-  profile meets it field by field as two established profiles do. The mark
+  Restore (a new clocked edit, which wins everywhere); against an unclocked
+  cloud profile (every pre-existing profile after the stage H transition,
+  until edited) each cloud field that holds anything wins outright and the
+  typed values fill only what the cloud lacks (corrected 2026-11-03: the
+  first build used the established profiles' length tie-break here, so a
+  longer typed name would have replaced the cloud name on both devices,
+  listed as displaced but still overwritten; `SyncTestProfileTests` +1, the
+  selection 181 tests green under SyncTest). The mark
   clears at every profile import and at the first complete fetch, where a
   typed clock stands if the cloud holds no profile (logged). The outgoing
   record still carries the clock, so a first device's typed profile is a
