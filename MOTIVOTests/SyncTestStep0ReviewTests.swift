@@ -11,6 +11,11 @@
 //  seams alone first (every one failed as the review predicted), then
 //  against the fixes.
 //
+//  Round 2 (R7–R10, Codex's review of eb4cd55): a replacement file whose
+//  copy fails, instrument and custom rows known before their save, the
+//  rejected-send handler for attachment metadata, and the deferred
+//  rejected-send handlers after a local removal. Same method.
+//
 
 #if SYNCTEST
 import XCTest
@@ -76,13 +81,13 @@ final class SyncTestStep0ReviewTests: XCTestCase {
         return engine
     }
 
-    private func importer(on persistence: NSPersistentContainer? = nil) -> (JournalImporter, NSManagedObjectContext, Step0Queue) {
+    private func importer(on persistence: NSPersistentContainer? = nil, customOwner: String? = nil) -> (JournalImporter, NSManagedObjectContext, Step0Queue) {
         let ctx = (persistence ?? container).newBackgroundContext()
         ctx.name = "syncImport"; ctx.transactionAuthor = JournalSyncAuthor.sync
         ctx.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy; ctx.stalenessInterval = 0
         let q = Step0Queue(store: store)
         queues.append(q)
-        let imp = JournalImporter(context: ctx, store: store, customOwner: nil)
+        let imp = JournalImporter(context: ctx, store: store, customOwner: customOwner)
         imp.queue = q
         imp.log = { [store] in store?.log($0) }
         imp.changeTag = { $0["testTag"] as? String }
@@ -104,13 +109,59 @@ final class SyncTestStep0ReviewTests: XCTestCase {
         return r
     }
 
-    private func attachmentRecord(id: UUID, sessionID: UUID, file: URL, hash: String, tag: String) -> CKRecord {
+    private func attachmentRecord(id: UUID, sessionID: UUID, file: URL, hash: String, tag: String, modified: Date = Date()) -> CKRecord {
         let r = CKRecord(recordType: "Attachment", recordID: JournalRecordMapping.recordID(for: id))
-        r["kind"] = "image" as CKRecordValue; r["createdAt"] = Date() as CKRecordValue; r["userModifiedAt"] = Date() as CKRecordValue
+        r["kind"] = "image" as CKRecordValue; r["createdAt"] = Date() as CKRecordValue; r["userModifiedAt"] = modified as CKRecordValue
         r["session"] = CKRecord.Reference(recordID: JournalRecordMapping.recordID(for: sessionID), action: .none)
         r["file"] = CKAsset(fileURL: file); r["fileExt"] = "jpg" as CKRecordValue; r["fileHash"] = hash as CKRecordValue
         r["testTag"] = tag as CKRecordValue
         return r
+    }
+
+    private func attachmentMetaRecord(aid: UUID, displayName: String, modified: Date, tag: String) -> CKRecord {
+        let name = JournalSyncRecordType.metaName(for: aid.uuidString)
+        let r = CKRecord(recordType: JournalSyncRecordType.attachmentMeta, recordID: CKRecord.ID(recordName: name, zoneID: JournalRecordMapping.zoneID))
+        r["displayName"] = displayName as CKRecordValue; r["isThumbnail"] = false as CKRecordValue
+        r["userModifiedAt"] = modified as CKRecordValue; r["testTag"] = tag as CKRecordValue
+        return r
+    }
+
+    private func instrumentRecord(id: UUID, name: String, tag: String) -> CKRecord {
+        let r = CKRecord(recordType: JournalSyncRecordType.instrument, recordID: JournalRecordMapping.recordID(for: id))
+        r["name"] = name as CKRecordValue; r["testTag"] = tag as CKRecordValue
+        return r
+    }
+
+    private func customActivityRecord(id: UUID, name: String, tag: String) -> CKRecord {
+        let r = CKRecord(recordType: JournalSyncRecordType.userActivity, recordID: JournalRecordMapping.recordID(for: id))
+        r["displayName"] = name as CKRecordValue; r["normalizedName"] = PersistenceController.normalized(name) as CKRecordValue
+        r["coreActivityCode"] = 0 as CKRecordValue; r["testTag"] = tag as CKRecordValue
+        return r
+    }
+
+    private func listRecord(id: UUID, name: String) -> CKRecord {
+        JournalRecordMapping.record(for: SavedList(id: id, name: name, items: [SavedListLine(text: "C major")]), base: nil)!
+    }
+
+    /// A value set the way the importer's own context writes (author sync), so no history entry is made.
+    private func setSyncValue(_ entity: String, _ id: UUID, _ key: String, _ newValue: Any?) throws {
+        let ctx = container.newBackgroundContext(); ctx.transactionAuthor = JournalSyncAuthor.sync
+        var failure: Error?
+        ctx.performAndWait {
+            let r = NSFetchRequest<NSManagedObject>(entityName: entity); r.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            guard let o = (try? ctx.fetch(r))?.first else { failure = NSError(domain: "test", code: 1); return }
+            o.setValue(newValue, forKey: key)
+            do { try ctx.save() } catch { failure = error }
+        }
+        if let failure { throw failure }
+    }
+
+    @MainActor private func listIDs(scope: String) -> Set<UUID> { Set(((try? SavedListLibrary.read(ownerScope: scope)) ?? []).map(\.id)) }
+
+    @MainActor private func removeLists(_ ids: [UUID], scope: String) {
+        guard let current = try? SavedListLibrary.read(ownerScope: scope) else { return }
+        let gone = Set(ids)
+        try? SavedListLibrary.commit(snapshot: current, updated: current.filter { !gone.contains($0.id) }, ownerScope: scope)
     }
 
     private func notes(_ id: UUID) -> String? { value("Session", id, "notes") as? String }
@@ -141,6 +192,7 @@ final class SyncTestStep0ReviewTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: on ? 0o500 : 0o755], ofItemAtPath: tempDir.appendingPathComponent("state").path)
     }
     private func pendingSave(_ id: UUID) -> JournalSyncPendingChange? { store.state.outbox.first { $0.recordName == id.uuidString && $0.op == .save } }
+    private func pendingSave(_ name: String) -> JournalSyncPendingChange? { store.state.outbox.first { $0.recordName == name && $0.op == .save } }
 
     // MARK: R1 — the removal marker cannot be saved
 
@@ -281,6 +333,141 @@ final class SyncTestStep0ReviewTests: XCTestCase {
         XCTAssertTrue(store.state.awaitingMedia.isEmpty)
         XCTAssertEqual(rowCount("Attachment"), 1)
         try? FileManager.default.removeItem(at: JournalRecordMapping.materialisedURL(recordName: aid.uuidString, ext: "jpg"))
+    }
+    // MARK: R7 — a replacement file whose copy fails
+
+    @MainActor
+    func testR7_AFailedFileCopyKeepsThePreviousFileTheHoldAndTheKnownHash() async throws {
+        let sid = UUID(), aid = UUID()
+        let (imp, ictx, _) = importer()
+        let first = tempDir.appendingPathComponent("first.jpg")
+        try Data("first bytes".utf8).write(to: first)
+        ictx.performAndWait {
+            _ = imp.importModifications([sessionRecord(id: sid, notes: "", modified: Date(), tag: "s")])
+            _ = imp.importModifications([attachmentRecord(id: aid, sessionID: sid, file: first, hash: "h1", tag: "a1", modified: Date().addingTimeInterval(-600))])
+        }
+        let destination = JournalRecordMapping.materialisedURL(recordName: aid.uuidString, ext: "jpg")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        XCTAssertEqual(store.state.assetHashes[aid.uuidString], "h1")
+        // The row points at this device's own file (as staging names it), not the materialised one.
+        let own = tempDir.appendingPathComponent("own-\(aid.uuidString).jpg")
+        try Data("own bytes".utf8).write(to: own)
+        try setSyncValue("Attachment", aid, "fileURL", own.path)
+        // The other device replaced the media; the downloaded file cannot be read.
+        let replacement = tempDir.appendingPathComponent("replacement.jpg")
+        try Data("replacement bytes".utf8).write(to: replacement)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: replacement.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: replacement.path) }
+        store.update { $0.awaitingMedia = [aid.uuidString] }
+        let record = attachmentRecord(id: aid, sessionID: sid, file: replacement, hash: "h2", tag: "a2", modified: Date())
+        let engine = makeEngine()
+        let released = await engine.applyReleasedMedia(full: [record], gone: [], generation: 0)
+        XCTAssertTrue(released.isEmpty, "R7: a copy that failed is not an applied import")
+        XCTAssertEqual(store.state.awaitingMedia, [aid.uuidString], "the hold stays")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: own.path), "the previous file is kept")
+        XCTAssertEqual(value("Attachment", aid, "fileURL") as? String, own.path, "and the row still points at it")
+        XCTAssertEqual(store.state.assetHashes[aid.uuidString], "h1", "the known hash still names the file this device holds")
+        // Readable at the next release: applied once, the previous file replaced after the row is committed.
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: replacement.path)
+        let again = await engine.applyReleasedMedia(full: [record], gone: [], generation: 0)
+        XCTAssertEqual(again, [aid.uuidString])
+        XCTAssertTrue(store.state.awaitingMedia.isEmpty)
+        XCTAssertEqual(value("Attachment", aid, "fileURL") as? String, destination.path)
+        XCTAssertEqual(try Data(contentsOf: destination), Data("replacement bytes".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: own.path), "the previous file goes once the row is committed")
+        XCTAssertEqual(store.state.assetHashes[aid.uuidString], "h2")
+    }
+
+    // MARK: R8 — instrument and custom rows known before their save
+
+    func testR8_InstrumentAndCustomRowsWhoseSaveFailedAreImportedOnTheRetryNotSkippedAsEchoes() throws {
+        let readOnly = try Self.openStore(at: tempDir.appendingPathComponent("store.sqlite"), readOnly: true)
+        let (failing, fctx, _) = importer(on: readOnly, customOwner: "k2-test")
+        let iid = UUID(), cid = UUID()
+        let records = [instrumentRecord(id: iid, name: "Cello", tag: "i1"), customActivityRecord(id: cid, name: "Sight reading", tag: "c1")]
+        var first = JournalImporter.Summary()
+        fctx.performAndWait { first = failing.importModifications(records) }
+        XCTAssertTrue(first.saveFailed)
+        XCTAssertEqual(rowCount("Instrument"), 0); XCTAssertEqual(rowCount("UserActivity"), 0)
+        store = JournalSyncStateStore(fileURL: store.fileURL)
+        let (retry, rctx, _) = importer(customOwner: "k2-test")
+        var second = JournalImporter.Summary()
+        rctx.performAndWait { second = retry.importModifications(records) }
+        XCTAssertEqual(second.echoes, 0, "R8: rows that never reached the store are not echoes")
+        XCTAssertEqual(second.received, 2)
+        XCTAssertEqual(value("Instrument", iid, "name") as? String, "Cello")
+        XCTAssertEqual(value("UserActivity", cid, "displayName") as? String, "Sight reading")
+        XCTAssertEqual(store.state.knownChangeTags[iid.uuidString], "i1", "known only once applied")
+        XCTAssertEqual(store.state.knownChangeTags[cid.uuidString], "c1")
+        var third = JournalImporter.Summary()
+        rctx.performAndWait { third = retry.importModifications(records) }
+        XCTAssertEqual(third.echoes, 2); XCTAssertEqual(third.received, 0)
+    }
+
+    // MARK: R9 — the rejected-send handler for attachment metadata
+
+    func testR9_ARejectedMetadataSendKeepsTheLocalNameUntilTheServerCopyIsDurable() throws {
+        let sid = UUID(), aid = UUID()
+        let meta = JournalSyncRecordType.metaName(for: aid.uuidString)
+        let (imp, ictx, _) = importer()
+        let file = tempDir.appendingPathComponent("photo.jpg")
+        try Data("jpeg bytes".utf8).write(to: file)
+        ictx.performAndWait {
+            _ = imp.importModifications([sessionRecord(id: sid, notes: "", modified: Date(), tag: "s")])
+            _ = imp.importModifications([attachmentRecord(id: aid, sessionID: sid, file: file, hash: "h1", tag: "a1", modified: Date().addingTimeInterval(-600))])
+        }
+        defer { try? FileManager.default.removeItem(at: JournalRecordMapping.materialisedURL(recordName: aid.uuidString, ext: "jpg")) }
+        // The person named it here; the name is queued as a meta send.
+        try setSyncValue("Attachment", aid, "displayName", "typed here")
+        store.update { JournalChangeTracker.merge([.init(recordName: meta, recordType: JournalSyncRecordType.attachmentMeta, op: .save)], into: &$0) }
+        let server = attachmentMetaRecord(aid: aid, displayName: "other device, newer", modified: Date().addingTimeInterval(60), tag: "m2")
+        // (a) The recovery entry cannot be saved: nothing is overwritten, the send is tried again.
+        try makeStateUnwritable(true)
+        var resend = false
+        ictx.performAndWait { resend = imp.resolveSendConflict(recordType: JournalSyncRecordType.attachmentMeta, recordName: meta, server: server) }
+        try makeStateUnwritable(false)
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "typed here", "R9: no overwrite without a saved recovery entry")
+        XCTAssertNotNil(pendingSave(meta), "the edit stays queued")
+        XCTAssertTrue(resend, "and is tried again")
+        XCTAssertTrue(store.state.conflicts.isEmpty)
+        // (b) The entry is saved but the store cannot commit the server copy: the edit stays queued.
+        let readOnly = try Self.openStore(at: tempDir.appendingPathComponent("store.sqlite"), readOnly: true)
+        let (failing, fctx, _) = importer(on: readOnly)
+        fctx.performAndWait { resend = failing.resolveSendConflict(recordType: JournalSyncRecordType.attachmentMeta, recordName: meta, server: server) }
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "typed here")
+        XCTAssertNotNil(pendingSave(meta), "R9: pending work goes only once the server copy is committed")
+        XCTAssertFalse(resend)
+        // (c) Both succeed: the server's name stands, the displaced name is in the recovery entry.
+        ictx.performAndWait { resend = imp.resolveSendConflict(recordType: JournalSyncRecordType.attachmentMeta, recordName: meta, server: server) }
+        XCTAssertFalse(resend)
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "other device, newer")
+        XCTAssertNil(pendingSave(meta))
+        let entry = try XCTUnwrap(store.state.conflicts.last)
+        XCTAssertEqual(entry.winner, "server")
+        XCTAssertEqual(entry.displaced["Name (this device)"], "typed here", "the displaced name can be read back")
+    }
+
+    // MARK: R10 — a deferred rejected-send handler after a local removal
+
+    @MainActor
+    func testR10_ADeferredListConflictDoesNotApplyAfterALocalRemoval() async throws {
+        let engine = makeEngine()
+        let scope = JournalSavedListSync.currentScope()
+        let before = UUID(), after = UUID()
+        defer { removeLists([before, after], scope: scope) }
+        // Control: before any removal the deferred handler applies the server's list and settles the send.
+        store.update { JournalChangeTracker.merge([.init(recordName: before.uuidString, recordType: JournalSyncRecordType.savedList, op: .save)], into: &$0) }
+        await engine.applyDeferredSendConflict(server: listRecord(id: before, name: "Before"), recordID: JournalRecordMapping.recordID(for: before),
+                                               generation: engine.generationForTesting())
+        XCTAssertTrue(listIDs(scope: scope).contains(before), "precondition: the handler applies while sync is allowed")
+        XCTAssertNil(pendingSave(before))
+        // A send is rejected (the handler's generation is taken), then the person removes Études data before it runs.
+        let generation = engine.generationForTesting()
+        XCTAssertTrue(engine.beginLocalRemoval(reason: "test"))
+        await engine.applyDeferredSendConflict(server: listRecord(id: after, name: "After"), recordID: JournalRecordMapping.recordID(for: after),
+                                               generation: generation)
+        XCTAssertFalse(listIDs(scope: scope).contains(after), "R10: nothing is written onto a removed copy")
+        XCTAssertTrue(store.state.localRemovalInProgress)
     }
 }
 #endif

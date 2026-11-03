@@ -1840,6 +1840,35 @@ the join.
   arrived with it), no duplicate. The iPad showed no episode. Not
   exercised: sections 4 (held media under the full state, mobile data)
   and 5 (zone refusal), both unit-covered only.
+  **Independent review of Step 0, round 2 (Codex, 2026-11-03), four items,
+  C-166 to C-169: fixed and unit-verified 2026-11-03.** R7 a replacement
+  file whose copy failed still counted as an applied import (row applied,
+  previous file removed, server hash recorded, download hold released);
+  R8 instrument and custom rows were known before their save (C-162's
+  gap, so a rolled-back save made the retry skip them); R9 the
+  attachment-metadata branch of the rejected-send handler lacked C-164's
+  guards (no recovery entry, save failure ignored, pending send dropped);
+  R10 the deferred list, score and settings rejected-send handlers had no
+  lifecycle check. Same method: the one seam needed (the three deferred
+  handlers as one callable step carrying the generation it snapshots)
+  went in first with no behaviour change; **all four are genuine pre-fix
+  reproductions** — on `eb4cd55` the four tests failed through their
+  calling paths exactly as the review predicted (17 assertion failures,
+  none for set-up reasons) — and pass against the fixes. The fixes: media
+  is put in place through a staging copy BEFORE the row is touched, and
+  the previous file's removal and the new hash are committed only with
+  the row's save (a failed copy changes nothing and the record is fetched
+  again); instrument and custom rows use the after-save knowledge; the
+  metadata branch mirrors the session/attachment contract (a migrated
+  transition copy is simply superseded, as the catch-up does); the
+  deferred handlers check the generation inside their apply step. R10's
+  test drives the list branch; the score and settings branches share its
+  guard and are source-traced. Tests: `SyncTestStep0ReviewTests` (10);
+  the selection is 202 tests green under SyncTest; Debug and Release
+  build. No device run. Noted for the next round, not changed: the
+  custom-row and Instrument branch of `resolveSendConflict` still applies
+  the server copy with an unchecked `save()` and drops the pending send
+  regardless (R9's shape; not among the four items).
   **Follow-ups before main-build integration (agreed 2026-11-03):** the
   bounded C-151 workflow (built, above; device verification pending) and iCloud storage-full handling
   and recovery (local content and pending work preserved, clear status,

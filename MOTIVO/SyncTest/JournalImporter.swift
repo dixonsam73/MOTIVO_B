@@ -154,13 +154,22 @@ final class JournalImporter {
     private func noteKnownAfterSave(_ record: CKRecord) {
         knownAfterSave[record.recordID.recordName] = (JournalSyncStateStore.encodeSystemFields(record), changeTag(record))
     }
+    /// R7 (2026-11-03): what else becomes true only with the save — the hash
+    /// of a media file put in place for a row, and the files that row no
+    /// longer needs (the previous file of a replaced attachment, a held copy
+    /// once linked). A rolled-back save keeps them.
+    private var hashesAfterSave: [String: String] = [:]
+    private var removeAfterSave: [URL] = []
     private func commitKnown() {
-        guard !knownAfterSave.isEmpty else { return }
-        let pending = knownAfterSave
-        knownAfterSave.removeAll()
-        store.update { st in
-            for (name, entry) in pending { st.lastKnownRecords[name] = entry.0; st.knownChangeTags[name] = entry.1 }
+        let pending = knownAfterSave, hashes = hashesAfterSave, removals = removeAfterSave
+        knownAfterSave.removeAll(); hashesAfterSave.removeAll(); removeAfterSave.removeAll()
+        if !pending.isEmpty || !hashes.isEmpty {
+            store.update { st in
+                for (name, entry) in pending { st.lastKnownRecords[name] = entry.0; st.knownChangeTags[name] = entry.1 }
+                for (name, hash) in hashes { st.assetHashes[name] = hash; st.fileStampCache.removeValue(forKey: name) }
+            }
         }
+        for url in removals { try? FileManager.default.removeItem(at: url) }
     }
 
     // MARK: Modifications
@@ -344,8 +353,12 @@ final class JournalImporter {
         if let existing, pendingSave(name) == nil, !keepsNewerLocal(existing, over: record, type: JournalSyncRecordType.attachment) {
             return (false, 0)
         }
+        // The conflict is decided first; nothing is applied, dropped or
+        // deleted until the file is in place.
+        var dropsTransitionCopy = false
+        var serverWinsPendingEdit = false
         if existing != nil, let pending = pendingSave(name), pending.metadataOnly {
-            if JournalMetadataFields.recordCarriesMetadata(record) { queue?.removePendingSave(name) }
+            dropsTransitionCopy = JournalMetadataFields.recordCarriesMetadata(record)
         } else if let existing, localChangePending(name) {
             let local = existing.value(forKey: "userModifiedAt") as? Date
             let server = JournalRecordMapping.userModifiedAt(of: record)
@@ -354,9 +367,66 @@ final class JournalImporter {
                 recordConflict(record, winner: .local, local: existing)
                 return (false, 0)
             }
+            serverWinsPendingEdit = true
+        }
+
+        // Media. CloudKit downloads the asset of every fetched attachment record
+        // (transport; counted as such). It is written into place only when this
+        // device has no usable file, or when the server's hash says the file was
+        // replaced on the other device. The device that created the attachment
+        // otherwise keeps its own file (named <base>-<id>.<ext> by staging).
+        // R7 (2026-11-03): the file is put in place BEFORE the row is touched,
+        // through a staging copy, so a failed copy changes nothing: the row, its
+        // previous file, the known hash and any hold stay as they were and the
+        // record is fetched again. The previous file goes, and the new hash is
+        // recorded, only with the row's save.
+        var bytes: Int64 = 0
+        let ext = (record[JournalRecordMapping.fileExtKey] as? String) ?? ""
+        let destination = JournalRecordMapping.materialisedURL(recordName: name, ext: ext)
+        let existingFile = AttachmentPathResolver.resolve(existing?.value(forKey: "fileURL") as? String)
+        let sourceURL = heldFile.map { URL(fileURLWithPath: $0) } ?? (record[JournalRecordMapping.assetKey] as? CKAsset)?.fileURL
+        let serverHash = record[JournalRecordMapping.fileHashKey] as? String
+        let knownHash = store.state.assetHashes[name]
+        if heldFile == nil, let sourceURL, let size = JournalAssetHash.stamp(of: sourceURL)?.size {
+            store.update { $0.assetBytesDownloaded += size }
+        }
+        let replaced = existingFile != nil && serverHash != nil && knownHash != nil && serverHash != knownHash
+        var fileURLAfterCopy: String?
+        var hashAfterSave: String?
+        var previousFile: URL?
+        if existingFile == nil || replaced {
+            if let sourceURL, FileManager.default.fileExists(atPath: sourceURL.path) {
+                let incoming = JournalAssetHash.stamp(of: sourceURL)?.size ?? 0
+                let present = JournalAssetHash.stamp(of: destination)?.size
+                if present != incoming || replaced {
+                    guard materialise(sourceURL, at: destination) else {
+                        log("Attachment \(name) not imported: \(replaced ? "the previous file is kept" : "no file in place") and the record is fetched again")
+                        return (false, 0)
+                    }
+                    bytes = incoming
+                }
+                if replaced, let old = existingFile, old.path != destination.path {
+                    // Never a library PDF (C-138): a score attached from the library is its file.
+                    if !AttachmentStore.isLibraryScoreFile(old) { previousFile = old }
+                    log("Replaced media for \(name) from the other device")
+                }
+                hashAfterSave = serverHash ?? JournalAssetHash.hash(of: destination)
+            } else if existingFile == nil {
+                log("Attachment \(name) arrived without a file")
+            }
+            // Point at the materialised path even without a file, so the
+            // resolver's filename match finds it once a later fetch supplies it.
+            fileURLAfterCopy = destination.path
+        } else if knownHash == nil, let serverHash {
+            // Our own file, sent before hashes existed: adopt the server's.
+            store.update { $0.assetHashes[name] = serverHash }
+        }
+
+        if serverWinsPendingEdit, let existing {
             guard recordConflict(record, winner: .server, local: existing) else { return (false, 0) }
             queue?.removePendingSave(name)
         }
+        if dropsTransitionCopy { queue?.removePendingSave(name) }
         let object = existing ?? NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.attachment, into: context)
         // Legacy metadata on the content record counts only until this
         // attachment has a meta record (the stage G transition).
@@ -365,56 +435,30 @@ final class JournalImporter {
         if legacy { applySideStores(record, id: id) }
         object.setValue(session, forKey: "session")
         object.setValue(session.value(forKey: "ownerUserID") as? String, forKey: "ownerUserID")
-
-        // Media. CloudKit downloads the asset of every fetched attachment record
-        // (transport; counted as such). It is written into place only when this
-        // device has no usable file, or when the server's hash says the file was
-        // replaced on the other device. The device that created the attachment
-        // otherwise keeps its own file (named <base>-<id>.<ext> by staging).
-        var bytes: Int64 = 0
-        let ext = (record[JournalRecordMapping.fileExtKey] as? String) ?? ""
-        let destination = JournalRecordMapping.materialisedURL(recordName: name, ext: ext)
-        let existingFile = AttachmentPathResolver.resolve(object.value(forKey: "fileURL") as? String)
-        let sourceURL = heldFile.map { URL(fileURLWithPath: $0) } ?? (record[JournalRecordMapping.assetKey] as? CKAsset)?.fileURL
-        let serverHash = record[JournalRecordMapping.fileHashKey] as? String
-        let knownHash = store.state.assetHashes[name]
-        if heldFile == nil, let sourceURL, let size = JournalAssetHash.stamp(of: sourceURL)?.size {
-            store.update { $0.assetBytesDownloaded += size }
-        }
-        let replaced = existingFile != nil && serverHash != nil && knownHash != nil && serverHash != knownHash
-        if existingFile == nil || replaced {
-            if let sourceURL, FileManager.default.fileExists(atPath: sourceURL.path) {
-                let incoming = JournalAssetHash.stamp(of: sourceURL)?.size ?? 0
-                let present = JournalAssetHash.stamp(of: destination)?.size
-                if present != incoming || replaced {
-                    try? FileManager.default.removeItem(at: destination)
-                    do { try FileManager.default.copyItem(at: sourceURL, to: destination); bytes = incoming }
-                    catch { log("Could not materialise \(name): \(error.localizedDescription)") }
-                }
-                if replaced, let old = existingFile, old.path != destination.path {
-                    // Never a library PDF (C-138): a score attached from the library is its file.
-                    if !AttachmentStore.isLibraryScoreFile(old) { try? FileManager.default.removeItem(at: old) }
-                    log("Replaced media for \(name) from the other device")
-                }
-                let hash = serverHash ?? JournalAssetHash.hash(of: destination)
-                store.update { st in
-                    if let hash { st.assetHashes[name] = hash }
-                    st.fileStampCache.removeValue(forKey: name)
-                }
-            } else if existingFile == nil {
-                log("Attachment \(name) arrived without a file")
-            }
-            // Point at the materialised path even if the copy failed, so the
-            // resolver's filename match finds it once a later fetch supplies it.
-            object.setValue(destination.path, forKey: "fileURL")
-        } else if knownHash == nil, let serverHash {
-            // Our own file, sent before hashes existed: adopt the server's.
-            store.update { $0.assetHashes[name] = serverHash }
-        }
-        if heldFile != nil, let sourceURL { try? FileManager.default.removeItem(at: sourceURL) }
+        if let fileURLAfterCopy { object.setValue(fileURLAfterCopy, forKey: "fileURL") }
+        if let hashAfterSave { hashesAfterSave[name] = hashAfterSave }
+        if let previousFile { removeAfterSave.append(previousFile) }
+        if heldFile != nil, let sourceURL { removeAfterSave.append(sourceURL) }
         noteKnownAfterSave(record)
         applyHeldMeta(for: name)
         return (true, bytes)
+    }
+
+    /// R7: copies beside the destination and moves into place, so a copy that
+    /// fails leaves whatever was at the destination as it was.
+    private func materialise(_ source: URL, at destination: URL) -> Bool {
+        let staging = destination.deletingLastPathComponent().appendingPathComponent(".\(destination.lastPathComponent).part")
+        try? FileManager.default.removeItem(at: staging)
+        do {
+            try FileManager.default.copyItem(at: source, to: staging)
+            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+            try FileManager.default.moveItem(at: staging, to: destination)
+            return true
+        } catch {
+            log("Could not materialise \(destination.lastPathComponent): \(error.localizedDescription)")
+            try? FileManager.default.removeItem(at: staging)
+            return false
+        }
     }
 
     private func hold(_ record: CKRecord, sessionRecordName: String) {
@@ -450,7 +494,7 @@ final class JournalImporter {
             let link = JournalRecordMapping.instrumentLink(of: record)
             if let core = resolveInstrument(recordName: link.recordName, name: link.name) { object.setValue(core, forKey: "coreInstrument") }
         }
-        noteKnown(record)
+        noteKnownAfterSave(record) // R8: known only once the batch's save succeeds
         return object
     }
 
@@ -463,7 +507,7 @@ final class JournalImporter {
         let name = record.recordID.recordName
         guard UUID(uuidString: name) != nil, let instrumentName = record["name"] as? String else { return nil }
         let object = resolveInstrument(recordName: name, name: instrumentName, applyName: true)
-        noteKnown(record)
+        noteKnownAfterSave(record) // R8: known only once the batch's save succeeds
         return object
     }
 
@@ -626,16 +670,29 @@ final class JournalImporter {
             noteKnown(server)
             guard let attachmentName = JournalSyncRecordType.attachmentName(fromMeta: recordName), let id = UUID(uuidString: attachmentName),
                   let local = freshObject(entity: JournalSyncRecordType.attachment, id: id) else { return false }
-            if pendingSave(recordName)?.metadataOnly != true,
+            let transition = pendingSave(recordName)?.metadataOnly == true
+            if !transition,
                JournalConflictRule.decide(localUserModifiedAt: local.value(forKey: "userModifiedAt") as? Date,
                                           serverUserModifiedAt: JournalRecordMapping.userModifiedAt(of: server)) == .local {
                 recordConflict(server, winner: .local, local: local)
                 log("Conflict on metadata \(recordName): local kept, resending")
                 return true
             }
+            // R9 (2026-11-03): the same contract as a session or attachment —
+            // the displaced name is on disk before it is overwritten, and the
+            // pending send goes only once the server copy is committed. A
+            // transition copy (migrated metadata, not a person's edit) is
+            // simply superseded.
+            if !transition, !recordConflict(server, winner: .server, local: local) {
+                log("Conflict on metadata \(recordName): the recovery entry could not be saved; local name kept and the send tried again")
+                return true
+            }
             JournalRecordMapping.applyMeta(server, to: local)
             applySideStores(server, id: id)
-            save()
+            guard save() else {
+                log("Conflict on metadata \(recordName): the server copy could not be saved; local name kept, resolved again later")
+                return false
+            }
             queue?.removePendingSave(recordName)
             log("Conflict on metadata \(recordName): server kept")
             return false
@@ -837,7 +894,7 @@ final class JournalImporter {
         do { try context.save(); commitKnown(); return true } catch {
             log("Import save failed: \(error.localizedDescription); the batch is fetched again")
             context.rollback()
-            knownAfterSave.removeAll()
+            knownAfterSave.removeAll(); hashesAfterSave.removeAll(); removeAfterSave.removeAll()
             return false
         }
     }

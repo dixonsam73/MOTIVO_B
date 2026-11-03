@@ -2084,6 +2084,37 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         // an echo above (its asset bytes counted), so nothing is applied twice.
     }
 
+    /// Test seam: the lifecycle generation a deferred handler snapshots.
+    func generationForTesting() -> Int { stateLock.lock(); defer { stateLock.unlock() }; return dormantGeneration }
+
+    /// The deferred half of a rejected-send conflict for the families whose
+    /// apply runs on the main actor (lists) or through their own stage
+    /// (scores, settings): the server copy wins, with our save known to be
+    /// pending. `generation` was snapshotted when the rejection was handled.
+    func applyDeferredSendConflict(server: CKRecord, recordID: CKRecord.ID, generation: Int) async {
+        let name = recordID.recordName
+        // R10 (2026-11-03): this runs after the rejection was handled; a
+        // removal, unlink or account refusal meanwhile means nothing is
+        // applied, checked inside the apply step as the catch-up's families do.
+        if server.recordType == JournalSyncRecordType.savedList {
+            let applied = await MainActor.run { () -> Bool in
+                guard self.mayStillImport(generation) else { return false }
+                JournalSavedListSync.apply([server], store: self.store, overridePending: true)
+                self.dropPendingSave(name)
+                return true
+            }
+            log(applied ? "Conflict on list \(name): server kept" : "Conflict on list \(name): not resolved, sync stopped meanwhile")
+            return
+        }
+        let applied: Bool
+        if JournalSyncRecordType.isScoreRecordName(name) { applied = await importScoreRecords([server], localPending: true, generation: generation) }
+        else { applied = await importSettingsRecords([server], localPending: true, generation: generation) }
+        guard applied else { log("Conflict on \(name): not resolved, sync stopped meanwhile"); return }
+        let stillPending = store.state.outbox.contains { $0.recordName == name && $0.op == .save }
+        if stillPending { queueToEngine(zoneChanges: [.saveRecord(recordID)]) }
+        else { engine?.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)]) }
+    }
+
     private func handleFailedSave(_ failure: CKSyncEngine.Event.SentRecordZoneChanges.FailedRecordSave) {
         let record = failure.record
         let name = record.recordID.recordName
@@ -2092,11 +2123,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             guard let server = failure.error.serverRecord else { return }
             if record.recordType == JournalSyncRecordType.savedList {
                 // Lists: the server copy wins a rejected send (whole list).
-                Task { @MainActor in
-                    JournalSavedListSync.apply([server], store: self.store, overridePending: true)
-                    self.dropPendingSave(name)
-                }
-                log("Conflict on list \(name): server kept")
+                stateLock.lock(); let generation = dormantGeneration; stateLock.unlock()
+                Task { await self.applyDeferredSendConflict(server: server, recordID: record.recordID, generation: generation) }
                 return
             }
             if JournalSyncRecordType.isProfileRecordName(name) {
@@ -2121,24 +2149,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 }
                 return
             }
-            if JournalSyncRecordType.isScoreRecordName(name) {
-                // Stage I: the same rule as the import, with our save known to be pending.
-                Task {
-                    await self.importScoreRecords([server], localPending: true)
-                    let stillPending = self.store.state.outbox.contains { $0.recordName == name && $0.op == .save }
-                    if stillPending { self.queueToEngine(zoneChanges: [.saveRecord(record.recordID)]) }
-                    else { self.engine?.state.remove(pendingRecordZoneChanges: [.saveRecord(record.recordID)]) }
-                }
-                return
-            }
-            if JournalSyncRecordType.isSettingsRecordName(name) {
-                // Stage J: the same rule as the import, with our save known to be pending.
-                Task {
-                    await self.importSettingsRecords([server], localPending: true)
-                    let stillPending = self.store.state.outbox.contains { $0.recordName == name && $0.op == .save }
-                    if stillPending { self.queueToEngine(zoneChanges: [.saveRecord(record.recordID)]) }
-                    else { self.engine?.state.remove(pendingRecordZoneChanges: [.saveRecord(record.recordID)]) }
-                }
+            if JournalSyncRecordType.isScoreRecordName(name) || JournalSyncRecordType.isSettingsRecordName(name) {
+                // Stages I and J: the same rule as the import, with our save known to be pending.
+                stateLock.lock(); let generation = dormantGeneration; stateLock.unlock()
+                Task { await self.applyDeferredSendConflict(server: server, recordID: record.recordID, generation: generation) }
                 return
             }
             var resend = false
