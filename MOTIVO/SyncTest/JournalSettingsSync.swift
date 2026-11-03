@@ -560,7 +560,9 @@ enum JournalSettingsSync {
             }
             defaults.set(value, forKey: dk)
             outcome.applied = 1
-            if !local.isEmpty, local != JournalSettingKey.defaultValue(key) || st.settingStamps[key] != nil {
+            // C-144: only a value this device had not sent is displaced; a value
+            // the server already held from here, replaced later, is an import.
+            if pending, !local.isEmpty, local != JournalSettingKey.defaultValue(key) || st.settingStamps[key] != nil {
                 var conflict = JournalSyncConflict(at: Date(), recordName: name, recordType: JournalSyncRecordType.setting, winner: "server",
                                                    localUserModifiedAt: st.settingStamps[key], serverUserModifiedAt: serverStamp,
                                                    losingTitle: nil, losingNotes: nil)
@@ -644,7 +646,7 @@ enum JournalSettingsSync {
         case .takeServer:
             write(server, instrumentID: instrumentID, scope: scope, defaults: defaults)
             outcome.applied = 1
-            if !local.isEmpty {
+            if pending, !local.isEmpty {   // C-144: an unsent edit only
                 var conflict = JournalSyncConflict(at: Date(), recordName: name, recordType: JournalSyncRecordType.listContext, winner: "server",
                                                    localUserModifiedAt: st.listContextStamps[name], serverUserModifiedAt: serverStamp, losingTitle: nil, losingNotes: nil)
                 conflict.subject = subject

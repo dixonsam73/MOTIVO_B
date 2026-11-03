@@ -140,6 +140,13 @@ final class SyncTestSettingsSyncTests: XCTestCase {
         let entry = store.state.conflicts.last
         XCTAssertEqual(entry?.subject, "Journal Tint")
         XCTAssertEqual(entry?.displaced["Journal Tint (this device)"], Theme.TintMode.instrument.displayName)
+        // C-144 (2026-11-03): the other device changes it again later; "thread" was already the
+        // server's and this device's, so nothing is displaced and the list stays quiet.
+        let count = store.state.conflicts.count
+        let later = apply([settingRecord(JournalSettingKey.tintMode, value: "activity", stamp: Date().addingTimeInterval(60))], localPending: false)
+        XCTAssertEqual(later.applied, 1)
+        XCTAssertEqual(defaults.string(forKey: "appSettings_tintMode"), "activity")
+        XCTAssertEqual(store.state.conflicts.count, count, "a later edit from the other device is not a conflict")
     }
 
     func testTwoUnclockedValuesGoToTheServerAndANewerLocalEditIsKeptAndResent() {
@@ -246,6 +253,11 @@ final class SyncTestSettingsSyncTests: XCTestCase {
         XCTAssertEqual(JournalListContextValues.presetLines(JournalListContextValues.normalisedPreset(defaults.object(forKey: ctx.tasksKey))).map(\.text), ["New preset"])
         XCTAssertEqual(store.state.conflicts.last?.displaced["Preset (this device)"], "Old preset")
         XCTAssertNil(store.state.conflicts.last?.restore, "list settings are copy-only")
+        // C-144: a later change from the other device over what this device already holds from the server: no entry.
+        let count = store.state.conflicts.count
+        let later = contextRecord(activity: "core:0", instrument: "Cello", defaultList: "", autofill: false, preset: ["Newer preset"], stamp: Date().addingTimeInterval(60))
+        XCTAssertEqual(apply([later], localPending: false).applied, 1)
+        XCTAssertEqual(store.state.conflicts.count, count, "a later edit from the other device is not a conflict")
     }
 
     // MARK: Instrument colours
