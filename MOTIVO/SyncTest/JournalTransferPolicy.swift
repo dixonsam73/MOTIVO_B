@@ -16,12 +16,12 @@
 //  Uploads: an outgoing record that would carry a file is left in the outbox
 //  while media is held and sent when it is not. Downloads: CKSyncEngine
 //  fetches every asset with its record and offers no way to leave files out,
-//  so while media is held the engine is built WITHOUT automatic sync and the
-//  app fetches records itself through the asset-free delta catch-up
-//  (stage G); a record whose file this device needs is held by name and
-//  imported with its file once media is allowed again. Pushes while the app
-//  drives its own fetches arrive through the app's own silent-push
-//  subscription.
+//  so the engine never fetches (C-149, 2026-11-03): the app fetches records
+//  itself through the asset-free delta catch-up (stage G) on a push, the
+//  foreground, a 75 s poll while active and activation, and fetches a file
+//  by name only where it is new here; while media is held such records wait
+//  by name and are imported with their file once media is allowed again.
+//  Pushes arrive through the app's own silent-push subscription.
 //
 
 #if SYNCTEST
@@ -71,11 +71,11 @@ enum JournalMediaGate {
              constrained: path.isConstrained)
     }
 
-    /// Whether moving from one hold to another needs the engine rebuilt: only
-    /// when media goes from allowed to held or back (the engine's automatic
-    /// sync follows that); a change of reason alone is a status change.
-    static func rebuildNeeded(from previous: Hold, to next: Hold) -> Bool {
-        previous.holds != next.holds
+    /// Whether moving from one hold to another releases what waited: only
+    /// from held to allowed. The engine is never rebuilt for a hold change
+    /// (C-149); a change of reason alone is a status change.
+    static func releaseNeeded(from previous: Hold, to next: Hold) -> Bool {
+        previous.holds && !next.holds
     }
 }
 

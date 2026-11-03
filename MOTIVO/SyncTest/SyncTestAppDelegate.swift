@@ -2,10 +2,9 @@
 //  SyncTestAppDelegate.swift
 //  MOTIVO — Études Sync Test only (SYNCTEST configuration)
 //
-//  The app's own silent-push path (stage J). CKSyncEngine acts on pushes by
-//  itself only while it syncs automatically; while media waits for Wi-Fi the
-//  engine is built without automatic sync and the app fetches records itself,
-//  so a change on the other device must reach the app another way: a
+//  The app's own silent-push path (stage J). The engine never fetches
+//  (C-149), so the app fetches records itself and a change on the other
+//  device must reach the app another way: a
 //  CKDatabaseSubscription of the app's own, whose content-available push
 //  lands here. When the engine is automatic this does nothing.
 //

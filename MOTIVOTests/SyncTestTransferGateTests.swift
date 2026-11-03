@@ -30,11 +30,21 @@ final class SyncTestTransferGateTests: XCTestCase {
         XCTAssertEqual(JournalMediaGate.hold(link: L(cellularOnly: true, constrained: true), allowMobileData: true), .lowDataMode)
     }
 
-    func testOnlyAChangeBetweenHeldAndAllowedRebuildsTheEngine() {
-        XCTAssertTrue(JournalMediaGate.rebuildNeeded(from: .none, to: .mobileData))
-        XCTAssertTrue(JournalMediaGate.rebuildNeeded(from: .lowDataMode, to: .none))
-        XCTAssertFalse(JournalMediaGate.rebuildNeeded(from: .mobileData, to: .lowDataMode), "a change of reason is a status change only")
-        XCTAssertFalse(JournalMediaGate.rebuildNeeded(from: .none, to: .none))
+    func testOnlyHeldToAllowedReleasesAndNoHoldChangeRebuildsTheEngine() {
+        // C-149 (2026-11-03): the engine is never rebuilt for a hold change; a release is the only action.
+        XCTAssertTrue(JournalMediaGate.releaseNeeded(from: .mobileData, to: .none))
+        XCTAssertTrue(JournalMediaGate.releaseNeeded(from: .lowDataMode, to: .none))
+        XCTAssertFalse(JournalMediaGate.releaseNeeded(from: .none, to: .mobileData), "going held changes only what happens from now on")
+        XCTAssertFalse(JournalMediaGate.releaseNeeded(from: .mobileData, to: .lowDataMode), "a change of reason is a status change only")
+        XCTAssertFalse(JournalMediaGate.releaseNeeded(from: .none, to: .none))
+    }
+
+    func testCatchUpRecoveryIsDefinedPerError() {
+        XCTAssertEqual(JournalCatchUp.recovery(for: .changeTokenExpired), .rereadZone, "the one unavoidable full fetch, records only")
+        XCTAssertEqual(JournalCatchUp.recovery(for: .zoneNotFound), .zoneGone)
+        XCTAssertEqual(JournalCatchUp.recovery(for: .userDeletedZone), .zoneGone)
+        XCTAssertEqual(JournalCatchUp.recovery(for: .networkUnavailable), .retryLater)
+        XCTAssertEqual(JournalCatchUp.recovery(for: .requestRateLimited), .retryLater)
     }
 
     func testTheOptionIsPerDeviceAndOffByDefault() {

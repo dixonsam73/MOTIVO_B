@@ -23,6 +23,7 @@
 
 #if SYNCTEST
 import Foundation
+import CloudKit
 import CoreData
 
 enum JournalAccountGuard {
@@ -76,6 +77,17 @@ enum JournalCatchUp {
     /// hash is the server's is never fetched, whatever this device last
     /// recorded (2026-11-03: the device's own 132 MB upload, finished by a
     /// dropped engine that never reported it, was fetched back on release).
+    /// PURE. What a failed catch-up means (C-149: the app's catch-up is the
+    /// only fetch, so recovery is defined here, not by a fresh engine's fetch).
+    enum Recovery: Equatable { case retryLater, rereadZone, zoneGone }
+    static func recovery(for code: CKError.Code) -> Recovery {
+        switch code {
+        case .changeTokenExpired: return .rereadZone
+        case .zoneNotFound, .userDeletedZone: return .zoneGone
+        default: return .retryLater
+        }
+    }
+
     static func needsAsset(serverHash: String?, knownHash: String?, fileExists: Bool, localHash: String? = nil) -> Bool {
         guard fileExists else { return true }
         guard let serverHash else { return false }

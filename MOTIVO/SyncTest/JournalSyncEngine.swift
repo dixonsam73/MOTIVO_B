@@ -281,7 +281,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             heldPollTask = Task { [weak self] in
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: JournalSyncEngine.heldPollInterval)
-                    guard let self, !Task.isCancelled, self.mediaGated, self.engine != nil else { continue }
+                    guard let self, !Task.isCancelled, self.engine != nil else { continue }
                     let active = await MainActor.run { UIApplication.shared.applicationState == .active }
                     guard active else { continue }
                     await self.manualRefresh(trigger: "poll")
@@ -398,8 +398,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             case .some(true):
                 let ok = await deltaCatchUp(reason: "the zone changed while no engine was running")
                 if !ok {
-                    store.update { $0.engineState = nil }
-                    log("Full recovery: the delta catch-up could not run (\(store.state.lastCatchUp ?? "")); building a fresh engine")
+                    store.update { $0.engineState = nil; $0.catchUpZoneToken = nil }
+                    log("Full recovery: the delta catch-up could not run (\(store.state.lastCatchUp ?? "")); building a fresh engine and reading the whole zone")
                 }
             case .some(false):
                 if store.state.catchUpZoneToken == nil {
@@ -422,10 +422,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         if engineInstance == nil {
             var configuration = CKSyncEngine.Configuration(database: container.privateCloudDatabase,
                                                            stateSerialization: store.state.engineState, delegate: self)
-            // Stage J: while media is held the engine must not fetch (it
-            // would download every asset with its record), so it runs
-            // without automatic sync and the app drives sends and fetches.
-            configuration.automaticallySync = !mediaGatedValue
+            // C-149: the engine never fetches. Its fetch brings every changed
+            // record with its asset (104 MB of files this device already held,
+            // on mobile data, 2026-11-03), so the app's records-only catch-up
+            // is the only fetch and the engine only sends.
+            configuration.automaticallySync = false
             engineInstance = CKSyncEngine(configuration)
             probeServerFilesBeforeFirstBatch = store.state.engineState != nil
         }
@@ -435,7 +436,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         retryAttempts = 0
         lastRefusal = nil
         stateLock.unlock()
-        if wasDormant { log("Engine \(store.state.engineState == nil ? "built fresh" : "built from saved state") (\(trigger))\(gated ? "; automatic sync off, \(hold.reason ?? "")" : "")") }
+        if wasDormant { log("Engine \(store.state.engineState == nil ? "built fresh" : "built from saved state") (\(trigger)); app-driven fetch\(gated ? ", \(hold.reason ?? "")" : "")") }
         await publish { $0.pausedReason = nil }
 
         queueToEngine(databaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
@@ -456,74 +457,74 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         await scanScores(reason: "activation", positions: !store.state.scoreScanDone)
         requeueOutbox()
         ensureAppSubscription()
-        if gated {
-            scheduleManualSend()
-        } else if !store.state.awaitingMedia.isEmpty {
+        if store.state.catchUpZoneToken == nil {
+            // A fresh state (first link, re-enable, recovery): the whole zone,
+            // records only, then the files that are new here.
+            _ = await deltaCatchUp(reason: "first fetch")
+        } else if !gated, !store.state.awaitingMedia.isEmpty {
             await releaseHeldMedia()
         }
+        scheduleManualSend()
         await publish { $0.phase = "Running" }
         refreshCounts()
     }
 
     // MARK: Stage J: media over mobile data
 
-    /// Re-evaluates the hold from the last path report and the option; when
-    /// media goes from allowed to held or back, the engine is rebuilt with the
-    /// matching automatic-sync setting (the stage E drop-and-rebuild path:
-    /// the old instance's later events are ignored by `isCurrent`, the
-    /// activation re-asks the account guard) and what waited is released. A
+    /// Re-evaluates the hold from the last path report and the option. The
+    /// engine is not rebuilt (C-149): from allowed to held, the builder leaves
+    /// files out and the catch-up holds records whose file is new from now on;
+    /// from held to allowed, what waited is released and a send asked for. A
     /// change of reason alone (Wi-Fi only → Low Data Mode) is a status change.
     func recomputeGate(trigger: String) async {
         let allow = JournalMediaPreference.allowsMobileData()
         stateLock.lock()
         let previous = mediaHoldValue
         let next = JournalMediaGate.hold(link: pathLink, allowMobileData: allow)
-        let rebuild = JournalMediaGate.rebuildNeeded(from: previous, to: next)
         mediaHoldValue = next
-        let hadEngine = engineInstance != nil
-        if rebuild, hadEngine { engineInstance = nil; dormantGeneration += 1 }
         stateLock.unlock()
         guard previous != next else { return }
-        log("Media transfers now \(next.reason ?? "allowed on this link") (\(trigger))\(rebuild && hadEngine ? "; engine rebuilt" : "")")
+        log("Media transfers now \(next.reason ?? "allowed on this link") (\(trigger))")
         if !next.holds { store.update { $0.mediaWaitingUpload.removeAll() } }
         await publish { $0.mediaGated = next.holds; $0.mediaHold = next }
         refreshCounts()
-        guard rebuild, hadEngine, currentDecision().allowed else { return }
-        await activate(trigger: trigger)
+        guard JournalMediaGate.releaseNeeded(from: previous, to: next), engine != nil, currentDecision().allowed else { return }
+        await releaseHeldMedia()
+        scheduleManualSend()
     }
 
-    /// While the engine does not sync automatically: the app's own records-only
-    /// fetch, then a send. Called from a push and from the foreground.
+    /// The app's own records-only fetch, then a send. Called from a push, the
+    /// foreground, the poll and the diagnostics.
     func manualRefresh(trigger: String) async {
-        guard mediaGated, engine != nil, currentDecision().allowed else { return }
-        _ = await deltaCatchUp(reason: "\(trigger) while media is held")
+        guard engine != nil, currentDecision().allowed else { return }
+        _ = await deltaCatchUp(reason: trigger)
         scheduleManualSend()
     }
 
     /// The app's own silent push landed. Returns whether the app acted on it
     /// (the engine acts for itself while it syncs automatically).
     func pushReceived() async -> Bool {
-        guard mediaGated else { return false }
+        guard engine != nil else { return false }
         #if canImport(UIKit)
-        let task = await MainActor.run { JournalBackgroundTask.begin("push while media waits") }
+        let task = await MainActor.run { JournalBackgroundTask.begin("push") }
         defer { Task { @MainActor in task.end() } }
         #endif
         await manualRefresh(trigger: "push")
         return true
     }
 
-    /// One send per burst while the app drives sends itself.
+    /// One send per burst: the app asks the engine to send itself.
     private func scheduleManualSend() {
         stateLock.lock()
-        guard mediaGatedValue, !manualSendScheduled else { stateLock.unlock(); return }
+        guard !manualSendScheduled else { stateLock.unlock(); return }
         manualSendScheduled = true
         stateLock.unlock()
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard let self else { return }
             self.stateLock.lock(); self.manualSendScheduled = false; self.stateLock.unlock()
-            guard let engine = self.engine, self.mediaGated, self.currentDecision().allowed else { return }
-            do { try await engine.sendChanges() } catch { self.log("Send (media held) failed: \(error.localizedDescription); retried at the next change, push or foreground") }
+            guard let engine = self.engine, self.currentDecision().allowed else { return }
+            do { try await engine.sendChanges() } catch { self.log("Send failed: \(error.localizedDescription); retried at the next change, push, poll or foreground") }
         }
     }
 
@@ -714,12 +715,20 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             container.privateCloudDatabase.add(op)
         }
         if let failure {
-            let code = failure.code
             let text = "Delta catch-up failed: \(failure.localizedDescription)"
             store.update { $0.lastCatchUp = text }
             log(text)
-            // Only these need the whole zone again; anything else is retried next time.
-            return !(code == .changeTokenExpired || code == .zoneNotFound || code == .userDeletedZone)
+            switch JournalCatchUp.recovery(for: failure.code) {
+            case .retryLater:
+                return true
+            case .rereadZone:
+                // The one unavoidable full fetch: records only, files by need.
+                store.update { $0.catchUpZoneToken = nil }
+                log("Zone token expired; the whole zone is read again, records only")
+                return previous == nil ? true : await deltaCatchUpBody(reason: "\(reason), whole zone")
+            case .zoneGone:
+                return false
+            }
         }
 
         // The file only where it is needed.
@@ -812,6 +821,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         forgetSettings(deleted.filter { JournalSyncRecordType.settingsTypes.contains($0.1) }.map(\.0.recordName))
         await applyHeldSettings()
         let summary = "Catch-up (\(reason)): \(modified.count) changed record(s), \(deleted.count) deletion(s), \(assetsFetched) file(s) fetched"
+        let first = !store.state.initialFetchComplete
         store.update { st in
             if let newToken, let data = try? NSKeyedArchiver.archivedData(withRootObject: newToken, requiringSecureCoding: true) {
                 st.catchUpZoneToken = data
@@ -819,8 +829,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             st.catchUpRecords += modified.count
             st.catchUpAssets += assetsFetched
             st.lastCatchUp = summary
+            st.initialFetchComplete = true
         }
         log(summary)
+        if first { log("First complete fetch finished") }
         if let fetchCycleCompleted { await MainActor.run { fetchCycleCompleted() } }
         return true
     }
@@ -1148,13 +1160,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     }
 
     func fetchNow() async {
-        guard let engine, currentDecision().allowed else { log("Fetch refused: \(currentDecision().reason ?? "no engine")"); return }
-        if mediaGated {
-            // The engine's fetch would bring every asset; the app's own fetch brings records.
-            _ = await deltaCatchUp(reason: "manual fetch while media is held")
-            return
-        }
-        do { try await engine.fetchChanges() } catch { log("fetchChanges failed: \(error.localizedDescription)") }
+        guard engine != nil, currentDecision().allowed else { log("Fetch refused: \(currentDecision().reason ?? "no engine")"); return }
+        _ = await deltaCatchUp(reason: "manual fetch")
     }
 
     func sendNow() async {
