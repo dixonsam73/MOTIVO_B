@@ -96,6 +96,36 @@ enum JournalCatchUp {
     }
 }
 
+/// PURE. What the set-up screen offers BEFORE it asks for a name (C-151).
+/// After a device-only removal the binding is kept and the private iCloud
+/// journal is untouched, so the person is offered the restoration first; while
+/// sync is on and the first complete fetch is pending, the screen says so and
+/// a name typed meanwhile is provisional (see `JournalProfileSync.scan`).
+enum JournalRestoreOffer: Equatable {
+    /// Sync is off on this device (a removed local copy, or unlinked): offer to re-enable.
+    case offer(localCopyRemoved: Bool)
+    /// Sync is on; the first complete fetch has not finished (offline, or still running).
+    case restoring(lastFailure: String?)
+    /// Sync is on but refused for now (no iCloud account, a different account…).
+    case waiting(reason: String)
+    /// The first complete fetch finished and the cloud holds no profile name.
+    case nothingFound
+    /// The cloud profile is here (the set-up gate closes by itself), or sync never started.
+    case none
+
+    static func decide(started: Bool, unlinked: Bool, localCopyRemoved: Bool, localRemovalInProgress: Bool,
+                       pausedReason: String?, initialFetchComplete: Bool, lastCatchUp: String?, profileName: String) -> JournalRestoreOffer {
+        guard started, !localRemovalInProgress else { return .none }
+        if unlinked { return .offer(localCopyRemoved: localCopyRemoved) }
+        if let pausedReason, !pausedReason.isEmpty { return .waiting(reason: pausedReason) }
+        if !initialFetchComplete {
+            let failure = lastCatchUp.flatMap { $0.hasPrefix("Delta catch-up failed") ? $0 : nil }
+            return .restoring(lastFailure: failure)
+        }
+        return profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .nothingFound : .none
+    }
+}
+
 /// PURE. The outbox is the durable record of pending work; an engine built
 /// from its saved state restores its own pending list too, which may hold a
 /// save the catch-up dropped meanwhile (a lost conflict resolved before the
@@ -171,6 +201,7 @@ enum JournalLocalRemoval {
             // is a clocked edit, and the wiped avatar is not a removal.
             st.profileFingerprint = JournalProfileValues().fingerprint
             st.profileStamp = nil
+            st.profileStampProvisional = false
             st.avatarRemovedAt = nil
             st.profilePrimaryChosen = false
             // Stage I: the erased library is the baseline (nothing erased is

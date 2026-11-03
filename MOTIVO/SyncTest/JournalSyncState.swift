@@ -241,6 +241,12 @@ struct JournalSyncPersistedState: Codable {
     /// The clock of this device's profile text; nil for a profile that predates
     /// this build and has not been edited since (sent without a clock).
     var profileStamp: Date?
+    /// C-151: the clock above belongs to text typed before this device's first
+    /// complete fetch (set-up after a removal, or a first install), so it is
+    /// provisional: it merges as UNCLOCKED against whatever the cloud holds,
+    /// and becomes a real clock only once the first complete fetch brings no
+    /// profile. Cleared by every profile import and by the first complete fetch.
+    var profileStampProvisional = false
     /// When the avatar was removed here (its record's clock while no file exists).
     var avatarRemovedAt: Date?
     var avatarUploads = 0
@@ -302,6 +308,11 @@ struct JournalSyncPersistedState: Codable {
     var mediaDownloadsHeld = 0
     /// Library items without a file on this device at the last scan (not sent).
     var scoresWithoutFile = 0
+    // iCloud storage full (JournalStorageFull).
+    /// The current storage-full episode, or nil while iCloud accepts saves.
+    var storageFull: JournalStorageFull.Episode?
+    /// Episodes begun on this install (diagnostics).
+    var storageFullEpisodes = 0
 
     init() {}
 
@@ -352,6 +363,7 @@ struct JournalSyncPersistedState: Codable {
         echoAssetBytes = try c.decodeIfPresent(Int64.self, forKey: .echoAssetBytes) ?? 0
         profileFingerprint = try c.decodeIfPresent(String.self, forKey: .profileFingerprint)
         profileStamp = try c.decodeIfPresent(Date.self, forKey: .profileStamp)
+        profileStampProvisional = try c.decodeIfPresent(Bool.self, forKey: .profileStampProvisional) ?? false
         avatarRemovedAt = try c.decodeIfPresent(Date.self, forKey: .avatarRemovedAt)
         avatarUploads = try c.decodeIfPresent(Int.self, forKey: .avatarUploads) ?? 0
         avatarAssetBytesDelivered = try c.decodeIfPresent(Int64.self, forKey: .avatarAssetBytesDelivered) ?? 0
@@ -384,6 +396,8 @@ struct JournalSyncPersistedState: Codable {
         mediaUploadsHeld = try c.decodeIfPresent(Int.self, forKey: .mediaUploadsHeld) ?? 0
         mediaDownloadsHeld = try c.decodeIfPresent(Int.self, forKey: .mediaDownloadsHeld) ?? 0
         scoresWithoutFile = try c.decodeIfPresent(Int.self, forKey: .scoresWithoutFile) ?? 0
+        storageFull = try c.decodeIfPresent(JournalStorageFull.Episode.self, forKey: .storageFull)
+        storageFullEpisodes = try c.decodeIfPresent(Int.self, forKey: .storageFullEpisodes) ?? 0
     }
 }
 

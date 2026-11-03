@@ -664,5 +664,118 @@ final class SyncTestProfileTests: XCTestCase {
         let decoded = try JSONDecoder().decode(JournalSyncPersistedState.self, from: old)
         XCTAssertNil(decoded.profileFingerprint); XCTAssertNil(decoded.profileStamp); XCTAssertEqual(decoded.avatarUploads, 0)
     }
+
+    // MARK: C-151: set-up before the first complete fetch
+
+    /// Offline setup: "Temp" typed at set-up after a removal (device, 2026-11-03)
+    /// is clocked but provisional, so the established cloud profile comes back
+    /// on reconnect and "Temp" is kept on the Displaced by sync list with Restore.
+    @MainActor
+    func testANameTypedBeforeTheFirstCompleteFetchYieldsToTheCloudProfileAndIsKeptForRestore() throws {
+        // After "Remove Études Data from This Device" and Re-enable: empty baseline, no fetch yet.
+        JournalLocalRemoval.begin(store: store, reason: "test")
+        JournalLocalRemoval.finish(store: store, container: container)
+        JournalLocalRemoval.reenable(store: store)
+        XCTAssertFalse(store.state.initialFetchComplete)
+        makeProfile(name: "Temp", primary: "Piano", instruments: ["Piano"])
+        let typedAt = Date(timeIntervalSince1970: 1_762_177_632)   // 2026-11-03 13:47:12 UTC
+        let typed = scan(now: typedAt)
+        XCTAssertEqual(typed.map(\.recordName), [JournalProfileSync.profileName])
+        XCTAssertEqual(store.state.profileStamp, typedAt)
+        XCTAssertTrue(store.state.profileStampProvisional, "typed before the first complete fetch")
+        XCTAssertEqual(profileRecordBuilt()["userModifiedAt"] as? Date, typedAt, "the record carries its clock: it stands if the cloud holds no profile")
+        // The first fetch brings the cloud profile, clocked EARLIER (2026-10-28): it wins anyway.
+        let cloudAt = Date(timeIntervalSince1970: 1_761_660_000)
+        let outcome = applyProfile(serverProfile(name: "Name A", location: "Bristol", primary: "Cello", stamp: cloudAt))
+        XCTAssertEqual(outcome.applied, 1); XCTAssertTrue(outcome.resend.isEmpty)
+        XCTAssertEqual(values(), JournalProfileValues(name: "Name A", location: "Bristol", primaryInstrument: "Cello"))
+        XCTAssertEqual(store.state.profileStamp, cloudAt); XCTAssertFalse(store.state.profileStampProvisional)
+        XCTAssertNil(outbox(JournalProfileSync.profileName), "the typed profile is not sent over the cloud copy")
+        let entries = JournalRecovery.entries(store: store)
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0].displaced["Name (this device)"], "Temp")
+        XCTAssertEqual(entries[0].displaced["Instrument (this device)"], "Piano")
+        XCTAssertEqual(entries[0].restore, "profile"); XCTAssertNil(entries[0].localUserModifiedAt, "listed as unclocked")
+        // Restore is a NEW edit after the first complete fetch: clocked now, wins everywhere.
+        // (The app's view context merges the import by itself; here it is refreshed.)
+        store.update { $0.initialFetchComplete = true }
+        container.viewContext.refreshAllObjects()
+        XCTAssertEqual(JournalRecovery.restore(entries[0], store: store, context: container.viewContext, scope: scope), .restored("Restored name as a new edit"))
+        let restoredAt = Date(timeIntervalSince1970: 1_762_180_000)
+        XCTAssertEqual(scan(now: restoredAt).map(\.recordName), [JournalProfileSync.profileName])
+        XCTAssertEqual(store.state.profileStamp, restoredAt); XCTAssertFalse(store.state.profileStampProvisional)
+        let stale = applyProfile(serverProfile(name: "Name A", location: "Bristol", primary: "Cello", stamp: cloudAt), localPending: true)
+        XCTAssertEqual(stale.applied, 0); XCTAssertEqual(stale.resend.count, 1); XCTAssertEqual(values().name, "Temp")
+        let after = JournalRecovery.entries(store: store)
+        XCTAssertFalse(after.contains { $0.id == entries[0].id }, "the restored entry has left the list")
+        XCTAssertEqual(after.map { $0.displaced["Name (other device)"] }, ["Name A"], "the cloud name is now the displaced one (existing rule)")
+        // The pure rule: provisional counts for nothing; without the mark the clock rules as before.
+        let local = JournalProfileValues(name: "Temp", location: "", primaryInstrument: "Piano")
+        let cloud = JournalProfileValues(name: "Name A", location: "Bristol", primaryInstrument: "Cello")
+        let unclockedCloud = JournalProfileMerge.decide(local: local, localStamp: typedAt, localPending: true, server: cloud, serverStamp: nil, localProvisional: true)
+        XCTAssertEqual(unclockedCloud.apply, cloud, "field by field, as two established profiles: the longer name, Unicode order for the instrument")
+        XCTAssertFalse(unclockedCloud.send, "the merged values are the server's")
+        XCTAssertTrue(unclockedCloud.displaced.contains("name (this device): Temp"))
+        XCTAssertTrue(unclockedCloud.displaced.contains("instrument (this device): Piano"))
+        let clocked = JournalProfileMerge.decide(local: local, localStamp: typedAt, localPending: true, server: cloud, serverStamp: cloudAt, localProvisional: false)
+        XCTAssertNil(clocked.apply); XCTAssertTrue(clocked.send, "a real later edit still wins")
+        // No cloud profile at all: the first complete fetch makes the typed clock real (the engine clears the mark).
+        store.update { $0.initialFetchComplete = false; $0.profileStampProvisional = true }
+        store.update { $0.initialFetchComplete = true; $0.profileStampProvisional = false }
+        XCTAssertEqual(store.state.profileStamp, restoredAt)
+    }
+
+    /// Online restoration: the set-up screen offers the restore before a name
+    /// is typed; the fetched profile fills the row and its instrument, so the
+    /// set-up gate closes with nothing edited, sent or displaced.
+    @MainActor
+    func testRestoringFromICloudAtSetUpFillsTheProfileAndItsInstrumentWithNothingEditedOrDisplaced() throws {
+        typealias Offer = JournalRestoreOffer
+        func offer(unlinked: Bool = false, removed: Bool = false, removing: Bool = false, paused: String? = nil, fetched: Bool = false,
+                   last: String? = nil, name: String = "") -> Offer {
+            Offer.decide(started: true, unlinked: unlinked, localCopyRemoved: removed, localRemovalInProgress: removing,
+                         pausedReason: paused, initialFetchComplete: fetched, lastCatchUp: last, profileName: name)
+        }
+        JournalLocalRemoval.begin(store: store, reason: "test")
+        XCTAssertEqual(offer(removing: true), .none, "nothing is offered while the removal runs")
+        JournalLocalRemoval.finish(store: store, container: container)
+        XCTAssertEqual(offer(unlinked: true, removed: true), .offer(localCopyRemoved: true))
+        XCTAssertEqual(offer(unlinked: true), .offer(localCopyRemoved: false))
+        // "Restore from iCloud" re-enables; the set-up screen has already made the empty row.
+        JournalLocalRemoval.reenable(store: store)
+        XCTAssertFalse(store.state.unlinked); XCTAssertFalse(store.state.localCopyRemoved)
+        makeProfile(name: "")
+        XCTAssertTrue(scan().isEmpty, "the empty row is the baseline, not an edit")
+        XCTAssertEqual(offer(), .restoring(lastFailure: nil))
+        XCTAssertEqual(offer(last: "Delta catch-up failed: offline"), .restoring(lastFailure: "Delta catch-up failed: offline"))
+        XCTAssertEqual(offer(last: "Catch-up (first fetch): 0 changed record(s)"), .restoring(lastFailure: nil))
+        XCTAssertEqual(offer(paused: "Waiting for iCloud"), .waiting(reason: "Waiting for iCloud"))
+        XCTAssertEqual(Offer.decide(started: false, unlinked: true, localCopyRemoved: true, localRemovalInProgress: false, pausedReason: nil,
+                                    initialFetchComplete: false, lastCatchUp: nil, profileName: ""), .none)
+        // The first fetch brings the profile: a plain import onto the empty row.
+        let cloudAt = Date(timeIntervalSince1970: 1_761_660_000)
+        let outcome = applyProfile(serverProfile(name: "Name A", location: "Bristol", primary: "Cello", stamp: cloudAt))
+        XCTAssertEqual(outcome.applied, 1); XCTAssertTrue(outcome.resend.isEmpty)
+        XCTAssertTrue(store.state.conflicts.isEmpty); XCTAssertTrue(store.state.outbox.isEmpty)
+        XCTAssertEqual(values(), JournalProfileValues(name: "Name A", location: "Bristol", primaryInstrument: "Cello"))
+        XCTAssertEqual(store.state.profileStamp, cloudAt); XCTAssertFalse(store.state.profileStampProvisional)
+        // The set-up gate (PracticeTimerView.requiresAppSetUpNow): a name, and an instrument OF the profile.
+        let ctx = container.viewContext
+        ctx.refreshAllObjects()
+        let row = try XCTUnwrap(JournalProfileSync.profileRow(in: ctx))
+        XCTAssertEqual(row.value(forKey: "name") as? String, "Name A")
+        let instruments = try ctx.fetch(NSFetchRequest<NSManagedObject>(entityName: "Instrument"))
+        XCTAssertEqual(instruments.count, 1)
+        XCTAssertEqual(instruments[0].value(forKey: "name") as? String, "Cello")
+        XCTAssertEqual((instruments[0].value(forKey: "profile") as? NSManagedObject)?.objectID, row.objectID, "linked to the row, so the gate closes")
+        // After the fetch the card is gone (or says nothing was found), and the name step is skipped.
+        store.update { $0.initialFetchComplete = true }
+        XCTAssertEqual(offer(fetched: true, name: "Name A"), .none)
+        XCTAssertEqual(offer(fetched: true), .nothingFound)
+        // Continue on the set-up screen writes the same name back: not an edit, nothing sent.
+        row.setValue("Name A", forKey: "name"); try ctx.save()
+        XCTAssertTrue(scan(now: Date(timeIntervalSince1970: 1_762_180_000)).isEmpty)
+        XCTAssertEqual(store.state.profileStamp, cloudAt)
+    }
 }
 #endif

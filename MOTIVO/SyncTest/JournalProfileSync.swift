@@ -31,6 +31,14 @@
 //  resolve to the longer one (equal length: Unicode order), whichever arrived
 //  first, so both devices compute the same result and converge in one round.
 //
+//  C-151 (2026-11-03): a name typed before this device's first complete
+//  fetch (set-up after a removal, or a first install, offline or while the
+//  fetch runs) is clocked but PROVISIONAL: it merges as unclocked, so an
+//  established cloud profile comes back and the typed name is kept on the
+//  Displaced by sync list with Restore. It becomes a real clock only when the
+//  first complete fetch brings no profile. The set-up screen offers the
+//  restoration before it asks for a name (`JournalRestoreOffer`).
+//
 //  A profile that was never meaningful (name and location both empty) and
 //  never edited is not uploaded, and a change to it is not an edit: the app
 //  writes a default primary instrument on its own, and that must never beat an
@@ -136,9 +144,14 @@ enum JournalProfileMerge {
         return tieBreak(local, server)
     }
 
+    /// `localProvisional` (C-151): the local clock belongs to text typed before
+    /// the first complete fetch, so it counts for nothing here: a clocked server
+    /// copy wins the whole record, an unclocked one meets it field by field.
     static func decide(local: JournalProfileValues, localStamp: Date?, localPending: Bool,
-                       server: JournalProfileValues, serverStamp: Date?) -> Decision {
+                       server: JournalProfileValues, serverStamp: Date?, localProvisional: Bool = false) -> Decision {
         var d = Decision()
+        let localStamp = localProvisional ? nil : localStamp
+        let provisionalNote = localProvisional ? " (typed before the first complete fetch: unclocked)" : ""
         if local == server {
             d.summary = "same values"
             return d
@@ -156,7 +169,7 @@ enum JournalProfileMerge {
             }
             if merged != local { d.apply = merged }
             d.send = merged != server
-            d.summary = "merged field by field (no clock on either side)"
+            d.summary = "merged field by field (no clock on either side)" + provisionalNote
             return d
         }
         switch JournalConflictRule.decide(localUserModifiedAt: localStamp, serverUserModifiedAt: serverStamp) {
@@ -177,7 +190,7 @@ enum JournalProfileMerge {
                     d.displaced.append("\(label) (this device): \(l)")
                 }
             }
-            d.summary = "server newer; applied"
+            d.summary = "server newer; applied" + provisionalNote
         case .local:
             d.send = true
             for (label, l, s) in [("name", local.name, server.name), ("location", local.location, server.location),
@@ -336,7 +349,9 @@ enum JournalProfileSync {
     /// queues what changed, recording the new fingerprint and clock in the same
     /// write. The first scan on a device (no fingerprint yet) is the
     /// transition: an established profile is queued UNSTAMPED, an empty one
-    /// sets the baseline and sends nothing. Must be called on `context`'s queue.
+    /// sets the baseline and sends nothing. An edit found before the first
+    /// complete fetch is clocked but provisional (C-151): the clock stands only
+    /// if the cloud holds no profile. Must be called on `context`'s queue.
     @discardableResult
     static func scan(context: NSManagedObjectContext, scope: JournalProfileScope, store: JournalSyncStateStore,
                      now: Date = Date()) -> [JournalSyncPendingChange] {
@@ -346,6 +361,7 @@ enum JournalProfileSync {
         let avatar = currentAvatar(scope: scope, store: store)
         var pending: [JournalSyncPendingChange] = []
         var newStamp = st.profileStamp
+        var newProvisional = st.profileStampProvisional
         var newFingerprint = st.profileFingerprint
         var note: String?
 
@@ -363,8 +379,9 @@ enum JournalProfileSync {
             if JournalProfileMerge.isEdit(previous: previous, current: values, everEdited: st.profileStamp != nil,
                                           primaryChosen: st.profilePrimaryChosen) {
                 newStamp = now
+                newProvisional = !st.initialFetchComplete
                 pending.append(.init(recordName: profileName, recordType: JournalSyncRecordType.profile, op: .save))
-                note = "Profile edited: \(values.describe())"
+                note = "Profile edited: \(values.describe())" + (newProvisional ? " (before the first complete fetch: provisional, yields to a cloud profile)" : "")
             } else {
                 note = "Profile default changed on an empty profile (\(values.describe())); not an edit"
             }
@@ -382,11 +399,13 @@ enum JournalProfileSync {
         }
 
         let changed = !pending.isEmpty || newFingerprint != st.profileFingerprint || newStamp != st.profileStamp || avatarRemovedAt != st.avatarRemovedAt
+            || newProvisional != st.profileStampProvisional
         guard changed else { return [] }
         let ok = store.update { s in
             JournalChangeTracker.merge(pending, into: &s.outbox)
             s.profileFingerprint = newFingerprint
             s.profileStamp = newStamp
+            s.profileStampProvisional = newProvisional
             s.avatarRemovedAt = avatarRemovedAt
             if let note { s.log.append(.init(at: now, text: note)) }
         }
@@ -454,11 +473,16 @@ enum JournalProfileSync {
         let local = currentValues(context: context, scope: scope)
         let server = values(of: record)
         let serverStamp = record[JournalProfileKeys.stamp] as? Date
-        let decision = JournalProfileMerge.decide(local: local, localStamp: st.profileStamp, localPending: pending, server: server, serverStamp: serverStamp)
+        // C-151: a clock typed before the first complete fetch counts for nothing
+        // against a cloud copy; the server's clock is the record's from here on.
+        let provisional = st.profileStampProvisional
+        let localStamp: Date? = provisional ? nil : st.profileStamp
+        let decision = JournalProfileMerge.decide(local: local, localStamp: st.profileStamp, localPending: pending, server: server,
+                                                  serverStamp: serverStamp, localProvisional: provisional)
         if !decision.displaced.isEmpty {
             var conflict = JournalSyncConflict(at: Date(), recordName: profileName, recordType: JournalSyncRecordType.profile,
                                                winner: decision.apply == nil ? "local" : (decision.send ? "merged" : "server"),
-                                               localUserModifiedAt: st.profileStamp, serverUserModifiedAt: serverStamp,
+                                               localUserModifiedAt: localStamp, serverUserModifiedAt: serverStamp,
                                                losingTitle: "displaced: " + decision.displaced.joined(separator: " · "), losingNotes: nil)
             // Stage J: "name (this device): H-Pad" → "Name (this device)": "H-Pad".
             for item in decision.displaced {
@@ -473,6 +497,16 @@ enum JournalProfileSync {
         }
         if let apply = decision.apply {
             let link = JournalRecordMapping.instrumentLink(of: record)
+            // The row first (C-151): an instrument the importer creates is linked
+            // to the Profile row that exists at that moment, and the set-up gate
+            // needs an instrument OF the profile, so a restore onto a device with
+            // no row must create the row before it resolves the primary.
+            let profile = profileRow(in: context) ?? {
+                let created = NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.profile, into: context)
+                created.setValue(UUID(), forKey: "id")
+                created.setValue(false, forKey: "defaultPrivacy")
+                return created
+            }()
             // Resolve the primary against this device's instruments (id → alias
             // → name → create), never making a duplicate; the row's name is
             // what the profile then stores.
@@ -481,12 +515,6 @@ enum JournalProfileSync {
                 let row = importer.resolveInstrument(recordName: link.recordName, name: apply.primaryInstrument)
                 primary = (row?.value(forKey: "name") as? String ?? apply.primaryInstrument).trimmingCharacters(in: .whitespacesAndNewlines)
             }
-            let profile = profileRow(in: context) ?? {
-                let created = NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.profile, into: context)
-                created.setValue(UUID(), forKey: "id")
-                created.setValue(false, forKey: "defaultPrivacy")
-                return created
-            }()
             if (profile.value(forKey: "name") as? String) != apply.name { profile.setValue(apply.name, forKey: "name") }
             if (profile.value(forKey: "primaryInstrument") as? String) != primary { profile.setValue(primary, forKey: "primaryInstrument") }
             if profile.value(forKey: "id") == nil { profile.setValue(UUID(), forKey: "id") }
@@ -504,12 +532,13 @@ enum JournalProfileSync {
         let applied = decision.apply == nil ? local : currentValues(context: context, scope: scope)
         if decision.send {
             outcome.resend.append(.init(recordName: profileName, recordType: JournalSyncRecordType.profile, op: .save,
-                                        metadataOnly: st.profileStamp == nil && serverStamp == nil))
+                                        metadataOnly: localStamp == nil && serverStamp == nil))
         }
         store.update { s in
             s.lastKnownRecords[profileName] = JournalSyncStateStore.encodeSystemFields(record)
             s.profileFingerprint = applied.fingerprint
-            if decision.apply != nil { s.profileStamp = serverStamp }
+            if decision.apply != nil || provisional { s.profileStamp = serverStamp }
+            s.profileStampProvisional = false
             if !decision.send { s.outbox.removeAll { $0.recordName == profileName && $0.op == .save } }
             else { JournalChangeTracker.merge(outcome.resend, into: &s.outbox) }
         }

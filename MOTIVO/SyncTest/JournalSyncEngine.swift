@@ -84,6 +84,9 @@ final class JournalSyncStatus: ObservableObject {
     @Published var mediaHold: JournalMediaGate.Hold = .none
     /// "Media waiting for Wi-Fi: 2 to send (35 MB), 1 to receive", or nil.
     @Published var mediaWaiting: String?
+    /// iCloud storage full: the current episode and the person-facing line.
+    @Published var storageFull: JournalStorageFull.Episode?
+    @Published var storageFullSummary: String?
 }
 
 final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue, @unchecked Sendable {
@@ -150,6 +153,9 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// files it already holds, so a matching file is not sent twice.
     private var probeServerFilesBeforeFirstBatch = false
     static let heldPollInterval: UInt64 = 75_000_000_000
+    /// Diagnostics only: until this time every send is refused as if the
+    /// server had answered quotaExceeded; nothing reaches the server.
+    private var quotaSimulationUntil: Date?
     private var preferenceObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
     /// While media is held the engine is built without automatic sync: the
@@ -260,9 +266,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                     let open = await MainActor.run { ScoreLibraryStore.shared.openViewerID }
                     let task = await MainActor.run { JournalBackgroundTask.begin("score position") }
                     await self.scanScores(reason: "background", positions: true, force: open.map { [$0] } ?? [])
-                    if open != nil, let engine = self.engine, self.currentDecision().allowed {
-                        do { try await engine.sendChanges(); self.log("Background send finished") }
-                        catch { self.log("Background send failed: \(error.localizedDescription) (sent at the next foreground)") }
+                    if open != nil, self.engine != nil, self.currentDecision().allowed {
+                        if await self.performSend(userDriven: true) { self.log("Background send finished") }
                     }
                     await MainActor.run { task.end() }
                 }
@@ -464,7 +469,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         } else if !gated, !store.state.awaitingMedia.isEmpty {
             await releaseHeldMedia()
         }
-        scheduleManualSend()
+        scheduleManualSend(userDriven: true)
         await publish { $0.phase = "Running" }
         refreshCounts()
     }
@@ -498,7 +503,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     func manualRefresh(trigger: String) async {
         guard engine != nil, currentDecision().allowed else { return }
         _ = await deltaCatchUp(reason: trigger)
-        scheduleManualSend()
+        scheduleManualSend(userDriven: trigger == "foreground")
     }
 
     /// The app's own silent push landed. Returns whether the app acted on it
@@ -513,8 +518,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         return true
     }
 
-    /// One send per burst: the app asks the engine to send itself.
-    private func scheduleManualSend() {
+    /// One send per burst: the app asks the engine to send itself. A
+    /// user-driven burst (a local change, the foreground, activation) may
+    /// retry sooner while iCloud storage is full (`JournalStorageFull`).
+    private func scheduleManualSend(userDriven: Bool = false) {
         stateLock.lock()
         guard !manualSendScheduled else { stateLock.unlock(); return }
         manualSendScheduled = true
@@ -523,10 +530,100 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard let self else { return }
             self.stateLock.lock(); self.manualSendScheduled = false; self.stateLock.unlock()
-            guard let engine = self.engine, self.currentDecision().allowed else { return }
-            do { try await engine.sendChanges() } catch { self.log("Send failed: \(error.localizedDescription); retried at the next change, push, poll or foreground") }
+            await self.performSend(userDriven: userDriven)
         }
     }
+
+    /// THE send. While iCloud storage is full the attempt waits for its
+    /// cadence (`JournalStorageFull.retryDue`: 2, 4, 8, then 15 minutes after
+    /// each refusal, the floor for a user-driven trigger), then re-adds the
+    /// outbox the engine dropped and sends it once, in the builder's order.
+    /// Returns whether a send was attempted.
+    @discardableResult
+    func performSend(userDriven: Bool, bypassCadence: Bool = false) async -> Bool {
+        guard let engine, currentDecision().allowed else { return false }
+        if let episode = store.state.storageFull {
+            let outbox = store.state.outbox
+            if outbox.isEmpty && !episode.zoneSaveFailed {
+                endStorageFull(sent: 0, reason: "nothing left to send")
+            } else {
+                guard bypassCadence || JournalStorageFull.retryDue(episode, now: Date(), userDriven: userDriven) else { return false }
+                // The engine forgot the refused changes; the outbox did not.
+                engine.state.add(pendingRecordZoneChanges: outbox.map(pendingChange))
+                if episode.zoneSaveFailed { engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))]) }
+            }
+        }
+        stateLock.lock(); let simulation = quotaSimulationUntil; stateLock.unlock()
+        if JournalStorageFull.simulationActive(until: simulation, now: Date()) {
+            simulateStorageFullRefusal(engine)
+            return true
+        }
+        do { try await engine.sendChanges() } catch {
+            // A refused batch is reported per record in handleSent, once per
+            // episode; the operation's own error adds nothing to the log.
+            let code = (error as? CKError)?.code
+            if store.state.storageFull != nil, code == .quotaExceeded || code == .partialFailure { return true }
+            log("Send failed: \(error.localizedDescription); retried at the next change, push, poll or foreground")
+        }
+        return true
+    }
+
+    // MARK: iCloud storage full (JournalStorageFull)
+
+    /// Saves (and possibly the zone) refused for lack of iCloud storage. The
+    /// outbox keeps every change; the engine has dropped them; the next
+    /// attempt on the cadence re-adds and sends them. Logged once per episode;
+    /// later refusals are counted in the episode the diagnostics show.
+    private func noteStorageFull(records: [String], zone: Bool, simulated: Bool) {
+        let (episode, began) = JournalStorageFull.noting(failureAt: Date(), zone: zone, simulated: simulated, in: store.state.storageFull)
+        store.update { $0.storageFull = episode; if began { $0.storageFullEpisodes += 1 } }
+        if began {
+            let waiting = store.state.outbox.count
+            log("iCloud storage is full\(simulated ? " (simulated)" : ""): \(records.count) save(s)\(zone ? " and the zone" : "") refused; \(waiting) change(s) kept waiting, nothing removed; retried on a change, push, poll or foreground at most every few minutes (further refusals are counted, not logged)")
+        }
+        refreshCounts()
+    }
+
+    private func endStorageFull(sent: Int, reason: String) {
+        guard let episode = store.state.storageFull else { return }
+        store.update { $0.storageFull = nil }
+        let left = store.state.outbox.count
+        log("iCloud storage available again after \(episode.attempts) refused attempt(s)\(episode.simulated ? " (simulated)" : ""): \(reason); \(sent) record(s) sent\(left > 0 ? ", \(left) change(s) still pending go with the next send" : "")")
+        refreshCounts()
+    }
+
+    /// Diagnostics only: exactly what a real refusal does to the app — the
+    /// engine's pending saves (and a pending zone save) are dropped the way
+    /// CKSyncEngine drops a non-retryable failure, and the failure handler
+    /// runs. Nothing is sent.
+    private func simulateStorageFullRefusal(_ engine: CKSyncEngine) {
+        let saves = engine.state.pendingRecordZoneChanges.filter { if case .saveRecord = $0 { return true }; return false }
+        let names = saves.compactMap { change -> String? in
+            if case .saveRecord(let id) = change { return id.recordName }
+            return nil
+        }
+        let zonePending = engine.state.pendingDatabaseChanges.contains { if case .saveZone = $0 { return true }; return false }
+        guard !names.isEmpty || zonePending else { return }
+        engine.state.remove(pendingRecordZoneChanges: saves)
+        if zonePending { engine.state.remove(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))]) }
+        noteStorageFull(records: names, zone: zonePending, simulated: true)
+    }
+
+    /// Diagnostics: refuse every send for a bounded period, then let the next
+    /// due attempt go to the server for real (the recovery path).
+    func simulateStorageFull(minutes: Int) {
+        let until = Date().addingTimeInterval(TimeInterval(minutes) * 60)
+        stateLock.lock(); quotaSimulationUntil = until; stateLock.unlock()
+        log("Storage-full simulation on for \(minutes) min: every send is refused as quotaExceeded until \(until.formatted(date: .omitted, time: .standard)); nothing reaches the server meanwhile")
+        scheduleManualSend(userDriven: true)
+    }
+
+    func endStorageFullSimulation() {
+        stateLock.lock(); let was = quotaSimulationUntil; quotaSimulationUntil = nil; stateLock.unlock()
+        if was != nil { log("Storage-full simulation ended; the next due attempt goes to the server") }
+    }
+
+    var storageFullSimulationUntil: Date? { stateLock.lock(); defer { stateLock.unlock() }; return quotaSimulationUntil }
 
     /// Upload side of the gate: a record that would carry a file stays in the
     /// outbox (not in the engine) while media is held. nil here drops
@@ -822,6 +919,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         await applyHeldSettings()
         let summary = "Catch-up (\(reason)): \(modified.count) changed record(s), \(deleted.count) deletion(s), \(assetsFetched) file(s) fetched"
         let first = !store.state.initialFetchComplete
+        // C-151: a profile typed before this fetch was provisional; a cloud
+        // profile in the batch has already settled it (applyProfile clears the
+        // mark), so a mark still set means the cloud holds none and the typed
+        // clock stands.
+        let provisionalStands = first && store.state.profileStampProvisional
         store.update { st in
             if let newToken, let data = try? NSKeyedArchiver.archivedData(withRootObject: newToken, requiringSecureCoding: true) {
                 st.catchUpZoneToken = data
@@ -830,9 +932,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             st.catchUpAssets += assetsFetched
             st.lastCatchUp = summary
             st.initialFetchComplete = true
+            st.profileStampProvisional = false
         }
         log(summary)
-        if first { log("First complete fetch finished") }
+        if first { log("First complete fetch finished" + (provisionalStands ? "; no cloud profile, so the profile typed here keeps its clock" : "")) }
         if let fetchCycleCompleted { await MainActor.run { fetchCycleCompleted() } }
         return true
     }
@@ -1100,7 +1203,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         if !zoneChanges.isEmpty { engine.state.add(pendingRecordZoneChanges: zoneChanges) }
         if !databaseChanges.isEmpty { engine.state.add(pendingDatabaseChanges: databaseChanges) }
         // Stage J: without automatic sync the app asks for the send itself.
-        if !zoneChanges.isEmpty || !databaseChanges.isEmpty { scheduleManualSend() }
+        if !zoneChanges.isEmpty || !databaseChanges.isEmpty { scheduleManualSend(userDriven: true) }
     }
 
     private func pendingChange(_ c: JournalSyncPendingChange) -> CKSyncEngine.PendingRecordZoneChange {
@@ -1165,9 +1268,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     }
 
     func sendNow() async {
-        guard let engine, currentDecision().allowed else { log("Send refused: \(currentDecision().reason ?? "no engine")"); return }
+        guard engine != nil, currentDecision().allowed else { log("Send refused: \(currentDecision().reason ?? "no engine")"); return }
         noteLocalChanges()
-        do { try await engine.sendChanges() } catch { log("sendChanges failed: \(error.localizedDescription)") }
+        // The diagnostics tap ignores the storage-full cadence: one attempt now, counted like any other.
+        await performSend(userDriven: true, bypassCadence: true)
     }
 
     /// Diagnostic: fetch the zone directly with CloudKit, bypassing the engine,
@@ -1326,7 +1430,19 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             await publish { $0.lastSendAt = Date() }
 
         case .sentDatabaseChanges(let e):
-            if !e.failedZoneSaves.isEmpty { log("Zone save failed: \(e.failedZoneSaves.map { $0.error.localizedDescription })") }
+            if e.failedZoneSaves.contains(where: { JournalStorageFull.isStorageFull($0.error.code) }) {
+                noteStorageFull(records: [], zone: true, simulated: false)
+            } else if !e.failedZoneSaves.isEmpty {
+                log("Zone save failed: \(e.failedZoneSaves.map { $0.error.localizedDescription })")
+            } else if store.state.storageFull != nil, !e.savedZones.isEmpty {
+                // The zone exists again; the episode ends only when no save waits.
+                let savesLeft = store.state.outbox.filter { $0.op == .save }.count
+                if JournalStorageFull.recovered(savedRecords: 0, savedZones: e.savedZones.count, deletedRecords: 0, quotaFailures: 0, savesStillPending: savesLeft) {
+                    endStorageFull(sent: 0, reason: "the zone was saved and nothing else waits")
+                } else {
+                    store.update { $0.storageFull?.zoneSaveFailed = false }
+                }
+            }
 
         case .didFetchRecordZoneChanges(let e):
             log("Did fetch zone \(e.zoneID.zoneName): \(e.error.map { "error \($0.localizedDescription)" } ?? "ok")")
@@ -1766,7 +1882,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 $0.outbox.removeAll { $0.recordName == recordID.recordName && $0.op == .delete }
             }
         }
-        for failure in e.failedRecordSaves { handleFailedSave(failure) }
+        var quotaRefused: [String] = []
+        for failure in e.failedRecordSaves {
+            if JournalStorageFull.isStorageFull(failure.error.code) { quotaRefused.append(failure.record.recordID.recordName) }
+            else { handleFailedSave(failure) }
+        }
         for failure in e.failedRecordDeletes {
             if failure.value.code == .unknownItem {
                 store.update { $0.outbox.removeAll { $0.recordName == failure.key.recordName && $0.op == .delete } }
@@ -1776,6 +1896,14 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
         store.update { $0.recordsSent += sent; $0.bytesSent += bytes; $0.assetUploads += uploads; $0.attachmentRecordsSentWithoutMedia += withoutMedia }
         if sent > 0 { log("Sent \(sent) record(s); \(uploads) media upload(s), \(bytes) bytes; \(withoutMedia) attachment record(s) metadata only") }
+        if !quotaRefused.isEmpty {
+            noteStorageFull(records: quotaRefused, zone: false, simulated: false)
+        } else if store.state.storageFull != nil {
+            let savesLeft = store.state.outbox.filter { $0.op == .save }.count
+            if JournalStorageFull.recovered(savedRecords: sent, savedZones: 0, deletedRecords: e.deletedRecordIDs.count, quotaFailures: 0, savesStillPending: savesLeft) {
+                endStorageFull(sent: sent, reason: "a save was accepted")
+            }
+        }
         // C-134 / C-135: no manual `fetchChanges()` after a content send. Every
         // such call on 2026-10-26 (seven of seven, 1846 to 1849) trapped inside
         // CloudKit 3 s later. The engine's own push-triggered fetch after a send
@@ -1787,8 +1915,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private func handleFailedSave(_ failure: CKSyncEngine.Event.SentRecordZoneChanges.FailedRecordSave) {
         let record = failure.record
         let name = record.recordID.recordName
-        switch failure.error.code {
-        case .serverRecordChanged:
+        switch JournalSendFailure.action(for: failure.error.code) {
+        case .resolveConflict:
             guard let server = failure.error.serverRecord else { return }
             if record.recordType == JournalSyncRecordType.savedList {
                 // Lists: the server copy wins a rejected send (whole list).
@@ -1846,17 +1974,22 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 resend = importer.resolveSendConflict(recordType: record.recordType, recordName: name, server: server)
             }
             if resend { queueToEngine(zoneChanges: [.saveRecord(record.recordID)]) }
-        case .zoneNotFound:
+        case .recreateZone:
             queueToEngine(zoneChanges: [.saveRecord(record.recordID)],
                           databaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
-            log("Zone missing; re-creating and resending \(name)")
-        case .unknownItem:
+            // While the storage is full the zone itself was refused and every
+            // record fails this way; the episode's one line covers it.
+            if store.state.storageFull == nil { log("Zone missing; re-creating and resending \(name)") }
+        case .resendAsNew:
             // The server no longer has it: resend as a new record.
             store.update { $0.lastKnownRecords.removeValue(forKey: name) }
             queueToEngine(zoneChanges: [.saveRecord(record.recordID)])
-        case .networkFailure, .networkUnavailable, .serviceUnavailable, .requestRateLimited, .zoneBusy, .notAuthenticated:
+        case .engineRetries:
             log("Save of \(name) deferred: \(failure.error.localizedDescription)") // the engine retries
-        default:
+        case .storageFull:
+            // handleSent gathers these per batch; kept for a direct call.
+            noteStorageFull(records: [name], zone: false, simulated: false)
+        case .unexpected:
             log("Save of \(name) failed: \(failure.error.localizedDescription)")
         }
     }
@@ -1905,6 +2038,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             self.status.mediaGated = hold.holds
             self.status.mediaHold = hold
             self.status.mediaWaiting = JournalMediaHold.summary(uploads: st.mediaWaitingUpload, downloads: st.awaitingMedia, hold: hold)
+            self.status.storageFull = st.storageFull
+            self.status.storageFullSummary = st.storageFull.map { episode in
+                let saves = st.outbox.filter { $0.op == .save }
+                let media = saves.filter { JournalAssetPolicy.carriesFile(recordType: $0.recordType) && !$0.assetFree }.count
+                return JournalStorageFull.summary(episode: episode, pendingSaves: saves.count, pendingDeletes: st.outbox.count - saves.count, mediaFiles: media)
+            }
         }
     }
 }

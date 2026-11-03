@@ -119,7 +119,8 @@ struct SyncTestDiagnosticsView: View {
             }
             Section("Private profile (stage H)") {
                 row("Profile here", profileValuesText)
-                row("Profile clock", state?.profileStamp.map(format) ?? "none (predates this build, or never edited)")
+                row("Profile clock", (state?.profileStamp.map(format) ?? "none (predates this build, or never edited)")
+                    + (state?.profileStampProvisional == true ? " · provisional (typed before the first complete fetch; yields to a cloud profile, C-151)" : ""))
                 row("Last exchanged", state?.profileFingerprint == nil ? "nothing yet (transition pending)"
                     : (JournalProfileValues(fingerprint: state?.profileFingerprint)?.describe() ?? "?"))
                 row("Avatar here", avatarHereText)
@@ -197,6 +198,21 @@ struct SyncTestDiagnosticsView: View {
                 if let held = state?.awaitingMedia, !held.isEmpty {
                     ForEach(held, id: \.self) { Text($0.prefix(30) + "…").font(.caption.monospaced()) }
                 }
+            }
+            Section("iCloud storage (quota)") {
+                if let episode = status.storageFull {
+                    row("State", "full since \(format(episode.began))\(episode.simulated ? " (simulated)" : ""), \(episode.attempts) refused attempt(s)\(episode.zoneSaveFailed ? ", zone refused" : "")")
+                    row("Waiting", status.storageFullSummary ?? "")
+                    row("Next attempt", nextAttemptText(episode))
+                } else {
+                    row("State", "iCloud accepts saves")
+                }
+                row("Episodes on this install", "\(state?.storageFullEpisodes ?? 0)")
+                row("Simulation", simulationText())
+                Button("Simulate iCloud storage full for 10 minutes") { JournalSyncCoordinator.shared.engine?.simulateStorageFull(minutes: 10); refreshTick += 1 }
+                Button("End simulation (next due attempt goes to the server)") { JournalSyncCoordinator.shared.engine?.endStorageFullSimulation(); refreshTick += 1 }
+                Text("While the simulation is on every send is refused as quotaExceeded and nothing reaches the server; the outbox keeps every change. Make an edit to see it refused. \"Send now\" above ignores the retry cadence.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Counts") {
                 row("Outbox (pending)", "\(status.outboxCount)")
@@ -329,6 +345,18 @@ struct SyncTestDiagnosticsView: View {
 
     private func format(_ d: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f.string(from: d)
+    }
+
+    private func nextAttemptText(_ episode: JournalStorageFull.Episode) -> String {
+        let now = Date()
+        func when(_ d: Date) -> String { d <= now ? "due now" : "at \(format(d))" }
+        return "push/poll \(when(JournalStorageFull.nextRetryAt(episode, userDriven: false))); change/foreground \(when(JournalStorageFull.nextRetryAt(episode, userDriven: true)))"
+    }
+
+    private func simulationText() -> String {
+        guard let until = JournalSyncCoordinator.shared.engine?.storageFullSimulationUntil,
+              JournalStorageFull.simulationActive(until: until, now: Date()) else { return "off" }
+        return "refusing every send until \(format(until))"
     }
 
     private func bytes(_ b: Int64) -> String {
