@@ -389,6 +389,10 @@ enum JournalScoreSync {
                     if copy(sourceURL, to: url, log: log) {
                         outcome.bytesWritten = JournalAssetHash.stamp(of: url)?.size ?? 0
                         library.refreshFileAvailability()
+                        // The scan's count stands until its next run; the diagnostics
+                        // read it, so move it now (device, 2026-11-03: "1 without file"
+                        // shown after the file was back).
+                        store.update { $0.scoresWithoutFile = max(0, $0.scoresWithoutFile - 1) }
                         log("Score \(parsed.id.prefix(8))…: missing file restored from the other device")
                     }
                 } else {
