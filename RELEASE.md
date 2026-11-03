@@ -1655,6 +1655,30 @@ the join.
   states). The selection is 172 tests green under SyncTest; Debug and
   Release build. Not covered here: the device run (Samuel decides; the
   iPad Sync Test install is the disposable copy).
+  **iCloud storage-full handling, built 2026-11-03 (C-152; simulated
+  refusals only; device check is Samuel's call).** `CKSyncEngine` does not
+  retry `quotaExceeded` and drops the change from its pending list; the
+  outbox kept it but nothing re-queued it before the next activation, and
+  every refusal was logged twice per attempt. Now: `JournalSendFailure`
+  names what each failed save means; `JournalStorageFull` keeps one
+  episode per full period in the state file, begun by the first refused
+  record or zone save and logged once (later refusals counted in the
+  diagnostics); the one send path waits for its cadence (2, 4, 8, then
+  every 15 min after each refusal for a push or poll; a 2-minute floor for
+  a change, the foreground, activation or a backgrounding; "Send now"
+  ignores it), re-adds the whole outbox the engine dropped and sends once,
+  in the builder's order; the episode ends on an accepted save (a deletion
+  or zone save alone counts only when nothing waits), logged once;
+  fetches, held media and the journal untouched. Profile: "Running ·
+  iCloud storage full" and what waits; diagnostics: state, next attempt,
+  episodes, and a 10-minute simulation that refuses every send locally
+  exactly as a real refusal reaches the app (nothing sent to the server;
+  in memory only). `SyncTestStorageFullTests` (8). The selection is 180
+  tests green under SyncTest; Debug and Release build. Note: the C-151
+  commits (`c083bcd`, `5db7b7e`) carried this work's engine, state file,
+  diagnostics and Profile edits and the C-152 row from the shared
+  checkout; the helper and test files landed with the storage-full commit.
+  Device script: side-session notes, `storage-full-device-script.md`.
   **Follow-ups before main-build integration (agreed 2026-11-03):** the
   bounded C-151 workflow (built, above; device verification pending) and iCloud storage-full handling
   and recovery (local content and pending work preserved, clear status,
