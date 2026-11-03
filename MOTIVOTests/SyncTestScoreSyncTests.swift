@@ -318,6 +318,12 @@ final class SyncTestScoreSyncTests: XCTestCase {
         XCTAssertTrue(store.state.conflicts.contains { $0.losingTitle?.contains("Newer local") == true })
         XCTAssertEqual(store.state.scoreStamps[a.id.uuidString], t1.addingTimeInterval(60))
         XCTAssertEqual(library.items.count, 1, "never a duplicate")
+        // C-144 (2026-11-03): the other device edits again later, over values this device holds
+        // from the server with nothing pending: applied, and nothing is displaced.
+        let count = store.state.conflicts.count
+        _ = apply([serverMeta(id: a.id, title: "Later server", favourite: false, cover: 1, stamp: t1.addingTimeInterval(120))], library)
+        XCTAssertEqual(library.items[0].title, "Later server")
+        XCTAssertEqual(store.state.conflicts.count, count, "a later edit from the other device is not a conflict")
     }
 
     func testSameIdDifferentFileTakesTheServersAndKeepsTheLocalCopy() throws {

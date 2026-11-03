@@ -540,7 +540,10 @@ enum JournalScoreSync {
                 s.outbox.removeAll { $0.recordName == name && $0.op == .save }
                 s.awaitingScore.removeValue(forKey: name)
                 s.scoreAwaitingFirstMeta.removeAll { $0 == parsed.id }
-                if !firstMeta {
+                // C-144: displaced only when this device's values had not been sent
+                // (pending, a transition copy, or two unclocked copies); a later
+                // edit from the other device over a synced value is an import.
+                if !firstMeta, pending || transitionCopy || (localStamp == nil && serverStamp == nil) {
                     s.conflicts.append(metaConflict(name: name, winner: "server", localStamp: localStamp, serverStamp: serverStamp, subject: serverTitle,
                                                     id: parsed.id, side: "this device", kept: (serverTitle, serverFavourite, serverCover),
                                                     lost: (item.title, item.isFavourite, item.thumbnailPage)))

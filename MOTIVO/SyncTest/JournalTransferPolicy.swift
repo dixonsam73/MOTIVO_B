@@ -126,4 +126,26 @@ enum JournalMediaHold {
         return head + ": " + parts.joined(separator: ", ")
     }
 }
+
+/// PURE. One delta catch-up at a time: a request that lands during a run
+/// marks one more run after it, so a push and a foreground a second apart
+/// (device, 2026-11-03: the same seven records imported twice) fetch once.
+struct JournalCatchUpSerial: Equatable {
+    private(set) var running = false
+    private var queued = false
+    /// True when the caller should run now; false when a run is in progress
+    /// and will go again when it finishes.
+    mutating func begin() -> Bool {
+        if running { queued = true; return false }
+        running = true
+        return true
+    }
+    /// Whether another run was requested meanwhile.
+    mutating func end() -> Bool {
+        running = false
+        let again = queued
+        queued = false
+        return again
+    }
+}
 #endif

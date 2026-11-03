@@ -71,5 +71,17 @@ final class SyncTestTransferGateTests: XCTestCase {
         XCTAssertEqual(reloaded.state.awaitingMedia, ["score-1"])
         XCTAssertTrue(reloaded.state.appSubscriptionSaved)
     }
+
+    func testOneCatchUpAtATimeAndARequestDuringARunMeansOneMoreRunAfterIt() {
+        var serial = JournalCatchUpSerial()
+        XCTAssertTrue(serial.begin(), "nothing running: run now")
+        XCTAssertFalse(serial.begin(), "a push during the foreground's run: wait")
+        XCTAssertFalse(serial.begin(), "and a third request adds nothing")
+        XCTAssertTrue(serial.end(), "one more run, not two")
+        XCTAssertTrue(serial.begin())
+        XCTAssertFalse(serial.end(), "nothing asked meanwhile")
+        XCTAssertFalse(serial.running)
+        XCTAssertEqual(JournalSyncEngine.heldPollInterval, 75_000_000_000, "about what the engine does for itself when it syncs automatically")
+    }
 }
 #endif

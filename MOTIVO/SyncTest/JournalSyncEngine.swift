@@ -134,6 +134,14 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private var mediaHoldValue: JournalMediaGate.Hold = .none
     private var mediaGatedValue: Bool { mediaHoldValue.holds }
     private var manualSendScheduled = false
+    private var catchUpSerial = JournalCatchUpSerial()
+    /// Stage J: while media is held the engine does not sync automatically, and
+    /// a silent push is best effort (device, 2026-11-03: the iPad's four sends
+    /// reached the iPhone eight minutes later, with the first push). While the
+    /// app is active this looks for changes itself, as the engine does when it
+    /// syncs automatically (about every 80 s in the logs).
+    private var heldPollTask: Task<Void, Never>?
+    static let heldPollInterval: UInt64 = 75_000_000_000
     private var preferenceObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
     /// While media is held the engine is built without automatic sync: the
@@ -181,6 +189,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     }
 
     deinit {
+        heldPollTask?.cancel()
         for o in [saveObserver, stampObserver, accountObserver, listObserver, backgroundObserver, preferenceObserver, foregroundObserver].compactMap({ $0 }) {
             NotificationCenter.default.removeObserver(o)
         }
@@ -260,6 +269,15 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             }
             foregroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil) { [weak self] _ in
                 Task { await self?.manualRefresh(trigger: "foreground") }
+            }
+            heldPollTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: JournalSyncEngine.heldPollInterval)
+                    guard let self, !Task.isCancelled, self.mediaGated, self.engine != nil else { continue }
+                    let active = await MainActor.run { UIApplication.shared.applicationState == .active }
+                    guard active else { continue }
+                    await self.manualRefresh(trigger: "poll")
+                }
             }
             #endif
         }
@@ -645,6 +663,18 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// already hold. Returns false when only a fresh engine can recover
     /// (expired token, zone gone); the reason is in `lastCatchUp`.
     func deltaCatchUp(reason: String) async -> Bool {
+        stateLock.lock()
+        let runNow = catchUpSerial.begin()
+        stateLock.unlock()
+        guard runNow else { log("Catch-up (\(reason)) waits for the one in progress"); return true }
+        let result = await deltaCatchUpBody(reason: reason)
+        stateLock.lock()
+        let again = catchUpSerial.end()
+        stateLock.unlock()
+        return again ? await deltaCatchUp(reason: "\(reason), queued") : result
+    }
+
+    private func deltaCatchUpBody(reason: String) async -> Bool {
         let previous = store.state.catchUpZoneToken.flatMap {
             try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: $0)
         }
