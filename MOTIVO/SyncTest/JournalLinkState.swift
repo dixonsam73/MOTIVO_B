@@ -72,9 +72,14 @@ enum JournalCatchUp {
     /// Stage G: whether a changed attachment record needs its file fetched.
     /// Not when this device already holds a usable file whose hash matches
     /// what the server reports (or the server reports none: an old record).
-    static func needsAsset(serverHash: String?, knownHash: String?, fileExists: Bool) -> Bool {
+    /// `localHash` is the file here when the caller has it: a file whose
+    /// hash is the server's is never fetched, whatever this device last
+    /// recorded (2026-11-03: the device's own 132 MB upload, finished by a
+    /// dropped engine that never reported it, was fetched back on release).
+    static func needsAsset(serverHash: String?, knownHash: String?, fileExists: Bool, localHash: String? = nil) -> Bool {
         guard fileExists else { return true }
         guard let serverHash else { return false }
+        if let localHash, localHash == serverHash { return false }
         return knownHash != serverHash
     }
 }

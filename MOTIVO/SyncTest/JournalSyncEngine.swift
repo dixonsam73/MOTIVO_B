@@ -732,9 +732,17 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 let name = record.recordID.recordName
                 guard let parsed = JournalSyncRecordType.scoreRecord(fromName: name), let uuid = UUID(uuidString: parsed.id),
                       let item = library.items.first(where: { $0.id == uuid }) else { return true }
-                let exists = FileManager.default.fileExists(atPath: library.url(for: item).path)
-                return JournalCatchUp.needsAsset(serverHash: record[JournalRecordMapping.fileHashKey] as? String,
-                                                 knownHash: store.state.assetHashes[name], fileExists: exists)
+                let url = library.url(for: item)
+                let exists = FileManager.default.fileExists(atPath: url.path)
+                let serverHash = record[JournalRecordMapping.fileHashKey] as? String
+                var localHash: String?
+                if exists, let cached = JournalAssetHash.cachedHash(of: url, cache: store.state.fileStampCache[name]) {
+                    localHash = cached.hash
+                    store.update { $0.fileStampCache[name] = cached.entry }
+                }
+                let needs = JournalCatchUp.needsAsset(serverHash: serverHash, knownHash: store.state.assetHashes[name], fileExists: exists, localHash: localHash)
+                if !needs, let serverHash, localHash == serverHash { store.update { $0.assetHashes[name] = serverHash } }
+                return needs
             }
             if record.recordType == JournalSyncRecordType.profileAvatar {
                 // Stage H: the avatar's file only when its hash is new here.
@@ -744,14 +752,21 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             guard record.recordType == JournalSyncRecordType.attachment else { return false }
             let name = record.recordID.recordName
             var exists = false
+            var localHash: String?
             importContext.performAndWait {
                 if let id = UUID(uuidString: name), let object = importer.fetch(entity: JournalSyncRecordType.attachment, id: id),
                    let url = AttachmentPathResolver.resolve(object.value(forKey: "fileURL") as? String) {
                     exists = FileManager.default.fileExists(atPath: url.path)
+                    if exists, let cached = JournalAssetHash.cachedHash(of: url, cache: store.state.fileStampCache[name]) {
+                        localHash = cached.hash
+                        store.update { $0.fileStampCache[name] = cached.entry }
+                    }
                 }
             }
-            return JournalCatchUp.needsAsset(serverHash: record[JournalRecordMapping.fileHashKey] as? String,
-                                             knownHash: store.state.assetHashes[name], fileExists: exists)
+            let serverHash = record[JournalRecordMapping.fileHashKey] as? String
+            let needs = JournalCatchUp.needsAsset(serverHash: serverHash, knownHash: store.state.assetHashes[name], fileExists: exists, localHash: localHash)
+            if !needs, let serverHash, localHash == serverHash { store.update { $0.assetHashes[name] = serverHash } }
+            return needs
         }.map(\.recordID)
         if !needing.isEmpty, mediaGated {
             // Stage J: the files are held; the records wait with them
@@ -1259,6 +1274,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                     echoCount += 1
                     if let url = (record[JournalRecordMapping.assetKey] as? CKAsset)?.fileURL {
                         echoBytes += JournalAssetHash.stamp(of: url)?.size ?? 0
+                        // The hash the server holds for this device's own file, so no
+                        // later catch-up treats the file as new (C-148).
+                        if let hash = record[JournalRecordMapping.fileHashKey] as? String, !hash.isEmpty {
+                            store.update { $0.assetHashes[record.recordID.recordName] = hash }
+                        }
                     }
                 } else {
                     records.append(record)

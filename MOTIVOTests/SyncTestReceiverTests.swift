@@ -328,6 +328,10 @@ final class SyncTestReceiverTests: XCTestCase {
         XCTAssertTrue(JournalCatchUp.needsAsset(serverHash: "h2", knownHash: "h", fileExists: true), "replaced on the other device")
         XCTAssertTrue(JournalCatchUp.needsAsset(serverHash: "h", knownHash: nil, fileExists: false))
         XCTAssertTrue(JournalCatchUp.needsAsset(serverHash: nil, knownHash: nil, fileExists: false))
+        // C-148 (2026-11-03): the file here IS the server's, whatever was recorded: never fetched back.
+        XCTAssertFalse(JournalCatchUp.needsAsset(serverHash: "h", knownHash: nil, fileExists: true, localHash: "h"), "this device's own upload, completion lost")
+        XCTAssertTrue(JournalCatchUp.needsAsset(serverHash: "h2", knownHash: nil, fileExists: true, localHash: "h"), "a different file on the server")
+        XCTAssertTrue(JournalCatchUp.needsAsset(serverHash: "h", knownHash: nil, fileExists: false, localHash: nil))
     }
 }
 #endif
