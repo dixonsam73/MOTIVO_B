@@ -289,5 +289,20 @@ final class SyncTestMediaTests: XCTestCase {
         let decoded = try JSONDecoder().decode(JournalSyncPendingChange.self, from: Data(#"{"recordName":"x","recordType":"Session","op":"save"}"#.utf8))
         XCTAssertFalse(decoded.ownerOnly)
     }
+
+    func testOnlyAttachmentsScoresAndTheAvatarCarryAFileAndAKnownServerHashStopsAResend() {
+        // Stage J (2026-11-03): after a rebuild the engine probes the server for these types only.
+        XCTAssertTrue(JournalAssetPolicy.carriesFile(recordType: JournalSyncRecordType.attachment))
+        XCTAssertTrue(JournalAssetPolicy.carriesFile(recordType: JournalSyncRecordType.score))
+        XCTAssertTrue(JournalAssetPolicy.carriesFile(recordType: JournalSyncRecordType.profileAvatar))
+        for other in [JournalSyncRecordType.session, JournalSyncRecordType.attachmentMeta, JournalSyncRecordType.scoreMeta,
+                      JournalSyncRecordType.setting, JournalSyncRecordType.tintMap, nil] {
+            XCTAssertFalse(JournalAssetPolicy.carriesFile(recordType: other), "\(other ?? "nil") never carries a file")
+        }
+        // What the probe records makes the builder leave the file out: a server copy with the same hash.
+        XCTAssertFalse(JournalAssetPolicy.includeAsset(hasServerCopy: true, serverHash: "h", localHash: "h"))
+        XCTAssertTrue(JournalAssetPolicy.includeAsset(hasServerCopy: true, serverHash: "h", localHash: "h2"), "a changed file still goes")
+        XCTAssertTrue(JournalAssetPolicy.includeAsset(hasServerCopy: false, serverHash: "h", localHash: "h"), "without the server's system fields the record is new to this device and carries it")
+    }
 }
 #endif

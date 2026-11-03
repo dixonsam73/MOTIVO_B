@@ -62,6 +62,13 @@ enum JournalAssetPolicy {
         guard hasServerCopy, let serverHash, let localHash else { return true }
         return serverHash != localHash
     }
+
+    /// The record types whose save can carry a file (stage J: the ones a
+    /// rebuilt engine asks the server about before its first batch).
+    static func carriesFile(recordType: String?) -> Bool {
+        recordType == JournalSyncRecordType.attachment || recordType == JournalSyncRecordType.score
+            || recordType == JournalSyncRecordType.profileAvatar
+    }
 }
 
 enum JournalConflictWinner: Equatable { case server, local }

@@ -141,6 +141,14 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// app is active this looks for changes itself, as the engine does when it
     /// syncs automatically (about every 80 s in the logs).
     private var heldPollTask: Task<Void, Never>?
+    /// Stage J: a rebuilt engine may inherit a save whose file the dropped
+    /// engine's batch already finished uploading in CloudKit's daemon, which
+    /// never tells this instance (device, 2026-11-03: a 132 MB video begun on
+    /// Wi-Fi survived the cut to mobile data, was on the server by 12:08, and
+    /// the new engine uploaded it again before the server rejected the save).
+    /// Before its first batch the new engine asks the server which of those
+    /// files it already holds, so a matching file is not sent twice.
+    private var probeServerFilesBeforeFirstBatch = false
     static let heldPollInterval: UInt64 = 75_000_000_000
     private var preferenceObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
@@ -419,6 +427,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             // without automatic sync and the app drives sends and fetches.
             configuration.automaticallySync = !mediaGatedValue
             engineInstance = CKSyncEngine(configuration)
+            probeServerFilesBeforeFirstBatch = store.state.engineState != nil
         }
         let gated = mediaGatedValue
         let hold = mediaHoldValue
@@ -1091,6 +1100,33 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         Task { await scanScores(reason: "re-run", positions: true) }
     }
 
+    /// One small fetch of the file hashes the server holds for records about
+    /// to go up with a file. A record the server has (this device's own
+    /// upload finished by the dropped engine) gets its hash recorded, and its
+    /// system fields where this device had none, so the builder sends the
+    /// record without the file; a differing hash still uploads.
+    private func probeServerFiles(_ ids: [CKRecord.ID]) async {
+        let op = CKFetchRecordsOperation(recordIDs: ids)
+        op.desiredKeys = [JournalRecordMapping.fileHashKey]
+        op.configuration.timeoutIntervalForRequest = 15
+        op.configuration.timeoutIntervalForResource = 30
+        var found: [CKRecord] = []
+        op.perRecordResultBlock = { _, result in if case .success(let r) = result { found.append(r) } }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            op.fetchRecordsResultBlock = { _ in continuation.resume() }
+            container.privateCloudDatabase.add(op)
+        }
+        guard !found.isEmpty else { return }
+        store.update { s in
+            for record in found {
+                let name = record.recordID.recordName
+                s.assetHashes[name] = record[JournalRecordMapping.fileHashKey] as? String ?? ""
+                if s.lastKnownRecords[name] == nil { s.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+            }
+        }
+        log("Probe after rebuild: the server already holds \(found.count) of \(ids.count) record(s) due to go up with a file; a file it has is not sent again")
+    }
+
     func fetchNow() async {
         guard let engine, currentDecision().allowed else { log("Fetch refused: \(currentDecision().reason ?? "no engine")"); return }
         if mediaGated {
@@ -1302,6 +1338,18 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         let typeByName = Dictionary(outbox.map { ($0.recordName, $0.recordType) }, uniquingKeysWith: { a, _ in a })
         let ownerOnlyNames = Set(outbox.filter { $0.op == .save && $0.ownerOnly }.map(\.recordName))
         let assetFreeNames = Set(outbox.filter { $0.op == .save && $0.assetFree }.map(\.recordName))
+        stateLock.lock()
+        let probe = probeServerFilesBeforeFirstBatch
+        probeServerFilesBeforeFirstBatch = false
+        stateLock.unlock()
+        if probe {
+            let ids = pending.compactMap { change -> CKRecord.ID? in
+                guard case .saveRecord(let id) = change,
+                      JournalAssetPolicy.carriesFile(recordType: typeByName[id.recordName]), !assetFreeNames.contains(id.recordName) else { return nil }
+                return id
+            }
+            if !ids.isEmpty { await probeServerFiles(ids) }
+        }
         pending.sort { a, b in rank(a, typeByName) < rank(b, typeByName) }
         let listNames = pending.compactMap { change -> String? in
             if case .saveRecord(let id) = change, typeByName[id.recordName] == JournalSyncRecordType.savedList { return id.recordName }
