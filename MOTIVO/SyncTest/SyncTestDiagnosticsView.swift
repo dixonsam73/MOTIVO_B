@@ -163,6 +163,15 @@ struct SyncTestDiagnosticsView: View {
                     }
                     refreshTick += 1
                 }
+                // Stage J section 6 (the missing-file state): the cable cannot delete
+                // a file in the container, so the trial removes one from here.
+                Button("Remove newest score's file (test: missing-file state)") {
+                    if let item = newestScore() {
+                        try? FileManager.default.removeItem(at: ScoreLibraryStore.shared.url(for: item))
+                        JournalSyncCoordinator.shared.engine?.rerunScoreScan()
+                    }
+                    refreshTick += 1
+                }
                 let displaced = JournalScoreSync.displacedScores()
                 if !displaced.isEmpty {
                     row("Displaced score files kept", "\(displaced.count)")

@@ -1109,6 +1109,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         scanProfile(reason: "re-run")
     }
 
+    /// Stage J diagnostics: one scan now (after a file was removed from the test screen).
+    func rerunScoreScan() {
+        Task { await scanScores(reason: "diagnostics", positions: false) }
+    }
+
     /// Stage I: forget what was exchanged for the library and send it again.
     func rerunScoreTransition() {
         JournalScoreSync.rerunTransition(store: store)
