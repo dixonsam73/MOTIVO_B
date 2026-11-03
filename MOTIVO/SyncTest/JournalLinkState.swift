@@ -183,6 +183,7 @@ enum JournalLocalRemoval {
             st.historyToken = JournalSyncStateStore.encode(token: token)
             st.outbox.removeAll()
             st.lastKnownRecords.removeAll()
+            st.knownChangeTags.removeAll()
             st.awaitingParent.removeAll()
             st.assetHashes.removeAll()
             st.fileStampCache.removeAll()

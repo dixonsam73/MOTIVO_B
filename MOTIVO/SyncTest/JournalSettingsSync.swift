@@ -445,7 +445,7 @@ enum JournalSettingsSync {
             || contextFingerprints != st.listContextFingerprints || queuedTint != st.tintMapQueuedFingerprint
         guard changed else { return [] }
         let ok = store.update { s in
-            JournalChangeTracker.merge(pending, into: &s.outbox)
+            JournalChangeTracker.merge(pending, into: &s)
             s.settingsScanDone = true
             s.settingFingerprints = settingFingerprints
             s.settingStamps = settingStamps
@@ -590,7 +590,7 @@ enum JournalSettingsSync {
             if !send {
                 if !pending || decision == .takeServer { s.outbox.removeAll { $0.recordName == name && $0.op == .save } }
             } else {
-                JournalChangeTracker.merge(outcome.resend, into: &s.outbox)
+                JournalChangeTracker.merge(outcome.resend, into: &s)
             }
         }
         if !send, !pending || decision == .takeServer { outcome.settled.append(name) }
@@ -674,7 +674,7 @@ enum JournalSettingsSync {
             if !send {
                 if !pending || decision == .takeServer { s.outbox.removeAll { $0.recordName == name && $0.op == .save } }
             } else {
-                JournalChangeTracker.merge(outcome.resend, into: &s.outbox)
+                JournalChangeTracker.merge(outcome.resend, into: &s)
             }
         }
         if !send, !pending || decision == .takeServer { outcome.settled.append(name) }
@@ -706,7 +706,7 @@ enum JournalSettingsSync {
             s.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
             s.tintMapExchanged = merged
             s.tintMapQueuedFingerprint = send ? JournalTintMapMerge.fingerprint(Theme.InstrumentTint.storedSlotMap(ownerID: owner, defaults: defaults)) : nil
-            if send { JournalChangeTracker.merge(outcome.resend, into: &s.outbox) }
+            if send { JournalChangeTracker.merge(outcome.resend, into: &s) }
             else { s.outbox.removeAll { $0.recordName == name && $0.op == .save } }
         }
         if !send { outcome.settled.append(name) }

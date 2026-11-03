@@ -25,10 +25,13 @@ enum LocalFactoryReset {
 
     private static let log = Logger(subsystem: "com.sdsongs.etudes", category: "factoryreset")
 
-    static func perform(reason: String, auth: AuthManager) async {
+    /// Returns false when nothing was erased (SYNCTEST: the sync removal marker
+    /// could not be written, R1); true otherwise.
+    @discardableResult
+    static func perform(reason: String, auth: AuthManager) async -> Bool {
         guard !isInProgress else {
             NSLog("[LocalFactoryReset] already in progress; ignoring request reason=\(reason)")
-            return
+            return false
         }
 
         isInProgress = true
@@ -44,7 +47,13 @@ enum LocalFactoryReset {
         // history and would otherwise be queued as SERVER deletions. The marker
         // is written and the engine dropped before the first row goes; the
         // bracket closes at the end. Not a third caller of this function.
-        JournalSyncCoordinator.shared.beginLocalRemoval(reason: reason)
+        // R1 (2026-11-03): with no durable marker the removal is refused: the
+        // batch deletes below would be tracked by history with nothing to stop
+        // them becoming server deletions at a later launch. Nothing is erased.
+        guard JournalSyncCoordinator.shared.beginLocalRemoval(reason: reason) else {
+            NSLog("[LocalFactoryReset] refused: the sync removal marker could not be written; nothing erased reason=\(reason)")
+            return false
+        }
         #endif
 
         // Prevent any background publish attempts while we reset.
@@ -159,6 +168,7 @@ enum LocalFactoryReset {
         // stopped for the life of the process, so a member who set Études up
         // again without relaunching could queue publishes that never flushed.
         SessionSyncQueue.shared.resumeAfterFactoryReset()
+        return true
     }
 
     @discardableResult

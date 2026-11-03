@@ -328,6 +328,13 @@ struct JournalSyncPersistedState: Codable {
     var storageFull: JournalStorageFull.Episode?
     /// Episodes begun on this install (diagnostics).
     var storageFullEpisodes = 0
+    // Step 0 review (2026-11-03).
+    /// R3: the server change tag this device last applied or sent, per record
+    /// name, written only once the import's Core Data save succeeded.
+    var knownChangeTags: [String: String] = [:]
+    /// R4: one monotonic counter for outbox revisions, so a re-created entry
+    /// never reuses the revision of an older send still in flight.
+    var outboxSequence = 0
 
     init() {}
 
@@ -413,6 +420,8 @@ struct JournalSyncPersistedState: Codable {
         scoresWithoutFile = try c.decodeIfPresent(Int.self, forKey: .scoresWithoutFile) ?? 0
         storageFull = try c.decodeIfPresent(JournalStorageFull.Episode.self, forKey: .storageFull)
         storageFullEpisodes = try c.decodeIfPresent(Int.self, forKey: .storageFullEpisodes) ?? 0
+        knownChangeTags = try c.decodeIfPresent([String: String].self, forKey: .knownChangeTags) ?? [:]
+        outboxSequence = try c.decodeIfPresent(Int.self, forKey: .outboxSequence) ?? 0
     }
 }
 

@@ -2682,8 +2682,8 @@ private var sessionSetupSection: some View {
                  localSaveMessage = nil
                  name = ""
                  locationText = ""
-                await LocalFactoryReset.perform(reason: "erase-all-etudes-data-local", auth: auth)
-                 dismissProfileAfterSuccessfulErase()
+                let erased = await LocalFactoryReset.perform(reason: "erase-all-etudes-data-local", auth: auth)
+                if erased { dismissProfileAfterSuccessfulErase() }
              }
              return
          }
@@ -2767,8 +2767,8 @@ private var sessionSetupSection: some View {
              localSaveMessage = nil
              name = ""
              locationText = ""
-                await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
-             dismissProfileAfterSuccessfulErase()
+                let erased = await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
+             if erased { dismissProfileAfterSuccessfulErase() }
 
              // TN3194 step 2 — "Direct the user to manually revoke access for
              // your client" — shown only when revocation did not succeed, and

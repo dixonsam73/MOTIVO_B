@@ -158,6 +158,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private var quotaSimulationUntil: Date?
     /// B2: the outbox revision of each save as the batch was built.
     private var sentRevisions: [String: Int] = [:]
+    /// R1: the removal marker could not be written; transport stays off for
+    /// this process whatever the account says (the cleanup was not started).
+    private var removalMarkerFailed = false
+    /// R2: held while a record family is applied and while a removal begins,
+    /// so a removal never lands between a family's guard and its mutation.
+    private let importLock = NSLock()
     private var preferenceObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
     /// While media is held the engine is built without automatic sync: the
@@ -305,6 +311,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// The current engine instance, or nil while dormant.
     var engine: CKSyncEngine? { stateLock.lock(); defer { stateLock.unlock() }; return engineInstance }
 
+    /// Test seam: an engine that was never started has no iCloud user; tests
+    /// of the apply paths assume the bound one so the account guard allows.
+    func assumeCurrentUserForTesting(_ recordName: String?) {
+        stateLock.lock(); currentUserRecordName = recordName; stateLock.unlock()
+    }
+
     private func isCurrent(_ e: CKSyncEngine) -> Bool {
         stateLock.lock(); defer { stateLock.unlock() }
         return engineInstance === e
@@ -313,7 +325,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// The one rule every data path asks (`JournalAccountGuard`).
     func currentDecision() -> JournalAccountGuard.Decision {
         let st = store.state
-        stateLock.lock(); let current = currentUserRecordName; stateLock.unlock()
+        stateLock.lock(); let current = currentUserRecordName; let markerFailed = removalMarkerFailed; stateLock.unlock()
+        if markerFailed {
+            return .refuse(reason: "A removal could not be recorded on this device; sync is off until the app is relaunched", retry: false)
+        }
         return JournalAccountGuard.decide(bound: st.boundUserRecordName, current: current, unlinked: st.unlinked,
                                           localRemovalInProgress: st.localRemovalInProgress, localCopyRemoved: st.localCopyRemoved)
     }
@@ -664,14 +679,34 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             fetch.fetchRecordsResultBlock = { _ in continuation.resume() }
             container.privateCloudDatabase.add(fetch)
         }
-        guard mayStillImport(generation) else { log("Media release abandoned: sync stopped while the files were fetched; nothing imported"); return }
-        importModifications(full.filter { $0.recordType == JournalSyncRecordType.attachment })
-        importProfileRecords(full.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) })
-        await importScoreRecords(full.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) })
-        let done = Set(full.map(\.recordID.recordName)).union(gone)
-        store.update { $0.awaitingMedia.removeAll { done.contains($0) } }
-        log("Media released: \(full.count) record(s) fetched with their files\(gone.isEmpty ? "" : ", \(gone.count) gone from the server"); \(store.state.awaitingMedia.count) still waiting")
+        await applyReleasedMedia(full: full, gone: gone, generation: generation)
+    }
+
+    /// The apply half of a media release: the fetched records with their
+    /// files, then the holds they settle. Returns the names released.
+    @discardableResult
+    func applyReleasedMedia(full: [CKRecord], gone: [String], generation: Int) async -> Set<String> {
+        func abandoned() -> Set<String> { log("Media release abandoned: sync stopped while the files were fetched; nothing imported"); return [] }
+        // R6 (2026-11-03): a hold is released only for a record that is now
+        // durably applied — an attachment row the store committed, a score or
+        // avatar whose file hash the state file now records — or gone from
+        // the server; anything else stays held and is tried again.
+        guard let journal = applyFamily(generation, { importModifications(full.filter { $0.recordType == JournalSyncRecordType.attachment }) }) else { return abandoned() }
+        guard applyFamily(generation, { importProfileRecords(full.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) }) }) != nil else { return abandoned() }
+        guard await importScoreRecords(full.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) }, generation: generation) else { return abandoned() }
+        var applied = journal.applied
+        let hashes = store.state.assetHashes
+        for record in full where record.recordType != JournalSyncRecordType.attachment {
+            let name = record.recordID.recordName
+            let serverHash = record[JournalRecordMapping.fileHashKey] as? String ?? ""
+            if !serverHash.isEmpty, hashes[name] == serverHash { applied.insert(name) }
+        }
+        let done = applied.union(gone)
+        let notApplied = full.map(\.recordID.recordName).filter { !done.contains($0) }
+        guard applyFamily(generation, { store.update { $0.awaitingMedia.removeAll { done.contains($0) } } }) != nil else { return abandoned() }
+        log("Media released: \(applied.count) of \(full.count) record(s) applied with their files\(gone.isEmpty ? "" : ", \(gone.count) gone from the server")\(notApplied.isEmpty ? "" : "; \(notApplied.count) not applied, still held"); \(store.state.awaitingMedia.count) still waiting")
         refreshCounts()
+        return done
     }
 
     /// The app's own database subscription, so a push reaches the app while
@@ -739,7 +774,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 ? JournalSyncPendingChange(recordName: JournalSyncRecordType.metaName(for: name), recordType: JournalSyncRecordType.attachmentMeta,
                                            op: .save, metadataOnly: true)
                 : JournalSyncPendingChange(recordName: name, recordType: type, op: .save, metadataOnly: true)
-            self.store.update { JournalChangeTracker.merge([change], into: &$0.outbox) }
+            self.store.update { JournalChangeTracker.merge([change], into: &$0) }
             self.queueToEngine(zoneChanges: [self.pendingChange(change)])
         }
         store.update { $0.metadataMigrationDone = true }
@@ -762,7 +797,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             }
         }
         store.update { st in
-            JournalChangeTracker.merge(changes, into: &st.outbox)
+            JournalChangeTracker.merge(changes, into: &st)
             st.metaTransitionDone = true
         }
         queueToEngine(zoneChanges: changes.map(pendingChange))
@@ -932,22 +967,63 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             }
         }
         guard mayStillImport(generation) else { log("Catch-up (\(reason)) abandoned: sync stopped while files were fetched; nothing imported, token kept"); return true }
+        _ = await applyFetchedBatch(modified: modified, deleted: deleted, newToken: newToken, assetsFetched: assetsFetched,
+                                    generation: generation, reason: reason, writeFailuresBefore: writeFailuresBefore)
+        return true
+    }
 
+    /// Test hook: runs before each record family is applied (R2).
+    static var testBeforeFamily: ((String) -> Void)?
+
+    /// The import half of a catch-up, after the fetches: every record family
+    /// in order, the deletions, then the zone token. Returns whether the batch
+    /// was applied in full (the token moved).
+    func applyFetchedBatch(modified modifiedIn: [CKRecord], deleted: [(CKRecord.ID, CKRecord.RecordType)], newToken: CKServerChangeToken?,
+                           assetsFetched: Int, generation: Int, reason: String, writeFailuresBefore: Int) async -> Bool {
+        var modified = modifiedIn
         // Import exactly as a fetched batch would be.
         let records = modified.filter { $0.recordType != JournalSyncRecordType.savedList && !JournalSyncRecordType.profileTypes.contains($0.recordType)
                                         && !JournalSyncRecordType.scoreTypes.contains($0.recordType) && !JournalSyncRecordType.settingsTypes.contains($0.recordType) }
         let lists = modified.filter { $0.recordType == JournalSyncRecordType.savedList }
-        let importOK = importModifications(records)
-        importProfileRecords(modified.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) })
-        if !lists.isEmpty { _ = await MainActor.run { JournalSavedListSync.apply(lists, store: store) } }
-        await importScoreRecords(modified.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) })
-        await importSettingsRecords(modified.filter { JournalSyncRecordType.settingsTypes.contains($0.recordType) })
-        importDeletions(deleted)
+        // R2 (2026-11-03): every family checks the lifecycle at its own
+        // boundary — the synchronous ones under the import lock, the
+        // main-actor ones inside their main-actor step (a removal begins on
+        // the main actor, so the two cannot interleave) — and the token is
+        // committed only if every family ran.
+        func abandoned(_ family: String) -> Bool {
+            log("Catch-up (\(reason)) abandoned before \(family): sync stopped while it ran; token kept")
+            return false
+        }
+        Self.testBeforeFamily?("journal")
+        guard let journalOK = applyFamily(generation, { !importModifications(records).saveFailed }) else { return abandoned("journal") }
+        let importOK = journalOK
+        Self.testBeforeFamily?("profile")
+        guard applyFamily(generation, { importProfileRecords(modified.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) }) }) != nil else { return abandoned("profile") }
+        Self.testBeforeFamily?("lists")
+        if !lists.isEmpty {
+            let ran = await MainActor.run { () -> Bool in
+                guard self.mayStillImport(generation) else { return false }
+                _ = JournalSavedListSync.apply(lists, store: self.store); return true
+            }
+            guard ran else { return abandoned("lists") }
+        }
+        Self.testBeforeFamily?("scores")
+        guard await importScoreRecords(modified.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) }, generation: generation) else { return abandoned("scores") }
+        Self.testBeforeFamily?("settings")
+        guard await importSettingsRecords(modified.filter { JournalSyncRecordType.settingsTypes.contains($0.recordType) }, generation: generation) else { return abandoned("settings") }
+        Self.testBeforeFamily?("deletions")
+        guard applyFamily(generation, { importDeletions(deleted) }) != nil else { return abandoned("deletions") }
         let listDeletions = deleted.filter { $0.1 == JournalSyncRecordType.savedList }.map(\.0.recordName)
-        if !listDeletions.isEmpty { _ = await MainActor.run { JournalSavedListSync.applyDeletions(listDeletions, store: store) } }
-        await applyScoreDeletions(deleted.filter { JournalSyncRecordType.scoreTypes.contains($0.1) }.map(\.0.recordName))
-        forgetSettings(deleted.filter { JournalSyncRecordType.settingsTypes.contains($0.1) }.map(\.0.recordName))
-        await applyHeldSettings()
+        if !listDeletions.isEmpty {
+            let ran = await MainActor.run { () -> Bool in
+                guard self.mayStillImport(generation) else { return false }
+                _ = JournalSavedListSync.applyDeletions(listDeletions, store: self.store); return true
+            }
+            guard ran else { return abandoned("list deletions") }
+        }
+        guard await applyScoreDeletions(deleted.filter { JournalSyncRecordType.scoreTypes.contains($0.1) }.map(\.0.recordName), generation: generation) else { return abandoned("score deletions") }
+        guard applyFamily(generation, { forgetSettings(deleted.filter { JournalSyncRecordType.settingsTypes.contains($0.1) }.map(\.0.recordName)) }) != nil else { return abandoned("settings deletions") }
+        guard await applyHeldSettings(generation: generation) else { return abandoned("held settings") }
         let summary = "Catch-up (\(reason)): \(modified.count) changed record(s), \(deleted.count) deletion(s), \(assetsFetched) file(s) fetched"
         let first = !store.state.initialFetchComplete
         // C-151: a profile typed before this fetch was provisional; a cloud
@@ -959,23 +1035,27 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         // or a Core Data save that rolled back, means part of this batch is
         // not applied; the zone token stays so the batch is fetched again
         // (every import is idempotent).
+        Self.testBeforeFamily?("commit")
         let complete = importOK && store.writeFailures == writeFailuresBefore
-        store.update { st in
-            if complete, let newToken, let data = try? NSKeyedArchiver.archivedData(withRootObject: newToken, requiringSecureCoding: true) {
-                st.catchUpZoneToken = data
+        let committed = applyFamily(generation) {
+            store.update { st in
+                if complete, let newToken, let data = try? NSKeyedArchiver.archivedData(withRootObject: newToken, requiringSecureCoding: true) {
+                    st.catchUpZoneToken = data
+                }
+                st.catchUpRecords += modified.count
+                st.catchUpAssets += assetsFetched
+                st.lastCatchUp = summary + (complete ? "" : " — incomplete, fetched again")
+                if complete { st.initialFetchComplete = true; st.profileStampProvisional = false }
             }
-            st.catchUpRecords += modified.count
-            st.catchUpAssets += assetsFetched
-            st.lastCatchUp = summary + (complete ? "" : " — incomplete, fetched again")
-            if complete { st.initialFetchComplete = true; st.profileStampProvisional = false }
         }
+        guard committed != nil else { return abandoned("the token commit") }
         log(summary + (complete ? "" : " — incomplete (a write failed); zone token kept, fetched again"))
         if first, complete { log("First complete fetch finished" + (provisionalStands ? "; no cloud profile, so the profile typed here keeps its clock" : "")) }
         if complete, let fetchCycleCompleted { await MainActor.run { fetchCycleCompleted() } }
         // B6: files that could not be fetched (this round or earlier) are
         // tried again now that the link may be back.
         if !mediaGated, !store.state.awaitingMedia.isEmpty { await releaseHeldMedia() }
-        return true
+        return complete
     }
 
     // MARK: Stage E controls
@@ -990,10 +1070,29 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// Step 1 of a local removal, BEFORE any row is deleted. Synchronous and
     /// durable: the marker and the emptied outbox are on disk, and the engine
     /// is dropped, when this returns.
-    func beginLocalRemoval(reason: String) {
+    /// R1 (2026-11-03): returns whether the marker is on disk. When it is not,
+    /// the caller must not delete anything; transport is stopped regardless
+    /// (engine dropped, every decision refused) so nothing moves meanwhile.
+    /// R2: taken under the import lock, so no record family is between its
+    /// guard and its mutation when the marker lands.
+    @discardableResult
+    func beginLocalRemoval(reason: String) -> Bool {
+        importLock.lock(); defer { importLock.unlock() }
         let ok = JournalLocalRemoval.begin(store: store, reason: reason)
-        if !ok { logger.error("Local removal marker could NOT be written; relying on the in-memory engine drop only") }
+        if !ok {
+            logger.error("Local removal marker could NOT be written; the removal is refused and sync stays off until relaunch")
+            stateLock.lock(); removalMarkerFailed = true; stateLock.unlock()
+        }
         goDormant(currentDecision(), trigger: "local removal")
+        return ok
+    }
+
+    /// R2: runs one synchronous record family under the import lock, or not
+    /// at all once the lifecycle moved (removal, unlink, account refusal).
+    private func applyFamily<T>(_ generation: Int, _ body: () -> T) -> T? {
+        importLock.lock(); defer { importLock.unlock() }
+        guard mayStillImport(generation) else { return nil }
+        return body()
     }
 
     /// Step 2, after the cleanup. Leaves sync off until re-enabled.
@@ -1183,13 +1282,13 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     func enqueueSave(_ recordName: String, recordType: String, ownerOnly: Bool) {
         let change = JournalSyncPendingChange(recordName: recordName, recordType: recordType, op: .save, ownerOnly: ownerOnly)
-        store.update { JournalChangeTracker.merge([change], into: &$0.outbox) }
+        store.update { JournalChangeTracker.merge([change], into: &$0) }
         queueToEngine(zoneChanges: [pendingChange(change)])
     }
 
     func enqueueDelete(_ recordName: String, recordType: String) {
         let change = JournalSyncPendingChange(recordName: recordName, recordType: recordType, op: .delete)
-        store.update { JournalChangeTracker.merge([change], into: &$0.outbox) }
+        store.update { JournalChangeTracker.merge([change], into: &$0) }
         queueToEngine(zoneChanges: [pendingChange(change)])
     }
 
@@ -1723,15 +1822,15 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     // MARK: Import (see JournalImporter)
 
-    /// Returns false when the batch's Core Data save failed (H3).
+    /// The batch's summary; `saveFailed` means the Core Data save rolled back (H3).
     @discardableResult
-    private func importModifications(_ records: [CKRecord]) -> Bool {
-        guard !records.isEmpty else { return true }
+    private func importModifications(_ records: [CKRecord]) -> JournalImporter.Summary {
+        guard !records.isEmpty else { return JournalImporter.Summary() }
         var summary = JournalImporter.Summary()
         importContext.performAndWait { summary = importer.importModifications(records) }
         store.update { $0.recordsReceived += summary.received; $0.bytesReceived += summary.bytes; $0.echoRecords += summary.echoes }
         if summary.received > 0 { log("Imported \(summary.received) record(s)\(summary.customs > 0 ? ", \(summary.customs) custom" : "")") }
-        return !summary.saveFailed
+        return summary
     }
 
     private func importDeletions(_ deletions: [(CKRecord.ID, CKRecord.RecordType)]) {
@@ -1745,6 +1844,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             store.update { st in
                 for name in profileNames {
                     st.lastKnownRecords.removeValue(forKey: name)
+                    st.knownChangeTags.removeValue(forKey: name)
                     if name == JournalProfileSync.avatarName { st.assetHashes.removeValue(forKey: name) } else { st.profileFingerprint = nil }
                 }
             }
@@ -1798,11 +1898,13 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     // MARK: Stage I: Scores library records
 
-    private func importScoreRecords(_ records: [CKRecord], localPending: Bool? = nil) async {
-        guard !records.isEmpty else { return }
-        let outcome = await MainActor.run {
-            JournalScoreSync.apply(records, store: store, library: ScoreLibraryStore.shared, localPending: localPending) { self.log($0) }
-        }
+    @discardableResult
+    private func importScoreRecords(_ records: [CKRecord], localPending: Bool? = nil, generation: Int? = nil) async -> Bool {
+        guard !records.isEmpty else { return true }
+        guard let outcome = await MainActor.run(body: { () -> JournalScoreSync.Outcome? in
+            if let generation, !self.mayStillImport(generation) { return nil }
+            return JournalScoreSync.apply(records, store: self.store, library: ScoreLibraryStore.shared, localPending: localPending) { self.log($0) }
+        }) else { return false }
         store.update { st in
             st.recordsReceived += outcome.applied
             st.scoreAssetBytesDelivered += outcome.assetBytes
@@ -1817,34 +1919,46 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         if outcome.applied > 0 || outcome.held > 0 {
             log("Scores: \(outcome.applied) record(s) applied, \(outcome.held) held, \(outcome.bytesWritten) bytes written")
         }
+        return true
     }
 
-    private func applyScoreDeletions(_ names: [String]) async {
-        guard !names.isEmpty else { return }
-        let removed = await MainActor.run {
-            JournalScoreSync.applyDeletions(names, store: store, library: ScoreLibraryStore.shared) { self.log($0) }
-        }
+    @discardableResult
+    private func applyScoreDeletions(_ names: [String], generation: Int? = nil) async -> Bool {
+        guard !names.isEmpty else { return true }
+        guard let removed = await MainActor.run(body: { () -> Int? in
+            if let generation, !self.mayStillImport(generation) { return nil }
+            return JournalScoreSync.applyDeletions(names, store: self.store, library: ScoreLibraryStore.shared) { self.log($0) }
+        }) else { return false }
         log("Applied \(names.count) score record deletion(s): \(removed) item(s) removed")
+        return true
     }
 
     // MARK: Stage J: settings records
 
-    private func importSettingsRecords(_ records: [CKRecord], localPending: Bool? = nil) async {
-        guard !records.isEmpty else { return }
-        let outcome = await MainActor.run {
-            JournalSettingsSync.apply(records, store: store, localPending: localPending) { self.log($0) }
-        }
+    @discardableResult
+    private func importSettingsRecords(_ records: [CKRecord], localPending: Bool? = nil, generation: Int? = nil) async -> Bool {
+        guard !records.isEmpty else { return true }
+        guard let outcome = await MainActor.run(body: { () -> JournalSettingsSync.Outcome? in
+            if let generation, !self.mayStillImport(generation) { return nil }
+            return JournalSettingsSync.apply(records, store: self.store, localPending: localPending) { self.log($0) }
+        }) else { return false }
         settleSettings(outcome)
         if outcome.applied > 0 || outcome.held > 0 {
             log("Settings: \(outcome.applied) record(s) applied, \(outcome.held) held")
         }
+        return true
     }
 
     /// List contexts held for an instrument that has since arrived.
-    private func applyHeldSettings() async {
-        guard !store.state.awaitingListContext.isEmpty else { return }
-        let outcome = await MainActor.run { JournalSettingsSync.retryHeld(store: store) { self.log($0) } }
+    @discardableResult
+    private func applyHeldSettings(generation: Int? = nil) async -> Bool {
+        guard !store.state.awaitingListContext.isEmpty else { return true }
+        guard let outcome = await MainActor.run(body: { () -> JournalSettingsSync.Outcome? in
+            if let generation, !self.mayStillImport(generation) { return nil }
+            return JournalSettingsSync.retryHeld(store: self.store) { self.log($0) }
+        }) else { return false }
         settleSettings(outcome)
+        return true
     }
 
     private func settleSettings(_ outcome: JournalSettingsSync.Outcome) {
@@ -1920,6 +2034,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             var keptNewer = false
             store.update {
                 $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
+                $0.knownChangeTags[name] = record.recordChangeTag
                 let settled = JournalOutboxSettle.settle(name: name, sentRevision: sentRevision, outbox: $0.outbox)
                 $0.outbox = settled.outbox
                 keptNewer = settled.keptNewer
@@ -1935,6 +2050,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         for recordID in e.deletedRecordIDs {
             store.update {
                 $0.lastKnownRecords.removeValue(forKey: recordID.recordName)
+                $0.knownChangeTags.removeValue(forKey: recordID.recordName)
                 $0.outbox.removeAll { $0.recordName == recordID.recordName && $0.op == .delete }
             }
         }
@@ -2142,9 +2258,10 @@ final class JournalSyncCoordinator {
     /// Bracket of the production erase (`LocalFactoryReset.perform`, SYNCTEST
     /// only) and of the diagnostics control. Synchronous and durable before
     /// the first row is deleted.
-    func beginLocalRemoval(reason: String) {
-        guard let store else { return }
-        if let engine { engine.beginLocalRemoval(reason: reason) } else { JournalLocalRemoval.begin(store: store, reason: reason) }
+    @discardableResult
+    func beginLocalRemoval(reason: String) -> Bool {
+        guard let store else { return false }
+        if let engine { return engine.beginLocalRemoval(reason: reason) } else { return JournalLocalRemoval.begin(store: store, reason: reason) }
     }
 
     func finishLocalRemoval() {

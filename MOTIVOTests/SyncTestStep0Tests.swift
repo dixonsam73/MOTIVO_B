@@ -23,10 +23,10 @@ final class Step0Queue: JournalSendQueue {
     init(store: JournalSyncStateStore) { self.store = store }
     func enqueueSave(_ recordName: String, recordType: String, ownerOnly: Bool) {
         saves.append(recordName)
-        store.update { JournalChangeTracker.merge([.init(recordName: recordName, recordType: recordType, op: .save, ownerOnly: ownerOnly)], into: &$0.outbox) }
+        store.update { JournalChangeTracker.merge([.init(recordName: recordName, recordType: recordType, op: .save, ownerOnly: ownerOnly)], into: &$0) }
     }
     func enqueueDelete(_ recordName: String, recordType: String) {
-        store.update { JournalChangeTracker.merge([.init(recordName: recordName, recordType: recordType, op: .delete)], into: &$0.outbox) }
+        store.update { JournalChangeTracker.merge([.init(recordName: recordName, recordType: recordType, op: .delete)], into: &$0) }
     }
     func removePendingSave(_ recordName: String) {
         removed.append(recordName)
@@ -233,26 +233,28 @@ final class SyncTestStep0Tests: XCTestCase {
         let name = UUID().uuidString
         let save = JournalSyncPendingChange(recordName: name, recordType: JournalSyncRecordType.session, op: .save)
         var outbox: [JournalSyncPendingChange] = []
-        JournalChangeTracker.merge([save], into: &outbox)
-        XCTAssertEqual(outbox.first?.revision, 0)
-        let built = outbox.first!.revision                               // the batch is built with revision 0
-        JournalChangeTracker.merge([save], into: &outbox)                 // edit 2 lands while the send is in flight
-        XCTAssertEqual(outbox.count, 1); XCTAssertEqual(outbox.first?.revision, 1)
+        var sequence = 0
+        JournalChangeTracker.merge([save], into: &outbox, sequence: &sequence)
+        let built = outbox.first!.revision                               // the batch is built with this revision
+        JournalChangeTracker.merge([save], into: &outbox, sequence: &sequence)   // edit 2 lands while the send is in flight
+        XCTAssertEqual(outbox.count, 1)
+        XCTAssertGreaterThan(outbox.first!.revision, built, "a later merge always carries a later revision")
         let first = JournalOutboxSettle.settle(name: name, sentRevision: built, outbox: outbox)
         XCTAssertTrue(first.keptNewer, "B2: the accepted send carried edit 1 only; the entry stays for edit 2")
         XCTAssertEqual(first.outbox.count, 1)
-        let second = JournalOutboxSettle.settle(name: name, sentRevision: 1, outbox: first.outbox)
+        let latest = first.outbox.first!.revision
+        let second = JournalOutboxSettle.settle(name: name, sentRevision: latest, outbox: first.outbox)
         XCTAssertFalse(second.keptNewer); XCTAssertTrue(second.outbox.isEmpty, "the resend carried edit 2: settled")
         // A legacy acceptance with no recorded revision settles as before; a stranger name changes nothing.
         XCTAssertTrue(JournalOutboxSettle.settle(name: name, sentRevision: nil, outbox: outbox).outbox.isEmpty)
-        XCTAssertEqual(JournalOutboxSettle.settle(name: "other", sentRevision: 0, outbox: outbox).outbox, outbox)
+        XCTAssertEqual(JournalOutboxSettle.settle(name: "other", sentRevision: built, outbox: outbox).outbox, outbox)
         // The revision survives the state file (a kill between the acceptance and the resend).
         store.update { $0.outbox = outbox }
-        XCTAssertEqual(JournalSyncStateStore(fileURL: store.fileURL).state.outbox.first?.revision, 1)
-        // The content save that absorbs a partial keeps counting.
+        XCTAssertEqual(JournalSyncStateStore(fileURL: store.fileURL).state.outbox.first?.revision, latest)
+        // The content save that absorbs a partial keeps counting upward.
         var mixed: [JournalSyncPendingChange] = [.init(recordName: name, recordType: JournalSyncRecordType.session, op: .save, ownerOnly: true)]
-        JournalChangeTracker.merge([save], into: &mixed)
-        XCTAssertFalse(mixed.first!.ownerOnly); XCTAssertEqual(mixed.first?.revision, 1)
+        JournalChangeTracker.merge([save], into: &mixed, sequence: &sequence)
+        XCTAssertFalse(mixed.first!.ownerOnly); XCTAssertGreaterThan(mixed.first!.revision, latest)
     }
 
     // MARK: B4 — a removal begun while history is being processed

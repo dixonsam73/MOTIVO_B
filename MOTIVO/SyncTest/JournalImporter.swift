@@ -67,7 +67,7 @@ final class JournalImporter {
     /// so the legacy metadata fields on its Attachment record are stale.
     private func metaKnown(_ attachmentName: String) -> Bool {
         let meta = JournalSyncRecordType.metaName(for: attachmentName)
-        return store.state.lastKnownRecords[meta] != nil || store.state.awaitingMeta[meta] != nil
+        return store.state.lastKnownRecords[meta] != nil || store.state.awaitingMeta[meta] != nil || knownAfterSave[meta] != nil
     }
 
     // MARK: Attachment metadata records (stage G)
@@ -90,7 +90,7 @@ final class JournalImporter {
             let local = attachment.value(forKey: "userModifiedAt") as? Date
             let server = JournalRecordMapping.userModifiedAt(of: record)
             if JournalConflictRule.decide(localUserModifiedAt: local, serverUserModifiedAt: server) == .local {
-                store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+                noteKnown(record)
                 recordConflict(record, winner: .local, local: attachment)
                 return false
             }
@@ -102,10 +102,9 @@ final class JournalImporter {
         }
         JournalRecordMapping.applyMeta(record, to: attachment)
         applySideStores(record, id: id)
-        store.update { st in
-            st.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
-            st.awaitingMeta.removeValue(forKey: name)
-        }
+        noteKnownAfterSave(record)
+        store.update { $0.awaitingMeta.removeValue(forKey: name) }
+        appliedInBatch.insert(name)
         return true
     }
 
@@ -125,7 +124,44 @@ final class JournalImporter {
         /// H3: the Core Data save of this batch failed and was rolled back; the
         /// caller keeps its zone token so the batch is fetched again.
         var saveFailed = false
-        var echoes = 0 }
+        var echoes = 0
+        /// R6: record names whose row reached the store in this batch.
+        var applied: Set<String> = [] }
+
+    /// R3 seam: the server change tag of a record (tests assign their own).
+    var changeTag: (CKRecord) -> String? = { $0.recordChangeTag }
+    /// Names applied in the current batch, reported once the save succeeded.
+    private var appliedInBatch: Set<String> = []
+
+    /// Remember the server copy this device now holds (its system fields for
+    /// the next send's change tag, and its change tag for the echo filter).
+    /// Immediate: used where nothing is applied (the local copy won), so the
+    /// resend carries the server's change tag.
+    func noteKnown(_ record: CKRecord) {
+        let name = record.recordID.recordName
+        let tag = changeTag(record)
+        store.update { st in
+            st.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
+            st.knownChangeTags[name] = tag
+        }
+    }
+
+    /// R3 (2026-11-03): where the server copy is APPLIED, the knowledge is
+    /// written only once the batch's Core Data save succeeded; a rolled-back
+    /// save leaves the record unknown, so the retry imports it instead of
+    /// skipping it as an echo.
+    private var knownAfterSave: [String: (Data, String?)] = [:]
+    private func noteKnownAfterSave(_ record: CKRecord) {
+        knownAfterSave[record.recordID.recordName] = (JournalSyncStateStore.encodeSystemFields(record), changeTag(record))
+    }
+    private func commitKnown() {
+        guard !knownAfterSave.isEmpty else { return }
+        let pending = knownAfterSave
+        knownAfterSave.removeAll()
+        store.update { st in
+            for (name, entry) in pending { st.lastKnownRecords[name] = entry.0; st.knownChangeTags[name] = entry.1 }
+        }
+    }
 
     // MARK: Modifications
 
@@ -147,7 +183,8 @@ final class JournalImporter {
         let pendingNames = Set(st.outbox.filter { $0.op == .save }.map(\.recordName))
         let records = incoming.filter { record in
             let name = record.recordID.recordName
-            let echo = !pendingNames.contains(name) && JournalEcho.isKnown(changeTag: record.recordChangeTag, storedSystemFields: st.lastKnownRecords[name])
+            let tag = changeTag(record)
+            let echo = !pendingNames.contains(name) && tag != nil && st.knownChangeTags[name] == tag
             if echo { summary.echoes += 1 }
             return !echo
         }
@@ -160,10 +197,11 @@ final class JournalImporter {
         // Instruments first, so sessions and custom rows resolve them by id.
         var importedInstruments: [NSManagedObject] = []
         for record in instruments { if let o = importInstrument(record) { importedInstruments.append(o); summary.received += 1 } }
-        for record in sessions { if importSession(record) { summary.received += 1 } }
+        appliedInBatch.removeAll()
+        for record in sessions { if importSession(record) { summary.received += 1; appliedInBatch.insert(record.recordID.recordName) } }
         for record in attachments {
             let outcome = importAttachment(record)
-            if outcome.imported { summary.received += 1 }
+            if outcome.imported { summary.received += 1; appliedInBatch.insert(record.recordID.recordName) }
             summary.bytes += outcome.bytes
         }
         for record in metas { if importAttachmentMeta(record) { summary.received += 1 } }
@@ -183,7 +221,9 @@ final class JournalImporter {
         for record in customs {
             if let object = importCustom(record) { importedCustoms.append(object); summary.received += 1; summary.customs += 1 }
         }
-        if !save() { summary.saveFailed = true; summary.received = 0; summary.bytes = 0 }
+        if save() { summary.applied = appliedInBatch }
+        else { summary.saveFailed = true; summary.received = 0; summary.bytes = 0 }
+        appliedInBatch.removeAll()
         if !importedInstruments.isEmpty {
             store.update { st in
                 for object in importedInstruments where !object.objectID.isTemporaryID {
@@ -228,7 +268,7 @@ final class JournalImporter {
                 // Keep our content; take the server's owner if we have none, so
                 // the resend carries both. Remember the server copy's change tag.
                 absorbOwner(serverOwner, into: existing, localOwner: localOwner, recordName: name)
-                store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+                noteKnown(record)
                 recordConflict(record, winner: .local, local: existing)
                 return false
             }
@@ -252,7 +292,7 @@ final class JournalImporter {
             store.update { $0.ownerConflicts += 1 }
         }
         followSessionOwner(object)
-        store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+        noteKnownAfterSave(record)
         if JournalOwnership.normalized(merged) != JournalOwnership.normalized(serverOwner) {
             // The server lost an owner this device holds (an edit from a device
             // that had not yet seen the ownership): send it back, owner only.
@@ -310,7 +350,7 @@ final class JournalImporter {
             let local = existing.value(forKey: "userModifiedAt") as? Date
             let server = JournalRecordMapping.userModifiedAt(of: record)
             if JournalConflictRule.decide(localUserModifiedAt: local, serverUserModifiedAt: server) == .local {
-                store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+                noteKnown(record)
                 recordConflict(record, winner: .local, local: existing)
                 return (false, 0)
             }
@@ -372,7 +412,7 @@ final class JournalImporter {
             store.update { $0.assetHashes[name] = serverHash }
         }
         if heldFile != nil, let sourceURL { try? FileManager.default.removeItem(at: sourceURL) }
-        store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+        noteKnownAfterSave(record)
         applyHeldMeta(for: name)
         return (true, bytes)
     }
@@ -410,7 +450,7 @@ final class JournalImporter {
             let link = JournalRecordMapping.instrumentLink(of: record)
             if let core = resolveInstrument(recordName: link.recordName, name: link.name) { object.setValue(core, forKey: "coreInstrument") }
         }
-        store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+        noteKnown(record)
         return object
     }
 
@@ -423,7 +463,7 @@ final class JournalImporter {
         let name = record.recordID.recordName
         guard UUID(uuidString: name) != nil, let instrumentName = record["name"] as? String else { return nil }
         let object = resolveInstrument(recordName: name, name: instrumentName, applyName: true)
-        store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+        noteKnown(record)
         return object
     }
 
@@ -583,7 +623,7 @@ final class JournalImporter {
     /// local record should be resent (on top of the server's change tag).
     func resolveSendConflict(recordType: String, recordName: String, server: CKRecord) -> Bool {
         if recordType == JournalSyncRecordType.attachmentMeta {
-            store.update { $0.lastKnownRecords[recordName] = JournalSyncStateStore.encodeSystemFields(server) }
+            noteKnown(server)
             guard let attachmentName = JournalSyncRecordType.attachmentName(fromMeta: recordName), let id = UUID(uuidString: attachmentName),
                   let local = freshObject(entity: JournalSyncRecordType.attachment, id: id) else { return false }
             if pendingSave(recordName)?.metadataOnly != true,
@@ -601,7 +641,7 @@ final class JournalImporter {
             return false
         }
         guard let id = UUID(uuidString: recordName), let local = freshObject(entity: recordType, id: id) else { return false }
-        store.update { $0.lastKnownRecords[recordName] = JournalSyncStateStore.encodeSystemFields(server) }
+        noteKnown(server)
         if JournalSyncRecordType.customs.contains(recordType) || recordType == JournalSyncRecordType.instrument {
             _ = JournalRecordMapping.apply(server, to: local)
             if JournalSyncRecordType.customs.contains(recordType), let owner = customOwner { local.setValue(owner, forKey: "ownerUserID") }
@@ -653,7 +693,12 @@ final class JournalImporter {
         let decision = JournalConflictRule.decide(localUserModifiedAt: local.value(forKey: "userModifiedAt") as? Date,
                                                   serverUserModifiedAt: JournalRecordMapping.userModifiedAt(of: server))
         if decision == .server {
-            recordConflict(server, winner: .server, local: local)
+            // R5 (2026-11-03): the loser's text must be on disk before it is
+            // overwritten; otherwise the edit stays queued and is tried again.
+            guard recordConflict(server, winner: .server, local: local) else {
+                log("Conflict on \(recordName): the recovery entry could not be saved; local content kept and the send tried again")
+                return true
+            }
             _ = JournalRecordMapping.apply(server, to: local)
             applySideStores(server, id: id)
             var resend = false
@@ -667,7 +712,12 @@ final class JournalImporter {
             } else if recordType == JournalSyncRecordType.attachment {
                 local.setValue(localOwner, forKey: "ownerUserID")
             }
-            save()
+            guard save() else {
+                // The overwrite rolled back: the edit stays queued (re-resolved
+                // at the next activation) and the server copy is not applied.
+                log("Conflict on \(recordName): the server copy could not be saved; local content kept, resolved again later")
+                return false
+            }
             queue?.removePendingSave(recordName)
             if resend { queue?.enqueueSave(recordName, recordType: recordType, ownerOnly: true) }
             log("Conflict on \(recordName): server content kept\(resend ? "; resending owner" : "")")
@@ -703,7 +753,7 @@ final class JournalImporter {
         let server = JournalRecordMapping.userModifiedAt(of: record)
         guard JournalConflictRule.decide(localUserModifiedAt: local, serverUserModifiedAt: server) == .local else { return true }
         let name = record.recordID.recordName
-        store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+        noteKnown(record)
         queue?.enqueueSave(name, recordType: type, ownerOnly: false)
         log("Kept this device's newer copy of \(name.prefix(8))… over an older server copy; queued to go up")
         return false
@@ -779,12 +829,15 @@ final class JournalImporter {
         return (try? context.fetch(request))?.first
     }
 
+    /// R3: knowledge of the records applied since the last save is committed
+    /// here, with the save, and discarded with a rollback.
     @discardableResult
     func save() -> Bool {
-        guard context.hasChanges else { return true }
-        do { try context.save(); return true } catch {
+        guard context.hasChanges else { commitKnown(); return true }
+        do { try context.save(); commitKnown(); return true } catch {
             log("Import save failed: \(error.localizedDescription); the batch is fetched again")
             context.rollback()
+            knownAfterSave.removeAll()
             return false
         }
     }

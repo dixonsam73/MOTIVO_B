@@ -414,7 +414,7 @@ enum JournalProfileSync {
             || newProvisional != st.profileStampProvisional
         guard changed else { return [] }
         let ok = store.update { s in
-            JournalChangeTracker.merge(pending, into: &s.outbox)
+            JournalChangeTracker.merge(pending, into: &s)
             s.profileFingerprint = newFingerprint
             s.profileStamp = newStamp
             s.profileStampProvisional = newProvisional
@@ -552,7 +552,7 @@ enum JournalProfileSync {
             if decision.apply != nil || provisional { s.profileStamp = serverStamp }
             s.profileStampProvisional = false
             if !decision.send { s.outbox.removeAll { $0.recordName == profileName && $0.op == .save } }
-            else { JournalChangeTracker.merge(outcome.resend, into: &s.outbox) }
+            else { JournalChangeTracker.merge(outcome.resend, into: &s) }
         }
         log("Profile record: \(decision.summary)\(decision.apply.map { " → \($0.describe())" } ?? "")")
         return outcome
@@ -616,7 +616,7 @@ enum JournalProfileSync {
                 s.assetHashes[avatarName] = serverHash
                 s.outbox.removeAll { $0.recordName == avatarName && $0.op == .save }
             } else {
-                JournalChangeTracker.merge(outcome.resend, into: &s.outbox)
+                JournalChangeTracker.merge(outcome.resend, into: &s)
             }
         }
         return outcome

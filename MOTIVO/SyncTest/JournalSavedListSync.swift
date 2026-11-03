@@ -68,7 +68,7 @@ enum JournalSavedListSync {
         }
         guard !pending.isEmpty || scopeChanged || store.state.listScope == nil else { return [] }
         let ok = store.update { st in
-            JournalChangeTracker.merge(pending, into: &st.outbox)
+            JournalChangeTracker.merge(pending, into: &st)
             st.listFingerprints = next
             st.listScope = scope
         }

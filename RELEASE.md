@@ -1776,6 +1776,52 @@ the join.
   reuses. Hands-on: Samuel ≈ 20 min at the devices for (a) and (b) plus
   ≈ 10 min for the storage-full check earlier; agent ≈ 1 h 10 min for the
   review's fixes, tests and records, the rest waiting on builds.
+  **Independent review of Step 0 (Codex, 2026-11-03) and its six items,
+  C-160 to C-165: fixed and unit-verified 2026-11-03.** R1 a removal whose
+  marker could not be saved went on deleting; R2 the lifecycle was checked
+  once before the import sequence, not at each family or the token commit;
+  R3 a record's change tag was recorded before the batch's save, so a
+  rolled-back save made the retry skip it as an echo; R4 a re-created
+  outbox entry reused revision zero, so an old acknowledgement settled a
+  newer edit; R5 the rejected-send handler overwrote local text without a
+  saved recovery entry; R6 a held download was released after the fetch,
+  not after a durable import. Method: the seams the tests need (the
+  catch-up's apply sequence and the media release's apply half as callable
+  steps with a hook between families, a change-tag seam, a Bool from the
+  removal entry point, a test-only current-user) were added first with no
+  behaviour change, `SyncTestStep0ReviewTests` ran against them, then the
+  fixes went in. **Genuine pre-fix reproductions: R2, R3, R5** (the later
+  families and the first-fetch state applied after the removal; the retried
+  record skipped as an echo; the local text overwritten). **R1, R4 and R6
+  failed in that first run for test-setup reasons, not the defect** (an
+  unstarted engine has no iCloud user, so its decisions refused anyway; the
+  importer's queue is held weakly and the test had dropped it; the test's
+  view context lacked the app's merge policy), so their pre-fix failure is
+  not demonstrated here: R1 is source-traced (the old entry point called
+  `goDormant(currentDecision())`, a no-op for an allowed account); R4's rule
+  failure was reproduced by Codex in an isolated check; R6 is source-traced
+  (every fetched name was removed from the hold). All six pass against the
+  fixes through their calling paths. The six fixes: a refused removal
+  stops transport and `LocalFactoryReset.perform` erases nothing and says
+  so; every record family and the token commit check the generation at
+  their own boundary, the synchronous ones under an import lock that the
+  removal entry point also takes, the main-actor ones inside their
+  main-actor step; known change tags and system fields are written after
+  the batch's save (a copy the local side won over is still recorded at
+  once, so the resend carries the server's tag); one persisted monotonic
+  outbox sequence; the rejected-send handler keeps the edit queued when the
+  recovery entry or the save fails; a hold is released only for a durably
+  applied record; the knowledge is committed inside the importer's own
+  `save()`, so a direct caller gets the same contract as a batch. Two
+  pre-existing tests moved with the contract: `SyncTestMetadataTests`
+  gained the save its scenario implied before reading the server's change
+  tag, and `SyncTestReceiverTests` needed the in-batch meta knowledge the
+  importer now keeps until the save. Tests: `SyncTestStep0ReviewTests` (6)
+  plus `SyncTestStep0Tests` B2 rewritten to relative revision
+  comparisons; the selection is 198 tests
+  green under SyncTest; Debug and Release build. Not changed on device
+  (no install); the import lock's interaction with a removal on the main
+  thread is covered by `testR2` and by reading, not by a device run.
   *Device evidence (state files over the cable, 17:24–17:34):* with the
   simulation on, the iPhone's first refused send at 17:25:56 logged ONE
   episode line (3 saves refused, 3 waiting); three later bursts of edits

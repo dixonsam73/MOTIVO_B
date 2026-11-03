@@ -234,7 +234,7 @@ enum JournalScoreSync {
         let changed = !pending.isEmpty || transition || fingerprints != st.scoreFingerprints || positionsKnown != st.scorePositions
         guard changed else { return [] }
         let ok = store.update { s in
-            JournalChangeTracker.merge(pending, into: &s.outbox)
+            JournalChangeTracker.merge(pending, into: &s)
             s.scoreFingerprints = fingerprints
             s.scoreStamps = stamps
             s.scorePositions = positionsKnown
@@ -528,7 +528,7 @@ enum JournalScoreSync {
             if !pending {
                 let change = JournalSyncPendingChange(recordName: name, recordType: JournalSyncRecordType.scoreMeta, op: .save, metadataEdit: true)
                 outcome.resend.append(change)
-                store.update { JournalChangeTracker.merge([change], into: &$0.outbox) }
+                store.update { JournalChangeTracker.merge([change], into: &$0) }
             }
             log("Score metadata \(parsed.id.prefix(8))…: local newer; kept and resent")
         case .server:
@@ -589,7 +589,7 @@ enum JournalScoreSync {
             if !pending {
                 let change = JournalSyncPendingChange(recordName: name, recordType: JournalSyncRecordType.scorePosition, op: .save, metadataEdit: true)
                 outcome.resend.append(change)
-                store.update { JournalChangeTracker.merge([change], into: &$0.outbox) }
+                store.update { JournalChangeTracker.merge([change], into: &$0) }
             }
             log("Score position \(parsed.id.prefix(8))…: local newer; kept")
         case .takeServer:

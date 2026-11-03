@@ -265,7 +265,7 @@ final class SyncTestMetadataTests: XCTestCase {
         // Same stamp, written by an older build: no displayName, no fields.
         let oldFormat = attachmentRecord(id: aid, sessionID: sid, displayName: nil, isPrivate: nil, pages: nil, stamp: old)
         var applied = false
-        ctx.performAndWait { applied = imp.importAttachment(oldFormat).imported }
+        ctx.performAndWait { applied = imp.importAttachment(oldFormat).imported; imp.save() }   // R3: knowledge lands with the save
         XCTAssertTrue(applied, "server content applied")
         ctx.performAndWait { XCTAssertEqual(imp.fetch(entity: "Attachment", id: aid)?.value(forKey: "displayName") as? String, "Migrated name",
                                             "an absent displayName is no information") }

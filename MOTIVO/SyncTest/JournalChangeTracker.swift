@@ -111,7 +111,7 @@ final class JournalChangeTracker {
             }
         }
         let ok = store.update { st in
-            Self.merge(pending, into: &st.outbox)
+            Self.merge(pending, into: &st)
             st.bootstrapQueued = true
             st.historyToken = JournalSyncStateStore.encode(token: token)
             st.log.append(.init(at: Date(), text: "Bootstrap queued \(pending.count) record(s) for first upload"))
@@ -159,7 +159,7 @@ final class JournalChangeTracker {
             }
         }
         let ok = store.update { st in
-            Self.merge(pending, into: &st.outbox)
+            Self.merge(pending, into: &st)
             st.customRecordNames.merge(names) { _, new in new }
             if customs { st.customsBootstrapQueued = true }
             if instruments { st.instrumentsBootstrapQueued = true }
@@ -196,7 +196,7 @@ final class JournalChangeTracker {
             }
         }
         guard !pending.isEmpty else { return [] }
-        let ok = store.update { Self.merge(pending, into: &$0.outbox) }
+        let ok = store.update { Self.merge(pending, into: &$0) }
         return ok ? pending : []
     }
 
@@ -317,7 +317,7 @@ final class JournalChangeTracker {
         let ok = store.update { st in
             guard !st.localRemovalInProgress, st.historyToken == tokenAtRead else { return }
             for line in diagnostics.prefix(12) { st.log.append(.init(at: Date(), text: line)) }
-            Self.merge(added, into: &st.outbox)
+            Self.merge(added, into: &st)
             st.customRecordNames.merge(namesAdded) { _, new in new }
             for uri in urisRemoved { st.customRecordNames.removeValue(forKey: uri) }
             if let newToken { st.historyToken = JournalSyncStateStore.encode(token: newToken) }
@@ -340,21 +340,38 @@ final class JournalChangeTracker {
     /// A delete supersedes a pending save of the same record; otherwise entries
     /// are unique by (name, op). A content save absorbs a pending owner-only
     /// save; an owner-only save never downgrades a pending content save.
+    /// The state-level merge every production path uses (R4: the revision
+    /// comes from the state's monotonic sequence).
+    static func merge(_ incoming: [JournalSyncPendingChange], into state: inout JournalSyncPersistedState) {
+        merge(incoming, into: &state.outbox, sequence: &state.outboxSequence)
+    }
+
     static func merge(_ incoming: [JournalSyncPendingChange], into outbox: inout [JournalSyncPendingChange]) {
+        var sequence = 0
+        merge(incoming, into: &outbox, sequence: &sequence)
+    }
+
+    static func merge(_ incoming: [JournalSyncPendingChange], into outbox: inout [JournalSyncPendingChange], sequence: inout Int) {
         for change in incoming {
             if change.op == .delete {
                 outbox.removeAll { $0.recordName == change.recordName }
             }
+            // R4 (2026-11-03): every merge takes the next value of ONE monotonic
+            // sequence, so an entry removed (a settled conflict) and re-created
+            // by a later edit never carries the revision of an older send still
+            // in flight; its acknowledgement then cannot settle the new entry.
+            sequence += 1
             if let i = outbox.firstIndex(where: { $0.recordName == change.recordName && $0.op == change.op }) {
                 // Partial or asset-free saves never downgrade a content save; a
                 // content save absorbs them (and will carry the file if it changed).
                 let existingPartial = outbox[i].ownerOnly || outbox[i].metadataOnly || outbox[i].metadataEdit
                 let incomingPartial = change.ownerOnly || change.metadataOnly || change.metadataEdit
-                let revision = outbox[i].revision + 1
                 if existingPartial && !incomingPartial { outbox[i] = change }
-                outbox[i].revision = revision
+                outbox[i].revision = sequence
             } else {
-                outbox.append(change)
+                var fresh = change
+                fresh.revision = sequence
+                outbox.append(fresh)
             }
         }
     }
