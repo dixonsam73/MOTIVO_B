@@ -265,7 +265,18 @@ enum JournalLocalRemoval {
         }
         sweepMedia()
         store.log("Interrupted local removal recovered at launch: \(removed) leftover row(s) removed locally")
-        return finish(store: store, container: container)
+        let ok = finish(store: store, container: container)
+        // H4 (2026-11-03): the recovery deletes fewer things than the removal
+        // (the profile row, the Scores library and the index may survive a
+        // kill before the defaults wipe). Those leftovers must not become
+        // clocked edits at the next re-enable: leave the profile and the
+        // library at "never scanned", so they go up as the unclocked
+        // transition does and yield to anything clocked in the cloud.
+        store.update { st in
+            st.profileFingerprint = nil
+            st.scoreScanDone = false
+        }
+        return ok
     }
 
     /// Re-enable after a removal or an unlink. The caller then reconciles the
@@ -275,6 +286,16 @@ enum JournalLocalRemoval {
     static func reenable(store: JournalSyncStateStore) -> Bool {
         store.update { st in
             let was = st.localCopyRemoved ? "a removed local copy" : "an unlinked device"
+            if st.localCopyRemoved {
+                // B4, second guard: a removed copy has nothing to delete
+                // elsewhere; any deletion that reached the outbox during the
+                // removal is the removal's own and must never go up.
+                let bogus = st.outbox.filter { $0.op == .delete }.count
+                if bogus > 0 {
+                    st.outbox.removeAll { $0.op == .delete }
+                    st.log.append(.init(at: Date(), text: "Dropped \(bogus) deletion(s) queued during the removal; a removed copy deletes nothing elsewhere"))
+                }
+            }
             st.unlinked = false
             st.localCopyRemoved = false
             st.log.append(.init(at: Date(), text: "Sync re-enabled for \(was)"))

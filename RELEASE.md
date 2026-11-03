@@ -1717,6 +1717,36 @@ the join.
   diagnostics and Profile edits and the C-152 row from the shared
   checkout; the helper and test files landed with the storage-full commit.
   Device script: side-session notes, `storage-full-device-script.md`.
+  **Step 0 before integration (focused review, 2026-11-03; C-153 to
+  C-159): built and unit-verified 2026-11-03; device scenarios below.**
+  The review (three read-only passes over the deleting paths, the catch-up
+  token, pending work and displaced-text recovery; report in the
+  side-session notes) found six defects in the data-loss category, all in
+  `MOTIVO/SyncTest/`: B1 the catch-up applied an older server copy, or the
+  device's own echoed write, over a newer local edit when no save was
+  pending (C-153); B2 an accepted older send cleared a newer pending edit
+  from the outbox and a kill then lost it (C-154); B3 import conflicts were
+  decided from the import context's stale copy and recorded the stale text
+  as displaced (C-155); B4 a history-processing run straddling a removal
+  could queue the removal's own deletions for the next re-enable (C-156,
+  suspected, guarded); B5 a fetch in flight re-imported the journal after a
+  device-only removal (C-157); B6 a record whose file fetch failed was
+  imported without its file and left behind the token (C-158). Of the
+  eight hardening items H1–H5 are fixed (failed state-file writes and a
+  rolled-back import save keep the zone token; a server win waits for its
+  recovery entry to be on disk; a recovered removal leaves the profile and
+  library unclocked; the zone save is queued after the reconcile) and
+  H6–H8 deferred as noise and a bounded leak (C-159). Reproductions:
+  `SyncTestStep0Tests` ran first against the unfixed code and failed on
+  B1, B3 (with a retained registered object: "typed here" replaced by
+  "other device", displaced text "v1"), B5, B6 and H2 exactly as the
+  scenarios predicted; B4's race was not reproduced and stays suspected
+  (its guard is tested through a hook between the read and the commit);
+  B2's pure rule is tested. After the fixes the selection is 192 tests
+  green under SyncTest (11 new); Debug and Release build. Three product
+  decisions are set out as scenarios in the report (a cleared iCloud zone,
+  what a lost session keeps, ownerless entries) and nothing here depends
+  on them.
   *Device evidence (state files over the cable, 17:24–17:34):* with the
   simulation on, the iPhone's first refused send at 17:25:56 logged ONE
   episode line (3 saves refused, 3 waiting); three later bursts of edits

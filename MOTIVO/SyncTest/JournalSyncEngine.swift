@@ -156,6 +156,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// Diagnostics only: until this time every send is refused as if the
     /// server had answered quotaExceeded; nothing reaches the server.
     private var quotaSimulationUntil: Date?
+    /// B2: the outbox revision of each save as the batch was built.
+    private var sentRevisions: [String: Int] = [:]
     private var preferenceObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
     /// While media is held the engine is built without automatic sync: the
@@ -444,7 +446,6 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         if wasDormant { log("Engine \(store.state.engineState == nil ? "built fresh" : "built from saved state") (\(trigger)); app-driven fetch\(gated ? ", \(hold.reason ?? "")" : "")") }
         await publish { $0.pausedReason = nil }
 
-        queueToEngine(databaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
         let bootstrapped = tracker.bootstrapIfNeeded()
         if bootstrapped > 0 { log("Queued \(bootstrapped) existing record(s)") }
         let customs = tracker.bootstrapCustomsIfNeeded(customOwner: customOwner)
@@ -461,6 +462,9 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         // once); afterwards they leave only at a dismissal or backgrounding.
         await scanScores(reason: "activation", positions: !store.state.scoreScanDone)
         requeueOutbox()
+        // H5: queued after the reconcile above, so the send it schedules cannot
+        // carry a restored pending change the outbox no longer holds.
+        queueToEngine(databaseChanges: [.saveZone(CKRecordZone(zoneID: JournalRecordMapping.zoneID))])
         ensureAppSubscription()
         if store.state.catchUpZoneToken == nil {
             // A fresh state (first link, re-enable, recovery): the whole zone,
@@ -644,6 +648,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     func releaseHeldMedia() async {
         let names = store.state.awaitingMedia
         guard !names.isEmpty, !mediaGated, currentDecision().allowed else { return }
+        stateLock.lock(); let generation = dormantGeneration; stateLock.unlock()
         let ids = names.map { CKRecord.ID(recordName: $0, zoneID: JournalRecordMapping.zoneID) }
         let fetch = CKFetchRecordsOperation(recordIDs: ids)
         fetch.configuration.timeoutIntervalForResource = 600
@@ -659,6 +664,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             fetch.fetchRecordsResultBlock = { _ in continuation.resume() }
             container.privateCloudDatabase.add(fetch)
         }
+        guard mayStillImport(generation) else { log("Media release abandoned: sync stopped while the files were fetched; nothing imported"); return }
         importModifications(full.filter { $0.recordType == JournalSyncRecordType.attachment })
         importProfileRecords(full.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) })
         await importScoreRecords(full.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) })
@@ -781,7 +787,16 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         return again ? await deltaCatchUp(reason: "\(reason), queued") : result
     }
 
+    /// B5: whether a fetch that awaited may still import. The dormant
+    /// generation moves on every removal, unlink or account refusal.
+    private func mayStillImport(_ generation: Int) -> Bool {
+        stateLock.lock(); let same = dormantGeneration == generation; stateLock.unlock()
+        return same && currentDecision().allowed
+    }
+
     private func deltaCatchUpBody(reason: String) async -> Bool {
+        stateLock.lock(); let generation = dormantGeneration; stateLock.unlock()
+        let writeFailuresBefore = store.writeFailures
         let previous = store.state.catchUpZoneToken.flatMap {
             try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: $0)
         }
@@ -828,6 +843,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             }
         }
 
+        guard mayStillImport(generation) else { log("Catch-up (\(reason)) abandoned: sync stopped while the zone was read; nothing imported, token kept"); return true }
         // The file only where it is needed.
         var assetsFetched = 0
         let library = await MainActor.run { ScoreLibraryStore.shared.snapshot() }
@@ -899,14 +915,29 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             }
             modified = modified.map { full[$0.recordID] ?? $0 }
             assetsFetched = full.count
-            if full.count < needing.count { log("Catch-up: \(needing.count - full.count) file(s) could not be fetched; their records wait for the next fetch") }
+            let unfetched = needing.filter { full[$0] == nil }.map(\.recordName)
+            if !unfetched.isEmpty {
+                // B6: a record whose file did not arrive is not imported
+                // without it; it waits by name, like a record under the media
+                // hold, and is fetched again with the next catch-up or release.
+                let set = Set(unfetched)
+                let before = store.state.awaitingMedia.count
+                store.update { s in
+                    s.awaitingMedia = JournalMediaHold.adding(unfetched, to: s.awaitingMedia)
+                    s.mediaDownloadsHeld += s.awaitingMedia.count - before
+                }
+                modified.removeAll { set.contains($0.recordID.recordName) }
+                log("Catch-up: \(unfetched.count) file(s) could not be fetched; their records are held by name and fetched again")
+                refreshCounts()
+            }
         }
+        guard mayStillImport(generation) else { log("Catch-up (\(reason)) abandoned: sync stopped while files were fetched; nothing imported, token kept"); return true }
 
         // Import exactly as a fetched batch would be.
         let records = modified.filter { $0.recordType != JournalSyncRecordType.savedList && !JournalSyncRecordType.profileTypes.contains($0.recordType)
                                         && !JournalSyncRecordType.scoreTypes.contains($0.recordType) && !JournalSyncRecordType.settingsTypes.contains($0.recordType) }
         let lists = modified.filter { $0.recordType == JournalSyncRecordType.savedList }
-        importModifications(records)
+        let importOK = importModifications(records)
         importProfileRecords(modified.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) })
         if !lists.isEmpty { _ = await MainActor.run { JournalSavedListSync.apply(lists, store: store) } }
         await importScoreRecords(modified.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) })
@@ -924,19 +955,26 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         // mark), so a mark still set means the cloud holds none and the typed
         // clock stands.
         let provisionalStands = first && store.state.profileStampProvisional
+        // H1/H3: a hold or a conflict entry that did not reach the state file,
+        // or a Core Data save that rolled back, means part of this batch is
+        // not applied; the zone token stays so the batch is fetched again
+        // (every import is idempotent).
+        let complete = importOK && store.writeFailures == writeFailuresBefore
         store.update { st in
-            if let newToken, let data = try? NSKeyedArchiver.archivedData(withRootObject: newToken, requiringSecureCoding: true) {
+            if complete, let newToken, let data = try? NSKeyedArchiver.archivedData(withRootObject: newToken, requiringSecureCoding: true) {
                 st.catchUpZoneToken = data
             }
             st.catchUpRecords += modified.count
             st.catchUpAssets += assetsFetched
-            st.lastCatchUp = summary
-            st.initialFetchComplete = true
-            st.profileStampProvisional = false
+            st.lastCatchUp = summary + (complete ? "" : " — incomplete, fetched again")
+            if complete { st.initialFetchComplete = true; st.profileStampProvisional = false }
         }
-        log(summary)
-        if first { log("First complete fetch finished" + (provisionalStands ? "; no cloud profile, so the profile typed here keeps its clock" : "")) }
-        if let fetchCycleCompleted { await MainActor.run { fetchCycleCompleted() } }
+        log(summary + (complete ? "" : " — incomplete (a write failed); zone token kept, fetched again"))
+        if first, complete { log("First complete fetch finished" + (provisionalStands ? "; no cloud profile, so the profile typed here keeps its clock" : "")) }
+        if complete, let fetchCycleCompleted { await MainActor.run { fetchCycleCompleted() } }
+        // B6: files that could not be fetched (this round or earlier) are
+        // tried again now that the link may be back.
+        if !mediaGated, !store.state.awaitingMedia.isEmpty { await releaseHeldMedia() }
         return true
     }
 
@@ -1484,6 +1522,9 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         // Sessions before their attachments, deletes last.
         let outbox = store.state.outbox
         let typeByName = Dictionary(outbox.map { ($0.recordName, $0.recordType) }, uniquingKeysWith: { a, _ in a })
+        // B2: remember which revision of each save this batch carries.
+        let revisions = Dictionary(outbox.filter { $0.op == .save }.map { ($0.recordName, $0.revision) }, uniquingKeysWith: { a, _ in a })
+        stateLock.lock(); sentRevisions.merge(revisions) { _, new in new }; stateLock.unlock()
         let ownerOnlyNames = Set(outbox.filter { $0.op == .save && $0.ownerOnly }.map(\.recordName))
         let assetFreeNames = Set(outbox.filter { $0.op == .save && $0.assetFree }.map(\.recordName))
         stateLock.lock()
@@ -1682,12 +1723,15 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     // MARK: Import (see JournalImporter)
 
-    private func importModifications(_ records: [CKRecord]) {
-        guard !records.isEmpty else { return }
+    /// Returns false when the batch's Core Data save failed (H3).
+    @discardableResult
+    private func importModifications(_ records: [CKRecord]) -> Bool {
+        guard !records.isEmpty else { return true }
         var summary = JournalImporter.Summary()
         importContext.performAndWait { summary = importer.importModifications(records) }
-        store.update { $0.recordsReceived += summary.received; $0.bytesReceived += summary.bytes }
+        store.update { $0.recordsReceived += summary.received; $0.bytesReceived += summary.bytes; $0.echoRecords += summary.echoes }
         if summary.received > 0 { log("Imported \(summary.received) record(s)\(summary.customs > 0 ? ", \(summary.customs) custom" : "")") }
+        return !summary.saveFailed
     }
 
     private func importDeletions(_ deletions: [(CKRecord.ID, CKRecord.RecordType)]) {
@@ -1831,6 +1875,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         var bytes: Int64 = 0
         var uploads = 0
         var withoutMedia = 0
+        var editedInFlight: [String] = []
         for record in e.savedRecords {
             sent += 1
             let name = record.recordID.recordName
@@ -1871,10 +1916,21 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 }
                 store.update { $0.assetHashes[name] = hash }
             }
+            stateLock.lock(); let sentRevision = sentRevisions.removeValue(forKey: name); stateLock.unlock()
+            var keptNewer = false
             store.update {
                 $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record)
-                $0.outbox.removeAll { $0.recordName == name && $0.op == .save }
+                let settled = JournalOutboxSettle.settle(name: name, sentRevision: sentRevision, outbox: $0.outbox)
+                $0.outbox = settled.outbox
+                keptNewer = settled.keptNewer
             }
+            if keptNewer { editedInFlight.append(name) }
+        }
+        if !editedInFlight.isEmpty {
+            // B2: the person edited these while their send was in flight; the
+            // entry stays and the current values go up next.
+            queueToEngine(zoneChanges: editedInFlight.map { .saveRecord(CKRecord.ID(recordName: $0, zoneID: JournalRecordMapping.zoneID)) })
+            log("\(editedInFlight.count) record(s) edited again while their send was in flight: kept queued, sent again")
         }
         for recordID in e.deletedRecordIDs {
             store.update {

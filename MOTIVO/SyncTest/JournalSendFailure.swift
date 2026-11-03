@@ -56,6 +56,19 @@ enum JournalSendFailure {
     }
 }
 
+/// PURE. B2 (2026-11-03): what an accepted save does to the outbox. The entry
+/// leaves only when nothing merged into it after the batch was built; a later
+/// revision stays and is sent again with its current values.
+enum JournalOutboxSettle {
+    static func settle(name: String, sentRevision: Int?, outbox: [JournalSyncPendingChange]) -> (outbox: [JournalSyncPendingChange], keptNewer: Bool) {
+        guard let i = outbox.firstIndex(where: { $0.recordName == name && $0.op == .save }) else { return (outbox, false) }
+        if let sentRevision, outbox[i].revision > sentRevision { return (outbox, true) }
+        var out = outbox
+        out.remove(at: i)
+        return (out, false)
+    }
+}
+
 /// PURE. One storage-full episode: from the first refused save to the first
 /// accepted one. The engine keeps it in the state file so the status is right
 /// at the next launch and the diagnostics can show when it began.

@@ -79,7 +79,7 @@ final class JournalImporter {
         let name = record.recordID.recordName
         guard let attachmentName = JournalSyncRecordType.attachmentName(fromMeta: name),
               let id = UUID(uuidString: attachmentName) else { return false }
-        guard let attachment = fetch(entity: JournalSyncRecordType.attachment, id: id) else {
+        guard let attachment = freshRow(entity: JournalSyncRecordType.attachment, id: id) else {
             if let data = JournalSyncStateStore.encodeWholeRecord(record) {
                 store.update { $0.awaitingMeta[name] = data }
                 log("Holding metadata \(name) until its attachment arrives")
@@ -94,7 +94,7 @@ final class JournalImporter {
                 recordConflict(record, winner: .local, local: attachment)
                 return false
             }
-            recordConflict(record, winner: .server, local: attachment)
+            guard recordConflict(record, winner: .server, local: attachment) else { return false }
             queue?.removePendingSave(name)
         } else if pendingSave(name)?.metadataOnly == true {
             // The transition's copy meets a real one: the server's stands.
@@ -121,14 +121,37 @@ final class JournalImporter {
         self.customOwner = customOwner
     }
 
-    struct Summary { var received = 0; var bytes: Int64 = 0; var customs = 0 }
+    struct Summary { var received = 0; var bytes: Int64 = 0; var customs = 0
+        /// H3: the Core Data save of this batch failed and was rolled back; the
+        /// caller keeps its zone token so the batch is fetched again.
+        var saveFailed = false
+        var echoes = 0 }
 
     // MARK: Modifications
 
     /// Imports Session, Attachment and custom-row records (not SavedList).
     /// Must be called on the context's queue (`performAndWait`).
-    func importModifications(_ records: [CKRecord]) -> Summary {
+    func importModifications(_ incoming: [CKRecord]) -> Summary {
         var summary = Summary()
+        // B5 (2026-11-03): a fetch that was in flight when the person removed
+        // Études data from this device must not put the journal back.
+        let st = store.state
+        if st.localRemovalInProgress || st.localCopyRemoved {
+            log("Import refused: \(incoming.count) record(s) arrived \(st.localRemovalInProgress ? "during" : "after") a local removal; nothing applied")
+            return summary
+        }
+        // B1 (2026-11-03): this device's own accepted writes come back through
+        // the records-only catch-up with the change tag it already holds;
+        // applying them would overwrite an edit made since. Skipped unless a
+        // save is pending (then the conflict rule decides).
+        let pendingNames = Set(st.outbox.filter { $0.op == .save }.map(\.recordName))
+        let records = incoming.filter { record in
+            let name = record.recordID.recordName
+            let echo = !pendingNames.contains(name) && JournalEcho.isKnown(changeTag: record.recordChangeTag, storedSystemFields: st.lastKnownRecords[name])
+            if echo { summary.echoes += 1 }
+            return !echo
+        }
+        if summary.echoes > 0 { log("Own-write echo: \(summary.echoes) record(s) already held, skipped") }
         let sessions = records.filter { $0.recordType == JournalSyncRecordType.session }
         let attachments = records.filter { $0.recordType == JournalSyncRecordType.attachment }
         let metas = records.filter { $0.recordType == JournalSyncRecordType.attachmentMeta }
@@ -160,7 +183,7 @@ final class JournalImporter {
         for record in customs {
             if let object = importCustom(record) { importedCustoms.append(object); summary.received += 1; summary.customs += 1 }
         }
-        save()
+        if !save() { summary.saveFailed = true; summary.received = 0; summary.bytes = 0 }
         if !importedInstruments.isEmpty {
             store.update { st in
                 for object in importedInstruments where !object.objectID.isTemporaryID {
@@ -187,9 +210,12 @@ final class JournalImporter {
     func importSession(_ record: CKRecord) -> Bool {
         let name = record.recordID.recordName
         guard let id = UUID(uuidString: name) else { return false }
-        let existing = fetch(entity: JournalSyncRecordType.session, id: id)
+        let existing = freshRow(entity: JournalSyncRecordType.session, id: id)
         let localOwner = existing?.value(forKey: "ownerUserID") as? String
         let serverOwner = record["ownerUserID"] as? String
+        if let existing, pendingSave(name) == nil, !keepsNewerLocal(existing, over: record, type: JournalSyncRecordType.session) {
+            return false
+        }
         if existing != nil, let pending = pendingSave(name), pending.metadataOnly {
             // A migrated row meets its server copy: dropped only when that copy
             // already carries metadata fields; an older build's copy has less
@@ -206,7 +232,7 @@ final class JournalImporter {
                 recordConflict(record, winner: .local, local: existing)
                 return false
             }
-            recordConflict(record, winner: .server, local: existing)
+            guard recordConflict(record, winner: .server, local: existing) else { return false }
             queue?.removePendingSave(name)
         } else if existing != nil, pendingSave(name)?.ownerOnly == true {
             // Only the owner key is pending here: the server's content is
@@ -264,7 +290,20 @@ final class JournalImporter {
             hold(record, sessionRecordName: sidName)
             return (false, 0)
         }
-        let existing = fetch(entity: JournalSyncRecordType.attachment, id: id)
+        let existing = freshRow(entity: JournalSyncRecordType.attachment, id: id)
+        // B6 (2026-11-03): a record the server holds a file for, arriving
+        // without it (a failed per-record fetch), is not a row yet; the
+        // catch-up holds it by name and fetches it again. A sender that had
+        // no file at all (no hash) still delivers its row.
+        let serverHashNow = record[JournalRecordMapping.fileHashKey] as? String ?? ""
+        let carriesFile = heldFile != nil || (record[JournalRecordMapping.assetKey] as? CKAsset)?.fileURL != nil
+        if existing == nil, !carriesFile, !serverHashNow.isEmpty {
+            log("Attachment \(name) arrived without its file although the server holds one; not imported until the file is fetched")
+            return (false, 0)
+        }
+        if let existing, pendingSave(name) == nil, !keepsNewerLocal(existing, over: record, type: JournalSyncRecordType.attachment) {
+            return (false, 0)
+        }
         if existing != nil, let pending = pendingSave(name), pending.metadataOnly {
             if JournalMetadataFields.recordCarriesMetadata(record) { queue?.removePendingSave(name) }
         } else if let existing, localChangePending(name) {
@@ -275,7 +314,7 @@ final class JournalImporter {
                 recordConflict(record, winner: .local, local: existing)
                 return (false, 0)
             }
-            recordConflict(record, winner: .server, local: existing)
+            guard recordConflict(record, winner: .server, local: existing) else { return (false, 0) }
             queue?.removePendingSave(name)
         }
         let object = existing ?? NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.attachment, into: context)
@@ -653,7 +692,28 @@ final class JournalImporter {
         store.state.outbox.first { $0.recordName == recordName && $0.op == .save }
     }
 
-    private func recordConflict(_ server: CKRecord, winner: JournalConflictWinner, local: NSManagedObject) {
+    /// B1 (2026-11-03): no save is pending for this row, yet the server copy is
+    /// older than what this device holds (an own write echoed back after a
+    /// later edit, or another device's older edit uploaded late). The local
+    /// copy stands and goes up; the server's is the previous version, not a
+    /// conflict the person needs to see. Returns false when the local copy is
+    /// kept (the caller applies nothing).
+    private func keepsNewerLocal(_ existing: NSManagedObject, over record: CKRecord, type: String) -> Bool {
+        let local = existing.value(forKey: "userModifiedAt") as? Date
+        let server = JournalRecordMapping.userModifiedAt(of: record)
+        guard JournalConflictRule.decide(localUserModifiedAt: local, serverUserModifiedAt: server) == .local else { return true }
+        let name = record.recordID.recordName
+        store.update { $0.lastKnownRecords[name] = JournalSyncStateStore.encodeSystemFields(record) }
+        queue?.enqueueSave(name, recordType: type, ownerOnly: false)
+        log("Kept this device's newer copy of \(name.prefix(8))… over an older server copy; queued to go up")
+        return false
+    }
+
+    /// H2 (2026-11-03): returns whether the entry reached the state file. A
+    /// server win is applied only when it did, so the loser's text is on disk
+    /// before it is overwritten.
+    @discardableResult
+    private func recordConflict(_ server: CKRecord, winner: JournalConflictWinner, local: NSManagedObject) -> Bool {
         let loserTitle: String?
         let loserNotes: String?
         if winner == .server {
@@ -688,7 +748,9 @@ final class JournalImporter {
             conflict.subject = "Attachment" + (sessionRow.map { " in " + JournalRecoverySubject.session($0) } ?? "")
             conflict.restore = "attachment:\(server.recordID.recordName)"
         }
-        store.update { $0.conflicts.append(conflict) }
+        let saved = store.update { $0.conflicts.append(conflict) }
+        if !saved { log("Recovery entry for \(server.recordID.recordName.prefix(8))… could not be saved; the \(winner == .server ? "server copy is not applied" : "entry is lost") this round") }
+        return saved
     }
 
     /// `value(forKey:)` raises for a key the entity lacks (Attachment has no
@@ -717,12 +779,26 @@ final class JournalImporter {
         return (try? context.fetch(request))?.first
     }
 
-    func save() {
-        guard context.hasChanges else { return }
-        do { try context.save() } catch {
-            log("Import save failed: \(error.localizedDescription)")
+    @discardableResult
+    func save() -> Bool {
+        guard context.hasChanges else { return true }
+        do { try context.save(); return true } catch {
+            log("Import save failed: \(error.localizedDescription); the batch is fetched again")
             context.rollback()
+            return false
         }
+    }
+
+    /// B3 (2026-11-03): the row as the store holds it NOW. The import context
+    /// is long-lived and keeps what it last imported, so an object it still
+    /// registers carries the clock and text of that import, not the person's
+    /// later edit (C-118 proved it for sends; the conflict decision read the
+    /// same stale copy). An object inserted or changed in this batch is left
+    /// as it is: nothing local can have touched it meanwhile.
+    func freshRow(entity: String, id: UUID) -> NSManagedObject? {
+        guard let object = fetch(entity: entity, id: id) else { return nil }
+        if !object.isInserted, !object.hasChanges { context.refresh(object, mergeChanges: false) }
+        return object
     }
 }
 #endif

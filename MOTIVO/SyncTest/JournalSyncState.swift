@@ -59,13 +59,27 @@ struct JournalSyncPendingChange: Codable, Hashable {
 
     /// Sends without the asset.
     var assetFree: Bool { metadataOnly || metadataEdit }
+    /// B2 (2026-11-03): bumped each time a change merges into an entry that
+    /// already exists, so an accepted send clears the entry only if nothing
+    /// was edited while that send was in flight (`JournalOutboxSettle`).
+    var revision: Int = 0
 
     init(recordName: String, recordType: String, op: Op, ownerOnly: Bool = false, metadataOnly: Bool = false, metadataEdit: Bool = false) {
         self.recordName = recordName; self.recordType = recordType; self.op = op; self.ownerOnly = ownerOnly
         self.metadataOnly = metadataOnly; self.metadataEdit = metadataEdit
     }
 
-    private enum CodingKeys: String, CodingKey { case recordName, recordType, op, ownerOnly, metadataOnly, metadataEdit }
+    private enum CodingKeys: String, CodingKey { case recordName, recordType, op, ownerOnly, metadataOnly, metadataEdit, revision }
+    /// The revision is bookkeeping, not identity: two entries for the same
+    /// change are equal whatever their revision.
+    static func == (a: JournalSyncPendingChange, b: JournalSyncPendingChange) -> Bool {
+        a.recordName == b.recordName && a.recordType == b.recordType && a.op == b.op
+            && a.ownerOnly == b.ownerOnly && a.metadataOnly == b.metadataOnly && a.metadataEdit == b.metadataEdit
+    }
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(recordName); hasher.combine(recordType); hasher.combine(op)
+        hasher.combine(ownerOnly); hasher.combine(metadataOnly); hasher.combine(metadataEdit)
+    }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         recordName = try c.decode(String.self, forKey: .recordName)
@@ -74,6 +88,7 @@ struct JournalSyncPendingChange: Codable, Hashable {
         ownerOnly = try c.decodeIfPresent(Bool.self, forKey: .ownerOnly) ?? false
         metadataOnly = try c.decodeIfPresent(Bool.self, forKey: .metadataOnly) ?? false
         metadataEdit = try c.decodeIfPresent(Bool.self, forKey: .metadataEdit) ?? false
+        revision = try c.decodeIfPresent(Int.self, forKey: .revision) ?? 0
     }
 }
 
@@ -407,6 +422,10 @@ final class JournalSyncStateStore: @unchecked Sendable {
     private let lock = NSLock()
     private var current: JournalSyncPersistedState
     let fileURL: URL
+    /// Failed writes since launch (H1, 2026-11-03): a catch-up that saw one
+    /// keeps its zone token, so a hold that did not persist is fetched again.
+    private var failedWrites = 0
+    var writeFailures: Int { lock.lock(); defer { lock.unlock() }; return failedWrites }
 
     init(fileURL: URL) {
         self.fileURL = fileURL
@@ -452,6 +471,7 @@ final class JournalSyncStateStore: @unchecked Sendable {
             current = next
             return true
         } catch {
+            failedWrites += 1
             return false
         }
     }

@@ -208,9 +208,13 @@ final class JournalChangeTracker {
     /// (the token advances, nothing is queued), so an erase, interrupted or
     /// not, can never become server deletions. Transactions by the removal
     /// recovery's own author are skipped like the import context's.
+    /// Test hook: runs between the history read and the commit (B4).
+    static var testBeforeCommit: (() -> Void)?
+
     @discardableResult
     func processHistory() -> [JournalSyncPendingChange] {
-        let after = JournalSyncStateStore.decodeToken(store.state.historyToken)
+        let tokenAtRead = store.state.historyToken
+        let after = JournalSyncStateStore.decodeToken(tokenAtRead)
         var added: [JournalSyncPendingChange] = []
         var newToken: NSPersistentHistoryToken?
         var namesAdded: [String: String] = [:]
@@ -303,14 +307,23 @@ final class JournalChangeTracker {
         }
 
         guard newToken != nil || !added.isEmpty else { return [] }
+        Self.testBeforeCommit?()
+        // B4 (2026-11-03): the read above may have straddled a local removal's
+        // begin (which empties the outbox and sets the marker) or its finish
+        // (which fast-forwards the token). Commit only if neither moved under
+        // us; otherwise the batch deletes of the removal would enter the
+        // outbox and go up as server deletions at the next re-enable.
+        var committed = false
         let ok = store.update { st in
+            guard !st.localRemovalInProgress, st.historyToken == tokenAtRead else { return }
             for line in diagnostics.prefix(12) { st.log.append(.init(at: Date(), text: line)) }
             Self.merge(added, into: &st.outbox)
             st.customRecordNames.merge(namesAdded) { _, new in new }
             for uri in urisRemoved { st.customRecordNames.removeValue(forKey: uri) }
             if let newToken { st.historyToken = JournalSyncStateStore.encode(token: newToken) }
+            committed = true
         }
-        return ok ? added : []
+        return ok && committed ? added : []
     }
 
     /// Whether the attachment's file differs from what the server holds. Unknown
@@ -337,7 +350,9 @@ final class JournalChangeTracker {
                 // content save absorbs them (and will carry the file if it changed).
                 let existingPartial = outbox[i].ownerOnly || outbox[i].metadataOnly || outbox[i].metadataEdit
                 let incomingPartial = change.ownerOnly || change.metadataOnly || change.metadataEdit
+                let revision = outbox[i].revision + 1
                 if existingPartial && !incomingPartial { outbox[i] = change }
+                outbox[i].revision = revision
             } else {
                 outbox.append(change)
             }
