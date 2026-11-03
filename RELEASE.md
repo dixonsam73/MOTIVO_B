@@ -1626,11 +1626,37 @@ the join.
   label on; thread colours primed per screen; an in-flight transfer is
   CloudKit's (C-148); the derived avatar is 256 points at screen scale
   (C-146); the re-send route for a missing score uploads the library
-  (C-150); C-151; C-143 (Lists manager popover, production, iOS 27).
+  (C-150); C-151 (fixed 2026-11-03, below); C-143 (Lists manager popover, production, iOS 27).
+  **C-151 workflow, built 2026-11-03 (unit-tested; device verification is
+  Samuel's call).** Two halves, SYNCTEST only. *Online restoration:* the
+  set-up screen shows a card above the name field (`SyncTestRestoreCard`,
+  rule `JournalRestoreOffer.decide`, pure): after a device-only removal,
+  "Restore from iCloud" re-enables sync from there (the binding was kept),
+  the first fetch fills the empty Profile row and links the primary
+  instrument to it (the import now creates the row before it resolves the
+  instrument), so the set-up gate closes by itself and the name step is
+  skipped; a cloud name arriving while the screen is up replaces the field
+  with a note; while the first fetch is pending the card says so and
+  offers a retry after a failed catch-up; while sync is paused it names the
+  reason; after a complete fetch with no cloud profile it says so. *Offline
+  setup:* a profile edit found by the scan before this device's first
+  complete fetch is clocked but **provisional** (`profileStampProvisional`
+  in the state file, shown on the diagnostics' Profile clock row): it
+  merges as UNCLOCKED, so a clocked cloud profile wins the whole record
+  and the typed name and instrument are on the Displaced by sync list with
+  Restore (a new clocked edit, which wins everywhere); an unclocked cloud
+  profile meets it field by field as two established profiles do. The mark
+  clears at every profile import and at the first complete fetch, where a
+  typed clock stands if the cloud holds no profile (logged). The outgoing
+  record still carries the clock, so a first device's typed profile is a
+  real one. Unit tests: `SyncTestProfileTests` +2 (the device scenario of
+  section 7 with "Temp" against "Name A", restore, the pure rule both
+  ways; the online restore with the gate's two conditions and the offer's
+  states). The selection is 172 tests green under SyncTest; Debug and
+  Release build. Not covered here: the device run (Samuel decides; the
+  iPad Sync Test install is the disposable copy).
   **Follow-ups before main-build integration (agreed 2026-11-03):** the
-  bounded C-151 workflow (restoration offered at onboarding before a name
-  is asked; a name typed offline must not silently overwrite the
-  established cloud profile on reconnect) and iCloud storage-full handling
+  bounded C-151 workflow (built, above; device verification pending) and iCloud storage-full handling
   and recovery (local content and pending work preserved, clear status,
   controlled retries, recovery once space exists; simulated quota
   failures only).
