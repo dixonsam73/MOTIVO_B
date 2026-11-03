@@ -1400,8 +1400,10 @@ the join.
   index is unreadable leaves the item here, and it is uploaded again once
   the index reads.
   **Stage J, settings, colours, recovery, mobile data, removal wording and
-  the missing-score state: BUILT 2026-10-27, clarified 2026-10-28, device run
-  pending; build 1867 (`3de231a`, `3ede45c`, `fe7c0d8` and the record commit).** Scope (Samuel, 2026-10-27): primary activity; Lists
+  the missing-score state: PASSED on device 2026-11-03; final build 1880
+  (`31bb9e9`, the C-149 commit) plus this record's commit; built 2026-10-27,
+  clarified 2026-10-28, device run 2026-10-28 and 2026-11-03 on builds 1867
+  to 1880, commits `3de231a` … `31bb9e9` (seventeen, all unpushed).** Scope (Samuel, 2026-10-27): primary activity; Lists
   defaults, autofill choices and typed presets per (activity, instrument)
   context; the Journal Tint preference; consistent thread and instrument
   colours; a user-facing recovery view for displaced text; media over Wi-Fi
@@ -1475,27 +1477,50 @@ the join.
   request; ordinary Wi-Fi and wired links carry media whatever the option;
   text, settings, metadata and deletions sync on any link. While media is
   held, outgoing records that would carry a file stay in the outbox, and
-  because `CKSyncEngine` fetches every asset with its record, the engine
-  is rebuilt WITHOUT automatic sync (the stage E drop-and-rebuild path:
-  the old instance's later events are ignored, the activation re-asks the
-  account guard) and the app fetches records itself through the asset-free
-  delta catch-up, holding by name each record whose file it needs ("n to
-  receive"); a change of reason alone (mobile data → Low Data Mode) is a
-  status change, no rebuild; the app's own `CKDatabaseSubscription`
-  ("etudes-journal-app-wake") brings a push to `SyncTestAppDelegate` while
-  the engine is not automatic (`remote-notification` in
-  `Info-SyncTest.plist` only; the production `Info.plist` line added in
-  `3de231a` was taken out again, to land with main-build integration —
-  ordinary builds have no CloudKit or push entitlement, no engine, no
-  subscription and no `registerForRemoteNotifications`, all of which are
-  `#if SYNCTEST`). When the hold lifts, the automatic engine returns, held
-  records are fetched with their files and held uploads are requeued. What
-  the app enforces is which records it hands to CloudKit and which it
-  fetches; an operation already in flight on the dropped engine finishes
-  or fails on CloudKit's own schedule, and its result is ignored (the
-  record stays in the outbox and is resent as a normal conflict-checked
-  save), so the device run reads the log, not byte counters, for that
-  case.
+  the app's asset-free delta catch-up holds by name each record whose
+  file it needs ("n to receive"); when the hold lifts those are fetched
+  with their files and the held uploads go. **The engine never fetches
+  (C-149, 2026-11-03).** `CKSyncEngine` fetches every asset with its
+  record and cannot leave files out; the first design rebuilt it without
+  automatic sync only while media was held, and each return to automatic
+  sync then re-fetched, with files, everything changed meanwhile (104 MB
+  on mobile data at 12:44 on 2026-11-03, own uploads echoed back on both
+  devices). Now the engine is built with automatic sync off always and
+  only sends; the app's records-only catch-up, with its own zone token,
+  is the only fetch: on activation (the whole zone, records only, when
+  there is no token yet, which marks the first complete fetch that
+  ownership adoption waits on), on every silent push (the app's own
+  `CKDatabaseSubscription` "etudes-journal-app-wake" and the engine's,
+  through `SyncTestAppDelegate`; `remote-notification` is in
+  `Info-SyncTest.plist` only, the production `Info.plist` line added in
+  `3de231a` was taken out again — ordinary builds have no CloudKit or push
+  entitlement, no engine, no subscription and no
+  `registerForRemoteNotifications`, all `#if SYNCTEST`), on the
+  foreground, on a 75 s poll while the app is active (pushes are Apple's
+  and best effort: four sends took eight minutes to arrive by push on
+  2026-11-03, C-147), and from the diagnostics; a file is fetched by name
+  only where it is new here, never when the file held matches the
+  server's hash. One catch-up runs at a time. A hold change rebuilds
+  nothing: a change of reason is a status change, held → allowed releases
+  what waited and asks for a send. Outgoing work is unchanged: a send is
+  asked for 1.5 s after each queue and after each catch-up, which is also
+  the retry for deferred sends. Recovery is defined in
+  `JournalCatchUp.recovery(for:)`: a transient error waits for the next
+  trigger; an expired zone token clears it and re-reads the whole zone
+  records-only (the one unavoidable full fetch); a missing or deleted
+  zone drops engine state and tokens and rebuilds fresh, the zone
+  recreated on the next send. The account decision before every fetch,
+  send and activation, `isCurrent` for engine events, and the dormant
+  states (unlink, removal, account mismatch) are untouched. What the app
+  enforces is which records it hands to CloudKit and which files it
+  fetches; a transfer CloudKit has already begun finishes on its own
+  schedule, mobile data included, and the app cannot pause or cancel it
+  (C-148): a 132 MB upload begun on Wi-Fi at 12:04:57 survived the cut to
+  mobile data and was on the server by 12:08:13 with no app counter
+  showing any of it, so "Media over mobile data off" means no NEW file
+  transfer starts on mobile data. A rebuilt engine (account transitions
+  only, now) asks the server which files it already holds before its
+  first batch, so such an upload is not sent again.
   (7) *Removal wording* (SYNCTEST): "Remove Études Data from This Device",
   confirm word REMOVE, and the confirmation says the private iCloud
   journal and other devices are unchanged, sync is turned off on this
@@ -1527,20 +1552,88 @@ the join.
   full-target run also shows seven order-dependent sharing tests
   (`JournalDeleteQueuedPublishTests`, `P6I02…`, `P6I03…`) that pass in
   isolation, as recorded under "Test hygiene".
-  Debug, Release and SyncTest build. **Device run pending** (script
-  `stage-J-device-script.md` in the notes folder): primary activity and
-  list defaults both ways with differing instrument ids; explicit clears
-  surviving relaunch and reconnect; colours preserved, converging and
-  stable; tint syncing while tool toggles stay independent; a displaced
-  value recovered through the view; mobile data with the option off
-  (metadata arriving, media pending both ways, released by the option or
-  Wi-Fi), Wi-Fi → mobile data → Wi-Fi with pending media, an active
-  transfer and a relaunch, an avatar and a score as well as an attachment,
-  no duplicate records or repeat transfers once released, Low Data Mode
-  with the option on; the engine rebuild's guards read from the log; a
-  restoration arriving on the other device as a normal edit; a missing
-  score file's visible state; device-only removal on the iPad's disposable
-  copy.
+  Final totals 2026-11-03 on `31bb9e9`: the same selection is 170 tests
+  green under SyncTest (the five added: unsent-edit-only displacement for
+  the profile and avatar, the catch-up serialiser and recovery map, the
+  file-carrying types and the no-refetch rule); Debug and Release build.
+  **Device run (iPhone "SD iPhone" and iPad, both Sync Test installs, iOS
+  and iPadOS 27.0.1; 2026-10-28 on 1867–1870, 2026-11-03 on 1871–1880;
+  evidence is each device's state file read over the cable, never a
+  network counter):** *Section 1, settings* — Journal Tint and primary
+  activity both ways, identical clocks on both state files; an explicit
+  reset to the default travels; an offline edit sent once on reconnect;
+  tool toggles stayed per device. Rule learnt: a device at a default
+  sends nothing at the transition, so an explicit value beats a default.
+  *Section 2, list contexts* — Viola held different ids on the two devices
+  and shared one record; default list, autofill off and a typed preset
+  both ways; an offline default change sent once; a Lute instrument and
+  its context arriving together created the instrument first. *Section 3,
+  colours* — two clashes: on the first the sanitiser moved the FIRST
+  upload's label (fixed `0c82b23`: the later device's own new label
+  relocates to the next free slot, the first upload stands); on the
+  second both new labels wrapped to the shared fifth slot, maps identical
+  on both, one send each, stable across relaunch; thread colours matched
+  once primed from the same screen. *Section 4, recovery* — a conflicting
+  notes edit, a profile name and a profile photo each displaced on the
+  loser with Copy and Restore; each Restore went up as a new clocked edit
+  and the other device applied it as a plain import. Found and fixed:
+  the loser's ordinary later edit appeared on the WINNER's list with
+  Restore (C-144, profile, avatar, settings, list contexts, score
+  metadata: displaced only while this device's save is unsent); the same
+  photo uploaded twice (C-145). *Section 5, mobile data* — step 3 held
+  the iPad's photo, profile photo and score ("3 to receive") and the
+  iPhone's own photo ("1 to send") while text, the score rename, the
+  tint and a deletion crossed; released once each by the option (step 6)
+  and by joining Wi-Fi (step 7), avatar byte counter up by exactly the
+  two profile photos; the held state survived two relaunches (step 5);
+  Low Data Mode paused media with the option on, on Wi-Fi (both devices,
+  since iCloud syncs the network setting) and on mobile data, and
+  released on Standard (step 8); the hotspot step was not exercised
+  (Device A has no data plan; the rule is unit-tested and a real
+  hotspot-flagged path on 2026-10-28 held and released correctly). Found
+  and fixed in this section: the push wait (C-147), the in-flight upload
+  resent by a rebuilt engine and fetched back on release (C-148), and the
+  engine's own re-fetch of everything with files on each return to
+  automatic sync (C-149, the mechanism change above). *Section 6,
+  missing score file* — the item stayed listed as unavailable with the
+  count at 1, took a rename from the iPhone while unavailable, and the
+  iPhone's re-send restored exactly the missing file (203,871 bytes
+  written); the re-send route uploads the whole library (19.7 MB), so
+  C-150 proposes self-restore from the server. *Section 7, device-only
+  removal* — the confirmation text as designed; after REMOVE three
+  launches logged no fetch, send or subscription save, server knowledge
+  and tokens cleared, the binding kept; Re-enable brought everything back
+  once (160 records, 47 files). The onboarding name typed before
+  re-enabling beat the cloud name by the newer-clock rule: **C-151,
+  unresolved**, not accepted as user behaviour. *C-149 re-run on 1880
+  (R1–R7, 14:00–14:32, about 45 minutes with the build):* pushes, the
+  poll and the foreground each drove a catch-up; seven deletions arrived
+  by poll and push; held downloads and uploads released once by the
+  option and by Wi-Fi; offline work survived two relaunches and went up
+  once; Low Data Mode paused and released; removal and re-enable as in
+  section 7 with the first fetch app-driven. Counters over the whole
+  re-run: the iPhone downloaded 6,314,487 bytes, exactly what the iPad
+  sent, and the iPad 12,322,719 bytes, exactly what the iPhone sent; echo
+  bytes and echo records 0 on both devices; every file fetched by name
+  once. One unavoidable records-only read of the whole zone happened on
+  the iPad at the 1880 launch (its zone token had never been established
+  under the old mechanism; 0 files). Also seen: an offline notes edit on
+  the iPhone displaced when the iPad added a photo to the SAME entry
+  (whole-record rule, known), and the status says "Running" rather than
+  "offline" in Airplane Mode (polish, not done). *Remaining limitations:*
+  the whole-record rule for a session when one device edits text and the
+  other adds media; the four-colour palette shares a slot from the fifth
+  label on; thread colours primed per screen; an in-flight transfer is
+  CloudKit's (C-148); the derived avatar is 256 points at screen scale
+  (C-146); the re-send route for a missing score uploads the library
+  (C-150); C-151; C-143 (Lists manager popover, production, iOS 27).
+  **Follow-ups before main-build integration (agreed 2026-11-03):** the
+  bounded C-151 workflow (restoration offered at onboarding before a name
+  is asked; a name typed offline must not silently overwrite the
+  established cloud profile on reconnect) and iCloud storage-full handling
+  and recovery (local content and pending work preserved, clear status,
+  controlled retries, recovery once space exists; simulated quota
+  failures only).
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
