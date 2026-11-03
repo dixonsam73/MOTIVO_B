@@ -1747,6 +1747,35 @@ the join.
   decisions are set out as scenarios in the report (a cleared iCloud zone,
   what a lost session keeps, ownerless entries) and nothing here depends
   on them.
+  **Device scenarios, build 1888 (`765d2ea`), iPhone "SD iPhone" and iPad
+  Sync Test installs, 2026-11-03 19:22–19:40 (state files over the cable):**
+  *(a) offline notes edit meets a photo added to the same entry* — order 1
+  (iPhone edit newer): the deferred edit went up once on reconnect, the
+  iPad imported it, no displaced entry on either device; order 2 (iPad
+  photo newer): the whole-record rule applied, both photos on both devices,
+  the iPhone listed "Notes (this device)" with exactly the typed text
+  ("E / iPhone notes, order 2"), Restore went up as one record and the
+  iPad applied it, entry resolved. Own-write echoes skipped on both devices
+  after every send ("Own-write echo: n record(s) already held, skipped";
+  iPhone echoes +4, iPad +3); bytes received equal to the other device's
+  upload exactly (1,137,683 and 2,357,000). *(b) remove during a fetch* —
+  two attempts: the iPad's fetch of a 132 MB video (19:32:37) and of an
+  84 MB video (19:39:02) each completed before REMOVE could be reached
+  (8 s and 24 s later), and the restore's first fetch (172 records,
+  51 files) took 5 s, so the in-flight case is NOT reachable by hand on
+  this Wi-Fi; both removals were clean (outbox empty, no deletion queued,
+  server knowledge cleared), two relaunches each stayed paused with no
+  fetch or send, "Restore from iCloud" on the set-up card brought the full
+  journal back both times with the set-up screen closing by itself, and
+  the iPhone's counters and log show no deletion applied. B5's guard and
+  C-156's second guard therefore stand on the unit tests and the code
+  reading; the removal and restore paths are device-verified. *(c) file
+  fetch cut mid-catch-up* — not attempted: the same two-second fetches
+  leave no window to cut; B6 stands on `testB6` (hold and refusal) and
+  the stage J section 5 device evidence for the hold-and-release path it
+  reuses. Hands-on: Samuel ≈ 20 min at the devices for (a) and (b) plus
+  ≈ 10 min for the storage-full check earlier; agent ≈ 1 h 10 min for the
+  review's fixes, tests and records, the rest waiting on builds.
   *Device evidence (state files over the cable, 17:24–17:34):* with the
   simulation on, the iPhone's first refused send at 17:25:56 logged ONE
   episode line (3 saves refused, 3 waiting); three later bursts of edits
