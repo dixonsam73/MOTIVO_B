@@ -16,6 +16,10 @@
 //  rejected-send handler for attachment metadata, and the deferred
 //  rejected-send handlers after a local removal. Same method.
 //
+//  Round 3 (R11–R13, Codex's check of d0062cb): a copy that fails in the
+//  ordinary catch-up, a replacement at the row's own materialised path, and
+//  the custom-row / Instrument rejected-send branch.
+//
 
 #if SYNCTEST
 import XCTest
@@ -468,6 +472,112 @@ final class SyncTestStep0ReviewTests: XCTestCase {
                                                generation: generation)
         XCTAssertFalse(listIDs(scope: scope).contains(after), "R10: nothing is written onto a removed copy")
         XCTAssertTrue(store.state.localRemovalInProgress)
+    }
+    // MARK: R11 — a copy that fails in the ordinary catch-up
+
+    @MainActor
+    func testR11_ACopyThatFailsInTheCatchUpHoldsTheRecordByNameAndRetries() async throws {
+        let sid = UUID(), aid = UUID()
+        let file = tempDir.appendingPathComponent("photo.jpg")
+        try Data("jpeg bytes".utf8).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path) }
+        let destination = JournalRecordMapping.materialisedURL(recordName: aid.uuidString, ext: "jpg")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let records = [sessionRecord(id: sid, notes: "", modified: Date(), tag: "s"),
+                       attachmentRecord(id: aid, sessionID: sid, file: file, hash: "h1", tag: "a1")]
+        let engine = makeEngine()
+        engine.holdMediaForTesting(.lowDataMode) // the batch must not end in a CloudKit release here
+        XCTAssertTrue(store.state.awaitingMedia.isEmpty, "precondition: nothing is held before the batch")
+        let complete = await engine.applyFetchedBatch(modified: records, deleted: [], newToken: nil, assetsFetched: 1,
+                                                      generation: 0, reason: "test", writeFailuresBefore: store.writeFailures)
+        XCTAssertTrue(complete, "the batch is complete: the retry is on disk")
+        XCTAssertEqual(rowCount("Session"), 1)
+        XCTAssertEqual(rowCount("Attachment"), 0)
+        XCTAssertEqual(store.state.awaitingMedia, [aid.uuidString], "R11: the record waits by name, not lost behind the token")
+        // Relaunch, the file readable: the release applies it once.
+        store = JournalSyncStateStore(fileURL: store.fileURL)
+        XCTAssertEqual(store.state.awaitingMedia, [aid.uuidString])
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+        let working = makeEngine()
+        let released = await working.applyReleasedMedia(full: [records[1]], gone: [], generation: 0)
+        XCTAssertEqual(released, [aid.uuidString])
+        XCTAssertTrue(store.state.awaitingMedia.isEmpty)
+        XCTAssertEqual(rowCount("Attachment"), 1)
+        XCTAssertEqual(try Data(contentsOf: destination), Data("jpeg bytes".utf8))
+    }
+
+    // MARK: R12 — a replacement at the row's own materialised path
+
+    func testR12_AReplacementAtTheMaterialisedPathKeepsThePreviousBytesUntilTheRowIsCommitted() throws {
+        let sid = UUID(), aid = UUID()
+        let (imp, ictx, _) = importer()
+        let first = tempDir.appendingPathComponent("first.jpg")
+        try Data("first bytes".utf8).write(to: first)
+        ictx.performAndWait {
+            _ = imp.importModifications([sessionRecord(id: sid, notes: "", modified: Date(), tag: "s")])
+            _ = imp.importModifications([attachmentRecord(id: aid, sessionID: sid, file: first, hash: "h1", tag: "a1", modified: Date().addingTimeInterval(-600))])
+        }
+        let destination = JournalRecordMapping.materialisedURL(recordName: aid.uuidString, ext: "jpg")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        XCTAssertEqual(value("Attachment", aid, "fileURL") as? String, destination.path, "precondition: the row's file IS the materialised path")
+        XCTAssertEqual(try Data(contentsOf: destination), Data("first bytes".utf8))
+        let replacement = tempDir.appendingPathComponent("replacement.jpg")
+        try Data("replacement bytes".utf8).write(to: replacement)
+        let server = attachmentRecord(id: aid, sessionID: sid, file: replacement, hash: "h2", tag: "a2", modified: Date())
+        // (a) A local edit is pending and the recovery entry cannot be saved.
+        store.update { JournalChangeTracker.merge([.init(recordName: aid.uuidString, recordType: JournalSyncRecordType.attachment, op: .save)], into: &$0) }
+        try makeStateUnwritable(true)
+        var outcome = JournalImporter.Summary()
+        ictx.performAndWait { outcome = imp.importModifications([server]) }
+        try makeStateUnwritable(false)
+        XCTAssertEqual(outcome.received, 0)
+        XCTAssertEqual(try Data(contentsOf: destination), Data("first bytes".utf8), "R12: the previous bytes stay until the recovery entry is on disk")
+        XCTAssertNotNil(pendingSave(aid), "the edit stays queued")
+        store.update { $0.outbox.removeAll() }
+        // (b) No pending edit; the store cannot commit the row.
+        let readOnly = try Self.openStore(at: tempDir.appendingPathComponent("store.sqlite"), readOnly: true)
+        let (failing, fctx, _) = importer(on: readOnly)
+        fctx.performAndWait { outcome = failing.importModifications([server]) }
+        XCTAssertTrue(outcome.saveFailed)
+        XCTAssertEqual(try Data(contentsOf: destination), Data("first bytes".utf8), "R12: the previous bytes stay until the row is committed")
+        XCTAssertEqual(store.state.assetHashes[aid.uuidString], "h1")
+        // (c) Both succeed: the replacement is in place and nothing is left beside it.
+        ictx.performAndWait { outcome = imp.importModifications([server]) }
+        XCTAssertEqual(outcome.received, 1)
+        XCTAssertEqual(try Data(contentsOf: destination), Data("replacement bytes".utf8))
+        XCTAssertEqual(store.state.assetHashes[aid.uuidString], "h2")
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: destination.deletingLastPathComponent().path)
+            .filter { $0.contains(aid.uuidString) && $0 != destination.lastPathComponent }
+        XCTAssertTrue(leftovers.isEmpty, "no copy of the previous bytes is left behind: \(leftovers)")
+    }
+
+    // MARK: R13 — the custom-row / Instrument rejected-send branch
+
+    func testR13_ARejectedCustomRowSendWhoseServerCopyCannotBeSavedKeepsTheEditQueued() throws {
+        let cid = UUID()
+        let (imp, ictx, _) = importer(customOwner: "k2-test")
+        ictx.performAndWait { _ = imp.importModifications([customActivityRecord(id: cid, name: "Sight reading", tag: "c1")]) }
+        XCTAssertEqual(rowCount("UserActivity"), 1)
+        // Renamed here; the rename is queued.
+        try setSyncValue("UserActivity", cid, "displayName", "Sight-reading practice")
+        store.update { JournalChangeTracker.merge([.init(recordName: cid.uuidString, recordType: JournalSyncRecordType.userActivity, op: .save)], into: &$0) }
+        let server = customActivityRecord(id: cid, name: "Sight reading (other device)", tag: "c2")
+        // The store cannot commit the server copy: the edit stays queued and the copy is not yet known.
+        let readOnly = try Self.openStore(at: tempDir.appendingPathComponent("store.sqlite"), readOnly: true)
+        let (failing, fctx, _) = importer(on: readOnly, customOwner: "k2-test")
+        var resend = true
+        fctx.performAndWait { resend = failing.resolveSendConflict(recordType: JournalSyncRecordType.userActivity, recordName: cid.uuidString, server: server) }
+        XCTAssertFalse(resend)
+        XCTAssertEqual(value("UserActivity", cid, "displayName") as? String, "Sight-reading practice", "nothing applied without a committed save")
+        XCTAssertNotNil(pendingSave(cid), "R13: the edit stays queued")
+        XCTAssertNotEqual(store.state.knownChangeTags[cid.uuidString], "c2", "the server copy is known only once applied, so the resend is rejected and resolved again")
+        // Committed: the server's name stands and the send is settled.
+        ictx.performAndWait { resend = imp.resolveSendConflict(recordType: JournalSyncRecordType.userActivity, recordName: cid.uuidString, server: server) }
+        XCTAssertFalse(resend)
+        XCTAssertEqual(value("UserActivity", cid, "displayName") as? String, "Sight reading (other device)")
+        XCTAssertNil(pendingSave(cid))
+        XCTAssertEqual(store.state.knownChangeTags[cid.uuidString], "c2")
     }
 }
 #endif

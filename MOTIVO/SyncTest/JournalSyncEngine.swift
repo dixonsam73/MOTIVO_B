@@ -2086,6 +2086,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     /// Test seam: the lifecycle generation a deferred handler snapshots.
     func generationForTesting() -> Int { stateLock.lock(); defer { stateLock.unlock() }; return dormantGeneration }
+    /// Test seam: a media hold, so a test batch ends without a CloudKit release.
+    func holdMediaForTesting(_ hold: JournalMediaGate.Hold) { stateLock.lock(); mediaHoldValue = hold; stateLock.unlock() }
 
     /// The deferred half of a rejected-send conflict for the families whose
     /// apply runs on the main actor (lists) or through their own stage

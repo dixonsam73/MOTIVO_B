@@ -1863,12 +1863,24 @@ the join.
   transition copy is simply superseded, as the catch-up does); the
   deferred handlers check the generation inside their apply step. R10's
   test drives the list branch; the score and settings branches share its
-  guard and are source-traced. Tests: `SyncTestStep0ReviewTests` (10);
-  the selection is 202 tests green under SyncTest; Debug and Release
-  build. No device run. Noted for the next round, not changed: the
-  custom-row and Instrument branch of `resolveSendConflict` still applies
-  the server copy with an unchecked `save()` and drops the pending send
-  regardless (R9's shape; not among the four items).
+  guard and are source-traced. **Codex's check of `d0062cb` left three
+  bounded cases, R11–R13 (C-166 extended, C-170), fixed and
+  unit-verified 2026-11-03, each reproduced first on `d0062cb`:** R11 a
+  copy failing in the ordinary catch-up let the batch complete and
+  advance its token with no retry (the record is now held by name in
+  `awaitingMedia`; a hold that cannot be written leaves the batch
+  incomplete, so the token is kept); R12 a replacement at the row's own
+  materialised path overwrote its bytes before the recovery entry and
+  the save (the previous bytes are now moved beside the file, named by
+  the hash they belong to, put back on a rolled-back save or a refused
+  conflict, and removed only after the save; tested with the recovery
+  write failing and with the database save failing); R13 the custom-row
+  and Instrument branch of `resolveSendConflict` recorded the server copy
+  as known, ignored a failed save and dropped the pending send (now
+  known and settled only once the save is committed, so a resend
+  meanwhile is rejected and resolved again). Tests:
+  `SyncTestStep0ReviewTests` (13); the selection is 205 tests green under
+  SyncTest; Debug and Release build. No device run.
   **Follow-ups before main-build integration (agreed 2026-11-03):** the
   bounded C-151 workflow (built, above; device verification pending) and iCloud storage-full handling
   and recovery (local content and pending work preserved, clear status,

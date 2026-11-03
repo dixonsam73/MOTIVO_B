@@ -160,9 +160,13 @@ final class JournalImporter {
     /// once linked). A rolled-back save keeps them.
     private var hashesAfterSave: [String: String] = [:]
     private var removeAfterSave: [URL] = []
+    /// R12 (2026-11-03): a replacement written over the row's own file keeps
+    /// the previous bytes beside it until the save; a rolled-back save puts
+    /// them back.
+    private var restoreOnRollback: [(previous: URL, destination: URL)] = []
     private func commitKnown() {
         let pending = knownAfterSave, hashes = hashesAfterSave, removals = removeAfterSave
-        knownAfterSave.removeAll(); hashesAfterSave.removeAll(); removeAfterSave.removeAll()
+        knownAfterSave.removeAll(); hashesAfterSave.removeAll(); removeAfterSave.removeAll(); restoreOnRollback.removeAll()
         if !pending.isEmpty || !hashes.isEmpty {
             store.update { st in
                 for (name, entry) in pending { st.lastKnownRecords[name] = entry.0; st.knownChangeTags[name] = entry.1 }
@@ -394,15 +398,32 @@ final class JournalImporter {
         var fileURLAfterCopy: String?
         var hashAfterSave: String?
         var previousFile: URL?
+        // R12: when the row's own file IS the destination, its bytes are kept
+        // beside it (named by the hash they belong to) until the row is saved.
+        var keptInPlace: URL?
         if existingFile == nil || replaced {
             if let sourceURL, FileManager.default.fileExists(atPath: sourceURL.path) {
                 let incoming = JournalAssetHash.stamp(of: sourceURL)?.size ?? 0
                 let present = JournalAssetHash.stamp(of: destination)?.size
                 if present != incoming || replaced {
-                    guard materialise(sourceURL, at: destination) else {
-                        log("Attachment \(name) not imported: \(replaced ? "the previous file is kept" : "no file in place") and the record is fetched again")
+                    let previous: URL? = (replaced && existingFile?.path == destination.path && knownHash != nil)
+                        ? Self.previousURL(for: destination, hash: knownHash ?? "") : nil
+                    guard materialise(sourceURL, at: destination, keeping: previous) else {
+                        // R11: the record waits by name, like a file that could
+                        // not be fetched, and is fetched again with the next
+                        // catch-up or release; a hold that cannot be written
+                        // leaves the batch incomplete (H1), so the token is kept.
+                        if heldFile == nil {
+                            store.update { st in
+                                let before = st.awaitingMedia.count
+                                st.awaitingMedia = JournalMediaHold.adding([name], to: st.awaitingMedia)
+                                st.mediaDownloadsHeld += st.awaitingMedia.count - before
+                            }
+                        }
+                        log("Attachment \(name) not imported: \(replaced ? "the previous file is kept" : "no file in place"); held by name and fetched again")
                         return (false, 0)
                     }
+                    keptInPlace = previous
                     bytes = incoming
                 }
                 if replaced, let old = existingFile, old.path != destination.path {
@@ -423,7 +444,10 @@ final class JournalImporter {
         }
 
         if serverWinsPendingEdit, let existing {
-            guard recordConflict(record, winner: .server, local: existing) else { return (false, 0) }
+            guard recordConflict(record, winner: .server, local: existing) else {
+                if let keptInPlace { Self.restore(previous: keptInPlace, to: destination) }
+                return (false, 0)
+            }
             queue?.removePendingSave(name)
         }
         if dropsTransitionCopy { queue?.removePendingSave(name) }
@@ -438,6 +462,7 @@ final class JournalImporter {
         if let fileURLAfterCopy { object.setValue(fileURLAfterCopy, forKey: "fileURL") }
         if let hashAfterSave { hashesAfterSave[name] = hashAfterSave }
         if let previousFile { removeAfterSave.append(previousFile) }
+        if let keptInPlace { removeAfterSave.append(keptInPlace); restoreOnRollback.append((keptInPlace, destination)) }
         if heldFile != nil, let sourceURL { removeAfterSave.append(sourceURL) }
         noteKnownAfterSave(record)
         applyHeldMeta(for: name)
@@ -445,20 +470,48 @@ final class JournalImporter {
     }
 
     /// R7: copies beside the destination and moves into place, so a copy that
-    /// fails leaves whatever was at the destination as it was.
-    private func materialise(_ source: URL, at destination: URL) -> Bool {
+    /// fails leaves whatever was at the destination as it was. R12: with
+    /// `keeping`, the bytes at the destination are moved there first (an
+    /// earlier attempt's copy of the same hash is kept as it is; any other
+    /// stale copy is removed), so a rolled-back save can put them back.
+    private func materialise(_ source: URL, at destination: URL, keeping previous: URL?) -> Bool {
+        let fm = FileManager.default
         let staging = destination.deletingLastPathComponent().appendingPathComponent(".\(destination.lastPathComponent).part")
-        try? FileManager.default.removeItem(at: staging)
+        try? fm.removeItem(at: staging)
         do {
-            try FileManager.default.copyItem(at: source, to: staging)
-            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
-            try FileManager.default.moveItem(at: staging, to: destination)
+            try fm.copyItem(at: source, to: staging)
+            if let previous {
+                let dir = destination.deletingLastPathComponent(), prefix = destination.lastPathComponent + Self.previousInfix
+                for stale in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] where stale.hasPrefix(prefix) && stale != previous.lastPathComponent {
+                    try? fm.removeItem(at: dir.appendingPathComponent(stale))
+                }
+                if fm.fileExists(atPath: destination.path) {
+                    if fm.fileExists(atPath: previous.path) { try fm.removeItem(at: destination) }
+                    else { try fm.moveItem(at: destination, to: previous) }
+                }
+            } else if fm.fileExists(atPath: destination.path) {
+                try fm.removeItem(at: destination)
+            }
+            try fm.moveItem(at: staging, to: destination)
             return true
         } catch {
             log("Could not materialise \(destination.lastPathComponent): \(error.localizedDescription)")
-            try? FileManager.default.removeItem(at: staging)
+            try? fm.removeItem(at: staging)
             return false
         }
+    }
+
+    private static let previousInfix = ".previous-"
+    static func previousURL(for destination: URL, hash: String) -> URL {
+        destination.deletingLastPathComponent().appendingPathComponent(destination.lastPathComponent + previousInfix + String(hash.prefix(12)))
+    }
+
+    /// Puts the kept bytes back after a rolled-back save or a refused conflict.
+    static func restore(previous: URL, to destination: URL) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: previous.path) else { return }
+        try? fm.removeItem(at: destination)
+        try? fm.moveItem(at: previous, to: destination)
     }
 
     private func hold(_ record: CKRecord, sessionRecordName: String) {
@@ -698,15 +751,22 @@ final class JournalImporter {
             return false
         }
         guard let id = UUID(uuidString: recordName), let local = freshObject(entity: recordType, id: id) else { return false }
-        noteKnown(server)
         if JournalSyncRecordType.customs.contains(recordType) || recordType == JournalSyncRecordType.instrument {
+            // R13 (2026-11-03): the pending send goes only once the server copy
+            // is committed, and the copy is known only then, so a send that is
+            // tried again meanwhile is rejected and resolved again.
             _ = JournalRecordMapping.apply(server, to: local)
             if JournalSyncRecordType.customs.contains(recordType), let owner = customOwner { local.setValue(owner, forKey: "ownerUserID") }
-            save()
+            noteKnownAfterSave(server)
+            guard save() else {
+                log("Conflict on \(recordType) \(recordName): the server copy could not be saved; local row kept, resolved again later")
+                return false
+            }
             queue?.removePendingSave(recordName)
             log("Conflict on \(recordType) \(recordName): server kept")
             return false
         }
+        noteKnown(server)
         let localOwner = local.value(forKey: "ownerUserID") as? String
         let serverOwner = server["ownerUserID"] as? String
         if pendingSave(recordName)?.metadataOnly == true {
@@ -894,7 +954,8 @@ final class JournalImporter {
         do { try context.save(); commitKnown(); return true } catch {
             log("Import save failed: \(error.localizedDescription); the batch is fetched again")
             context.rollback()
-            knownAfterSave.removeAll(); hashesAfterSave.removeAll(); removeAfterSave.removeAll()
+            for entry in restoreOnRollback { Self.restore(previous: entry.previous, to: entry.destination) }
+            knownAfterSave.removeAll(); hashesAfterSave.removeAll(); removeAfterSave.removeAll(); restoreOnRollback.removeAll()
             return false
         }
     }
