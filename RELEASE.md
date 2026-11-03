@@ -1653,8 +1653,37 @@ the join.
   section 7 with "Temp" against "Name A", restore, the pure rule both
   ways; the online restore with the gate's two conditions and the offer's
   states). The selection is 172 tests green under SyncTest; Debug and
-  Release build. Not covered here: the device run (Samuel decides; the
-  iPad Sync Test install is the disposable copy).
+  Release build. **Device run PASSED 2026-11-03 on build 1883 (`c083bcd`
+  plus the record commit and `e2f394c`'s files in the tree), iPad and
+  iPhone "SD iPhone", both Sync Test installs; evidence is each state file
+  read over the cable, in the notes folder under `c151-state`.** Step 0:
+  the iPhone put "Name A" back (both devices held "Temp" from the
+  afternoon's defect); the iPad took it by push. *Section A, online:* iPad
+  removal 15:01:29; after relaunch the set-up card offered the restore and
+  "Sync re-enabled for a removed local copy" 15:01:40 came from it; engine
+  built fresh; "Profile record: server newer; applied → Name A"; first
+  complete fetch 15:01:43 (161 records, 13 deletions, 47 files); no
+  "Profile edited" line, outbox empty, no Displaced entry, both devices on
+  the same profile clock (15:00:43, the iPhone's edit); the set-up screen
+  closed by itself. *Section B, offline:* iPad removal 15:03:36; Airplane
+  Mode; relaunch, offer tapped 15:04:08 (engine built, every send failed
+  with CKError 3, network); "Temp" and "Piano" typed at 15:04:38 and
+  15:04:43, both logged "(before the first complete fetch: provisional,
+  yields to a cloud profile)"; on reconnect the first fetch 15:05:18
+  applied "Name A" with "(typed before the first complete fetch:
+  unclocked)", the typed profile was never sent (the 6 records sent after
+  were the instrument, lists and list contexts), and the iPad holds one
+  Displaced entry: Name (this device) "Temp", Instrument (this device)
+  "Piano", unclocked, with Restore; the iPhone's profile is unchanged (same
+  clock, same values). Seen, not a defect: the instrument "Piano" added at
+  set-up travelled to the iPhone as an ordinary instrument record (stage
+  C's rule; the profile's primary is what C-151 governs); and the status
+  says "Running" while offline, the sends failing with CKError 3 (polish,
+  already noted). Not exercised: Restore on the entry (section 4 of the
+  stage J run covered a profile-name restore); the entry was left for
+  Samuel. Commit note: `c083bcd` and `5db7b7e` also carry the storage-full
+  session's then-uncommitted hunks in the shared engine, state, diagnostics
+  and Profile-section files and its C-152 row; `e2f394c` completes them.
   **iCloud storage-full handling, built 2026-11-03 (C-152; simulated
   refusals only; device check is Samuel's call).** `CKSyncEngine` does not
   retry `quotaExceeded` and drops the change from its pending list; the
