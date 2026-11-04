@@ -66,6 +66,40 @@ final class SyncTestMetadataTests: XCTestCase {
     }
 
     @discardableResult
+    // MARK: C-176: file-named legacy recordings
+
+    func testFileNamedLegacyRecordingsTakeTheirStemAsDisplayNameOnce() throws {
+        let ctx = container.viewContext
+        let session = makeSession(in: ctx)
+        let named = makeAttachment(session: session, in: ctx)
+        named.setValue("/var/x/Documents/Little fugue in A minor.m4a", forKey: "fileURL")
+        let appNamed = makeAttachment(session: session, in: ctx)          // <id>.m4a: the app's own naming
+        let titled = makeAttachment(session: session, in: ctx)
+        titled.setValue("/var/x/Documents/Old name.m4a", forKey: "fileURL")
+        let already = makeAttachment(session: session, in: ctx)
+        already.setValue("/var/x/Documents/Whatever.m4a", forKey: "fileURL"); already.setValue("Kept", forKey: "displayName")
+        let image = makeAttachment(session: session, in: ctx, kind: "image")
+        image.setValue("/var/x/Documents/Photo name.jpg", forKey: "fileURL")
+        try ctx.save()
+        let defaults = UserDefaults(suiteName: "synctest-c176-\(UUID().uuidString)")!
+        let titledID = try XCTUnwrap(titled.value(forKey: "id") as? UUID)
+        defaults.set([titledID.uuidString: "Stored title"], forKey: AttachmentTitlePersistenceKeys.legacyKey(for: .audio))
+
+        var queued: [String] = []
+        let adopted = JournalMetadataMigration.adoptFileNameTitles(container: container, defaults: defaults) { name, _ in queued.append(name) }
+        ctx.refreshAllObjects()
+        XCTAssertEqual(adopted, 1)
+        XCTAssertEqual(named.value(forKey: "displayName") as? String, "Little fugue in A minor")
+        XCTAssertNil(appNamed.value(forKey: "displayName"), "an id-named file is not a title")
+        XCTAssertNil(titled.value(forKey: "displayName"), "a stored title is the migration's job, not the stem")
+        XCTAssertEqual(already.value(forKey: "displayName") as? String, "Kept")
+        XCTAssertNil(image.value(forKey: "displayName"), "images have no title")
+        XCTAssertEqual(queued, [try XCTUnwrap(named.value(forKey: "id") as? UUID).uuidString])
+        XCTAssertEqual(JournalMetadataMigration.adoptFileNameTitles(container: container, defaults: defaults) { _, _ in XCTFail("nothing left") }, 0)
+        XCTAssertEqual(JournalMetadataMigration.fileNameTitle(path: "/a/\(UUID().uuidString).m4a"), nil)
+        XCTAssertEqual(JournalMetadataMigration.fileNameTitle(path: "/a/p3.I.m4a"), "p3.I")
+    }
+
     private func makeAttachment(session: NSManagedObject, in ctx: NSManagedObjectContext, id: UUID = UUID(), kind: String = "audio") -> NSManagedObject {
         let a = NSEntityDescription.insertNewObject(forEntityName: "Attachment", into: ctx)
         a.setValue(id, forKey: "id"); a.setValue(kind, forKey: "kind"); a.setValue(Date(), forKey: "createdAt")

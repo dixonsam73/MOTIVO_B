@@ -235,6 +235,9 @@ struct JournalSyncPersistedState: Codable {
     var catchUpToken: Data?
     /// Stage F: side-store values queued once with their existing stamps.
     var metadataMigrationDone = false
+    /// C-176: legacy recordings titled only by their file name took the stem
+    /// as `displayName` once (an upgrade of an existing store).
+    var fileNameTitlesAdopted = false
     // Stage G.
     /// Meta records that arrived before their attachment (whole record).
     var awaitingMeta: [String: Data] = [:]
@@ -375,6 +378,7 @@ struct JournalSyncPersistedState: Codable {
         localRemovalReason = try c.decodeIfPresent(String.self, forKey: .localRemovalReason)
         catchUpToken = try c.decodeIfPresent(Data.self, forKey: .catchUpToken)
         metadataMigrationDone = try c.decodeIfPresent(Bool.self, forKey: .metadataMigrationDone) ?? false
+        fileNameTitlesAdopted = try c.decodeIfPresent(Bool.self, forKey: .fileNameTitlesAdopted) ?? false
         awaitingMeta = try c.decodeIfPresent([String: Data].self, forKey: .awaitingMeta) ?? [:]
         metaTransitionDone = try c.decodeIfPresent(Bool.self, forKey: .metaTransitionDone) ?? false
         catchUpZoneToken = try c.decodeIfPresent(Data.self, forKey: .catchUpZoneToken)

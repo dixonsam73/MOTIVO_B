@@ -222,4 +222,44 @@ enum JournalMetadataMigration {
         }
         return outcome
     }
+
+    /// C-176 (upgrade trial, 2026-11-04): recordings made before the title
+    /// store existed carry their typed name only as the FILE name (the
+    /// editor shows the stem when no title is stored), and the sync carries
+    /// `displayName` only, materialising files as `<id>.<ext>` on the other
+    /// device, which then showed the id. Once, after the title migration: a
+    /// row with no `displayName` and no stored title takes its file stem,
+    /// unless the stem is the app's own id naming. Returns the rows changed.
+    static func adoptFileNameTitles(container: NSPersistentContainer, defaults: UserDefaults = .standard,
+                                    enqueue: (String, String) -> Void) -> Int {
+        var adopted = 0
+        let ctx = container.newBackgroundContext()
+        ctx.transactionAuthor = JournalSyncAuthor.migration
+        ctx.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        let audioTitles = (defaults.dictionary(forKey: AttachmentTitlePersistenceKeys.legacyKey(for: .audio)) as? [String: String]) ?? [:]
+        let videoTitles = (defaults.dictionary(forKey: AttachmentTitlePersistenceKeys.legacyKey(for: .video)) as? [String: String]) ?? [:]
+        ctx.performAndWait {
+            let attachments = NSFetchRequest<NSManagedObject>(entityName: JournalSyncRecordType.attachment)
+            for att in (try? ctx.fetch(attachments)) ?? [] {
+                guard let id = att.value(forKey: "id") as? UUID,
+                      let titleKind = JournalMetadataCodec.titleKind(for: att.value(forKey: "kind") as? String),
+                      att.value(forKey: "displayName") == nil,
+                      let path = att.value(forKey: "fileURL") as? String, !path.isEmpty else { continue }
+                let stored = ((titleKind == .audio ? audioTitles : videoTitles)[id.uuidString] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard stored.isEmpty, let stem = fileNameTitle(path: path) else { continue }
+                att.setValue(stem, forKey: "displayName")
+                adopted += 1
+                enqueue(id.uuidString, JournalSyncRecordType.attachment)
+            }
+            if ctx.hasChanges { try? ctx.save() }
+        }
+        return adopted
+    }
+
+    /// PURE. The stem of a user-named file; nil for the app's `<id>.<ext>` naming or an empty stem.
+    static func fileNameTitle(path: String) -> String? {
+        let stem = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !stem.isEmpty, UUID(uuidString: stem) == nil else { return nil }
+        return stem
+    }
 }

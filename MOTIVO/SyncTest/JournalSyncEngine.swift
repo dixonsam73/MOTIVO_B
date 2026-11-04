@@ -471,6 +471,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         if !caughtUp.isEmpty { log("Queued \(caughtUp.count) change(s) made while not syncing") }
         await refreshViewerScope()
         runMetadataMigrationIfNeeded()
+        runFileNameTitlePassIfNeeded()
         runMetaTransitionIfNeeded()
         await scanLists()
         scanProfile(reason: "activation")
@@ -787,6 +788,21 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
         store.update { $0.metadataMigrationDone = true }
         log("Metadata migration: \(outcome.titles) title(s) moved to displayName, \(outcome.privacy) privacy choice(s), \(outcome.pages) page selection(s), \(outcome.saves) favourite(s) queued")
+        refreshCounts()
+    }
+
+    /// C-176: once, after the title migration (also on installs that ran it
+    /// before this build): file-named legacy recordings take their stem.
+    func runFileNameTitlePassIfNeeded() {
+        guard store.state.metadataMigrationDone, !store.state.fileNameTitlesAdopted else { return }
+        let adopted = JournalMetadataMigration.adoptFileNameTitles(container: persistence) { name, _ in
+            let change = JournalSyncPendingChange(recordName: JournalSyncRecordType.metaName(for: name), recordType: JournalSyncRecordType.attachmentMeta,
+                                                  op: .save, metadataOnly: true)
+            self.store.update { JournalChangeTracker.merge([change], into: &$0) }
+            self.queueToEngine(zoneChanges: [self.pendingChange(change)])
+        }
+        store.update { $0.fileNameTitlesAdopted = true }
+        if adopted > 0 { log("File-name titles: \(adopted) recording(s) named only by their file took the name as displayName") }
         refreshCounts()
     }
 
