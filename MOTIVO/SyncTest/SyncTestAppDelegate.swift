@@ -1,6 +1,7 @@
 //
 //  SyncTestAppDelegate.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  The app's own silent-push path (stage J). The engine never fetches
 //  (C-149), so the app fetches records itself and a change on the other
@@ -9,7 +10,6 @@
 //  lands here. When the engine is automatic this does nothing.
 //
 
-#if SYNCTEST
 import UIKit
 import CloudKit
 
@@ -24,4 +24,3 @@ final class SyncTestAppDelegate: NSObject, UIApplicationDelegate {
         }
     }
 }
-#endif

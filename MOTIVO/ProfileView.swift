@@ -525,11 +525,9 @@ struct ProfileNameDraftState: Equatable {
 
      @State private var showPhotoPicker: Bool = false
      @State private var locationText: String = ""
-    #if SYNCTEST
     /// Stage H: values the private sync assigned to the screen, consumed by the
     /// `onChange` handlers so they schedule no directory write for them.
     @State private var syncHydration = ProfileSyncHydrationFilter()
-    #endif
  
      // Primary Activity (Stage 1 persisted in AppStorage; Stage 2 UX hardening)
      // Format: "core:<raw>" or "custom:<name>"
@@ -690,9 +688,9 @@ struct ProfileNameDraftState: Equatable {
                              connectedPromoSection
                          }
                      }
-                     #if SYNCTEST
-                     SyncTestProfileSection()
-                     #endif
+                     if JournalSyncCapability.buildSupportsSync {
+                         SyncTestProfileSection()
+                     }
                      buildInfoFooter
                         }
                         .background(KeyboardDismissFormTapCatcher(onDismiss: {
@@ -921,9 +919,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                                          name = kept
                                      }
                                  }
-                                 #if SYNCTEST
                                  JournalProfileMirror.setEditingHold(now || isLocationFocused)
-                                 #endif
                              }
                              .scaleEffect(isNameFocused ? 0.995 : 1)
                              .overlay(alignment: .bottomLeading) {
@@ -951,9 +947,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                              .onSubmit { isLocationFocused = false }
                              .onChange(of: isLocationFocused) { was, now in
                                  if was && !now { persistProfileEdits() }
-                                 #if SYNCTEST
                                  JournalProfileMirror.setEditingHold(now || isNameFocused)
-                                 #endif
                              }
                      }
                      .padding(.vertical, Theme.Spacing.s)
@@ -1465,31 +1459,25 @@ private var sessionSetupSection: some View {
      /// Destructive control title. Names account deletion explicitly whenever
      /// there is an account to delete.
      private var destructiveActionTitle: String {
-         #if SYNCTEST
-         // Stage J (Samuel, 2026-10-27): removal is device-only; the private
-         // iCloud journal and other devices are never touched by it.
-         return auth.hasConnectedIdentity ? "Delete Account & Remove Études Data from This Device" : "Remove Études Data from This Device"
-         #else
+         // Stage J (Samuel, 2026-10-27): with the private sync in use, removal
+         // is device-only; the iCloud journal and other devices are never
+         // touched by it. Without sync the wording is the original erase.
+         if JournalSyncCoordinator.shared.isInUse {
+             return auth.hasConnectedIdentity ? "Delete Account & Remove Études Data from This Device" : "Remove Études Data from This Device"
+         }
          return auth.hasConnectedIdentity ? "Delete Account & All Études Data" : "Erase All Études Data"
-         #endif
      }
 
      /// The word the user must type. Matches the verb in the title so the
      /// confirmation cannot read incongruously against the button.
      private var destructiveConfirmWord: String {
-         #if SYNCTEST
-         return auth.hasConnectedIdentity ? "DELETE" : "REMOVE"
-         #else
+         if JournalSyncCoordinator.shared.isInUse { return auth.hasConnectedIdentity ? "DELETE" : "REMOVE" }
          return auth.hasConnectedIdentity ? "DELETE" : "ERASE"
-         #endif
      }
 
      private var destructiveInFlightTitle: String {
-         #if SYNCTEST
-         return auth.hasConnectedIdentity ? "Deleting…" : "Removing…"
-         #else
+         if JournalSyncCoordinator.shared.isInUse { return auth.hasConnectedIdentity ? "Deleting…" : "Removing…" }
          return auth.hasConnectedIdentity ? "Deleting…" : "Erasing…"
-         #endif
      }
 
      private var eraseAllEtudesDataButton: some View {
@@ -2469,9 +2457,10 @@ private var sessionSetupSection: some View {
          // deletion of "comments" while B-3 retained them and B-1 preserved sent
          // attachments. Both rules were revised so the promise and the operation
          // now match; if that ever changes again, this string changes with it.
-         #if SYNCTEST
-         // Stage J: the same two paths, with what they do NOT do stated: the
-         // private iCloud journal and the copies on other devices stay.
+         // Stage J: with the private sync in use, the same two paths with what
+         // they do NOT do stated: the iCloud journal and the copies on other
+         // devices stay. Without sync, the original wording.
+         if JournalSyncCoordinator.shared.isInUse {
          if auth.hasConnectedIdentity {
              return """
              This permanently deletes your Études Connected account and the data associated with it — your profile, posts, comments, avatar, follows, and the attachments you have sent.
@@ -2496,7 +2485,7 @@ private var sessionSetupSection: some View {
 
          This does not delete posts already shared with Études Connected. Any pending requests to remove shared posts will also be removed. To delete a Connected account and its posts, sign in to that account and use Delete Account.
          """
-         #else
+         }
          if auth.hasConnectedIdentity {
              return """
              This permanently deletes your Études Connected account and the data associated with it — your profile, posts, comments, avatar, follows, and the attachments you have sent.
@@ -2513,7 +2502,6 @@ private var sessionSetupSection: some View {
              """
          }
          return "This permanently erases everything stored in Études on this device, including your Journal, Scores, profile, attachments, instruments, activities, and settings. Études will return to its first-launch state. This does not delete posts already shared with Études Connected. Any pending requests to remove shared posts will also be erased. To delete a Connected account and its posts, sign in to that account and use Delete Account. This can’t be undone."
-         #endif
      }
 
      private var deleteAccountSheet: some View {
@@ -2826,9 +2814,7 @@ private func initials(from string: String) -> String {
             .onAppear(perform: onAppearLoad)
             .onDisappear {
                 persistProfileEdits()
-                #if SYNCTEST
                 JournalProfileMirror.setEditingHold(false)
-                #endif
             }
             // C-70. Backgrounding is a commit point. Without it an app killed
             // while Profile is on screen loses the edit entirely — the pending
@@ -2836,9 +2822,7 @@ private func initials(from string: String) -> String {
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active {
                     persistProfileEdits()
-                    #if SYNCTEST
                     JournalProfileMirror.setEditingHold(false)
-                    #endif
                 }
             }
             // C-24: sign-in completion is an event, not a change of identity. On a
@@ -2979,14 +2963,11 @@ private func initials(from string: String) -> String {
                  // fresh task carrying the old identity's edit. `onChange` is
                  // already on the main actor, so the call is direct and the
                  // cancellation in the identity handler is actually sufficient.
-                 #if SYNCTEST
                  // Stage H: a value the private sync just put on screen is not
                  // this device's edit and schedules no directory write.
                  if !syncHydration.shouldPublish(newValue) { return }
-                 #endif
                  scheduleDirectorySyncDebounced()
              }
-             #if SYNCTEST
              // Stage H: the private sync changed the profile (import context, not
              // this context, so the save observer above never sees it). Re-read
              // what is not being edited right now; the avatar redraws through
@@ -3005,7 +2986,6 @@ private func initials(from string: String) -> String {
                  }
                  refreshAvatarDisplay()
              }
-             #endif
              .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: ctx)) { _ in
                  guard showInstrumentManager == false,
                        showActivityManager == false,
@@ -3017,9 +2997,7 @@ private func initials(from string: String) -> String {
              }
              .onChange(of: locationText) { _, newValue in
                  // C-70. Same reasoning as `name` above: no untracked outer Task.
-                 #if SYNCTEST
                  if !syncHydration.shouldPublish(newValue) { return }
-                 #endif
                  scheduleDirectorySyncDebounced()
              }
              // EVENTS 1 AND 3, in ONE observer over BOTH asynchronous inputs.

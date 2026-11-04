@@ -134,9 +134,7 @@ ToolbarItem(placement: .cancellationAction) {
 
         do {
             try moc.save()
-            #if SYNCTEST
             JournalProfileMirror.primaryChosen()   // stage H: a choice, not the app's default
-            #endif
             loadPrimarySelection()
         } catch {
             moc.rollback()

@@ -212,8 +212,12 @@ final class SyncTestStep0ReviewTests: XCTestCase {
         XCTAssertFalse(engine.currentDecision().allowed, "and nothing is sent or fetched meanwhile")
         XCTAssertFalse(store.state.localRemovalInProgress, "the marker is not on disk")
         XCTAssertTrue(store.state.outbox.isEmpty)
-        // The coordinator's entry point reports the same (no engine: the pure marker write).
-        XCTAssertFalse(JournalLocalRemoval.begin(store: JournalSyncStateStore(fileURL: tempDir.appendingPathComponent("missing-dir/x.json")), reason: "test"))
+        // The pure marker write reports the same when its file cannot be written
+        // (a regular file where the state directory would be; the store makes
+        // a missing directory itself since the integration, 2026-11-04).
+        let blocker = tempDir.appendingPathComponent("blocker")
+        FileManager.default.createFile(atPath: blocker.path, contents: Data())
+        XCTAssertFalse(JournalLocalRemoval.begin(store: JournalSyncStateStore(fileURL: blocker.appendingPathComponent("x.json")), reason: "test"))
     }
 
     // MARK: R2 — a removal between two record families of one catch-up

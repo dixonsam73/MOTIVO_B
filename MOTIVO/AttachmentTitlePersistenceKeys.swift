@@ -76,10 +76,8 @@ enum AttachmentTitlePersistenceKeys {
             scoped.removeValue(forKey: id)
             defaults.set(scoped, forKey: key)
         }
-        #if SYNCTEST
         // Sync trial: the title also lands on Attachment.displayName, the
         // synced field. `mirror: false` is the import writing this store.
         if mirror { JournalMetadataMirror.titleChanged(attachmentID, title: trimmed) }
-        #endif
     }
 }

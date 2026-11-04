@@ -60,10 +60,8 @@ enum PDFSelectedPagesStore {
             map.removeValue(forKey: id.uuidString)
         }
         UserDefaults.standard.set(map, forKey: key)
-        #if SYNCTEST
         // Sync trial: a page selection is a user edit of the attachment.
         if mirror { JournalMetadataMirror.attachmentChanged(id) }
-        #endif
     }
 
     static func migratePages(from stagedID: UUID, stagedPages: [Int]?, to persistedID: UUID?) {

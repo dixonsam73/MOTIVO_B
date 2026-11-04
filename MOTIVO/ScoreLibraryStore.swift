@@ -253,9 +253,7 @@ final class ScoreLibraryStore: ObservableObject {
     /// for now. Production: nothing more; the private sync trial sends it.
     func viewerDidClose(_ itemID: UUID) {
         if openViewerID == itemID { openViewerID = nil }
-        #if SYNCTEST
         JournalScoreMirror.viewerClosed(itemID)
-        #endif
     }
 
     // MARK: - Private sync trial (imports write the library without firing a change)
@@ -462,9 +460,7 @@ final class ScoreLibraryStore: ObservableObject {
         } else {
             defaults.removeObject(forKey: activeScoreKey)
         }
-        #if SYNCTEST
         if let change { JournalScoreMirror.changed(change) }
-        #endif
     }
 
     private var storageKey: String {

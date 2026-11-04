@@ -1,25 +1,54 @@
 //
 //  SyncTestProfileSection.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
-//  The person-facing Sync rows on the Profile screen (stage J): status, the
-//  per-device "media over mobile data" option, what waits for Wi-Fi, the
-//  recovery view for displaced text, scores without a file, and the
-//  diagnostics screen. The full enable/disable control, first-sync progress
-//  and actionable errors belong to the main-build integration.
+//  The person-facing Sync rows on the Profile screen: the on/off control
+//  (off by default; on creates the state file, off is the stage E unlink),
+//  status, the per-device "media over mobile data" option, what waits for
+//  Wi-Fi, the recovery view for displaced text, scores without a file, and
+//  (DEBUG) the diagnostics screen. Shown only by a build that can sync
+//  (`JournalSyncCapability`). First-sync progress and actionable errors are
+//  still to come.
 //
 
-#if SYNCTEST
 import SwiftUI
 
 struct SyncTestProfileSection: View {
     @ObservedObject private var status = JournalSyncCoordinator.shared.status
     @ObservedObject private var library = ScoreLibraryStore.shared
+    @State private var syncOn = JournalSyncCoordinator.shared.isEnabled
     @State private var allowMobileData = JournalMediaPreference.allowsMobileData()
     @State private var recoverable = 0
 
     var body: some View {
-        Section(header: Text("Sync (trial)").sectionHeader()) {
+        Section(header: Text("iCloud sync (trial)").sectionHeader()) {
+            Toggle(isOn: $syncOn) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sync this journal with iCloud").font(Theme.Text.body)
+                    Text("Off: everything stays on this device only. On: your journal, scores, profile and settings are kept the same on every device signed in to this iCloud account. Turning it off keeps everything here and stops sending and receiving.")
+                        .font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+            .onChange(of: syncOn) { was, now in
+                guard was != now else { return }
+                if now {
+                    if !JournalSyncCoordinator.shared.enable(persistence: PersistenceController.shared.container) { syncOn = false }
+                } else if JournalSyncCoordinator.shared.isEnabled {
+                    Task { await JournalSyncCoordinator.shared.disable(); reload() }
+                }
+            }
+            if syncOn { syncRows }
+            #if DEBUG
+            NavigationLink("Sync Test diagnostics") { SyncTestDiagnosticsView() }
+            #endif
+        }
+        .onAppear(perform: reload)
+        .onReceive(status.objectWillChange) { _ in reload() }
+    }
+
+    @ViewBuilder
+    private var syncRows: some View {
             HStack {
                 Text("Status").font(Theme.Text.body)
                 Spacer()
@@ -52,10 +81,6 @@ struct SyncTestProfileSection: View {
                     Text(recoverable == 0 ? "none" : "\(recoverable)").font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
                 }
             }
-            NavigationLink("Sync Test diagnostics") { SyncTestDiagnosticsView() }
-        }
-        .onAppear(perform: reload)
-        .onReceive(status.objectWillChange) { _ in reload() }
     }
 
     private var statusText: String {
@@ -67,6 +92,8 @@ struct SyncTestProfileSection: View {
     }
 
     private func reload() {
+        let enabled = JournalSyncCoordinator.shared.isEnabled
+        if syncOn != enabled { syncOn = enabled }
         allowMobileData = JournalMediaPreference.allowsMobileData()
         if let store = JournalSyncCoordinator.shared.store { recoverable = JournalRecovery.entries(store: store).count }
     }
@@ -89,6 +116,13 @@ struct SyncTestRestoreCard: View {
             switch offer {
             case .none:
                 EmptyView()
+            case .turnOn:
+                card("Already using Études on another device?",
+                     "Turn on iCloud sync to bring your profile, journal, scores and settings here from your other devices before choosing a name. Off by default; you can turn it on later in Profile.",
+                     button: "Turn on iCloud sync") {
+                    JournalSyncCoordinator.shared.enable(persistence: PersistenceController.shared.container)
+                    reloadSoon()
+                }
             case .offer(let removed):
                 card("Restore from iCloud",
                      removed
@@ -149,4 +183,3 @@ struct SyncTestRestoreCard: View {
                                            lastCatchUp: state?.lastCatchUp, profileName: profileName)
     }
 }
-#endif

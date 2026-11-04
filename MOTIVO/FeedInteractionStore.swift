@@ -49,10 +49,8 @@ struct FeedInteractionStore {
         let was = UserDefaults.standard.bool(forKey: key)
         let now = !was
         UserDefaults.standard.set(now, forKey: key)
-        #if SYNCTEST
         // Sync trial: a favourite is a user edit of the session.
         JournalMetadataMirror.sessionChanged(id)
-        #endif
         return now
     }
 

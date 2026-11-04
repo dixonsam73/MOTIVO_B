@@ -1,6 +1,7 @@
 //
 //  JournalChangeTracker.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  LOCAL CHANGES → OUTBOX, FROM CORE DATA'S PERSISTENT HISTORY.
 //
@@ -15,7 +16,6 @@
 //  atomic update of the state file. If that write fails, neither moves.
 //
 
-#if SYNCTEST
 import Foundation
 import CoreData
 
@@ -423,4 +423,3 @@ enum JournalUserEditStamp {
         }
     }
 }
-#endif

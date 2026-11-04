@@ -1,6 +1,7 @@
 //
 //  JournalSavedListSync.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  SAVED LISTS ↔ CLOUDKIT (stage B).
 //
@@ -13,7 +14,6 @@
 //  library and keeps entries it did not change.
 //
 
-#if SYNCTEST
 import Foundation
 import CloudKit
 import CryptoKit
@@ -150,4 +150,3 @@ enum JournalSavedListSync {
         return current.count - updated.count
     }
 }
-#endif

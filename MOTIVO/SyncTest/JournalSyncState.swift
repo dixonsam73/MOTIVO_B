@@ -1,6 +1,7 @@
 //
 //  JournalSyncState.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  THE TRIAL'S DURABLE STATE, IN ONE ATOMICALLY WRITTEN FILE.
 //
@@ -16,7 +17,6 @@
 //  it accounts for, because both land in one atomic replace or neither does.
 //
 
-#if SYNCTEST
 import Foundation
 import CloudKit
 import CoreData
@@ -438,6 +438,10 @@ final class JournalSyncStateStore: @unchecked Sendable {
 
     init(fileURL: URL) {
         self.fileURL = fileURL
+        // The directory is made here, by the one caller that means to use the
+        // file, never by `defaultURL()`: a launch with sync off must leave no
+        // trace on disk.
+        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: fileURL),
            let decoded = try? JSONDecoder().decode(JournalSyncPersistedState.self, from: data) {
             current = decoded
@@ -446,11 +450,12 @@ final class JournalSyncStateStore: @unchecked Sendable {
         }
     }
 
+    /// Where the state file lives. Its existence is the sync switch
+    /// (`JournalSyncCoordinator`), so this creates nothing.
     static func defaultURL() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("SyncTest", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base.appendingPathComponent("JournalSyncState.json", isDirectory: false)
+            .appendingPathComponent("JournalSyncState.json", isDirectory: false)
     }
 
     /// Where held asset files wait for their session.
@@ -523,4 +528,3 @@ final class JournalSyncStateStore: @unchecked Sendable {
         try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKRecord.self, from: data)
     }
 }
-#endif

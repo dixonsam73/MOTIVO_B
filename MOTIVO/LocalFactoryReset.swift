@@ -25,8 +25,8 @@ enum LocalFactoryReset {
 
     private static let log = Logger(subsystem: "com.sdsongs.etudes", category: "factoryreset")
 
-    /// Returns false when nothing was erased (SYNCTEST: the sync removal marker
-    /// could not be written, R1); true otherwise.
+    /// Returns false when nothing was erased (the sync removal marker could not
+    /// be written, R1); true otherwise.
     @discardableResult
     static func perform(reason: String, auth: AuthManager) async -> Bool {
         guard !isInProgress else {
@@ -42,11 +42,12 @@ enum LocalFactoryReset {
 
         NSLog("[LocalFactoryReset] begin (stage 5c) reason=\(reason)")
 
-        #if SYNCTEST
-        // Sync trial, stage E: the batch deletes below are tracked by persistent
-        // history and would otherwise be queued as SERVER deletions. The marker
-        // is written and the engine dropped before the first row goes; the
-        // bracket closes at the end. Not a third caller of this function.
+        // Private sync, stage E: the batch deletes below are tracked by
+        // persistent history and would otherwise be queued as SERVER deletions.
+        // The marker is written and the engine dropped before the first row
+        // goes; the bracket closes at the end. Not a third caller of this
+        // function. With sync never used on this install there is nothing to
+        // bracket and this returns true at once.
         // R1 (2026-11-03): with no durable marker the removal is refused: the
         // batch deletes below would be tracked by history with nothing to stop
         // them becoming server deletions at a later launch. Nothing is erased.
@@ -54,7 +55,6 @@ enum LocalFactoryReset {
             NSLog("[LocalFactoryReset] refused: the sync removal marker could not be written; nothing erased reason=\(reason)")
             return false
         }
-        #endif
 
         // Prevent any background publish attempts while we reset.
         SessionSyncQueue.shared.stopForFactoryReset()
@@ -157,11 +157,9 @@ enum LocalFactoryReset {
             FollowStore.shared.resetForSignOut()
         }
 
-        #if SYNCTEST
         // Closes the bracket opened above: history fast-forwarded with nothing
         // queued, server knowledge cleared, sync off until re-enabled.
         JournalSyncCoordinator.shared.finishLocalRemoval()
-        #endif
 
         // C-91. Re-arm the publish queue LAST, once everything it could reach has
         // been wiped. It was stopped at the start of this reset and used to stay

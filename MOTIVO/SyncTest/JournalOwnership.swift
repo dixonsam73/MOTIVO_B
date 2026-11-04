@@ -1,6 +1,7 @@
 //
 //  JournalOwnership.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  WHO OWNS THE SYNCED JOURNAL, AS PURE RULES (stage B).
 //
@@ -22,7 +23,6 @@
 //  device's K2. Duplicates by normalised name resolve to the smallest id.
 //
 
-#if SYNCTEST
 import Foundation
 
 enum JournalOwnership {
@@ -116,4 +116,3 @@ enum JournalOwnership {
         ids.min { $0.uuidString < $1.uuidString }
     }
 }
-#endif

@@ -1,6 +1,7 @@
 //
 //  JournalMetadataSync.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  JOURNAL METADATA THAT LIVES OUTSIDE CORE DATA (stage F): audio/video
 //  titles, attachment privacy choices, favourites (saves) and selected PDF
@@ -27,7 +28,6 @@
 //  real edit elsewhere still wins under the existing conflict rule.
 //
 
-#if SYNCTEST
 import Foundation
 import CoreData
 import CloudKit
@@ -69,13 +69,15 @@ enum JournalMetadataCodec {
     }
 }
 
-/// The app's write points call this (SYNCTEST only) after writing their side
+/// The app's write points call this after writing their side
 /// store: the owning row is touched so the change is a user edit in history.
 enum JournalMetadataMirror {
     /// Set by the sync import while it writes side stores, so the hooks that
     /// the public setters fire do not queue the import back out.
     nonisolated(unsafe) static var suppressed = false
-    /// The app's container; tests point this at their own.
+    /// The container to stamp rows in. Set by `JournalSyncCoordinator` once
+    /// sync is in use on this install (tests point it at their own); nil
+    /// before, so with sync off the write points change nothing in Core Data.
     nonisolated(unsafe) static var container: NSPersistentContainer? = nil
 
     static func attachmentChanged(_ id: UUID) { touch(entity: JournalSyncRecordType.attachment, id: id) }
@@ -97,7 +99,10 @@ enum JournalMetadataMirror {
     }
 
     private static func write(entity: String, id: UUID, _ body: @escaping (NSManagedObject) -> Void) {
-        let ctx = (container ?? PersistenceController.shared.container).newBackgroundContext()
+        // Sync off (never turned on here): the side store was written and
+        // nothing else happens, exactly as before the sync existed.
+        guard let container else { return }
+        let ctx = container.newBackgroundContext()
         ctx.name = "metadataMirror"
         ctx.transactionAuthor = JournalSyncAuthor.metadata
         ctx.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
@@ -218,4 +223,3 @@ enum JournalMetadataMigration {
         return outcome
     }
 }
-#endif

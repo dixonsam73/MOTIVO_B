@@ -1,6 +1,7 @@
 //
 //  JournalRecovery.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  WHAT A CONFLICT DISPLACED, AND HOW A PERSON GETS IT BACK (stage J).
 //
@@ -13,7 +14,6 @@
 //  entry leaves the list when it is restored or dismissed.
 //
 
-#if SYNCTEST
 import Foundation
 import CoreData
 import UIKit
@@ -154,4 +154,3 @@ enum JournalRecoverySubject {
         return title.isEmpty ? "Entry \(when)" : "\(title) · \(when)"
     }
 }
-#endif

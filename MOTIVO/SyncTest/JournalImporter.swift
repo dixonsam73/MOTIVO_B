@@ -1,6 +1,7 @@
 //
 //  JournalImporter.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  SERVER RECORDS → CORE DATA, SEPARATE FROM THE ENGINE SO IT CAN BE TESTED
 //  WITHOUT CLOUDKIT.
@@ -25,7 +26,6 @@
 //  per-instrument list settings keep working.
 //
 
-#if SYNCTEST
 import Foundation
 import CloudKit
 import CoreData
@@ -972,4 +972,3 @@ final class JournalImporter {
         return object
     }
 }
-#endif

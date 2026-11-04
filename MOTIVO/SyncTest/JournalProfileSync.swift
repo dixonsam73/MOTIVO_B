@@ -1,6 +1,7 @@
 //
 //  JournalProfileSync.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  PRIVATE PROFILE SYNC (stage H): name, location, primary instrument and
 //  avatar, through the bound private iCloud journal, with no Connected login.
@@ -50,7 +51,6 @@
 //  identity, and `ConnectedWriteWitness` counts every attempt for the record.
 //
 
-#if SYNCTEST
 import Foundation
 import CloudKit
 import CoreData
@@ -238,7 +238,7 @@ enum JournalProfileMerge {
     }
 }
 
-/// The app's write points call this (SYNCTEST only). Installed by the engine.
+/// The app's write points call this. Installed by the engine; inert before.
 enum JournalProfileMirror {
     /// Set by the sync import while it writes, so its own writes do not scan.
     enum Event { case changed, avatarRemoved, primaryChosen }
@@ -274,7 +274,7 @@ struct ProfileSyncHydrationFilter: Equatable {
     mutating func shouldPublish(_ newValue: String) -> Bool { hydrated.remove(newValue) == nil }
 }
 
-/// SYNCTEST only: counts every attempt to write the Connected directory or the
+/// Counts every attempt to write the Connected directory or the
 /// Connected avatar object, whatever the outcome, so the device run can show
 /// that private sync started none. Incremented at the four entry points.
 enum ConnectedWriteWitness {
@@ -675,4 +675,3 @@ enum JournalProfileSync {
     }
     #endif
 }
-#endif

@@ -82,10 +82,8 @@ public enum AttachmentPrivacy {
             cache = map
             NotificationCenter.default.post(name: didChangeNotification, object: nil)
         }
-        #if SYNCTEST
         // Sync trial: a privacy choice is a user edit of the attachment.
         if mirror, let id { JournalMetadataMirror.attachmentChanged(id) }
-        #endif
     }
 
     @inline(__always)

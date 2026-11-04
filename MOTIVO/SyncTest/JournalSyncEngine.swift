@@ -1,6 +1,7 @@
 //
 //  JournalSyncEngine.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  PRIVATE JOURNAL SYNC THROUGH CKSyncEngine, FOR THE TWO-DEVICE TRIAL.
 //
@@ -25,7 +26,6 @@
 //  (`JournalLocalRemoval`) and need an explicit re-enable.
 //
 
-#if SYNCTEST
 import Foundation
 import CloudKit
 import CoreData
@@ -2236,7 +2236,29 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     }
 }
 
-/// App-wide holder so the diagnostics screen can reach the engine.
+/// Whether THIS build can run the private sync at all. Only the SyncTest
+/// configuration carries the CloudKit container entitlement, the push
+/// entitlement and the `remote-notification` background mode
+/// (`MOTIVO-SyncTest.entitlements`, `Info-SyncTest.plist`). Debug and Release
+/// carry none of them, so they never offer the control and never build an
+/// engine. Production enablement (entitlements for the Release id, a
+/// production container) is a later, separate step.
+enum JournalSyncCapability {
+    #if SYNCTEST
+    static let buildSupportsSync = true
+    #else
+    static let buildSupportsSync = false
+    #endif
+}
+
+/// Owns the private sync for the app. OFF BY DEFAULT: nothing here runs until
+/// the person turns sync on, and whether they have is one durable fact, the
+/// state file. With no file `startIfNeeded` builds nothing: no state store, no
+/// `JournalSyncEngine` (the only place a `CKContainer` is made), no push
+/// registration, and the mirrors at the app's write points are inert. The
+/// file is created by `enable()` and survives an unlink and a device-only
+/// removal (both are "sync off, remembered"), so an interrupted removal is
+/// always recovered at the next launch before any engine exists.
 @MainActor
 final class JournalSyncCoordinator {
     static let shared = JournalSyncCoordinator()
@@ -2248,14 +2270,76 @@ final class JournalSyncCoordinator {
     /// through it (and nothing else).
     weak var auth: AuthManager?
     private(set) var ownership: JournalOwnershipCoordinator?
+    /// Where the switch and the sync state live. Tests point this at a
+    /// temporary file; the app uses the default.
+    let stateFileURL: URL
+    /// Set by the app: asks iOS for silent pushes. Called only once an engine
+    /// exists, so a build or an install without sync never registers.
+    var registerForPush: (() -> Void)?
 
     private var persistence: NSPersistentContainer?
 
-    func startIfNeeded(persistence: NSPersistentContainer) {
-        guard engine == nil else { return }
+    init(stateFileURL: URL = JournalSyncStateStore.defaultURL()) {
+        self.stateFileURL = stateFileURL
+    }
+
+    /// Sync has been turned on on this install at some point: the state file
+    /// exists and was opened at launch (or by `enable`).
+    var isInUse: Bool { store != nil }
+
+    /// Sync is on right now: in use, not unlinked, not mid-removal.
+    var isEnabled: Bool {
+        guard let store else { return false }
+        let st = store.state
+        return !st.unlinked && !st.localRemovalInProgress
+    }
+
+    /// Launch. Returns whether sync is in use on this install. With no state
+    /// file (sync never turned on here) nothing is built or touched.
+    @discardableResult
+    func startIfNeeded(persistence: NSPersistentContainer) -> Bool {
+        if engine != nil { return true }
         self.persistence = persistence
-        let store = JournalSyncStateStore(fileURL: JournalSyncStateStore.defaultURL())
+        guard JournalSyncCapability.buildSupportsSync,
+              FileManager.default.fileExists(atPath: stateFileURL.path) else { return false }
+        start(persistence: persistence, store: JournalSyncStateStore(fileURL: stateFileURL))
+        return true
+    }
+
+    /// The person turns sync on. The first time, the state file is created
+    /// (the switch) with the history token fast-forwarded to now: everything
+    /// that happened before this moment is not sync's business (the bootstrap
+    /// queues the rows that exist; a deletion made before the switch must
+    /// never go up, since without a token the history is read from its
+    /// beginning). After an unlink or a removal it re-enables. False when this
+    /// build cannot sync or the switch could not be written.
+    @discardableResult
+    func enable(persistence: NSPersistentContainer) -> Bool {
+        guard JournalSyncCapability.buildSupportsSync else { return false }
+        self.persistence = persistence
+        if let store {
+            if store.state.unlinked { reenable() }
+            return true
+        }
+        let store = JournalSyncStateStore(fileURL: stateFileURL)
+        let token = persistence.persistentStoreCoordinator.currentPersistentHistoryToken(fromStores: nil)
+        let written = store.update { st in
+            st.historyToken = JournalSyncStateStore.encode(token: token)
+            st.log.append(.init(at: Date(), text: "Private sync turned on on this device; history before now is not read"))
+        }
+        guard written else { return false }
+        start(persistence: persistence, store: store)
+        return true
+    }
+
+    /// The person turns sync off: the journal and pending work are kept and
+    /// edits go on being tracked; nothing is sent or fetched until enabled again.
+    func disable() async { await engine?.unlink() }
+
+    private func start(persistence: NSPersistentContainer, store: JournalSyncStateStore) {
         self.store = store
+        // The metadata write points stamp their rows only once sync is in use.
+        JournalMetadataMirror.container = persistence
         // Before any engine exists: a local removal the previous run did not
         // finish is completed here, so nothing it deleted can be queued.
         _ = JournalLocalRemoval.recoverIfInterrupted(store: store, container: persistence) {
@@ -2271,12 +2355,13 @@ final class JournalSyncCoordinator {
 
     // MARK: Stage E
 
-    /// Bracket of the production erase (`LocalFactoryReset.perform`, SYNCTEST
-    /// only) and of the diagnostics control. Synchronous and durable before
-    /// the first row is deleted.
+    /// Bracket of the production erase (`LocalFactoryReset.perform`) and of
+    /// the diagnostics control. Synchronous and durable before the first row
+    /// is deleted. With sync never used on this install there is nothing to
+    /// bracket and the erase proceeds.
     @discardableResult
     func beginLocalRemoval(reason: String) -> Bool {
-        guard let store else { return false }
+        guard let store else { return true }
         if let engine { return engine.beginLocalRemoval(reason: reason) } else { return JournalLocalRemoval.begin(store: store, reason: reason) }
     }
 
@@ -2303,8 +2388,13 @@ final class JournalSyncCoordinator {
         ownership?.onOwnerChanged = { [weak engine] in engine?.ownerChanged() }
         self.engine = engine
         Task { await engine.start() }
+        // Silent CloudKit pushes are what tell the app the database moved;
+        // without them the daemon answers "no changes" from its cache (seen in
+        // Checkpoint 1). Asked for only now, with an engine to act on them.
+        registerForPush?()
     }
 
+    #if DEBUG
     /// Diagnostic: discard only the engine's own serialized state (its change
     /// tokens) and start a fresh engine. The journal, outbox, bound user and
     /// history token are all kept.
@@ -2330,5 +2420,5 @@ final class JournalSyncCoordinator {
         store?.log("Simulated interruption: journal rows deleted, exiting before finish")
         exit(0)
     }
+    #endif
 }
-#endif

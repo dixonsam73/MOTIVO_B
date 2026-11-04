@@ -1,6 +1,7 @@
 //
 //  JournalSendFailure.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  WHAT A FAILED SAVE MEANS, AND ICLOUD STORAGE FULL.
 //
@@ -20,7 +21,6 @@
 //  so a retry re-adds the outbox to the engine and sends.
 //
 
-#if SYNCTEST
 import Foundation
 import CloudKit
 
@@ -156,4 +156,3 @@ enum JournalStorageFull {
         return now < until
     }
 }
-#endif

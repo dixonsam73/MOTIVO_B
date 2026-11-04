@@ -1,6 +1,7 @@
 //
 //  JournalLinkState.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  WHETHER THIS DEVICE MAY SYNC RIGHT NOW, AND THE LOCAL-REMOVAL LIFECYCLE
 //  (stage E). Pure rules and state-file work, no CloudKit, so both are
@@ -21,7 +22,6 @@
 //  journal again as a fresh device would.
 //
 
-#if SYNCTEST
 import Foundation
 import CloudKit
 import CoreData
@@ -102,6 +102,9 @@ enum JournalCatchUp {
 /// sync is on and the first complete fetch is pending, the screen says so and
 /// a name typed meanwhile is provisional (see `JournalProfileSync.scan`).
 enum JournalRestoreOffer: Equatable {
+    /// Sync was never turned on here and this build can sync: offer to turn it
+    /// on, so a journal already in iCloud comes here before a name is typed.
+    case turnOn
     /// Sync is off on this device (a removed local copy, or unlinked): offer to re-enable.
     case offer(localCopyRemoved: Bool)
     /// Sync is on; the first complete fetch has not finished (offline, or still running).
@@ -113,9 +116,11 @@ enum JournalRestoreOffer: Equatable {
     /// The cloud profile is here (the set-up gate closes by itself), or sync never started.
     case none
 
-    static func decide(started: Bool, unlinked: Bool, localCopyRemoved: Bool, localRemovalInProgress: Bool,
+    static func decide(started: Bool, supported: Bool = JournalSyncCapability.buildSupportsSync,
+                       unlinked: Bool, localCopyRemoved: Bool, localRemovalInProgress: Bool,
                        pausedReason: String?, initialFetchComplete: Bool, lastCatchUp: String?, profileName: String) -> JournalRestoreOffer {
-        guard started, !localRemovalInProgress else { return .none }
+        guard started else { return supported ? .turnOn : .none }
+        guard !localRemovalInProgress else { return .none }
         if unlinked { return .offer(localCopyRemoved: localCopyRemoved) }
         if let pausedReason, !pausedReason.isEmpty { return .waiting(reason: pausedReason) }
         if !initialFetchComplete {
@@ -318,4 +323,3 @@ enum JournalLocalRemoval {
         }
     }
 }
-#endif

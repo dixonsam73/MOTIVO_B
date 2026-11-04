@@ -67,10 +67,10 @@ struct AppSetUpView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 header
 
-                #if SYNCTEST
-                // C-151: the restoration is offered before a name is asked for.
+                // C-151: the restoration (or, on a build that can sync, turning
+                // sync on) is offered before a name is asked for. Nothing is
+                // shown by a build that cannot sync.
                 SyncTestRestoreCard(profileName: profile?.name ?? "")
-                #endif
 
                 nameCard
 
@@ -114,7 +114,6 @@ struct AppSetUpView: View {
             ensureProfileExistsIfNeeded()
             seedFieldsIfNeeded()
         }
-        #if SYNCTEST
         // C-151: a cloud profile that arrives while this screen is up fills the
         // name from it (the gate closes by itself once its instrument is here).
         .onReceive(NotificationCenter.default.publisher(for: JournalProfileSync.didApplyNotification).receive(on: RunLoop.main)) { _ in
@@ -123,7 +122,6 @@ struct AppSetUpView: View {
             name = restored
             statusMessage = "Your name was restored from iCloud."
         }
-        #endif
     }
 
     private var header: some View {

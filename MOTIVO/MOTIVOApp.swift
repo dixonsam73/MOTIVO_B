@@ -64,10 +64,10 @@ final class AppRouteStore: ObservableObject {
 
 @main
 struct MOTIVOApp: App {
-    #if SYNCTEST
-    // Stage J: the app's own silent-push path while media waits for Wi-Fi.
+    // The private sync's silent-push path (stage J). Pushes are asked for only
+    // once an engine exists (`JournalSyncCoordinator.registerForPush`), so with
+    // sync off this delegate never hears anything.
     @UIApplicationDelegateAdaptor(SyncTestAppDelegate.self) private var syncTestDelegate
-    #endif
     let persistenceController = PersistenceController.shared
     private let identityService: IdentityService
     @StateObject private var auth: AuthManager
@@ -298,16 +298,14 @@ struct MOTIVOApp: App {
                     // took, BEFORE anything can be dispatched. Local only — Core Data
                     // and the queue file — so it needs no identity or network.
                     if !UnitTestHost.isActive { SharingHandoffRecovery.run(reason: "launch") }
-                    #if SYNCTEST
                     if !UnitTestHost.isActive {
-                        // Silent CloudKit pushes are what tell CKSyncEngine the
-                        // database moved; without them the daemon answers "no
-                        // changes" from its cache (seen in Checkpoint 1).
-                        UIApplication.shared.registerForRemoteNotifications()
+                        // Private sync, off by default: with no state file this
+                        // builds nothing and registers for no pushes (the
+                        // registration runs only when an engine is made).
+                        JournalSyncCoordinator.shared.registerForPush = { UIApplication.shared.registerForRemoteNotifications() }
                         JournalSyncCoordinator.shared.auth = auth
                         JournalSyncCoordinator.shared.startIfNeeded(persistence: persistenceController.container)
                     }
-                    #endif
                     if !UnitTestHost.isActive { connectedMembershipStore.start() } // C-100
                     if !UnitTestHost.isActive { appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled) } // C-100
 

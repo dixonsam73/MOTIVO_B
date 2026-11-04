@@ -1,13 +1,14 @@
 //
 //  SyncTestDiagnosticsView.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  The evidence screen for the trial: engine status, bound user, outbox and
 //  held counts, records and bytes each way, conflicts with the losing text,
 //  and the diagnostics log. Manual Fetch/Send for deterministic steps.
 //
 
-#if SYNCTEST
+#if DEBUG
 import SwiftUI
 import CoreData
 

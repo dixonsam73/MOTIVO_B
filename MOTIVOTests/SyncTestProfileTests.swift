@@ -779,8 +779,12 @@ final class SyncTestProfileTests: XCTestCase {
         XCTAssertEqual(offer(last: "Delta catch-up failed: offline"), .restoring(lastFailure: "Delta catch-up failed: offline"))
         XCTAssertEqual(offer(last: "Catch-up (first fetch): 0 changed record(s)"), .restoring(lastFailure: nil))
         XCTAssertEqual(offer(paused: "Waiting for iCloud"), .waiting(reason: "Waiting for iCloud"))
-        XCTAssertEqual(Offer.decide(started: false, unlinked: true, localCopyRemoved: true, localRemovalInProgress: false, pausedReason: nil,
-                                    initialFetchComplete: false, lastCatchUp: nil, profileName: ""), .none)
+        // Never started: a build that can sync offers to turn it on (integration,
+        // 2026-11-04); one that cannot shows nothing. The stage E flags are moot.
+        XCTAssertEqual(Offer.decide(started: false, supported: true, unlinked: true, localCopyRemoved: true, localRemovalInProgress: false,
+                                    pausedReason: nil, initialFetchComplete: false, lastCatchUp: nil, profileName: ""), .turnOn)
+        XCTAssertEqual(Offer.decide(started: false, supported: false, unlinked: true, localCopyRemoved: true, localRemovalInProgress: false,
+                                    pausedReason: nil, initialFetchComplete: false, lastCatchUp: nil, profileName: ""), .none)
         // The first fetch brings the profile: a plain import onto the empty row.
         let cloudAt = Date(timeIntervalSince1970: 1_761_660_000)
         let outcome = applyProfile(serverProfile(name: "Name A", location: "Bristol", primary: "Cello", stamp: cloudAt))

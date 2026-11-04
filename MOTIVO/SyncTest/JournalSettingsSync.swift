@@ -1,6 +1,7 @@
 //
 //  JournalSettingsSync.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  PERSONAL SETTINGS THROUGH THE BOUND JOURNAL (stage J).
 //
@@ -37,7 +38,6 @@
 //  2026-10-27), as do the active timer, drafts and unfinished recordings.
 //
 
-#if SYNCTEST
 import Foundation
 import CloudKit
 import CoreData
@@ -754,4 +754,3 @@ enum JournalSettingsSync {
         }
     }
 }
-#endif

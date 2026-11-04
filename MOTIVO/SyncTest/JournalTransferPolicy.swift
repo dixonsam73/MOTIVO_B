@@ -1,6 +1,7 @@
 //
 //  JournalTransferPolicy.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  MEDIA OVER MOBILE DATA (stage J). Attachment, score and avatar files travel
 //  over Wi-Fi unless the person allows mobile data on this device; text and
@@ -24,7 +25,6 @@
 //  Pushes arrive through the app's own silent-push subscription.
 //
 
-#if SYNCTEST
 import Foundation
 import Network
 
@@ -148,4 +148,3 @@ struct JournalCatchUpSerial: Equatable {
         return again
     }
 }
-#endif

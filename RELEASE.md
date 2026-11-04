@@ -484,7 +484,7 @@ the join.
   Sync Test" installs (`SyncTest` configuration, bundle id
   `com.samueldixon.motivo.synctest`, development container
   `iCloud.com.samueldixon.motivo.synctest`, code under `MOTIVO/SyncTest/`,
-  all `#if SYNCTEST`) on Device B and the iPad Pro 11" M4 (iPadOS 27.0.1),
+  `#if SYNCTEST` until the 2026-11-04 integration) on Device B and the iPad Pro 11" M4 (iPadOS 27.0.1),
   same iCloud account, no Connected. `CKSyncEngine` with Core Data
   persistent-history change tracking across every context, an outbox and
   history token written atomically together, Session and Attachment
@@ -1495,7 +1495,9 @@ the join.
   `Info-SyncTest.plist` only, the production `Info.plist` line added in
   `3de231a` was taken out again — ordinary builds have no CloudKit or push
   entitlement, no engine, no subscription and no
-  `registerForRemoteNotifications`, all `#if SYNCTEST`), on the
+  `registerForRemoteNotifications`; `#if SYNCTEST` until 2026-11-04, since
+  then compiled everywhere with the engine built, and push asked for, only
+  once sync is turned on), on the
   foreground, on a 75 s poll while the app is active (pushes are Apple's
   and best effort: four sends took eight minutes to arrive by push on
   2026-11-03, C-147), and from the diagnostics; a file is fetched by name
@@ -1881,11 +1883,62 @@ the join.
   meanwhile is rejected and resolved again). Tests:
   `SyncTestStep0ReviewTests` (13); the selection is 205 tests green under
   SyncTest; Debug and Release build. No device run.
-  **Follow-ups before main-build integration (agreed 2026-11-03):** the
-  bounded C-151 workflow (built, above; device verification pending) and iCloud storage-full handling
-  and recovery (local content and pending work preserved, clear status,
-  controlled retries, recovery once space exists; simulated quota
-  failures only).
+  **Follow-ups before main-build integration (agreed 2026-11-03), both
+  done:** the bounded C-151 workflow (device-verified on build 1883 except
+  the unclocked-cloud-profile case, unit only by decision) and the iCloud
+  storage-full handling and recovery (above; simulated quota failures only).
+  **Main-build integration, sync OFF by default (2026-11-04; C-171 to
+  C-173):** the 20 files under `MOTIVO/SyncTest/` compile in every
+  configuration and the 45 `#if SYNCTEST` hooks in production code are
+  gone; one compile-time fact remains, `JournalSyncCapability.buildSupportsSync`,
+  true only for the isolated SyncTest configuration, which alone carries the
+  container entitlement, the push entitlement and the `remote-notification`
+  mode (its bundle id, entitlements, Info.plist and development container are
+  unchanged; Debug and Release carry none of them). The switch is the state
+  file: with none, `JournalSyncCoordinator.startIfNeeded` builds nothing — no
+  state store, no engine (the only place a `CKContainer` is made), no push
+  registration (now asked for only once an engine exists), and the metadata,
+  profile and score mirrors at the app's write points are inert — so a person
+  who never turns sync on, and App Review, see the app exactly as it was.
+  Turning it on (Profile → "iCloud sync (trial)" toggle, or the set-up card
+  "Turn on iCloud sync", offered before a name is asked for so a second
+  device restores instead of typing a name that is then displaced) writes
+  the file with the history token fast-forwarded to that moment (C-173: with
+  no token the history is read from its beginning, deletions included) and
+  builds the engine; off is the stage E unlink (journal kept, edits tracked,
+  nothing moves); a device-only removal leaves the file, so the restore card
+  and the interrupted-removal recovery work as before, and the erase bracket
+  answers "nothing to bracket" with no store (C-171: it would have refused
+  every ordinary erase). Persistent history tracking and the `app`
+  transaction author are on for every build (a tracked store cannot go back,
+  and the switch must work without a relaunch); with sync off nobody reads
+  the history (it grows slowly; pruning is a later optimisation). The
+  ownerless-entry filter and the removal wording follow "sync in use" at
+  runtime (P3 stays open). The diagnostics screen and the two destructive
+  diagnostics are `#if DEBUG`. Existing trial installs keep syncing (their
+  files exist). Tests: `SyncOffByDefaultTests` runs in every configuration —
+  a fresh install starts nothing and leaves no directory; local use with
+  sync off (insert, edit, delete, every write-point hook, the erase bracket,
+  a disable) changes nothing beyond the app's own history transactions; two
+  source guards (only the engine makes a `CKContainer` or `CKSyncEngine`,
+  only the coordinator builds an engine, push registration goes through the
+  coordinator, one `#if SYNCTEST` left) and a configuration guard (Debug and
+  Release use `MOTIVO.entitlements` and `Info.plist` with no iCloud, push or
+  `remote-notification`; the trial entitlements name only the trial
+  container) — and, under SyncTest, the switch write, the fast-forward (a
+  row made and deleted before the switch is never read back), the next
+  launch starting from the file, and off = unlink with the file kept. The
+  selection (15 `SyncTest*` suites, `C138ScoreLibraryTests`,
+  `SyncOffByDefaultTests`) is 180 tests green under SyncTest; Debug and
+  Release build; the ordinary Debug `MOTIVOTests` run is 1,199 tests with
+  the known order-dependent failures only (7 cases in
+  `JournalDeleteQueuedPublishTests`, `P6I02…` and `P6I03…`, all green when
+  their three suites run alone: 56 of 56). Tools for the trial, read-only on the device:
+  `docs/sync-trial/compare_containers.py` (two container copies compared
+  field by field: sessions, attachments and their order, instrument and
+  directory names, profile row, file hashes, privacy map, chosen defaults),
+  `load_container_copy.sh` and `pull_container_copy.sh` (file by file over
+  the cable).
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

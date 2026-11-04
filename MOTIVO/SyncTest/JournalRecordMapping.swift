@@ -1,6 +1,7 @@
 //
 //  JournalRecordMapping.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  CORE DATA ↔ CKRECORD FOR SESSION AND ATTACHMENT, AND THE TRIAL CONFLICT RULE.
 //
@@ -17,7 +18,6 @@
 //  merge edits to different fields.
 //
 
-#if SYNCTEST
 import Foundation
 import CloudKit
 import CoreData
@@ -321,4 +321,3 @@ enum JournalRecordMapping {
         return docs.appendingPathComponent(name, isDirectory: false)
     }
 }
-#endif

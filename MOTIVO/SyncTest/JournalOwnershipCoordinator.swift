@@ -1,6 +1,7 @@
 //
 //  JournalOwnershipCoordinator.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  APPLIES THE OWNERSHIP RULES ON THE DEVICE (stage B).
 //
@@ -19,7 +20,6 @@
 //  id, publishing, directory or avatar work starts from it.
 //
 
-#if SYNCTEST
 import Foundation
 import CoreData
 import Combine
@@ -152,4 +152,3 @@ final class JournalOwnershipCoordinator {
         return (try? persistence.viewContext.count(for: request)) ?? 0
     }
 }
-#endif

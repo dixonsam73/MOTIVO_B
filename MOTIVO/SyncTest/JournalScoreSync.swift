@@ -1,6 +1,7 @@
 //
 //  JournalScoreSync.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  SCORES LIBRARY ↔ CLOUDKIT (stage I): the whole library, including
 //  documents no journal entry refers to. The library stays where it is (one
@@ -41,7 +42,6 @@
 //  last-opened date.
 //
 
-#if SYNCTEST
 import Foundation
 import CloudKit
 import CryptoKit
@@ -96,7 +96,7 @@ enum JournalScoreKeys {
     static var all: [String] { [fileName, pageCount, createdAt, sourceAttachmentID, initialTitle, title, isFavourite, thumbnailPage, lastViewedPage, stamp] }
 }
 
-/// The store's write points call this (SYNCTEST only). Installed by the engine.
+/// The store's write points call this. Installed by the engine; inert before.
 enum JournalScoreMirror {
     nonisolated(unsafe) static var suppressed = false
     nonisolated(unsafe) static var onChange: ((ScoreLibraryChange) -> Void)?
@@ -745,4 +745,3 @@ enum JournalScoreSync {
         for url in displacedScores() { try? FileManager.default.removeItem(at: url) }
     }
 }
-#endif

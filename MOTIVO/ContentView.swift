@@ -2089,13 +2089,14 @@ fileprivate struct SessionsRootView: View {
         switch selectedScope {
         case .mine:
             if let uid = effectiveUserID {
-                #if SYNCTEST
-                // Sync trial: ownerless entries (written before the owner key was
-                // adopted, on either device) stay visible beside owned ones.
-                out = out.filter { $0.ownerUserID == uid || ($0.ownerUserID ?? "").isEmpty }
-                #else
-                out = out.filter { $0.ownerUserID == uid }
-                #endif
+                if JournalSyncCoordinator.shared.isInUse {
+                    // Private sync in use: ownerless entries (written before the
+                    // owner key was adopted, on either device) stay visible beside
+                    // owned ones. P3 (whether this applies to everyone) is open.
+                    out = out.filter { $0.ownerUserID == uid || ($0.ownerUserID ?? "").isEmpty }
+                } else {
+                    out = out.filter { $0.ownerUserID == uid }
+                }
             } else {
                 break
             }

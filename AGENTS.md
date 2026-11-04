@@ -140,6 +140,12 @@ xcodebuild test -project MOTIVO.xcodeproj -scheme MOTIVO -only-testing:MOTIVOTes
   Build Number" script phase.
 - Release-readable logging: `os.Logger` with `privacy: .public`. Xcode's console
   shows it live.
+- **Private iCloud sync** (`MOTIVO/SyncTest/`) compiles into every build and
+  is **off by default**: the state file is the switch, and only the
+  `SyncTest` configuration (bundle `com.samueldixon.motivo.synctest`, its own
+  entitlements, push mode and development container) can turn it on
+  (`JournalSyncCapability`). Debug and Release build no engine and touch no
+  CloudKit or push API; `SyncOffByDefaultTests` guards this.
 
 ## Devices and Sandbox
 

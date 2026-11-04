@@ -1372,8 +1372,7 @@ final class AuthManager: NSObject, ObservableObject {
     /// Drops the local owner as well as the Connected identity. C-114: ONLY for
     /// `LocalFactoryReset`, where the journal is going too. Anything else that
     /// called this would hide the member's journal.
-    #if SYNCTEST
-    /// Sync trial only. A copied or imported journal carries the owner key its
+    /// Private sync. A copied or imported journal carries the owner key its
     /// sessions were written under, and the Keychain (where that key lives) is
     /// not part of a container copy or a sync. Adopt it so the journal filter
     /// shows those sessions. This sets the key and nothing else: no Supabase
@@ -1392,9 +1391,9 @@ final class AuthManager: NSObject, ObservableObject {
     /// key their redraw on this revision (as a Connected replacement does).
     func noteAvatarChangedBySync() { ownAvatarRevision &+= 1 }
 
-    /// Sync trial resets only. The Keychain outlives an uninstall, so a fresh
-    /// Sync Test install would otherwise start with the previous trial's owner.
-    /// Refused while a Connected identity is held.
+    /// Sync Test diagnostics only (the DEBUG screen). The Keychain outlives an
+    /// uninstall, so a fresh Sync Test install would otherwise start with the
+    /// previous trial's owner. Refused while a Connected identity is held.
     @discardableResult
     func clearOwnerForSyncTest() -> Bool {
         guard !hasConnectedIdentity else { return false }
@@ -1403,7 +1402,6 @@ final class AuthManager: NSObject, ObservableObject {
         PersistenceController.shared.currentUserID = nil
         return true
     }
-    #endif
 
     func signOut() {
         // P6-I-02. See `clearConnectedIdentity`. Queue retained, acknowledgements

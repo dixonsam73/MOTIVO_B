@@ -1,13 +1,13 @@
 //
 //  SyncRecoveryView.swift
-//  MOTIVO — Études Sync Test only (SYNCTEST configuration)
+//  MOTIVO — private iCloud sync. Compiled in every configuration; nothing
+//  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  The person's view of what sync displaced (stage J): one card per conflict
 //  with the value that lost, Copy, and Restore where the app can apply it as
 //  a new edit. Not a version history.
 //
 
-#if SYNCTEST
 import SwiftUI
 
 struct SyncRecoveryView: View {
@@ -88,4 +88,3 @@ struct SyncRecoveryView: View {
         return "\(f.string(from: entry.at)) · \(side)"
     }
 }
-#endif
