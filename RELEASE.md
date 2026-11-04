@@ -2039,7 +2039,12 @@ the join.
   outside the private sync, with Connected, and the wording says so; C-177
   fixed first, then the set-up card and Profile toggle wording (sync is
   optional, needs the same iCloud account, off keeps local data and stops
-  transfers, what was uploaded stays in iCloud).
+  transfers, what was uploaded stays in iCloud). **Both done 2026-11-04
+  (`0d75ff1`, build 1898 on Device A and the iPad):** C-177 device-checked
+  — a recording renamed "Am Fugue" on the iPad changed on Device A's open
+  journal with no relaunch; the set-up card and the Profile toggle carry
+  the agreed wording (and name ensembles as Connected's). Selection 182
+  tests green; Debug and Release build.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.
