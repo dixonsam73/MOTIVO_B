@@ -26,7 +26,7 @@ struct SyncTestProfileSection: View {
             Toggle(isOn: $syncOn) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Sync this journal with iCloud").font(Theme.Text.body)
-                    Text("Off: everything stays on this device only. On: your journal, scores, profile and settings are kept the same on every device signed in to this iCloud account. Turning it off keeps everything here and stops sending and receiving.")
+                    Text("Optional. On: your journal, scores, profile and settings are kept the same on every device signed in to the same iCloud account. Off: this device keeps everything it has and stops sending and receiving; what was already uploaded stays in iCloud. Ensembles and other Connected features are not part of this sync.")
                         .font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
                 }
             }
@@ -128,7 +128,7 @@ struct SyncTestRestoreCard: View {
                 EmptyView()
             case .turnOn:
                 card("Already using Études on another device?",
-                     "Turn on iCloud sync to bring your profile, journal, scores and settings here from your other devices before choosing a name. Off by default; you can turn it on later in Profile.",
+                     "iCloud sync is optional. If this iPhone is signed in to the same iCloud account as your other device, turn it on to bring your profile, journal, scores and settings here before choosing a name. You can turn it on or off later in Profile; turning it off keeps everything on this device.",
                      button: "Turn on iCloud sync") {
                     JournalSyncCoordinator.shared.enable(persistence: PersistenceController.shared.container)
                     reloadSoon()

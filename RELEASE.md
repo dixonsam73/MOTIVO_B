@@ -2028,6 +2028,18 @@ the join.
   for the run. Hands-on: Samuel ≈ 1 h 15 min across Parts 1–4 (incl. the
   iCloud account switch and three reinstalls); agent ≈ 3 h of which the
   three 800 MB container pulls and the upload/import waits were ≈ 40 min.
+  **Independent review through `3158850` (Codex, 2026-11-04):** no new
+  data-safety blocker; sync stays off by default and Debug and Release
+  cannot enable it. Carried: the comparator's gaps (a receiver's missing
+  media is a note, not a failure; avatar files and profile preferences are
+  not covered), so "0 failures" alone is not enough for a future trial
+  without the hands-on checks; C-174 is a plausible mitigation, not a
+  verified root cause. Decided (Samuel, 2026-11-04): P3 stays as tested
+  (ownerless entries visible only while sync is in use); ensembles stay
+  outside the private sync, with Connected, and the wording says so; C-177
+  fixed first, then the set-up card and Profile toggle wording (sync is
+  optional, needs the same iCloud account, off keeps local data and stops
+  transfers, what was uploaded stays in iCloud).
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

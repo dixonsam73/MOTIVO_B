@@ -68,7 +68,12 @@ struct MonthThoughtRow: View {
         return pickFavoriteVisualAttachment(from: attachments)
     }
 
+    /// C-177: a recording title lives in UserDefaults; one written by another
+    /// screen or a sync import must show without rebuilding the row.
+    @State private var _refreshTick: Int = 0
+
     var body: some View {
+        let _ = _refreshTick
         HStack(alignment: .center, spacing: 6) {
             ZStack(alignment: .center) {
                 RoundedRectangle(cornerRadius: 1, style: .continuous)
@@ -158,6 +163,10 @@ struct MonthThoughtRow: View {
         .padding(.vertical, 4)
         .padding(.trailing, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Received on the main run loop: a sync import writes from its own queue.
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
+            _refreshTick &+= 1
+        }
     }
 }
 

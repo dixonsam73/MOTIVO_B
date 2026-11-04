@@ -23,6 +23,9 @@ struct ThoughtRow: View {
     let threadChipTextColor: Color?
 
     @State private var isSavedLocal: Bool = false
+    /// C-177: the recording title (`mediaTitle`) lives in UserDefaults; a sync
+    /// import's write must show without rebuilding the row.
+    @State private var _refreshTick: Int = 0
     @AppStorage("hasSeenSaveHint_v1") private var hasSeenSaveHint: Bool = false
     @State private var showSaveHint: Bool = false
     @State private var saveHintToken = UUID()
@@ -112,6 +115,7 @@ struct ThoughtRow: View {
     }
 
     var body: some View {
+        let _ = _refreshTick
         VStack(alignment: .leading, spacing: rowSpacing) {
             Text(timestampText)
                 .font(.caption2)
@@ -216,8 +220,10 @@ struct ThoughtRow: View {
                 isSavedLocal = false
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
-            // See ContentViewSessionRow: a favourite changed elsewhere shows without a rebuild.
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
+            // See ContentViewSessionRow: a favourite or a recording title changed
+            // elsewhere (another screen, a sync import) shows without a rebuild.
+            _refreshTick &+= 1
             if context == .journalWeek, let sessionUUID, let viewerUserID {
                 let now = FeedInteractionStore.isSaved(sessionUUID, viewerUserID: viewerUserID)
                 if now != isSavedLocal { isSavedLocal = now }

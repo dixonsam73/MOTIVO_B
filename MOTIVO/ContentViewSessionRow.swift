@@ -826,7 +826,7 @@ struct SessionRow: View {
                 _refreshTick &+= 1
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             _refreshTick &+= 1
             // The favourite lives in UserDefaults; a change made elsewhere
             // (another screen, or a sync import) must show without rebuilding the row.
