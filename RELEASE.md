@@ -362,6 +362,13 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 
 ## C. Configuration (Samuel, in App Store Connect / Supabase / web)
 
+- [ ] **Private sync on the shipping configuration** (prepared 2026-11-04,
+  nothing applied): `docs/sync-trial/production-configuration.md` — the App
+  ID's iCloud/CloudKit (new container `iCloud.com.sdsongs.etudes`) and Push
+  capabilities, the CloudKit schema exported from the trial container and
+  deployed to Production, then the Release enablement patch applied in one
+  commit, a Release build for Device A and a TestFlight upload from it.
+
 - [x] Founding 500 introductory offer: free first year on both products, no end
   date (seen in ASC 2026-09-21). Remove manually at ~500.
 - [ ] **App price £4.99** in App Store Connect (Pricing and Availability),
@@ -433,6 +440,33 @@ the join.
 - [ ] Adult-only gate: `docs/qa-plan.md` Group AG on Device A (Release,
   Sandbox Apple Account), including AG0's cache-trap probe and the refusal
   count arithmetic.
+- [ ] **TestFlight checkpoint for the private sync** (script written
+  2026-11-04: `testflight-checkpoint-device-script.md` in
+  `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/`;
+  after section C's sync item). Device A
+  (iPhone 16e, trial iCloud account) and the iPad (TestFlight, fresh);
+  Device B unused; a fresh Sandbox tester for the Connected part. Parts:
+  (1) pre-flight on the production container's Development environment
+  with a development-signed Release build and the fixture — enable, the
+  ≈ 830 MB first upload (C-174's one-send gate under load; its root cause
+  is not verified, so a recurrence is recorded, not explained away),
+  relaunches, the comparator over the cable (upgraded role, 0 failures),
+  Offline and Waiting-for-Wi-Fi wording; (2) the populated upgrade with
+  sync off: fixture into a development-signed Release install, opened once,
+  then the TestFlight build installed over it, data kept, toggle still off;
+  (3) explicit enablement on Production and a second large first upload;
+  (4) the iPad restoring from the set-up card with the new progress
+  wording, the four entry kinds, scores, lists, profile and avatar checked,
+  then edits both ways incl. a rename seen without a relaunch (C-177) and a
+  deletion; (5) a Connected member with sync on: a fresh Sandbox tester
+  joins on Device A, the iPad changes location and avatar by sync, and the
+  backend's `account_directory` row and avatar object are read before and
+  after (unchanged until the person edits on Device A) — the unit-only
+  isolation case (`SyncTestConnectedIsolationTests`) on a device — then
+  Delete Account leaves the iCloud journal and the restore card brings it
+  back. Not readable over the cable: the TestFlight installs (if devicectl
+  refuses them, the evidence for parts 2–5 is on-screen and on the
+  receiver, and the record says so).
 
 ## E. After launch / known limitations (not release work)
 
@@ -2045,9 +2079,53 @@ the join.
   journal with no relaunch; the set-up card and the Profile toggle carry
   the agreed wording (and name ensembles as Connected's). Selection 182
   tests green; Debug and Release build.
-  **When sync or the Connected-deletion split ships, update the privacy
-  policy and terms:** both currently say journal data stays on the iPhone and
-  that deleting a Connected account erases the iPhone's Études data.
+  **TestFlight preparation (2026-11-04; C-178 to C-180) — built and tested:**
+  (1) the comparator's gaps closed (C-178): a receiver's missing media fails,
+  the avatar PNGs are compared by content, and location, name, primary
+  instrument, Journal Tint, the instrument colour map, primary activity, the
+  Lists contexts, favourites, saved Lists, the score index, recording titles
+  and page selections are compared by meaning; self-tested on the trial's
+  copies (copy2 upgraded: 0 failures; copy3 receiver: exactly the 10 C-176
+  titles it genuinely lacked when pulled; a clone with one video and the
+  avatars removed: fails on both). (2) The person-facing status (C-179):
+  `JournalSyncStatusSummary`, pure from the state file and three facts the
+  engine now publishes (the network path, the first fetch's progress, the
+  last transient send failure): "Restoring from iCloud" with records → files
+  → applying counts on the Status row and the set-up card; "Still to upload:
+  n entries, m files (x MB) and k other changes"; "Offline" in plain words;
+  "Waiting for Wi-Fi" / "Media paused by Low Data Mode" with the action;
+  "Signed out of iCloud", "Linked to a different iCloud account" and "iCloud
+  storage is full" with what to do; "Up to date" only when nothing waits.
+  Engine rules unchanged; `SyncTestStatusSummaryTests` (8). (3) The
+  container identifier per configuration (C-180): the build setting
+  `ETUDES_CLOUDKIT_CONTAINER` → Info.plist `EtudesCloudKitContainer` →
+  `JournalSyncCapability`; SyncTest sets the trial container (read back from
+  the built bundle), Debug and Release unset; the guard test ties the
+  setting to each configuration's entitlements, push and
+  `remote-notification`, and checks what the running bundle resolved.
+  Selection 190 tests green under SyncTest (16 `SyncTest*` suites,
+  `C138ScoreLibraryTests`, `SyncOffByDefaultTests`; the source guard now
+  asserts NO `#if SYNCTEST` is left in the app); Debug and Release build;
+  ordinary Debug `MOTIVOTests` 1,199 tests with the known order-dependent
+  failures only (the same 7 cases). **Prepared, waiting on
+  Samuel (nothing applied):** `docs/sync-trial/production-configuration.md`
+  — App ID `com.sdsongs.etudes` (iCloud/CloudKit with the NEW container
+  `iCloud.com.sdsongs.etudes`, Push), the Release enablement as
+  `docs/sync-trial/production-configuration.patch` (a Release-only
+  `MOTIVO-Release.entitlements` with `aps-environment`, the container and
+  CloudKit; `remote-notification` in `Info.plist`; the build setting in the
+  Release configuration), the CloudKit schema (every record type and field
+  the engine writes, listed; `cktool` export from the trial container →
+  validate → import into the production container's Development
+  environment → deploy to Production in the Console, with a check after
+  each step), and the recommendation that Release's flag flips at the
+  checkpoint by applying the patch in one commit, never before the schema
+  is in Production. Privacy policy and terms: the replacement text for
+  optional sync, device-only removal, the Connected deletion's split and
+  ensembles staying outside is drafted beside the current text in
+  `docs/sync-trial/policy-drafts-icloud-sync.md` (the Desktop drafts and
+  the website still say journal data stays on the iPhone and that a
+  Connected deletion erases it). The checkpoint itself: section D below.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.

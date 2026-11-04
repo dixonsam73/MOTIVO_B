@@ -8,8 +8,10 @@
 //  status, the per-device "media over mobile data" option, what waits for
 //  Wi-Fi, the recovery view for displaced text, scores without a file, and
 //  (DEBUG) the diagnostics screen. Shown only by a build that can sync
-//  (`JournalSyncCapability`). First-sync progress and actionable errors are
-//  still to come.
+//  (`JournalSyncCapability`). The Status row is `JournalSyncStatusSummary`:
+//  restoring with progress, what still waits to upload, offline and paused in
+//  plain words, and what the person can do (signed out, a different account,
+//  storage full, Low Data Mode); "Up to date" only when nothing waits.
 //
 
 import SwiftUI
@@ -49,10 +51,20 @@ struct SyncTestProfileSection: View {
 
     @ViewBuilder
     private var syncRows: some View {
-            HStack {
-                Text("Status").font(Theme.Text.body)
-                Spacer()
-                Text(statusText).font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText).multilineTextAlignment(.trailing)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text("Status").font(Theme.Text.body)
+                    Spacer()
+                    Text(status.summary.headline).font(Theme.Text.meta)
+                        .foregroundStyle(status.summary.kind == .attention ? Theme.Colors.accent : Theme.Colors.secondaryText)
+                        .multilineTextAlignment(.trailing)
+                }
+                if let detail = status.summary.detail {
+                    Text(detail).font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
+                }
+                if let action = status.summary.action {
+                    Text(action).font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
+                }
             }
             Toggle(isOn: $allowMobileData) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -62,10 +74,12 @@ struct SyncTestProfileSection: View {
                 }
             }
             .onChange(of: allowMobileData) { _, newValue in JournalMediaPreference.setAllowsMobileData(newValue) }
-            if let waiting = status.mediaWaiting {
+            // What waits for Wi-Fi and the storage-full line are in the summary
+            // when they decide the status; shown here too when something else does.
+            if let waiting = status.mediaWaiting, status.summary.kind != .mediaHeld {
                 Text(waiting).font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
             }
-            if let full = status.storageFullSummary {
+            if let full = status.storageFullSummary, status.summary.kind != .attention {
                 Text(full).font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
             }
             if !library.missingFileIDs.isEmpty {
@@ -81,14 +95,6 @@ struct SyncTestProfileSection: View {
                     Text(recoverable == 0 ? "none" : "\(recoverable)").font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
                 }
             }
-    }
-
-    private var statusText: String {
-        var text = status.phase
-        if let reason = status.pausedReason, !reason.isEmpty { text += " · \(reason)" }
-        if let reason = status.mediaHold.reason { text += " · \(reason)" }
-        if status.storageFull != nil { text += " · iCloud storage full" }
-        return text
     }
 
     private func reload() {
@@ -145,6 +151,7 @@ struct SyncTestRestoreCard: View {
             case .restoring(let failure):
                 card("Restoring from iCloud…",
                      "Looking for your journal in iCloud. If this device is offline you can set up now: your iCloud profile is restored when it connects, and a name typed here is kept on the Displaced by sync list."
+                     + (status.restoreProgress.map { "\n\n\($0.text)" } ?? "")
                      + (failure.map { "\n\n\($0)" } ?? ""),
                      button: failure == nil ? nil : "Try again") {
                     Task { await JournalSyncCoordinator.shared.engine?.fetchNow(); reloadSoon() }

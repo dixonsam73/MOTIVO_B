@@ -208,10 +208,12 @@ final class SyncOffByDefaultTests: XCTestCase {
                               "push registration is handed to the coordinator, which calls it only once an engine exists: \(line)")
             }
         }
-        // The capability constant is the one compile-time condition left.
+        // No compile-time condition is left in the app: whether a build can
+        // sync is the container identifier its bundle carries (C-180).
         let conditions = sources.filter { $0.text.contains("#if SYNCTEST") }
-        XCTAssertEqual(Set(conditions.map(\.path)), ["SyncTest/JournalSyncEngine.swift"])
-        XCTAssertEqual(conditions.first?.text.components(separatedBy: "#if SYNCTEST").count, 2)
+        XCTAssertEqual(Set(conditions.map(\.path)), [], "SYNCTEST is a test-target condition only")
+        XCTAssertEqual(files(containing: "Bundle.main.object(forInfoDictionaryKey: infoKey)"), ["SyncTest/JournalSyncEngine.swift"],
+                       "the capability reads the identifier from the bundle in one place")
     }
 
     func testDebugAndReleaseCarryNoCloudKitContainerOrPush() throws {
@@ -222,26 +224,68 @@ final class SyncOffByDefaultTests: XCTestCase {
                   let end = project.range(of: "};", range: idRange.upperBound..<project.endIndex) else { return "" }
             return String(project[start.lowerBound..<end.upperBound])
         }
+        // The container is a build setting (`ETUDES_CLOUDKIT_CONTAINER`), read
+        // by `JournalSyncCapability` from the bundle. A configuration that sets
+        // it must carry the matching entitlements, push and background mode;
+        // one that does not must carry none of them. Debug never sets it.
+        func containerSetting(_ config: String) -> String? {
+            guard let range = config.range(of: "ETUDES_CLOUDKIT_CONTAINER = ") else { return nil }
+            return String(config[range.upperBound...].prefix { $0 != ";" }).trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
+        }
+        func entitlementsFile(_ config: String) -> String? {
+            guard let range = config.range(of: "CODE_SIGN_ENTITLEMENTS = ") else { return nil }
+            return String(config[range.upperBound...].prefix { $0 != ";" }).trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
+        }
+        let plist = try String(contentsOf: repoRoot.appendingPathComponent("MOTIVO/Info.plist"), encoding: .utf8)
+        XCTAssertTrue(plist.contains("<string>$(ETUDES_CLOUDKIT_CONTAINER)</string>"), "Info.plist carries the container key, expanded per configuration")
         for bundleID in ["com.samueldixon.motivo.dev", "com.sdsongs.etudes"] {
             let config = targetConfiguration(bundleID: bundleID)
             XCTAssertFalse(config.isEmpty, "configuration for \(bundleID) not found")
-            XCTAssertTrue(config.contains("CODE_SIGN_ENTITLEMENTS = MOTIVO/MOTIVO.entitlements;"), bundleID)
             XCTAssertTrue(config.contains("INFOPLIST_FILE = MOTIVO/Info.plist;"), bundleID)
-            XCTAssertFalse(config.contains("SYNCTEST"), "\(bundleID) must not compile as a build that can sync")
+            XCTAssertFalse(config.contains("SYNCTEST"), "\(bundleID) must not compile as the trial build")
+        }
+        // Debug: the shared entitlements, no container, no push; never syncs.
+        let debug = targetConfiguration(bundleID: "com.samueldixon.motivo.dev")
+        XCTAssertEqual(entitlementsFile(debug), "MOTIVO/MOTIVO.entitlements")
+        XCTAssertNil(containerSetting(debug), "Debug never syncs")
+        let debugEntitlements = try String(contentsOf: repoRoot.appendingPathComponent("MOTIVO/MOTIVO.entitlements"), encoding: .utf8)
+        XCTAssertFalse(debugEntitlements.lowercased().contains("icloud"), "the Debug entitlements carry no CloudKit container")
+        XCTAssertFalse(debugEntitlements.contains("aps-environment"), "the Debug entitlements carry no push")
+        // Release: whichever entitlements file it names must agree with its setting.
+        let releaseConfig = targetConfiguration(bundleID: "com.sdsongs.etudes")
+        let releaseFile = try XCTUnwrap(entitlementsFile(releaseConfig))
+        let entitlements = try String(contentsOf: repoRoot.appendingPathComponent(releaseFile), encoding: .utf8)
+        let release = containerSetting(releaseConfig)
+        if let release {
+            // Production enablement applied (docs/sync-trial/production-configuration.md).
+            XCTAssertEqual(release, JournalSyncCapability.productionContainerIdentifier)
+            XCTAssertNotEqual(releaseFile, "MOTIVO/MOTIVO.entitlements", "Release syncs through its own entitlements file; Debug keeps the shared one")
+            XCTAssertTrue(entitlements.contains(release), "the Release entitlements must name the container the build setting names")
+            XCTAssertTrue(entitlements.contains("aps-environment"), "the Release entitlements must carry push for the app-wake subscription")
+            XCTAssertTrue(plist.contains("remote-notification"), "the Release Info.plist must carry the silent-push background mode")
+            XCTAssertFalse(entitlements.contains(JournalSyncCapability.trialContainerIdentifier), "Release never names the trial container")
+        } else {
+            XCTAssertFalse(entitlements.lowercased().contains("icloud"), "the production entitlements carry no CloudKit container")
+            XCTAssertFalse(entitlements.contains("aps-environment"), "the production entitlements carry no push")
+            XCTAssertFalse(plist.contains("remote-notification"), "the production Info.plist has no silent-push background mode")
         }
         let trial = targetConfiguration(bundleID: "com.samueldixon.motivo.synctest")
         XCTAssertTrue(trial.contains("MOTIVO-SyncTest.entitlements"))
         XCTAssertTrue(trial.contains("Info-SyncTest.plist"))
         XCTAssertTrue(trial.contains("SYNCTEST"))
-
-        let entitlements = try String(contentsOf: repoRoot.appendingPathComponent("MOTIVO/MOTIVO.entitlements"), encoding: .utf8)
-        XCTAssertFalse(entitlements.lowercased().contains("icloud"), "the production entitlements carry no CloudKit container")
-        XCTAssertFalse(entitlements.contains("aps-environment"), "the production entitlements carry no push")
-        let plist = try String(contentsOf: repoRoot.appendingPathComponent("MOTIVO/Info.plist"), encoding: .utf8)
-        XCTAssertFalse(plist.contains("remote-notification"), "the production Info.plist has no silent-push background mode")
+        XCTAssertEqual(containerSetting(trial), JournalSyncCapability.trialContainerIdentifier)
         let trialEntitlements = try String(contentsOf: repoRoot.appendingPathComponent("MOTIVO/MOTIVO-SyncTest.entitlements"), encoding: .utf8)
-        XCTAssertTrue(trialEntitlements.contains(JournalSyncCoordinator.containerIdentifier))
+        XCTAssertTrue(trialEntitlements.contains(JournalSyncCapability.trialContainerIdentifier))
         XCTAssertFalse(trialEntitlements.contains("iCloud.com.sdsongs"), "the trial never names a production container")
+
+        // What THIS build resolved at runtime from its own bundle.
+        #if SYNCTEST
+        XCTAssertEqual(JournalSyncCapability.containerIdentifier, JournalSyncCapability.trialContainerIdentifier)
+        XCTAssertTrue(JournalSyncCapability.buildSupportsSync)
+        #else
+        XCTAssertEqual(JournalSyncCapability.containerIdentifier, release ?? "", "the bundle's container is the build setting's, or none")
+        XCTAssertEqual(JournalSyncCapability.buildSupportsSync, release != nil)
+        #endif
     }
 
     #if SYNCTEST

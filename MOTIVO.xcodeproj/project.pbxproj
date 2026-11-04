@@ -697,6 +697,7 @@
 				DEVELOPMENT_TEAM = K352DG4UJA;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				ETUDES_CLOUDKIT_CONTAINER = iCloud.com.samueldixon.motivo.synctest;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "MOTIVO/Info-SyncTest.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Études Sync Test";

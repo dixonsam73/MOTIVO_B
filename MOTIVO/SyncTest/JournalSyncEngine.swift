@@ -87,6 +87,15 @@ final class JournalSyncStatus: ObservableObject {
     /// iCloud storage full: the current episode and the person-facing line.
     @Published var storageFull: JournalStorageFull.Episode?
     @Published var storageFullSummary: String?
+    /// The network path is satisfied (false = offline, as iOS reports it).
+    @Published var online = true
+    /// The first complete fetch, while it runs.
+    @Published var restoreProgress: JournalRestoreProgress?
+    /// The last transient send failure since the last accepted send.
+    @Published var lastTransientFailure: String?
+    /// What the Profile screen shows: derived from the state file and the
+    /// facts above by `JournalSyncStatusSummary` on every refresh.
+    @Published var summary = JournalSyncStatusSummary(kind: .off, headline: "Off")
 }
 
 final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue, @unchecked Sendable {
@@ -128,6 +137,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// 20 ms on a removed copy.
     private var dormantGeneration = 0
     private var pathMonitor: NWPathMonitor?
+    /// Live facts for the status summary, guarded by `stateLock`: the last
+    /// path report, the first fetch's progress and the last transient send
+    /// failure. Status only; no rule reads them.
+    private var onlineValue = true
+    private var restoreValue: JournalRestoreProgress?
+    private var transientFailureValue: String?
     /// Stage I: the Scores library's metadata scan debounce.
     private var scoreScanScheduled = false
     private var backgroundObserver: NSObjectProtocol?
@@ -869,7 +884,19 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         var deleted: [(CKRecord.ID, CKRecord.RecordType)] = []
         var newToken: CKServerChangeToken?
         var failure: CKError?
-        op.recordWasChangedBlock = { _, result in if case .success(let r) = result { modified.append(r) } }
+        // The first complete fetch is the restoration: say how far it is.
+        let restoring = !store.state.initialFetchComplete
+        var progress = JournalRestoreProgress()
+        if restoring { publishRestore(progress) }
+        op.recordWasChangedBlock = { [weak self] _, result in
+            if case .success(let r) = result {
+                modified.append(r)
+                if restoring {
+                    progress.recordsFetched += 1
+                    if progress.recordsFetched % 25 == 0 { self?.publishRestore(progress) }
+                }
+            }
+        }
         op.recordWithIDWasDeletedBlock = { id, type in deleted.append((id, type)) }
         op.recordZoneChangeTokensUpdatedBlock = { _, token, _ in newToken = token }
         op.recordZoneFetchResultBlock = { _, result in
@@ -888,6 +915,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         if let failure {
             let text = "Delta catch-up failed: \(failure.localizedDescription)"
             store.update { $0.lastCatchUp = text }
+            if restoring { publishRestore(nil) }
             log(text)
             switch JournalCatchUp.recovery(for: failure.code) {
             case .retryLater:
@@ -902,7 +930,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             }
         }
 
-        guard mayStillImport(generation) else { log("Catch-up (\(reason)) abandoned: sync stopped while the zone was read; nothing imported, token kept"); return true }
+        guard mayStillImport(generation) else {
+            if restoring { publishRestore(nil) }
+            log("Catch-up (\(reason)) abandoned: sync stopped while the zone was read; nothing imported, token kept"); return true
+        }
         // The file only where it is needed.
         var assetsFetched = 0
         let library = await MainActor.run { ScoreLibraryStore.shared.snapshot() }
@@ -949,6 +980,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             if !needs, let serverHash, localHash == serverHash { store.update { $0.assetHashes[name] = serverHash } }
             return needs
         }.map(\.recordID)
+        if restoring { progress.filesTotal = mediaGated ? 0 : needing.count; publishRestore(progress) }
         if !needing.isEmpty, mediaGated {
             // Stage J: the files are held; the records wait with them
             // (an attachment, score or avatar is never imported without its
@@ -967,7 +999,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             let fetch = CKFetchRecordsOperation(recordIDs: needing)
             fetch.configuration.timeoutIntervalForResource = 600
             var full: [CKRecord.ID: CKRecord] = [:]
-            fetch.perRecordResultBlock = { id, result in if case .success(let r) = result { full[id] = r } }
+            fetch.perRecordResultBlock = { [weak self] id, result in
+                if case .success(let r) = result { full[id] = r }
+                if restoring { progress.filesFetched += 1; self?.publishRestore(progress) }
+            }
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 fetch.fetchRecordsResultBlock = { _ in continuation.resume() }
                 container.privateCloudDatabase.add(fetch)
@@ -990,10 +1025,21 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 refreshCounts()
             }
         }
-        guard mayStillImport(generation) else { log("Catch-up (\(reason)) abandoned: sync stopped while files were fetched; nothing imported, token kept"); return true }
+        guard mayStillImport(generation) else {
+            if restoring { publishRestore(nil) }
+            log("Catch-up (\(reason)) abandoned: sync stopped while files were fetched; nothing imported, token kept"); return true
+        }
+        if restoring { progress.applying = true; publishRestore(progress) }
         _ = await applyFetchedBatch(modified: modified, deleted: deleted, newToken: newToken, assetsFetched: assetsFetched,
                                     generation: generation, reason: reason, writeFailuresBefore: writeFailuresBefore)
+        if restoring { publishRestore(nil) }
         return true
+    }
+
+    /// Status only: where the first complete fetch is (nil = not running).
+    private func publishRestore(_ progress: JournalRestoreProgress?) {
+        stateLock.lock(); restoreValue = progress; stateLock.unlock()
+        refreshCounts()
     }
 
     /// Test hook: runs before each record family is applied (R2).
@@ -1236,7 +1282,14 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         guard pathMonitor == nil else { return }
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
-            guard let self, path.status == .satisfied else { return }
+            guard let self else { return }
+            let online = path.status == .satisfied
+            self.stateLock.lock()
+            let onlineChanged = self.onlineValue != online
+            self.onlineValue = online
+            self.stateLock.unlock()
+            if onlineChanged { self.refreshCounts() }   // the status says "Offline" in plain words
+            guard online else { return }
             // Stage J: the link decides whether media waits.
             let link = JournalMediaGate.link(path: path)
             self.stateLock.lock()
@@ -2091,7 +2144,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             }
         }
         store.update { $0.recordsSent += sent; $0.bytesSent += bytes; $0.assetUploads += uploads; $0.attachmentRecordsSentWithoutMedia += withoutMedia }
-        if sent > 0 { log("Sent \(sent) record(s); \(uploads) media upload(s), \(bytes) bytes; \(withoutMedia) attachment record(s) metadata only") }
+        if sent > 0 {
+            stateLock.lock(); transientFailureValue = nil; stateLock.unlock()
+            log("Sent \(sent) record(s); \(uploads) media upload(s), \(bytes) bytes; \(withoutMedia) attachment record(s) metadata only")
+        }
         if !quotaRefused.isEmpty {
             noteStorageFull(records: quotaRefused, zone: false, simulated: false)
         } else if store.state.storageFull != nil {
@@ -2197,6 +2253,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             store.update { $0.lastKnownRecords.removeValue(forKey: name) }
             queueToEngine(zoneChanges: [.saveRecord(record.recordID)])
         case .engineRetries:
+            stateLock.lock(); transientFailureValue = failure.error.localizedDescription; stateLock.unlock()
             log("Save of \(name) deferred: \(failure.error.localizedDescription)") // the engine retries
         case .storageFull:
             // handleSent gathers these per batch; kept for a direct call.
@@ -2237,7 +2294,15 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     private func refreshCounts() {
         let st = store.state
+        stateLock.lock()
+        let online = onlineValue
+        let restore = restoreValue
+        let transientFailure = transientFailureValue
+        stateLock.unlock()
         Task { @MainActor in
+            self.status.online = online
+            self.status.restoreProgress = restore
+            self.status.lastTransientFailure = transientFailure
             self.status.outboxCount = st.outbox.count
             self.status.heldCount = st.awaitingParent.count
             self.status.conflictCount = st.conflicts.count
@@ -2256,23 +2321,42 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 let media = saves.filter { JournalAssetPolicy.carriesFile(recordType: $0.recordType) && !$0.assetFree }.count
                 return JournalStorageFull.summary(episode: episode, pendingSaves: saves.count, pendingDeletes: st.outbox.count - saves.count, mediaFiles: media)
             }
+            self.status.summary = JournalSyncStatusSummary.derive(JournalSyncStatusFacts(
+                inUse: true, unlinked: st.unlinked, localRemovalInProgress: st.localRemovalInProgress,
+                phase: self.status.phase, pausedReason: self.status.pausedReason, online: online,
+                initialFetchComplete: st.initialFetchComplete, restore: restore,
+                outbox: st.outbox, awaitingMedia: st.awaitingMedia, mediaWaitingUpload: st.mediaWaitingUpload,
+                fileStampCache: st.fileStampCache, mediaHold: hold, storageFullSummary: self.status.storageFullSummary,
+                lastTransientFailure: transientFailure, lastCatchUp: st.lastCatchUp, lastFetchAt: self.status.lastFetchAt))
         }
     }
 }
 
-/// Whether THIS build can run the private sync at all. Only the SyncTest
-/// configuration carries the CloudKit container entitlement, the push
-/// entitlement and the `remote-notification` background mode
-/// (`MOTIVO-SyncTest.entitlements`, `Info-SyncTest.plist`). Debug and Release
-/// carry none of them, so they never offer the control and never build an
-/// engine. Production enablement (entitlements for the Release id, a
-/// production container) is a later, separate step.
+/// Whether THIS build can run the private sync at all, and through which
+/// CloudKit container. The container identifier is a BUILD SETTING
+/// (`ETUDES_CLOUDKIT_CONTAINER`), carried into the bundle as the Info.plist
+/// key `EtudesCloudKitContainer`, and set only in a configuration whose
+/// entitlements name that container: today the isolated SyncTest
+/// configuration (the development container
+/// `iCloud.com.samueldixon.motivo.synctest`, `MOTIVO-SyncTest.entitlements`,
+/// `Info-SyncTest.plist`). Debug and Release leave it unset, so the key
+/// expands to "" and they never offer the control and never build an engine.
+/// Release's production container (`iCloud.com.sdsongs.etudes`) is turned on
+/// by setting the build setting in the same change as its entitlements and
+/// `remote-notification` (`docs/sync-trial/production-configuration.md`);
+/// `SyncOffByDefaultTests` keeps the setting and the entitlements consistent.
 enum JournalSyncCapability {
-    #if SYNCTEST
-    static let buildSupportsSync = true
-    #else
-    static let buildSupportsSync = false
-    #endif
+    static let infoKey = "EtudesCloudKitContainer"
+    static let trialContainerIdentifier = "iCloud.com.samueldixon.motivo.synctest"
+    static let productionContainerIdentifier = "iCloud.com.sdsongs.etudes"
+    /// The container this build syncs through; "" when this build cannot sync.
+    static let containerIdentifier: String = {
+        let raw = Bundle.main.object(forInfoDictionaryKey: infoKey) as? String ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An unexpanded setting ("$(ETUDES_CLOUDKIT_CONTAINER)") is "unset".
+        return trimmed.hasPrefix("iCloud.") ? trimmed : ""
+    }()
+    static var buildSupportsSync: Bool { !containerIdentifier.isEmpty }
 }
 
 /// Owns the private sync for the app. OFF BY DEFAULT: nothing here runs until
@@ -2286,7 +2370,8 @@ enum JournalSyncCapability {
 @MainActor
 final class JournalSyncCoordinator {
     static let shared = JournalSyncCoordinator()
-    static let containerIdentifier = "iCloud.com.samueldixon.motivo.synctest"
+    /// Per configuration: see `JournalSyncCapability`.
+    static var containerIdentifier: String { JournalSyncCapability.containerIdentifier }
     let status = JournalSyncStatus()
     private(set) var engine: JournalSyncEngine?
     private(set) var store: JournalSyncStateStore?
