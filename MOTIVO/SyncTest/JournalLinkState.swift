@@ -64,6 +64,30 @@ enum JournalAccountGuard {
 /// PURE. Whether a server-side database check means the engine missed
 /// changes while it did not exist. Without a previous token the check only
 /// establishes a baseline (every zone reads as "changed" on a first call).
+/// PURE. One `CKSyncEngine.sendChanges` in flight per engine (C-174,
+/// 2026-11-04: the overlay's entry precondition trapped when a second send
+/// was asked for 1.5 s into a 760 MB first upload, after the engine's own
+/// account-change event re-ran activation). A request made while a send runs
+/// is remembered and run once, after it.
+struct JournalSendGate {
+    private(set) var inFlight = false
+    private(set) var queued = false
+
+    /// Whether the caller may send now. When not, the request is kept.
+    mutating func enter() -> Bool {
+        if inFlight { queued = true; return false }
+        inFlight = true
+        return true
+    }
+
+    /// The send finished. Returns whether a kept request should run now.
+    mutating func leave() -> Bool {
+        inFlight = false
+        defer { queued = false }
+        return queued
+    }
+}
+
 enum JournalCatchUp {
     static func mustRefetch(hadToken: Bool, changedZones: [String], deletedZones: [String], zoneName: String) -> Bool {
         guard hadToken else { return false }

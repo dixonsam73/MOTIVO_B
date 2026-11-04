@@ -137,6 +137,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private var mediaHoldValue: JournalMediaGate.Hold = .none
     private var mediaGatedValue: Bool { mediaHoldValue.holds }
     private var manualSendScheduled = false
+    /// C-174: one `sendChanges` in flight; a request meanwhile runs once after it.
+    private var sendGate = JournalSendGate()
     private var catchUpSerial = JournalCatchUpSerial()
     /// Stage J: while media is held the engine does not sync automatically, and
     /// a silent push is best effort (device, 2026-11-03: the iPad's four sends
@@ -561,6 +563,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     @discardableResult
     func performSend(userDriven: Bool, bypassCadence: Bool = false) async -> Bool {
         guard let engine, currentDecision().allowed else { return false }
+        stateLock.lock(); let mayRun = sendGate.enter(); stateLock.unlock()
+        guard mayRun else { return false }
+        defer {
+            stateLock.lock(); let again = sendGate.leave(); stateLock.unlock()
+            if again { Task { await self.performSend(userDriven: userDriven, bypassCadence: bypassCadence) } }
+        }
         if let episode = store.state.storageFull {
             let outbox = store.state.outbox
             if outbox.isEmpty && !episode.zoneSaveFailed {

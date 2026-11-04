@@ -127,9 +127,13 @@ def read_container(root):
     out["user_activities"] = sorted((r[0], r[1], r[2]) for r in db.execute("select ZDISPLAYNAME, ZCOREACTIVITYCODE, ZOWNERUSERID from ZUSERACTIVITY"))
     out["profile"] = [tuple(r) for r in db.execute("select ZNAME, ZPRIMARYINSTRUMENT, ZDEFAULTPRIVACY from ZPROFILE")]
     meta = plistlib.loads(db.execute("select Z_PLIST from Z_METADATA").fetchone()[0])
+    tables = {r[0] for r in db.execute("select name from sqlite_master where type='table'")}
+    history = "ATRANSACTION" in tables
     out["store_meta"] = {
         "model_versions": meta.get("NSStoreModelVersionIdentifiers"),
-        "history_tracking": bool(meta.get("NSPersistentHistoryTrackingKey", False)),
+        "history_tracking": history,
+        "history_transactions": db.execute("select count(*) from ATRANSACTION").fetchone()[0] if history else 0,
+        "history_authors": [r[0] for r in db.execute("select distinct ZAUTHOR from ATRANSACTION")] if history else [],
         "has_userModifiedAt": has_umod,
     }
     db.close()
@@ -163,6 +167,10 @@ def defaults_view(d):
                     value = json.loads(value)
                 except Exception:
                     value = {"bytes": len(value), "sha256": hashlib.sha256(value).hexdigest()}
+            if key.startswith("scoreLibrary_v2") and isinstance(value, list):
+                # Device-local by design (stage I): when a score was last opened
+                # here and the page it was left on are never part of the record.
+                value = [{k: v for k, v in item.items() if k not in ("lastOpenedAt", "lastViewedPage")} for item in value]
             view[key] = value
     return view
 
@@ -194,14 +202,24 @@ def main():
     stamped = sum(1 for v in cand["sessions"].values() if v.get("usermodifiedat") is not None)
     notes.append(f"candidate sessions carrying userModifiedAt: {stamped} of {len(cand['sessions'])}")
 
-    # 2. attachments and order
+    # 2. attachments and order. A displayName the reference lacks is the stage F
+    # migration when it equals the reference's per-device title store entry.
+    ref_titles = {}
+    for key, value in read_plist(ref_root / "Library" / "Preferences" / args.reference_plist).items():
+        if key.startswith(("persistedAudioTitles_v1", "persistedVideoTitles_v1")) and isinstance(value, dict):
+            ref_titles.update({k.upper(): v for k, v in value.items()})
+    migrated_titles = 0
     for aid, rv in ref["attachments"].items():
         cv = cand["attachments"].get(aid)
         if cv is None:
             fails.append(f"attachment {aid} missing in candidate"); continue
         for k, v in rv.items():
             if cv.get(k) != v:
+                if k == "displayname" and v is None and ref_titles.get(aid) == cv.get(k):
+                    migrated_titles += 1; continue
                 fails.append(f"attachment {aid} {k}: reference {v!r} candidate {cv.get(k)!r}")
+    if migrated_titles:
+        notes.append(f"{migrated_titles} attachment title(s) moved from the title store onto displayName (stage F migration)")
     for aid in set(cand["attachments"]) - set(ref["attachments"]):
         fails.append(f"attachment {aid} in candidate but not in reference")
     for sid, order in ref["session_attachments"].items():

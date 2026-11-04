@@ -6,7 +6,9 @@
 #   Default subdirectories: Documents, "Library/Application Support",
 #   Library/Preferences. The destination must not exist yet.
 #
-# Uses the JSON listing, so names with spaces are safe. Prints one line per
+# One recursive JSON listing of the container root is taken and filtered by
+# prefix: the --subdirectory form returns nothing for Documents (seen
+# 2026-11-04), and the JSON keeps names with spaces safe. Prints one line per
 # file and the count; stops at the first failure.
 set -u
 UDID=${1:?udid}
@@ -18,26 +20,24 @@ if (( $# > 0 )); then SUBDIRS=("$@"); else SUBDIRS=(Documents "Library/Applicati
 [[ -e "$DEST" ]] && { echo "destination exists: $DEST"; exit 1; }
 mkdir -p "$DEST"
 LISTING="$DEST/device-listing.json"
+xcrun devicectl device info files --device "$UDID" --domain-type appDataContainer --domain-identifier "$BUNDLE" \
+  --json-output "$LISTING" >/dev/null 2>&1 || { echo "listing failed"; exit 1; }
 typeset -i n=0
-for sub in "${SUBDIRS[@]}"; do
-  xcrun devicectl device info files --device "$UDID" --domain-type appDataContainer --domain-identifier "$BUNDLE" \
-    --subdirectory "$sub" --json-output "$LISTING.part" >/dev/null 2>&1 || { echo "listing failed for $sub (missing on device?)"; continue; }
-  python3 -I - "$LISTING.part" "$sub" <<'EOF' | while IFS= read -r rel; do
+python3 -I -c '
 import json, sys
 data = json.load(open(sys.argv[1]))
-sub = sys.argv[2].rstrip("/")
+subs = [s.rstrip("/") + "/" for s in sys.argv[2:]]
 for item in data.get("result", {}).get("files", []):
     rel = item.get("relativePath")
     if not rel or item.get("resources", {}).get("isDirectory"):
         continue
-    print(f"{sub}/{rel}")
-EOF
-    mkdir -p "$DEST/$(dirname "$rel")"
-    xcrun devicectl device copy from --device "$UDID" --domain-type appDataContainer --domain-identifier "$BUNDLE" \
-      --source "$rel" --destination "$DEST/$rel" >/dev/null 2>&1 || { echo "FAILED: $rel"; exit 1; }
-    n+=1
-    echo "$n  $rel"
-  done
-  cat "$LISTING.part" >> "$LISTING"; rm -f "$LISTING.part"
+    if any(rel.startswith(s) for s in subs):
+        print(rel)
+' "$LISTING" "${SUBDIRS[@]}" | while IFS= read -r rel; do
+  mkdir -p "$DEST/$(dirname "$rel")"
+  xcrun devicectl device copy from --device "$UDID" --domain-type appDataContainer --domain-identifier "$BUNDLE" \
+    --source "$rel" --destination "$DEST/$rel" >/dev/null 2>&1 || { echo "FAILED: $rel"; exit 1; }
+  n+=1
+  echo "$n  $rel"
 done
 echo "pulled $(find "$DEST" -type f ! -name 'device-listing.json' | wc -l | tr -d ' ') file(s) from $BUNDLE on $UDID into $DEST"

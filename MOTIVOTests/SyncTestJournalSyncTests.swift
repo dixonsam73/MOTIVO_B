@@ -243,6 +243,20 @@ final class SyncTestJournalSyncTests: XCTestCase {
         let whole = try XCTUnwrap(JournalSyncStateStore.encodeWholeRecord(record))
         XCTAssertEqual(JournalSyncStateStore.decodeWholeRecord(whole)?["title"] as? String, "x")
     }
+
+    // MARK: C-174: one send in flight
+
+    func testSendGateRunsOneSendAtATimeAndOneFollowUpForRequestsMadeMeanwhile() {
+        var gate = JournalSendGate()
+        XCTAssertTrue(gate.enter(), "nothing in flight: send now")
+        XCTAssertFalse(gate.enter(), "a second request while sending is kept, not run")
+        XCTAssertFalse(gate.enter(), "and a third adds nothing")
+        XCTAssertTrue(gate.leave(), "the send finished: the kept request runs once")
+        XCTAssertTrue(gate.enter(), "that follow-up is the one in flight now")
+        XCTAssertFalse(gate.leave(), "nothing was asked for meanwhile: no further send")
+        XCTAssertFalse(gate.inFlight)
+    }
+
 }
 
 private extension JournalSyncPersistedState {
