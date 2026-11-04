@@ -1976,8 +1976,58 @@ the join.
   re-imported. Container pull #2 compared with the fixture: **0 failures, 2
   notes** — no edit stamps (`userModifiedAt` 0 of 112) and the 7 titles moved
   from the title store onto `displayName`, each equal to the store's entry.
-  The fix (`JournalSendGate`, one send in flight) went into build 1894 for
-  the receiver step. Receiver and pair steps: see below.
+  The fix (`JournalSendGate`, one send in flight) went into build 1894.
+  **Receiver, iPad Pro 11" M4 (fresh Sync Test install, same trial account;
+  14:08–14:12; C-175, C-176):** build 1894's set-up screen showed no "Turn
+  on iCloud sync" card (C-175: the card started empty and SwiftUI never ran
+  its appear-time decision; reproduced on the simulator, fixed in 1895 and
+  verified there); on 1895 the card appeared, "Turn on iCloud sync" with no
+  name typed: 14:08:20 switch written, bootstrap 0, engine built, first
+  fetch; 14:12:02 one pass imported 339 records and 91 files
+  (763,335,211 bytes, exactly Device A's upload), created the 8 instruments,
+  merged the profile field by field (no clock on either side), applied the
+  avatar, 7 scores with files and reading positions, 9 settings and 13
+  lists; first complete fetch finished, owner adopted (`000703…`), the
+  set-up screen closed by itself; outbox 0, nothing held, conflicts 0. After
+  adoption it re-sent its 13 lists and 7 list-context settings unclocked
+  (24 records, the stage J transition on a new owner scope); Device A
+  reads them as "same values". Container pull #3 compared with the fixture
+  as a receiver: **0 failures** — every session and attachment field,
+  attachment order, instrument and directory names, profile row, all 83
+  attachment files and 7 scores identical by content (materialised as
+  `<id>.<ext>`, by design), the privacy choices of every existing
+  attachment, the 7 score-library items, the 3 live page selections, the 13
+  lists under the owner scope identical. Not synced, by design or gap: the
+  fixture's one Connected ensemble; stale privacy, page and title entries
+  for attachments that no longer exist (763, 28 and 30). Hands-on: the
+  entries, scores, lists and profile checked on the iPad; **one difference
+  found: an audio entry Device A titles "Little fugue in A minor" showed its
+  UUID** — 13 of the fixture's recordings predate the title store and carry
+  their typed name only as the file name, which the sync does not carry
+  (C-176: fixed in 1896 by a one-off pass that moves such a stem onto
+  `displayName`). *On 1896 (14:28):* Device A's launch ran the pass once
+  ("File-name titles: 10 recording(s)…", the other 3 named files already
+  had stored titles), sent 10 records; the iPad imported them by push 6 s
+  later and its store and title store hold all 13 titles (checked over the
+  cable); the open journal screen showed the new title only after a
+  relaunch (C-177, carried: an imported title does not refresh an open
+  screen). Relaunches on both: counters unchanged apart from those records;
+  conflicts 0 throughout. *Pair (14:31–14:33):* a Thought with a photo on
+  Device A went up as 3 records and one 12,672,323-byte upload and the iPad
+  imported the 3 records with the file; the iPad's notes edit went up as 1
+  record and Device A imported it a second later; a Thought made on the iPad
+  by mistake and deleted went up and netted out (Device A never saw it);
+  own-write echoes skipped on both, outbox 0, conflicts 0. **Outcome:** the
+  in-place upgrade of a real, populated, pre-V11 store and the first-time
+  history tracking, transitions and bootstrap are device-verified field by
+  field, as is a fresh receiver's cold import; four findings in the run
+  (C-174 crash at first send, C-175 missing set-up card, C-176 file-named
+  titles, C-177 screen refresh), three fixed and verified on device in the
+  same run, one carried. Both installs now run 1896 with the fixture journal
+  on the trial account (the new baseline); Device B's Sync Test was deleted
+  for the run. Hands-on: Samuel ≈ 1 h 15 min across Parts 1–4 (incl. the
+  iCloud account switch and three reinstalls); agent ≈ 3 h of which the
+  three 800 MB container pulls and the upload/import waits were ≈ 40 min.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

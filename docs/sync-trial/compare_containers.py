@@ -123,7 +123,7 @@ def read_container(root):
     out["session_attachments"] = {s: [aid for _, aid in sorted(v)] for s, v in per_session.items()}
     out["sessions"], out["attachments"] = sessions, attachments
     out["instruments"] = sorted(instruments.values())
-    out["user_instruments"] = sorted((r[0], r[1], r[2]) for r in db.execute("select ZDISPLAYNAME, ZCOREINSTRUMENT, ZOWNERUSERID from ZUSERINSTRUMENT"))
+    out["user_instruments"] = sorted((r[0], instruments.get(r[1]), r[2]) for r in db.execute("select ZDISPLAYNAME, ZCOREINSTRUMENT, ZOWNERUSERID from ZUSERINSTRUMENT"))
     out["user_activities"] = sorted((r[0], r[1], r[2]) for r in db.execute("select ZDISPLAYNAME, ZCOREACTIVITYCODE, ZOWNERUSERID from ZUSERACTIVITY"))
     out["profile"] = [tuple(r) for r in db.execute("select ZNAME, ZPRIMARYINSTRUMENT, ZDEFAULTPRIVACY from ZPROFILE")]
     meta = plistlib.loads(db.execute("select Z_PLIST from Z_METADATA").fetchone()[0])
@@ -209,6 +209,7 @@ def main():
         if key.startswith(("persistedAudioTitles_v1", "persistedVideoTitles_v1")) and isinstance(value, dict):
             ref_titles.update({k.upper(): v for k, v in value.items()})
     migrated_titles = 0
+    renamed_files = 0
     for aid, rv in ref["attachments"].items():
         cv = cand["attachments"].get(aid)
         if cv is None:
@@ -217,9 +218,13 @@ def main():
             if cv.get(k) != v:
                 if k == "displayname" and v is None and ref_titles.get(aid) == cv.get(k):
                     migrated_titles += 1; continue
+                if k == "file" and args.role == "receiver":
+                    renamed_files += 1; continue   # a receiver materialises <id>.<ext>; content is checked below
                 fails.append(f"attachment {aid} {k}: reference {v!r} candidate {cv.get(k)!r}")
     if migrated_titles:
         notes.append(f"{migrated_titles} attachment title(s) moved from the title store onto displayName (stage F migration)")
+    if renamed_files:
+        notes.append(f"{renamed_files} attachment file(s) materialised under the attachment id on the receiver (by design); contents compared per attachment")
     for aid in set(cand["attachments"]) - set(ref["attachments"]):
         fails.append(f"attachment {aid} in candidate but not in reference")
     for sid, order in ref["session_attachments"].items():
@@ -245,14 +250,18 @@ def main():
     ref_attachment_files = {a["file"] for a in ref["attachments"].values() if a["file"]}
     ref_by_name = {Path(k).name: k for k in ref["files"]}
     cand_by_name = {Path(k).name: k for k in cand["files"]}
-    for name in sorted(ref_attachment_files):
-        r, c = ref_by_name.get(name), cand_by_name.get(name)
+    for aid, ra in ref["attachments"].items():
+        name = ra["file"]
+        ca = cand["attachments"].get(aid)
+        if not name or ca is None:
+            continue
+        r, c = ref_by_name.get(name), cand_by_name.get(ca["file"] or "")
         if r is None:
             fails.append(f"reference attachment file {name} missing in reference copy"); continue
         if c is None:
-            (fails if args.role == "upgraded" else notes).append(f"attachment file {name} missing in candidate"); continue
+            (fails if args.role == "upgraded" else notes).append(f"attachment {aid} file {ca['file']} missing in candidate"); continue
         if ref["files"][r]["sha256"] != cand["files"][c]["sha256"]:
-            fails.append(f"attachment file {name} hash differs")
+            fails.append(f"attachment {aid} file content differs ({name} vs {ca['file']})")
     ref_scores = {k: v for k, v in ref["files"].items() if k.startswith("Scores/")}
     cand_scores = {k: v for k, v in cand["files"].items() if k.startswith("Scores/")}
     for k, v in ref_scores.items():
@@ -270,9 +279,17 @@ def main():
         notes.append(f"reference files no attachment references, absent in candidate ({len(unreferenced_missing)}): {unreferenced_missing[:10]}")
 
     # 5. side stores
-    if ref["privacy"] != cand["privacy"]:
-        (fails if args.role == "upgraded" else notes).append(
-            f"AttachmentPrivacy.json differs: reference {len(ref['privacy'] or {})} entries, candidate {len(cand['privacy'] or {})}")
+    live_keys = {f"id://{aid}" for aid in ref["attachments"]}
+    ref_privacy = {k: v for k, v in (ref["privacy"] or {}).items() if k in live_keys}
+    cand_privacy = {k: v for k, v in (cand["privacy"] or {}).items() if k in live_keys}
+    if ref_privacy != cand_privacy:
+        fails.append(f"AttachmentPrivacy.json differs for existing attachments: reference {len(ref_privacy)} entries, candidate {len(cand_privacy)}, "
+                     f"{sum(1 for k in ref_privacy if cand_privacy.get(k) != ref_privacy[k])} differ")
+    stale = len(ref["privacy"] or {}) - len(ref_privacy)
+    if stale:
+        notes.append(f"reference privacy map holds {stale} entries for attachments that no longer exist (not synced)")
+    if ref["privacy"] != cand["privacy"] and args.role == "upgraded" and ref_privacy == cand_privacy:
+        notes.append("privacy map differs only in entries for attachments that no longer exist")
     rd = defaults_view(read_plist(ref_root / "Library" / "Preferences" / args.reference_plist))
     cd = defaults_view(read_plist(cand_root / "Library" / "Preferences" / args.candidate_plist))
     for key in sorted(set(rd) | set(cd)):
