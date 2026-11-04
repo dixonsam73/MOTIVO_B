@@ -1939,6 +1939,45 @@ the join.
   directory names, profile row, file hashes, privacy map, chosen defaults),
   `load_container_copy.sh` and `pull_container_copy.sh` (file by file over
   the cable).
+  **Populated upgrade trial, Device A (iPhone 16e "SD beta burner", Sync
+  Test install, trial iCloud account; 2026-11-04 13:39–13:56; C-174):**
+  fixture = the verified 2026-10-18 Études Dev container copy (112 sessions,
+  83 attachments, 102 Documents files incl. 7 scores, 832 MB, the privacy
+  map, four avatar files, its UserDefaults with 45 Connected/backend keys
+  dropped and 594 kept; store pre-V11, no history tracking), loaded file by
+  file into a never-launched install of build 1893 (111 files, every size
+  checked; devicectl makes the missing directories). *In-place upgrade,
+  sync off:* first open showed the journal at once (no set-up screen), 112
+  entries, the profile, 8 instruments, the sync toggle OFF; photo, video,
+  audio and PDF entries, Scores (7) and the Lists manager opened; force-quit
+  and reopen the same. The Lists manager was empty: the fixture's lists are
+  keyed by the Études Dev owner scope and the owner key had been cleared, so
+  the ownerless device looks under "device" — they came back once ownership
+  adoption ran (below). Container pull #1 compared with the fixture by
+  `compare_containers.py`: **0 failures** — every session and attachment
+  field, attachment order, instrument and directory names, profile row, all
+  102 file hashes, the privacy map and the chosen defaults identical; the
+  store now V11 with history tracking on and one empty, author-less
+  transaction (the migration's touch); no `SyncTest` directory and no state
+  file on disk (sync off leaves no trace). *Turning sync on:* 13:52:13 the
+  switch written, bootstrap 278 records + 121 directory rows, the metadata
+  migration (7 titles, 79 privacy choices, 3 page selections), the meta,
+  profile, tint, instrument-colour, scores (7 with files) and list-context
+  transitions each logged once; 13:52:14 first fetch (empty zone), owner
+  adopted (`000703…`, no Connected service), 13 lists queued; **13:52:18 the
+  app crashed** (C-174: CloudKit's precondition at the entry of
+  `CKSyncEngine.sendChanges`, best read as a second send fired 1.5 s into
+  the 760 MB first upload after the engine's own account-change event re-ran
+  activation; symbolised against the 23G83 device symbols); 13:52:23 the
+  relaunch rebuilt the engine from saved state and sent 250 + 89 records with
+  79 + 4 media uploads, 763,335,211 bytes, by 13:52:34; the next catch-up
+  echo-skipped the device's own 295 records; outbox 0, conflicts 0, 339
+  records known. Two relaunches: every counter delta 0, nothing re-sent or
+  re-imported. Container pull #2 compared with the fixture: **0 failures, 2
+  notes** — no edit stamps (`userModifiedAt` 0 of 112) and the 7 titles moved
+  from the title store onto `displayName`, each equal to the store's entry.
+  The fix (`JournalSendGate`, one send in flight) went into build 1894 for
+  the receiver step. Receiver and pair steps: see below.
   **When sync or the Connected-deletion split ships, update the privacy
   policy and terms:** both currently say journal data stays on the iPhone and
   that deleting a Connected account erases the iPhone's Études data.

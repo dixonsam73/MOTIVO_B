@@ -109,7 +109,17 @@ struct SyncTestRestoreCard: View {
     @ObservedObject private var status = JournalSyncCoordinator.shared.status
     /// The Profile row's name as the set-up screen sees it.
     let profileName: String
-    @State private var offer = JournalRestoreOffer.none
+    @State private var offer: JournalRestoreOffer
+
+    /// C-175: decided at creation. A `.none` start renders an empty view, and
+    /// SwiftUI never calls `onAppear` for one, so a reload there never ran
+    /// and a fresh install got no "turn on" card (seen on the iPad and the
+    /// simulator, 2026-11-04). The trial never noticed because a running
+    /// sync's status changes triggered the reload instead.
+    init(profileName: String) {
+        self.profileName = profileName
+        _offer = State(initialValue: Self.currentOffer(profileName: profileName, pausedReason: JournalSyncCoordinator.shared.status.pausedReason))
+    }
 
     var body: some View {
         Group {
@@ -174,12 +184,14 @@ struct SyncTestRestoreCard: View {
 
     private func reloadSoon() { DispatchQueue.main.async(execute: reload) }
 
-    private func reload() {
+    private func reload() { offer = Self.currentOffer(profileName: profileName, pausedReason: status.pausedReason) }
+
+    static func currentOffer(profileName: String, pausedReason: String?) -> JournalRestoreOffer {
         let state = JournalSyncCoordinator.shared.store?.state
-        offer = JournalRestoreOffer.decide(started: state != nil, unlinked: state?.unlinked ?? false,
-                                           localCopyRemoved: state?.localCopyRemoved ?? false,
-                                           localRemovalInProgress: state?.localRemovalInProgress ?? false,
-                                           pausedReason: status.pausedReason, initialFetchComplete: state?.initialFetchComplete ?? false,
-                                           lastCatchUp: state?.lastCatchUp, profileName: profileName)
+        return JournalRestoreOffer.decide(started: state != nil, unlinked: state?.unlinked ?? false,
+                                          localCopyRemoved: state?.localCopyRemoved ?? false,
+                                          localRemovalInProgress: state?.localRemovalInProgress ?? false,
+                                          pausedReason: pausedReason, initialFetchComplete: state?.initialFetchComplete ?? false,
+                                          lastCatchUp: state?.lastCatchUp, profileName: profileName)
     }
 }
