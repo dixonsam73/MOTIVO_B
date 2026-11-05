@@ -2158,7 +2158,13 @@ the join.
   displayed status is refreshed on the catch-up's failure branch and on
   every exit of the import batch; a SyncTest test drives the real engine
   from "Up to date" through an incomplete import and a real failed
-  CloudKit fetch, reading the status object. Selection 193 tests green under SyncTest; Debug and Release build; `SyncOffByDefaultTests` (6) green in Debug too.
+  CloudKit fetch, reading the status object. Selection 193 tests green
+  under SyncTest; Debug and Release build; `SyncOffByDefaultTests` (6)
+  green in Debug too. Carried: the engine-path status test needs a
+  simulator with NO iCloud account signed in (its real catch-up must fail
+  at CloudKit); and C-174's root cause remains unverified — the mitigation
+  is defensive, and the preflight and checkpoint record a recurrence rather
+  than explain it away.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.

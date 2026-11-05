@@ -8,6 +8,11 @@
 //  different account, storage full, Low Data Mode), and the one rule that
 //  "Up to date" is never said while anything waits.
 //
+//  The engine-path test at the top needs a SIMULATOR WITH NO ICLOUD ACCOUNT
+//  signed in: its real records-only catch-up must fail at CloudKit to read
+//  "Last check failed". On a simulator signed in to an account the fetch
+//  may succeed and the test fails for that reason alone.
+//
 
 #if SYNCTEST
 import XCTest
