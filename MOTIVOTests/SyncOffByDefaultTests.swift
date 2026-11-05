@@ -216,6 +216,57 @@ final class SyncOffByDefaultTests: XCTestCase {
                        "the capability reads the identifier from the bundle in one place")
     }
 
+    /// C-181: sync was used on this install, then the build lost the
+    /// capability (the Release setting removed, or an older build restored),
+    /// then the person erased the journal. The erase's batch deletes are in
+    /// persistent history; a later build that can sync must read them as the
+    /// recorded local removal, never as deletions to send.
+    func testEraseAfterCapabilityWithdrawnIsRecordedAsLocalRemovalNotCloudDeletion() throws {
+        let ctx = container.viewContext
+        // Sync was on: the state file exists with a history token from then.
+        let kept = makeSession(ctx, title: "synced earlier")
+        try ctx.save()
+        let keptID = try XCTUnwrap(kept.value(forKey: "id") as? UUID)
+        let before = JournalSyncStateStore(fileURL: stateURL)
+        XCTAssertTrue(before.update { st in
+            st.historyToken = JournalSyncStateStore.encode(token: self.container.persistentStoreCoordinator.currentPersistentHistoryToken(fromStores: nil))
+            st.initialFetchComplete = true
+            st.lastKnownRecords[keptID.uuidString] = Data()
+        })
+        // The capability is gone: nothing starts, no engine, no store.
+        let withdrawn = JournalSyncCoordinator(stateFileURL: stateURL, supportsSync: false)
+        XCTAssertFalse(withdrawn.startIfNeeded(persistence: container))
+        XCTAssertNil(withdrawn.engine)
+        XCTAssertFalse(withdrawn.enable(persistence: container), "a build without the capability cannot turn sync on")
+        // The erase, bracketed as LocalFactoryReset does it.
+        XCTAssertTrue(withdrawn.beginLocalRemoval(reason: "test erase"))
+        let removal = JournalSyncStateStore(fileURL: stateURL).state
+        XCTAssertTrue(removal.localRemovalInProgress, "the marker is durable before the first row goes")
+        ctx.delete(kept)
+        try ctx.save()
+        withdrawn.finishLocalRemoval()
+        let after = JournalSyncStateStore(fileURL: stateURL).state
+        XCTAssertFalse(after.localRemovalInProgress)
+        XCTAssertTrue(after.localCopyRemoved)
+        XCTAssertTrue(after.unlinked, "sync is off until explicitly re-enabled")
+        XCTAssertTrue(after.outbox.isEmpty)
+        XCTAssertTrue(after.lastKnownRecords.isEmpty, "server knowledge is forgotten, so nothing can be sent as a delete")
+        // The capability is back: the history since the old token holds the
+        // deletion, but the token was fast-forwarded past it.
+        let restored = JournalSyncStateStore(fileURL: stateURL)
+        let tracker = JournalChangeTracker(container: container, store: restored)
+        let queued = tracker.processHistory()
+        XCTAssertTrue(queued.isEmpty, "no deletion is queued from the erase: \(queued)")
+        XCTAssertTrue(restored.state.outbox.isEmpty)
+        // And a deletion made AFTER the erase, with sync still off, is the
+        // person's own later edit, not sent either until re-enabled (unlinked).
+        let later = makeSession(ctx, title: "after the erase")
+        try ctx.save()
+        ctx.delete(later)
+        try ctx.save()
+        XCTAssertTrue(JournalSyncStateStore(fileURL: stateURL).state.unlinked)
+    }
+
     func testDebugAndReleaseCarryNoCloudKitContainerOrPush() throws {
         let project = try String(contentsOf: repoRoot.appendingPathComponent("MOTIVO.xcodeproj/project.pbxproj"), encoding: .utf8)
         func targetConfiguration(bundleID: String) -> String {
@@ -278,14 +329,22 @@ final class SyncOffByDefaultTests: XCTestCase {
         XCTAssertTrue(trialEntitlements.contains(JournalSyncCapability.trialContainerIdentifier))
         XCTAssertFalse(trialEntitlements.contains("iCloud.com.sdsongs"), "the trial never names a production container")
 
-        // What THIS build resolved at runtime from its own bundle.
-        #if SYNCTEST
-        XCTAssertEqual(JournalSyncCapability.containerIdentifier, JournalSyncCapability.trialContainerIdentifier)
-        XCTAssertTrue(JournalSyncCapability.buildSupportsSync)
-        #else
-        XCTAssertEqual(JournalSyncCapability.containerIdentifier, release ?? "", "the bundle's container is the build setting's, or none")
-        XCTAssertEqual(JournalSyncCapability.buildSupportsSync, release != nil)
-        #endif
+        // What THIS build resolved at runtime from its own bundle, by the
+        // configuration actually running (the hosted tests' Bundle.main is the
+        // app): Debug stays disabled whatever Release is set to.
+        switch Bundle.main.bundleIdentifier {
+        case "com.samueldixon.motivo.synctest":
+            XCTAssertEqual(JournalSyncCapability.containerIdentifier, JournalSyncCapability.trialContainerIdentifier)
+            XCTAssertTrue(JournalSyncCapability.buildSupportsSync)
+        case "com.samueldixon.motivo.dev":
+            XCTAssertEqual(JournalSyncCapability.containerIdentifier, "", "Debug never carries a container, even after Release enablement")
+            XCTAssertFalse(JournalSyncCapability.buildSupportsSync)
+        case "com.sdsongs.etudes":
+            XCTAssertEqual(JournalSyncCapability.containerIdentifier, release ?? "", "Release carries exactly the build setting's container, or none")
+            XCTAssertEqual(JournalSyncCapability.buildSupportsSync, release != nil)
+        default:
+            XCTFail("unexpected test host \(Bundle.main.bundleIdentifier ?? "nil")")
+        }
     }
 
     #if SYNCTEST

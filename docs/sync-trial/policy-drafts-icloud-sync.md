@@ -32,7 +32,8 @@ What the sync does, as built (the wording must stay true to this):
   devices unchanged; the journal can be restored to that device afterwards.
 - Deleting a Connected account erases this device's Études data and deletes
   the Connected content; it does **not** touch the iCloud journal, which
-  stays for the person's other devices or a later restore.
+  stays for the person's other devices or a later restore — also when sync
+  was turned on once and is off now (the upload is kept, as section 3 says).
 
 ## Privacy policy
 
@@ -84,7 +85,7 @@ Current:
 
 Replacement:
 
-> Profile → Delete Account removes your Connected account and your posts, comments you wrote and files you sent, even if a follower still has them in their inbox. It does not delete comments other people wrote to you, or anything someone has already saved to their own device. It never requires an active membership. It also erases all Études data on that iPhone, including your journal, as the button says, so keep a copy of anything you want first. If iCloud sync is on, the copy of your journal in your own iCloud account is not deleted by this: it stays for your other devices, or for restoring later, until you remove it yourself (section 3). The only exception to deletion is data we must keep by law (see section 8).
+> Profile → Delete Account removes your Connected account and your posts, comments you wrote and files you sent, even if a follower still has them in their inbox. It does not delete comments other people wrote to you, or anything someone has already saved to their own device. It never requires an active membership. It also erases all Études data on that iPhone, including your journal, as the button says, so keep a copy of anything you want first. If you have previously turned on iCloud sync, whether or not it is on now, the copy of your journal in your own iCloud account is not deleted by this: it stays for your other devices, or for restoring later, until you remove it yourself (section 3). The only exception to deletion is data we must keep by law (see section 8).
 
 **P5 — Section 2 / the data table, if the policy lists where data is stored
 (Samuel to check the Desktop draft's table).** Add one row: *iCloud sync
@@ -126,7 +127,7 @@ Current:
 
 Replacement:
 
-> You are responsible for what you share and for backing up your own device. Deleting your Connected account also erases all Études data on that iPhone, as the button says; it does not delete a copy of your journal you have chosen to keep in iCloud through iCloud sync.
+> You are responsible for what you share and for backing up your own device. Deleting your Connected account also erases all Études data on that iPhone, as the button says; it does not delete a copy of your journal in your iCloud account from a time you had iCloud sync turned on, which stays until you remove it.
 
 **T4 — Section 3 (subscription ending), the "If your subscription ends"
 paragraph.** No change needed: "your journal and everything on your iPhone

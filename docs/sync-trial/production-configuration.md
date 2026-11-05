@@ -91,10 +91,23 @@ without the entitlement fails at the first CloudKit call), the guard test
 enforces exactly that pairing, and until the schema is in Production a
 Release build that could sync would meet an empty container.
 
-Rollback at any time: remove the `ETUDES_CLOUDKIT_CONTAINER` line from the
-Release configuration. Release then never builds an engine again, whatever
-the entitlements say; a person who had turned sync on sees the Profile
-section disappear and keeps their journal (the state file is left alone).
+**Withdrawing the capability is not a free rollback.** Removing the
+`ETUDES_CLOUDKIT_CONTAINER` line from the Release configuration makes
+Release build no engine again and hides the Profile section; a person who
+had turned sync on keeps their journal and their state file. The hazard
+(Codex, 2026-11-05; C-181) is the sequence *synced install → capability
+withdrawn → the person erases the journal ("Remove Études Data" / Delete
+Account) → a later build restores the capability*: the erase's batch
+deletes are in persistent history, and a build that can sync reads history
+from the state file's token. Protected since `C-181`: the coordinator opens
+the state store for the erase bracket even when the build cannot sync, so
+the erase is recorded as a local removal (marker before the first row goes,
+history token fast-forwarded past the deletes, server knowledge forgotten,
+sync off until re-enabled) and a later capable build queues nothing from
+it. `SyncOffByDefaultTests.testEraseAfterCapabilityWithdrawnIsRecordedAsLocalRemovalNotCloudDeletion`
+runs in every configuration. Local-only deletion never becomes cloud
+deletion. If the capability is withdrawn for good, the person's iCloud copy
+stays until they remove it from iCloud themselves (the policy says so).
 
 ## 4. The CloudKit schema for the production container
 
@@ -212,7 +225,18 @@ never change once deployed, and a deployed field cannot be removed.
 2. Apply the patch (section 3), commit on `feature/solo-connected`, build
    Release for Device A from that commit (development-signed: it talks to
    the container's **Development** environment — the right place for the
-   first populated run with cable evidence).
+   first populated run with cable evidence). The populated runs use the
+   **Release fixture** `~/Documents/Xcode projects/EtudesRelease-upgrade-fixture-2026-11-05`
+   (the 2026-11-04 fixture with its preferences as
+   `Library/Preferences/com.sdsongs.etudes.plist`, the Release bundle's
+   domain; verified: 112 sessions, 83 attachments, 102 files, 7 scores,
+   nothing missing), loaded with
+   `load_container_copy.sh <udid> <fixture> com.sdsongs.etudes`, pulled
+   with `pull_container_copy.sh <udid> <dest> com.sdsongs.etudes`, and
+   compared with `compare_containers.py <fixture> <copy> --reference-plist
+   com.sdsongs.etudes.plist --candidate-plist com.sdsongs.etudes.plist
+   --role upgraded|receiver` — both plist arguments explicit, since the
+   script's defaults are the trial's.
 3. Archive the same commit and upload to TestFlight (Production environment).
 4. Run the checkpoint script (`RELEASE.md`, "TestFlight checkpoint for the
    private sync"; the numbered device script is in the session notes).

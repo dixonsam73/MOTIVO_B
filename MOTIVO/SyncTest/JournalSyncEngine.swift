@@ -2325,7 +2325,9 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 inUse: true, unlinked: st.unlinked, localRemovalInProgress: st.localRemovalInProgress,
                 phase: self.status.phase, pausedReason: self.status.pausedReason, online: online,
                 initialFetchComplete: st.initialFetchComplete, restore: restore,
-                outbox: st.outbox, awaitingMedia: st.awaitingMedia, mediaWaitingUpload: st.mediaWaitingUpload,
+                outbox: st.outbox, awaitingMedia: st.awaitingMedia,
+                heldRecords: st.awaitingParent.count + st.awaitingMeta.count + st.awaitingScore.count + st.awaitingListContext.count,
+                mediaWaitingUpload: st.mediaWaitingUpload,
                 fileStampCache: st.fileStampCache, mediaHold: hold, storageFullSummary: self.status.storageFullSummary,
                 lastTransientFailure: transientFailure, lastCatchUp: st.lastCatchUp, lastFetchAt: self.status.lastFetchAt))
         }
@@ -2382,14 +2384,18 @@ final class JournalSyncCoordinator {
     /// Where the switch and the sync state live. Tests point this at a
     /// temporary file; the app uses the default.
     let stateFileURL: URL
+    /// Whether this build can sync (`JournalSyncCapability`). Tests pass it
+    /// to play a build whose capability was withdrawn after sync was used.
+    let supportsSync: Bool
     /// Set by the app: asks iOS for silent pushes. Called only once an engine
     /// exists, so a build or an install without sync never registers.
     var registerForPush: (() -> Void)?
 
     private var persistence: NSPersistentContainer?
 
-    init(stateFileURL: URL = JournalSyncStateStore.defaultURL()) {
+    init(stateFileURL: URL = JournalSyncStateStore.defaultURL(), supportsSync: Bool = JournalSyncCapability.buildSupportsSync) {
         self.stateFileURL = stateFileURL
+        self.supportsSync = supportsSync
     }
 
     /// Sync has been turned on on this install at some point: the state file
@@ -2409,7 +2415,7 @@ final class JournalSyncCoordinator {
     func startIfNeeded(persistence: NSPersistentContainer) -> Bool {
         if engine != nil { return true }
         self.persistence = persistence
-        guard JournalSyncCapability.buildSupportsSync,
+        guard supportsSync,
               FileManager.default.fileExists(atPath: stateFileURL.path) else { return false }
         start(persistence: persistence, store: JournalSyncStateStore(fileURL: stateFileURL))
         return true
@@ -2424,7 +2430,7 @@ final class JournalSyncCoordinator {
     /// build cannot sync or the switch could not be written.
     @discardableResult
     func enable(persistence: NSPersistentContainer) -> Bool {
-        guard JournalSyncCapability.buildSupportsSync else { return false }
+        guard supportsSync else { return false }
         self.persistence = persistence
         if let store {
             if store.state.unlinked { reenable() }
@@ -2467,9 +2473,16 @@ final class JournalSyncCoordinator {
     /// Bracket of the production erase (`LocalFactoryReset.perform`) and of
     /// the diagnostics control. Synchronous and durable before the first row
     /// is deleted. With sync never used on this install there is nothing to
-    /// bracket and the erase proceeds.
+    /// bracket and the erase proceeds. C-181: with a state file on a build
+    /// that cannot sync (the capability withdrawn after sync was used), the
+    /// store is opened for the bracket alone, so the erase is recorded as a
+    /// local removal and a later build that can sync never reads its batch
+    /// deletes from history as deletions to send.
     @discardableResult
     func beginLocalRemoval(reason: String) -> Bool {
+        if store == nil, FileManager.default.fileExists(atPath: stateFileURL.path) {
+            store = JournalSyncStateStore(fileURL: stateFileURL)
+        }
         guard let store else { return true }
         if let engine { return engine.beginLocalRemoval(reason: reason) } else { return JournalLocalRemoval.begin(store: store, reason: reason) }
     }

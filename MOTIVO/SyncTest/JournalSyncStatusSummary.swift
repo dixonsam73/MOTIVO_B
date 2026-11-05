@@ -48,6 +48,11 @@ struct JournalSyncStatusFacts: Equatable {
     var outbox: [JournalSyncPendingChange] = []
     /// Record names whose file this device still needs (held or not fetched).
     var awaitingMedia: [String] = []
+    /// Records fetched but not yet applied because something they need has
+    /// not arrived (an attachment's session, a meta record's attachment, a
+    /// score's file, a list context's instrument): `awaitingParent`,
+    /// `awaitingMeta`, `awaitingScore`, `awaitingListContext`.
+    var heldRecords = 0
     /// Bytes of the files that wait: `mediaWaitingUpload` for held media, and
     /// the hashed size of a file whose record is queued ("size|mtime|hash").
     var mediaWaitingUpload: [String: Int64] = [:]
@@ -119,6 +124,8 @@ struct JournalSyncPendingCounts: Equatable {
 struct JournalSyncStatusSummary: Equatable {
     enum Kind: Equatable {
         case off, removing, restoring, checking, waiting, paused, offline, mediaHeld, uploading, downloading, upToDate
+        /// The last check failed or its import was incomplete; it runs again.
+        case retrying
         /// Needs the person: signed out, a different account, storage full.
         case attention
     }
@@ -133,6 +140,8 @@ struct JournalSyncStatusSummary: Equatable {
     static let differentAccountMarker = "different iCloud account"
     static let signedOutMarker = "Signed out of iCloud"
     static let waitingMarker = "Waiting for iCloud"
+    static let catchUpFailedMarker = "Delta catch-up failed"
+    static let catchUpIncompleteMarker = "incomplete, fetched again"
 
     static func derive(_ f: JournalSyncStatusFacts, now: Date = Date()) -> JournalSyncStatusSummary {
         guard f.inUse else { return .init(kind: .off, headline: "Off") }
@@ -164,7 +173,7 @@ struct JournalSyncStatusSummary: Equatable {
             var detail: String
             if !f.online {
                 detail = "Waiting for a connection. Restoring continues when iCloud is reachable; you can keep using Études meanwhile."
-            } else if let failure = f.lastCatchUp, failure.hasPrefix("Delta catch-up failed") {
+            } else if let failure = f.lastCatchUp, failure.hasPrefix(catchUpFailedMarker) {
                 let sentence = failure.hasSuffix(".") ? String(failure.dropLast()) : failure
                 detail = "\(sentence). It is tried again automatically."
             } else {
@@ -201,6 +210,19 @@ struct JournalSyncStatusSummary: Equatable {
         if !f.awaitingMedia.isEmpty {
             return .init(kind: .downloading, headline: "Downloading",
                          detail: "\(f.awaitingMedia.count) file\(f.awaitingMedia.count == 1 ? "" : "s") still to receive.")
+        }
+        if f.heldRecords > 0 {
+            return .init(kind: .downloading, headline: "Downloading",
+                         detail: "\(f.heldRecords) item\(f.heldRecords == 1 ? "" : "s") waiting for the rest of \(f.heldRecords == 1 ? "its" : "their") data from iCloud.")
+        }
+        // A later check that failed, or whose import did not finish, is not
+        // "Up to date": it runs again on the next push, foreground or poll.
+        if let last = f.lastCatchUp, last.hasPrefix(catchUpFailedMarker) {
+            let sentence = last.hasSuffix(".") ? String(last.dropLast()) : last
+            return .init(kind: .retrying, headline: "Last check failed", detail: "\(sentence). It is tried again automatically.")
+        }
+        if let last = f.lastCatchUp, last.hasSuffix(catchUpIncompleteMarker) {
+            return .init(kind: .retrying, headline: "Finishing an import", detail: "Part of the last import could not be written; it is fetched again.")
         }
         if f.phase == "Checking iCloud account" {
             return .init(kind: .checking, headline: "Checking iCloud account")

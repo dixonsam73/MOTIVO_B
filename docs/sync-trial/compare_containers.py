@@ -25,12 +25,14 @@ temporary directory first, so the originals are never opened) and compares:
      blobs: AttachmentPrivacy.json and the selected PDF pages for existing
      attachments; audio/video titles (stored title, `displayName`, or the
      typed file name of a legacy recording — C-176); the score library
-     (title, favourite, thumbnail page, page count per item); saved Lists
-     (name → lines).
-  6. Avatar files (`Library/Application Support/Profiles/*-avatar.png`) by
-     content: every derived avatar image in the reference must exist in the
-     candidate. The `-original.jpg` beside it is device-local (the receiver
-     regenerates it) and only noted.
+     (title, favourite, thumbnail page, page count per item, and each
+     item's `fileName` resolving to a file in Documents/Scores whose content
+     equals the reference item's file); saved Lists (name → lines).
+  6. Avatar files (`Library/Application Support/Profiles/*`) by content:
+     every derived avatar image (`-avatar.png`) in the reference must exist
+     in the candidate; the `-original.jpg` beside it must be identical per
+     scope on an UPGRADED device (nothing may touch it), and may differ on a
+     receiver, which regenerates it from the derived image (noted).
   7. The profile preferences the sync carries, read from the two Preferences
      plists: location (owner scope, falling back to the local profile),
      primary instrument and name (the Profile row), Journal Tint, the
@@ -477,6 +479,17 @@ def main():
                     fails.append(f"score {sid} {k}: reference {item.get(k)!r} candidate {c.get(k)!r}")
             if item.get("fileName") != c.get("fileName"):
                 notes.append(f"score {sid} file name differs: reference {item.get('fileName')!r} candidate {c.get('fileName')!r}")
+            # The library's reference must resolve to the right bytes: the
+            # file the candidate's item names must exist and equal the file
+            # the reference's item names (not merely "a file of that name").
+            rf = ref["files"].get(f"Scores/{item.get('fileName')}")
+            cf = cand["files"].get(f"Scores/{c.get('fileName')}")
+            if rf is None:
+                notes.append(f"score {sid}: the reference's own file {item.get('fileName')!r} is missing in the reference copy")
+            elif cf is None:
+                fails.append(f"score {sid} ({item.get('title')!r}): the candidate's index names {c.get('fileName')!r}, which is not in its Scores directory")
+            elif cf["sha256"] != rf["sha256"]:
+                fails.append(f"score {sid} ({item.get('title')!r}): the candidate's index names {c.get('fileName')!r}, whose content differs from the reference's file")
         for sid in set(cs) - set(rs):
             (notes if receiver else fails).append(f"score {sid} in candidate's library but not in reference")
     owner = ref["owner"] or cand["owner"]
@@ -510,9 +523,18 @@ def main():
         (notes if receiver else fails).append(f"avatar image {h[:12]}… in candidate (scopes {scopes}) not in reference")
     if ref["avatars"] or cand["avatars"]:
         same_scopes = sorted(s for s in ref["avatars"] if cand["avatars"].get(s, {}).get("avatar") == ref["avatars"][s].get("avatar"))
+        originals_same = sorted(s for s in ref["avatars"] if ref["avatars"][s].get("original")
+                                and ref["avatars"][s].get("original") == cand["avatars"].get(s, {}).get("original"))
         notes.append(f"avatar files: reference scopes {sorted(ref['avatars'])}, candidate scopes {sorted(cand['avatars'])}, "
-                     f"derived image identical for {same_scopes}; -original.jpg is device-local ("
-                     f"{sum(1 for s in ref['avatars'] if ref['avatars'][s].get('original') and ref['avatars'][s].get('original') == cand['avatars'].get(s, {}).get('original'))} identical)")
+                     f"derived image identical for {same_scopes}; -original.jpg identical for {originals_same}")
+        for scope, files in ref["avatars"].items():
+            if not files.get("original"):
+                continue
+            if cand["avatars"].get(scope, {}).get("original") != files["original"]:
+                # An upgraded device's original photo must survive untouched; a
+                # receiver regenerates it from the derived image (by design).
+                (notes if receiver else fails).append(
+                    f"avatar original (-original.jpg) for scope {scope!r} {'regenerated on the receiver' if receiver else 'differs or is missing in the candidate'}")
 
     # 7. profile preferences the sync carries
     rloc, cloc = location(rd_all, owner), location(cd_all, owner)

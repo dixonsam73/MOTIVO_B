@@ -181,6 +181,53 @@ final class SyncTestStatusSummaryTests: XCTestCase {
         XCTAssertEqual(JournalSyncStatusSummary.derive(facts).kind, .upToDate)
     }
 
+    /// Codex, 2026-11-05: a later check that failed, an import that did not
+    /// finish, or records held for data that has not arrived are not "Up to
+    /// date" either, whatever the engine's phase says.
+    func testNoUpToDateAfterAFailedOrIncompleteLaterCheckOrWhileRecordsAreHeld() {
+        var facts = JournalSyncStatusFacts()
+        XCTAssertEqual(JournalSyncStatusSummary.derive(facts).kind, .upToDate)
+
+        var failed = facts
+        failed.lastCatchUp = "Delta catch-up failed: The request timed out."
+        let f = JournalSyncStatusSummary.derive(failed)
+        XCTAssertEqual(f.kind, .retrying)
+        XCTAssertEqual(f.headline, "Last check failed")
+        XCTAssertEqual(f.detail, "Delta catch-up failed: The request timed out. It is tried again automatically.")
+
+        var incomplete = facts
+        incomplete.lastCatchUp = "Catch-up (push): 7 changed record(s), 0 deletion(s), 1 file(s) fetched — incomplete, fetched again"
+        let i = JournalSyncStatusSummary.derive(incomplete)
+        XCTAssertEqual(i.kind, .retrying)
+        XCTAssertEqual(i.headline, "Finishing an import")
+        // The engine's own wording for both, so the summary stays in step with it.
+        XCTAssertTrue(incomplete.lastCatchUp!.hasSuffix(JournalSyncStatusSummary.catchUpIncompleteMarker))
+        XCTAssertTrue(failed.lastCatchUp!.hasPrefix(JournalSyncStatusSummary.catchUpFailedMarker))
+
+        var ok = facts
+        ok.lastCatchUp = "Catch-up (poll): 1 changed record(s), 0 deletion(s), 0 file(s) fetched"
+        XCTAssertEqual(JournalSyncStatusSummary.derive(ok).kind, .upToDate, "a completed later check is up to date")
+
+        var held = facts
+        held.heldRecords = 3
+        let h = JournalSyncStatusSummary.derive(held)
+        XCTAssertEqual(h.kind, .downloading)
+        XCTAssertEqual(h.detail, "3 items waiting for the rest of their data from iCloud.")
+        held.heldRecords = 1
+        XCTAssertEqual(JournalSyncStatusSummary.derive(held).detail, "1 item waiting for the rest of its data from iCloud.")
+
+        // Order: something to upload is said before a failed check; a hold
+        // before a failed check; offline before all of them.
+        var both = failed
+        both.outbox = [change("s1", JournalSyncRecordType.session)]
+        XCTAssertEqual(JournalSyncStatusSummary.derive(both).kind, .uploading)
+        both.outbox = []
+        both.heldRecords = 2
+        XCTAssertEqual(JournalSyncStatusSummary.derive(both).kind, .downloading)
+        both.online = false
+        XCTAssertEqual(JournalSyncStatusSummary.derive(both).kind, .offline)
+    }
+
     func testOffAndRemovingComeFirst() {
         var facts = JournalSyncStatusFacts()
         facts.inUse = false

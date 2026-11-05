@@ -2126,6 +2126,29 @@ the join.
   `docs/sync-trial/policy-drafts-icloud-sync.md` (the Desktop drafts and
   the website still say journal data stays on the iPhone and that a
   Connected deletion erases it). The checkpoint itself: section D below.
+  **Correction pass (2026-11-05, Codex's six findings on the preparation;
+  C-181):** (1) "rollback at any time" withdrawn — withdrawing the
+  capability after sync was used, then an erase, then restoring it would
+  have sent the erase as cloud deletions; the erase bracket now opens the
+  state store on a build that cannot sync, tested in every configuration
+  (C-181). (2) The checkpoint script separates the purchase's fresh Sandbox
+  tester from the Sign in with Apple identity (the device's Apple Account),
+  and requires the backend user to be verified disposable before the
+  Connected test and its deletion. (3) "Up to date" is never said after a
+  failed or incomplete later check or while records are held for data
+  that has not arrived; regression test added (C-179). (4) The comparator
+  checks that each score's index entry names the right file by content and
+  that an upgraded device's original avatar photo is untouched; both
+  demonstrated false passes now fail (C-178). (5) A Release fixture with
+  the preferences as `com.sdsongs.etudes.plist`, and the bundle and both
+  plist arguments explicit in every cable and comparator command. (6) The
+  configuration guard checks the running configuration by bundle id, so
+  Debug stays disabled after Release enablement (C-180). Policy drafts:
+  the deletion wording covers a person who turned sync on once and off
+  since. C-174's root cause stays unverified. Selection 192 tests green
+  under SyncTest; Debug and Release build; the ordinary Debug run is 1,200
+  tests (the erase test runs there too) with the same 7 known
+  order-dependent failures only.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
