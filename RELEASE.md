@@ -2149,6 +2149,16 @@ the join.
   under SyncTest; Debug and Release build; the ordinary Debug run is 1,200
   tests (the erase test runs there too) with the same 7 known
   order-dependent failures only.
+  **Follow-up (2026-11-05, Codex's two remaining findings; C-182, C-183):**
+  the set-up screen's restore card now decides "nothing" on any build that
+  cannot sync (after an erase the remembered state is unlinked and would
+  have been offered), and `reenable` guards the capability — the
+  every-configuration erase test continues through the card's own decision
+  path and the restore action: no engine, no push registration. The
+  displayed status is refreshed on the catch-up's failure branch and on
+  every exit of the import batch; a SyncTest test drives the real engine
+  from "Up to date" through an incomplete import and a real failed
+  CloudKit fetch, reading the status object. Selection 193 tests green under SyncTest; Debug and Release build; `SyncOffByDefaultTests` (6) green in Debug too.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.

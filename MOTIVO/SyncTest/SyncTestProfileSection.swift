@@ -193,9 +193,12 @@ struct SyncTestRestoreCard: View {
 
     private func reload() { offer = Self.currentOffer(profileName: profileName, pausedReason: status.pausedReason) }
 
-    static func currentOffer(profileName: String, pausedReason: String?) -> JournalRestoreOffer {
-        let state = JournalSyncCoordinator.shared.store?.state
-        return JournalRestoreOffer.decide(started: state != nil, unlinked: state?.unlinked ?? false,
+    /// The set-up screen's decision. `coordinator` is a parameter so a test
+    /// can drive this exact path with a coordinator of its own.
+    static func currentOffer(profileName: String, pausedReason: String?,
+                             coordinator: JournalSyncCoordinator = .shared) -> JournalRestoreOffer {
+        let state = coordinator.store?.state
+        return JournalRestoreOffer.decide(started: state != nil, supported: coordinator.supportsSync, unlinked: state?.unlinked ?? false,
                                           localCopyRemoved: state?.localCopyRemoved ?? false,
                                           localRemovalInProgress: state?.localRemovalInProgress ?? false,
                                           pausedReason: pausedReason, initialFetchComplete: state?.initialFetchComplete ?? false,

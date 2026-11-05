@@ -917,6 +917,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             store.update { $0.lastCatchUp = text }
             if restoring { publishRestore(nil) }
             log(text)
+            refreshCounts()   // the status says "Last check failed" (C-183)
             switch JournalCatchUp.recovery(for: failure.code) {
             case .retryLater:
                 return true
@@ -1050,6 +1051,9 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// was applied in full (the token moved).
     func applyFetchedBatch(modified modifiedIn: [CKRecord], deleted: [(CKRecord.ID, CKRecord.RecordType)], newToken: CKServerChangeToken?,
                            assetsFetched: Int, generation: Int, reason: String, writeFailuresBefore: Int) async -> Bool {
+        // C-183: however this batch ends (applied, incomplete, abandoned),
+        // the status is derived again from what the state file now says.
+        defer { refreshCounts() }
         var modified = modifiedIn
         // Import exactly as a fetched batch would be.
         let records = modified.filter { $0.recordType != JournalSyncRecordType.savedList && !JournalSyncRecordType.profileTypes.contains($0.recordType)
@@ -2292,7 +2296,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         await MainActor.run { change(self.status) }
     }
 
-    private func refreshCounts() {
+    /// Status only: counts, the live facts and the derived summary, published
+    /// on the main actor. Internal so a test can seed the status from a state
+    /// file; the engine calls it after every event, catch-up and import.
+    func refreshCounts() {
         let st = store.state
         stateLock.lock()
         let online = onlineValue
@@ -2498,7 +2505,9 @@ final class JournalSyncCoordinator {
     /// rebuilt: after an erase the install key (K2) and the import context
     /// are stale, and a removed copy needs a fresh CKSyncEngine anyway.
     func reenable() {
-        guard let store, let persistence else { return }
+        // C-182: never an engine on a build that cannot sync, whatever the
+        // caller (the set-up screen's restore card, `enable`).
+        guard supportsSync, let store, let persistence else { return }
         JournalLocalRemoval.reenable(store: store)
         makeEngine(persistence: persistence, store: store)
     }

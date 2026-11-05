@@ -11,9 +11,102 @@
 
 #if SYNCTEST
 import XCTest
+import CoreData
+import CloudKit
 @testable import Etudes
 
 final class SyncTestStatusSummaryTests: XCTestCase {
+
+    // MARK: the status object through the engine's own paths (C-183)
+
+    private var tempDir: URL?
+
+    override func tearDownWithError() throws {
+        if let tempDir { try? FileManager.default.removeItem(at: tempDir) }
+    }
+
+    private func openStore(at url: URL) throws -> NSPersistentContainer {
+        let c = NSPersistentContainer(name: "MOTIVO")
+        let d = NSPersistentStoreDescription(url: url)
+        d.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+        d.shouldAddStoreAsynchronously = false
+        c.persistentStoreDescriptions = [d]
+        var loadError: Error?
+        c.loadPersistentStores { _, error in loadError = error }
+        try XCTUnwrap(loadError == nil ? () : nil, "store failed to load: \(String(describing: loadError))")
+        return c
+    }
+
+    /// Waits for the main-actor publish that `refreshCounts` schedules.
+    private func summary(of status: JournalSyncStatus, becomes kind: JournalSyncStatusSummary.Kind, within seconds: Double = 3) async -> JournalSyncStatusSummary {
+        let deadline = Date().addingTimeInterval(seconds)
+        while true {
+            let current = await MainActor.run { status.summary }
+            if current.kind == kind || Date() > deadline { return current }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
+    /// Codex, 2026-11-05: the pure summary was right, but a later failed
+    /// fetch or an incomplete import updated the state file and the log
+    /// without reliably refreshing the DISPLAYED summary. This drives the
+    /// real engine paths — the records-only catch-up against CloudKit (which
+    /// fails here: the simulator has no iCloud account) and the import half
+    /// of a batch whose write failed — and reads the status object itself,
+    /// starting from "Up to date".
+    @MainActor
+    func testTheDisplayedSummaryIsRefreshedAfterAFailedFetchAndAnIncompleteImport() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("synctest-status-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("state"), withIntermediateDirectories: true)
+        tempDir = dir
+        let container = try openStore(at: dir.appendingPathComponent("store.sqlite"))
+        let store = JournalSyncStateStore(fileURL: dir.appendingPathComponent("state/JournalSyncState.json"))
+        let upToDate = "Catch-up (poll): 0 changed record(s), 0 deletion(s), 0 file(s) fetched"
+        XCTAssertTrue(store.update { st in
+            st.boundUserRecordName = "_user"
+            st.initialFetchComplete = true
+            st.lastCatchUp = upToDate
+        })
+        let status = JournalSyncStatus()
+        let engine = JournalSyncEngine(containerIdentifier: JournalSyncCoordinator.containerIdentifier, persistence: container,
+                                       store: store, status: status, customOwner: nil)
+        engine.importer.log = { [store] in store.log($0) }
+        engine.assumeCurrentUserForTesting("_user")
+
+        // Seeded from the state file: nothing waits, the last check completed.
+        engine.refreshCounts()
+        var shown = await summary(of: status, becomes: .upToDate)
+        XCTAssertEqual(shown.kind, .upToDate, "\(shown)")
+
+        // 1. The import half of a batch whose write failed: the token is
+        //    kept, the state file says "incomplete, fetched again", and the
+        //    status must follow without any engine event.
+        let before = store.writeFailures
+        let complete = await engine.applyFetchedBatch(modified: [], deleted: [], newToken: nil, assetsFetched: 0,
+                                                      generation: engine.generationForTesting(), reason: "test",
+                                                      writeFailuresBefore: before - 1)   // "a write failed during this batch"
+        XCTAssertFalse(complete)
+        XCTAssertTrue(store.state.lastCatchUp?.hasSuffix(JournalSyncStatusSummary.catchUpIncompleteMarker) == true, store.state.lastCatchUp ?? "nil")
+        shown = await summary(of: status, becomes: .retrying)
+        XCTAssertEqual(shown.kind, .retrying, "\(shown)")
+        XCTAssertEqual(shown.headline, "Finishing an import")
+
+        // Back to up to date (a later complete batch), then
+        XCTAssertTrue(store.update { $0.lastCatchUp = upToDate })
+        engine.refreshCounts()
+        shown = await summary(of: status, becomes: .upToDate)
+        XCTAssertEqual(shown.kind, .upToDate)
+
+        // 2. A later records-only catch-up that fails at CloudKit (no account
+        //    here): the state file records the failure and the status says so.
+        let ran = await engine.deltaCatchUp(reason: "test")
+        XCTAssertTrue(ran, "a transient failure keeps the token and returns true")
+        XCTAssertTrue(store.state.lastCatchUp?.hasPrefix(JournalSyncStatusSummary.catchUpFailedMarker) == true, store.state.lastCatchUp ?? "nil")
+        shown = await summary(of: status, becomes: .retrying)
+        XCTAssertEqual(shown.kind, .retrying, "\(shown)")
+        XCTAssertEqual(shown.headline, "Last check failed")
+        XCTAssertNotEqual(shown.headline, "Up to date")
+    }
 
     private func change(_ name: String, _ type: String, op: JournalSyncPendingChange.Op = .save, assetFree: Bool = false) -> JournalSyncPendingChange {
         JournalSyncPendingChange(recordName: name, recordType: type, op: op, metadataOnly: assetFree)

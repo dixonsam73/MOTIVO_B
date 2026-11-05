@@ -105,8 +105,10 @@ the erase is recorded as a local removal (marker before the first row goes,
 history token fast-forwarded past the deletes, server knowledge forgotten,
 sync off until re-enabled) and a later capable build queues nothing from
 it. `SyncOffByDefaultTests.testEraseAfterCapabilityWithdrawnIsRecordedAsLocalRemovalNotCloudDeletion`
-runs in every configuration. Local-only deletion never becomes cloud
-deletion. If the capability is withdrawn for good, the person's iCloud copy
+runs in every configuration, and continues through the set-up screen that
+follows: a build that cannot sync offers no "Restore from iCloud", and its
+`reenable` builds no engine (C-182). Local-only deletion never becomes
+cloud deletion. If the capability is withdrawn for good, the person's iCloud copy
 stays until they remove it from iCloud themselves (the policy says so).
 
 ## 4. The CloudKit schema for the production container

@@ -265,6 +265,30 @@ final class SyncOffByDefaultTests: XCTestCase {
         ctx.delete(later)
         try ctx.save()
         XCTAssertTrue(JournalSyncStateStore(fileURL: stateURL).state.unlinked)
+
+        // C-182: the set-up screen that follows the erase. Through the card's
+        // own decision path, a build that cannot sync offers no restoration
+        // (the remembered state is unlinked, which a capable build would
+        // offer to restore), and the restore button's action builds nothing.
+        var pushAsked = 0
+        withdrawn.registerForPush = { pushAsked += 1 }
+        XCTAssertNotNil(withdrawn.store, "the remembered state is open after the erase")
+        XCTAssertEqual(SyncTestRestoreCard.currentOffer(profileName: "", pausedReason: nil, coordinator: withdrawn), JournalRestoreOffer.none)
+        XCTAssertEqual(JournalRestoreOffer.decide(started: true, supported: false, unlinked: true, localCopyRemoved: true, localRemovalInProgress: false,
+                                                  pausedReason: nil, initialFetchComplete: false, lastCatchUp: nil, profileName: ""), .none)
+        withdrawn.reenable()
+        XCTAssertNil(withdrawn.engine, "no engine: the engine is the only place a CKContainer or CKSyncEngine is made")
+        XCTAssertFalse(withdrawn.enable(persistence: container))
+        XCTAssertNil(withdrawn.engine)
+        XCTAssertFalse(withdrawn.startIfNeeded(persistence: container))
+        XCTAssertNil(withdrawn.engine)
+        XCTAssertEqual(pushAsked, 0, "no push registration without an engine")
+        XCTAssertTrue(JournalSyncStateStore(fileURL: stateURL).state.unlinked, "reenable on a build that cannot sync changes nothing")
+        // The same state on a build that can sync is offered for restoration
+        // (the card's decision with `supported: true`; an engine needs the
+        // entitlements, so that half is the trial configuration's tests).
+        XCTAssertEqual(JournalRestoreOffer.decide(started: true, supported: true, unlinked: true, localCopyRemoved: true, localRemovalInProgress: false,
+                                                  pausedReason: nil, initialFetchComplete: false, lastCatchUp: nil, profileName: ""), .offer(localCopyRemoved: true))
     }
 
     func testDebugAndReleaseCarryNoCloudKitContainerOrPush() throws {

@@ -143,7 +143,11 @@ enum JournalRestoreOffer: Equatable {
     static func decide(started: Bool, supported: Bool = JournalSyncCapability.buildSupportsSync,
                        unlinked: Bool, localCopyRemoved: Bool, localRemovalInProgress: Bool,
                        pausedReason: String?, initialFetchComplete: Bool, lastCatchUp: String?, profileName: String) -> JournalRestoreOffer {
-        guard started else { return supported ? .turnOn : .none }
+        // A build that cannot sync offers nothing, started or not: after an
+        // erase the remembered state is unlinked, and "Restore from iCloud"
+        // would re-enable through a path that builds an engine (C-182).
+        guard supported else { return .none }
+        guard started else { return .turnOn }
         guard !localRemovalInProgress else { return .none }
         if unlinked { return .offer(localCopyRemoved: localCopyRemoved) }
         if let pausedReason, !pausedReason.isEmpty { return .waiting(reason: pausedReason) }
