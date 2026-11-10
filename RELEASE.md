@@ -371,9 +371,14 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   TestFlight as Internal Only on 2026-11-10 (section D's checkpoint).
   Left: **remove the test journal from Samuel's own iCloud** (the
   Production private database of his main Apple Account holds the fixture
-  journal, about 770 MB, and the Development one the preflight's) before
-  he turns sync on for real; until then sync stays off in Études on
-  Device B. Widening distribution waits for review.
+  journal, and the Development one the preflight's) before he turns sync
+  on for real; until then sync stays off in Études on Device B. The app's
+  own "Remove Études Data from This Device" is **not** a route for this:
+  it keeps the iCloud copy by design (C-181), as do turning sync off and
+  deleting the app. The targets, the two routes that do delete the zone
+  and the safeguards are proposed in `personal-icloud-cleanup-proposal.md`
+  (session notes folder, beside the checkpoint script); nothing has been
+  cleaned up. Widening distribution waits for review.
 
 - [x] Founding 500 introductory offer: free first year on both products, no end
   date (seen in ASC 2026-09-21). Remove manually at ~500.
@@ -456,8 +461,14 @@ the join.
   trial account; Device B unused. Part 5 needs a Connected identity
   verified disposable, separate from the fresh Sandbox purchase tester:
   Sign in with Apple on either device is Samuel's real account
-  (`0f33f6b8…`), so it also needs a disposable Apple Account and a source
-  for the sync import (the iPad is never signed out). Parts:
+  (`0f33f6b8…`). Switching the Apple Account under the existing install
+  is not enough (its journal and state are bound to the main account):
+  part 5 needs a **fresh install and a fresh journal made under the
+  disposable Apple Account**, the Apple identity and the exact backend
+  user id verified before anything is deleted, and a second writer to
+  that account's iCloud journal that is not the iPad. Prepared, not run:
+  `part5-connected-isolation-script.md`, and a sustained-upload trial,
+  `sustained-upload-trial-script.md` (same notes folder). Parts:
   (1) pre-flight on the production container's Development environment
   with a development-signed Release build and the fixture — enable, the
   ≈ 830 MB first upload (C-174's one-send gate under load; its root cause
@@ -471,9 +482,10 @@ the join.
   wording, the four entry kinds, scores, lists, profile and avatar checked,
   then edits both ways incl. a rename seen without a relaunch (C-177) and a
   deletion; (5) a Connected member with sync on: a fresh Sandbox tester
-  joins on Device A, the iPad changes location and avatar by sync, and the
-  backend's `account_directory` row and avatar object are read before and
-  after (unchanged until the person edits on Device A) — the unit-only
+  joins on Device A, a second writer changes location and avatar by sync,
+  and the backend's `account_directory` row values, the avatar object and
+  the API write log are read before and after (unchanged until the person
+  edits on Device A, the positive control) — the unit-only
   isolation case (`SyncTestConnectedIsolationTests`) on a device — then
   Delete Account leaves the iCloud journal and the restore card brings it
   back. The TestFlight installs turned out to be readable over the cable
@@ -2249,7 +2261,9 @@ the join.
   earlier step-7 attempt was void: the "Media over mobile data" option had
   been switched on on the device, so a 12.7 MB photo rightly went over 4G.
   End state: 349 records, 779,221,867 bytes sent, conflicts 0, no
-  storage-full episode. Evidence (two container copies, both comparison
+  storage-full episode. (Every "bytes sent" figure in this record and the
+  next is the app's counter: the sizes of the files in records the server
+  acknowledged. It is not measured network traffic.) Evidence (two container copies, both comparison
   reports, the enablement timeline, state snapshots):
   `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/preflight-2026-11-10/`.
   Not exercised: Low Data Mode wording, a second device, anything on
@@ -2284,13 +2298,19 @@ the join.
   iCloud" with the raw text for 78 s); the account-change event fired and
   nothing trapped; 250 records by 20:18:04 and 89 more with all 83 media
   by 20:18:08 (339 records, 763,335,211 bytes); first complete fetch
-  20:19:12; outbox 0, conflicts 0, no crash log. **The media were
-  confirmed in under five seconds, which is not a real transfer of 747
-  MB: iCloud very likely already held this content for the account (the
-  trial and the preflight, where it took 13 s). The long upload that
-  preceded C-174's crash was therefore not exercised today, in either
-  run; C-174's root cause stays unverified and so does its gate under a
-  long upload.** Two relaunches: every counter unchanged.
+  20:19:12; outbox 0, conflicts 0, no crash log. **What the figures do
+  and do not show.** 763,335,211 is the sum of the sizes of the files in
+  the records the server acknowledged; network traffic was not measured.
+  All 83 media were acknowledged within about 5 s of the first batch (13 s
+  in the preflight, 11 s in the 2026-11-04 trial after its relaunch). A
+  hypothesis, not established: iCloud already held this content for the
+  account, so little was transferred. Either way, no run so far has kept
+  an upload active for minutes while further sends were asked for, so the
+  one-send gate has not been shown under a sustained upload, and
+  **C-174's root cause remains unverified**. A trial with media this
+  account has never stored is prepared
+  (`sustained-upload-trial-script.md`). Two relaunches: every counter
+  unchanged.
   *Part 4, restoration on the iPad and edits both ways.* A deviation
   first (C-187): the fresh install asked for an age range on the set-up
   screen, because the iPad's Keychain still held a Connected sign-in to a
@@ -2299,8 +2319,8 @@ the join.
   closed with the card unanswered; at the next launch the app had dropped
   the sign-in itself and the red button read "Remove Études Data from
   This Device". Restore from the set-up card 20:42:24 to 20:48:16 (5 min
-  52 s): 339 records, 91 files, 763,335,211 bytes downloaded (the bytes
-  Device A sent), nothing held, conflicts 0, one owner with a matching
+  52 s): 339 records, 91 files, 763,335,211 bytes of files delivered to
+  the app (the same figure as Device A's acknowledged sizes), nothing held, conflicts 0, one owner with a matching
   key, nothing sent back. Container copy against the fixture as a
   receiver: sessions, attachments, every media file by content, scores,
   lists, settings, profile and avatars equal; one flag, explained
@@ -2312,19 +2332,28 @@ the join.
   notes edit and a rename showed on Device A's open journal within 3 s
   (C-177 holds); the iPad's deletion was applied on Device A in 1 s. Two
   relaunches on both: "Up to date" at once, nothing re-sent.
-  *Samuel's real Connected account* was read before the restoration and
-  after the run: every value identical (name, location, no avatar key,
-  the 8 instruments, 1 post, last sign-in 2026-10-16, and the same
-  `auth.users.updated_at`, 2026-11-10 15:31:21 UTC). Nothing in parts 2
-  to 4 wrote to it. That 15:31 timestamp predates the iPad install by five
-  hours and was not made by Device A (no sign-in held); its cause is not
-  established (Device B's own Études is the likely one).
+  *Samuel's real Connected account* was read twice by Samuel: at
+  20:41:48, which is 36 s before the restoration began (20:42:24) but
+  about 8 minutes after the iPad's first launch with the dead sign-in
+  held (about 20:33), and at 21:11:52, after the run. Every value was
+  identical (name, location, no avatar key, the 8 instruments, 1 post,
+  last sign-in 2026-10-16, and the same `auth.users.updated_at`,
+  2026-11-10 15:31:21 UTC). So the row did not change between the two
+  reads, which cover the restoration and the edits. That is weaker than
+  "nothing wrote to it": a write of identical values would not show, the
+  first launch precedes the baseline, and no API log was read. What
+  stands beside it: neither test install held credentials for that
+  account (Device A no sign-in at all; the iPad's was for a user that no
+  longer exists). The 15:31 timestamp predates the iPad install by five
+  hours and was not made by Device A; Samuel thinks he opened Études on
+  Device B that day, which is the likely cause, not an established one.
   *Omitted or not exercised:* part 5 (blocked on a disposable identity;
-  its script also relied on an `updated_at` column that
-  `account_directory` does not have); Low Data Mode wording; Offline and
-  Waiting for Wi-Fi under TestFlight (seen in the preflight only); a
-  genuinely long upload. C-186 is carried as a limitation of the internal
-  trial. Evidence (the export's entitlements, two container copies and
+  its old steps also relied on an `updated_at` column that
+  `account_directory` does not have, replaced in the prepared script by
+  row values, the avatar object and the write log); Low Data Mode
+  wording; Offline and Waiting for Wi-Fi under TestFlight (seen in the
+  preflight only); a sustained upload. C-186 and C-188 are carried as
+  limitations of the internal trial. Evidence (the export's entitlements, two container copies and
   comparison reports, both timelines, state snapshots, the account
   reads):
   `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/testflight-2026-11-10/`.
