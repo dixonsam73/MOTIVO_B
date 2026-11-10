@@ -2180,6 +2180,72 @@ the join.
   on the original. A Development-environment preflight cannot catch this
   kind of gap (fields appear just in time there), so the checker is the
   gate before any Production build sends.
+  **Release preflight, Device A (iPhone 16e "SD beta burner", Études
+  Release, development-signed, the production container's Development
+  environment, Samuel's main iCloud account; 2026-11-10 14:51–15:35;
+  C-185, C-186):** the enablement patch applied as `50135a5` (**build
+  1906**). Before any device step: selection 193 green under SyncTest; the
+  ordinary Debug run 1,200 tests with the 7 known failures only, its
+  configuration guard passing in the Debug host with Release enabled; the
+  built Debug bundle carries no container, the built Release bundle
+  `iCloud.com.sdsongs.etudes` and `remote-notification`; the device build
+  signed with `aps-environment`, the container and CloudKit under
+  "iOS Team Provisioning Profile: com.sdsongs.etudes" (the proof the App ID
+  step took). Device A's Études 1818 replaced (confirmed disposable; Device
+  B untouched) and the Release fixture loaded into the never-launched
+  install: 111 files, every size equal, 835,899,008 bytes, 54 s.
+  *First open, attempt 1 — a test-setup failure (C-185):* no entries, no
+  avatar and an age-range prompt. A Connected sign-in from September
+  (Apple user `001325…`, backend user `F0BA3610…`, Samuel's second Apple
+  ID) had survived the app's deletion in the Keychain, so the journal
+  filter hid the fixture's `000703…` entries; the data was intact (112
+  sessions over the cable) and the publish queue empty. Release has no way
+  to drop an owner key but the erase, and with the sign-in held the erase
+  is Delete Account: Samuel chose to delete that test account (its
+  revocation sheet would have presented his main Apple ID; cancelled, so
+  revocation was not attempted and the deletion ran on the stored session,
+  as designed). Reinstalled, fixture reloaded (111 files verified).
+  *First open, attempt 2, sync off:* the journal at once, 112 entries, the
+  profile and avatar, toggle off, no age prompt; over the cable no state
+  file, no identity key, the age-gate result untouched. Container pull A
+  compared with the fixture (`--role upgraded`, both plists explicit):
+  **0 failures** — sessions, attachments and order, directories, the
+  profile row, 102 file hashes, both avatar images and originals, the
+  preferences; store V11 with history tracking.
+  *Explicit enablement (15:19:02):* each transition logged once; the first
+  fetch failed "zone does not exist" (a new container; see C-186); the
+  engine's account-change event fired at 15:19:03, the moment that
+  preceded C-174's trap in the trial, and nothing trapped; 250 records
+  with 14 files (327,958,337 bytes) at 15:19:11 and 69 records with 69
+  files (435,376,874 bytes) at 15:19:15 — 763,335,211 bytes, the trial's
+  figure; the poll at 15:20:2x completed the first fetch (own records
+  echo-skipped), the owner key was adopted and 21 more records (lists,
+  their contexts) went up: 340 sent, 339 known, outbox 0, conflicts 0, no
+  crash. **C-174 did not recur; its root cause remains unverified** (one
+  clean run under the gate is not a reproduction of the absence).
+  *Relaunches (15:22:16, 15:22:42):* "Up to date" at once; every counter
+  delta 0. Container pull B compared with the fixture: **0 failures**, 10
+  notes (17 titles moved onto `displayName`, one instrument colour from
+  the union).
+  *Status wording on the device:* "Up to date — Everything on this device
+  is in iCloud" after the upload; **Offline** with what waits (Airplane
+  Mode; a Thought queued 15:26:09, its saves deferred, sent 15:26:30);
+  **Waiting for Wi-Fi** — "1 file (2.9 MB) to send. Text and settings
+  still sync. Turn on Media over mobile data below to send and receive
+  them now" (option off, Wi-Fi off, 4G signal: upload held 15:32:51, sent
+  3 s after Wi-Fi returned); and the row left "Up to date" by itself when
+  a later check failed (C-183 on a device). Two wording faults, C-186. An
+  earlier step-7 attempt was void: the "Media over mobile data" option had
+  been switched on on the device, so a 12.7 MB photo rightly went over 4G.
+  End state: 349 records, 779,221,867 bytes sent, conflicts 0, no
+  storage-full episode. Evidence (two container copies, both comparison
+  reports, the enablement timeline, state snapshots):
+  `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/preflight-2026-11-10/`.
+  Not exercised: Low Data Mode wording, a second device, anything on
+  Production or TestFlight. **Carried to the checkpoint:** Device A now
+  signs in with Apple as Samuel's MAIN identity, so the checkpoint's
+  Connected part needs a disposable Apple Account decided first; and the
+  script gains a "clear any earlier sign-in before the fixture" step.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
