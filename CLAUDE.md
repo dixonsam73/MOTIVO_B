@@ -141,11 +141,16 @@ xcodebuild test -project MOTIVO.xcodeproj -scheme MOTIVO -only-testing:MOTIVOTes
 - Release-readable logging: `os.Logger` with `privacy: .public`. Xcode's console
   shows it live.
 - **Private iCloud sync** (`MOTIVO/SyncTest/`) compiles into every build and
-  is **off by default**: the state file is the switch, and only the
-  `SyncTest` configuration (bundle `com.samueldixon.motivo.synctest`, its own
-  entitlements, push mode and development container) can turn it on
-  (`JournalSyncCapability`). Debug and Release build no engine and touch no
-  CloudKit or push API; `SyncOffByDefaultTests` guards this.
+  is **off by default**: the state file is the switch, written only by the
+  person's tap. Which builds CAN sync is the build setting
+  `ETUDES_CLOUDKIT_CONTAINER` (`JournalSyncCapability`): `SyncTest` (bundle
+  `com.samueldixon.motivo.synctest`, the development container) and, since
+  2026-11-10, **Release** (`iCloud.com.sdsongs.etudes`, its own
+  `MOTIVO-Release.entitlements`). **Debug never syncs** and carries no
+  iCloud or push. With sync off no build makes an engine or touches
+  CloudKit or push; `SyncOffByDefaultTests` guards all of this. A new
+  synced field must be added to the Production schema first
+  (`docs/sync-trial/check_schema.py`). Not yet on TestFlight.
 
 ## Devices and Sandbox
 
