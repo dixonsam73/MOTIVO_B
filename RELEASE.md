@@ -367,8 +367,13 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   ID's iCloud/CloudKit (only the new container `iCloud.com.sdsongs.etudes`)
   and Push capabilities; the CloudKit schema exported from the trial
   container, corrected (three fields, C-184) and deployed to Production.
-  Left: the Release preflight on Device A, then, after review, a TestFlight
-  upload.
+  The Release preflight passed and build 1908 (`9dd52ff`) went to
+  TestFlight as Internal Only on 2026-11-10 (section D's checkpoint).
+  Left: **remove the test journal from Samuel's own iCloud** (the
+  Production private database of his main Apple Account holds the fixture
+  journal, about 770 MB, and the Development one the preflight's) before
+  he turns sync on for real; until then sync stays off in Études on
+  Device B. Widening distribution waits for review.
 
 - [x] Founding 500 introductory offer: free first year on both products, no end
   date (seen in ASC 2026-09-21). Remove manually at ~500.
@@ -444,9 +449,15 @@ the join.
 - [ ] **TestFlight checkpoint for the private sync** (script written
   2026-11-04: `testflight-checkpoint-device-script.md` in
   `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/`;
-  after section C's sync item). Device A
-  (iPhone 16e, trial iCloud account) and the iPad (TestFlight, fresh);
-  Device B unused; a fresh Sandbox tester for the Connected part. Parts:
+  after section C's sync item). **Run 2026-11-10 on build 1908: parts 1
+  to 4 passed; part 5 is blocked and was omitted** (record under "Sync",
+  C-187 to C-189). Device A (iPhone 16e) and the iPad (TestFlight, fresh),
+  both on Samuel's main Apple Account, which earlier text called the
+  trial account; Device B unused. Part 5 needs a Connected identity
+  verified disposable, separate from the fresh Sandbox purchase tester:
+  Sign in with Apple on either device is Samuel's real account
+  (`0f33f6b8…`), so it also needs a disposable Apple Account and a source
+  for the sync import (the iPad is never signed out). Parts:
   (1) pre-flight on the production container's Development environment
   with a development-signed Release build and the fixture — enable, the
   ≈ 830 MB first upload (C-174's one-send gate under load; its root cause
@@ -465,9 +476,9 @@ the join.
   after (unchanged until the person edits on Device A) — the unit-only
   isolation case (`SyncTestConnectedIsolationTests`) on a device — then
   Delete Account leaves the iCloud journal and the restore card brings it
-  back. Not readable over the cable: the TestFlight installs (if devicectl
-  refuses them, the evidence for parts 2–5 is on-screen and on the
-  receiver, and the record says so).
+  back. The TestFlight installs turned out to be readable over the cable
+  (devicectl, 2026-11-10), so parts 2 to 4 have state files and container
+  copies as well as the screen.
 
 ## E. After launch / known limitations (not release work)
 
@@ -2246,6 +2257,77 @@ the join.
   signs in with Apple as Samuel's MAIN identity, so the checkpoint's
   Connected part needs a disposable Apple Account decided first; and the
   script gains a "clear any earlier sign-in before the fixture" step.
+  **Internal TestFlight checkpoint, parts 2 to 4 (Device A and the iPad,
+  TestFlight build 1908 from commit `9dd52ff`, the Production environment,
+  Samuel's main Apple Account; 2026-11-10 17:18–21:09; C-187 to C-189):**
+  *The archive.* Built from a clean tree as `Etudes 1908 (9dd52ff)`. An App
+  Store Connect export of it (TestFlight Internal Only, not uploaded) was
+  read: bundle `com.sdsongs.etudes` 1.0 (1908), the one container
+  `iCloud.com.sdsongs.etudes`, `icloud-container-environment` Production,
+  `aps-environment` production, `get-task-allow` false, Cloud Managed
+  Apple Distribution with the team's store profile, no StoreKit file.
+  Samuel uploaded the same archive from Organizer, which signs its own
+  export: the uploaded bytes themselves were not read.
+  *Accounts.* Device A and the iPad show the same Apple Account in
+  Settings, and both state files are bound to the same user record
+  (`_cd4f590c…`) in the production container.
+  *Part 2, the populated upgrade with sync off.* The preflight's install
+  (sync on, Development) was deleted, never updated in place; build 1906
+  reinstalled, the fixture loaded (111 files, 835,899,008 bytes, each by
+  size) and opened once: journal, profile and avatar on screen, toggle
+  off, no state file, no sign-in in the preferences, container copy
+  against the fixture **0 failures**. TestFlight 1908 installed over it:
+  the device reports 1908, all 102 media files are present by size, still
+  no state file, the toggle still off.
+  *Part 3, explicit enablement on Production.* On at about 20:17:54; the
+  first fetch found no zone (the C-186 wording again: "Restoring from
+  iCloud" with the raw text for 78 s); the account-change event fired and
+  nothing trapped; 250 records by 20:18:04 and 89 more with all 83 media
+  by 20:18:08 (339 records, 763,335,211 bytes); first complete fetch
+  20:19:12; outbox 0, conflicts 0, no crash log. **The media were
+  confirmed in under five seconds, which is not a real transfer of 747
+  MB: iCloud very likely already held this content for the account (the
+  trial and the preflight, where it took 13 s). The long upload that
+  preceded C-174's crash was therefore not exercised today, in either
+  run; C-174's root cause stays unverified and so does its gate under a
+  long upload.** Two relaunches: every counter unchanged.
+  *Part 4, restoration on the iPad and edits both ways.* A deviation
+  first (C-187): the fresh install asked for an age range on the set-up
+  screen, because the iPad's Keychain still held a Connected sign-in to a
+  backend user that no longer exists (`ab70e211…`: 0 users, 0 directory
+  rows, read by Samuel; his real account is `0f33f6b8…`). Études was
+  closed with the card unanswered; at the next launch the app had dropped
+  the sign-in itself and the red button read "Remove Études Data from
+  This Device". Restore from the set-up card 20:42:24 to 20:48:16 (5 min
+  52 s): 339 records, 91 files, 763,335,211 bytes downloaded (the bytes
+  Device A sent), nothing held, conflicts 0, one owner with a matching
+  key, nothing sent back. Container copy against the fixture as a
+  receiver: sessions, attachments, every media file by content, scores,
+  lists, settings, profile and avatars equal; one flag, explained
+  (C-189). On screen: the four media kinds, 7 scores, lists, the profile,
+  8 instruments and the recording's title all right. Push works on
+  Production: two reading positions from the iPad reached Device A in
+  about 3 s each. A Thought with a photo from Device A (4,112,329 bytes,
+  a real upload, 3 s) was on the iPad 2 s later with its file; the iPad's
+  notes edit and a rename showed on Device A's open journal within 3 s
+  (C-177 holds); the iPad's deletion was applied on Device A in 1 s. Two
+  relaunches on both: "Up to date" at once, nothing re-sent.
+  *Samuel's real Connected account* was read before the restoration and
+  after the run: every value identical (name, location, no avatar key,
+  the 8 instruments, 1 post, last sign-in 2026-10-16, and the same
+  `auth.users.updated_at`, 2026-11-10 15:31:21 UTC). Nothing in parts 2
+  to 4 wrote to it. That 15:31 timestamp predates the iPad install by five
+  hours and was not made by Device A (no sign-in held); its cause is not
+  established (Device B's own Études is the likely one).
+  *Omitted or not exercised:* part 5 (blocked on a disposable identity;
+  its script also relied on an `updated_at` column that
+  `account_directory` does not have); Low Data Mode wording; Offline and
+  Waiting for Wi-Fi under TestFlight (seen in the preflight only); a
+  genuinely long upload. C-186 is carried as a limitation of the internal
+  trial. Evidence (the export's entitlements, two container copies and
+  comparison reports, both timelines, state snapshots, the account
+  reads):
+  `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/testflight-2026-11-10/`.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
