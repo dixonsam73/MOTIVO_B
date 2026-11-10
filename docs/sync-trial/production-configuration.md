@@ -117,10 +117,33 @@ The engine never queries (no `CKQuery`): it fetches zone changes, records by
 id and database changes, so no field needs an index for the app to work.
 Production refuses just-in-time schema, so every record type and field the
 engine writes must exist there before a Production build sends anything.
-The trial's development container holds the complete schema (every type
-below was written by the populated upgrade trial); export it, import it
-into the new container's Development environment, then deploy to Production
-in the Console (`cktool` has no deploy command).
+The trial's development container holds every record TYPE (each was written
+by the populated upgrade trial) but **not necessarily every field**: the
+Development environment creates a field only when a non-nil value is saved,
+and a journal that never held some optional value leaves that field out
+(C-184, below). So the export is checked against the code with
+`docs/sync-trial/check_schema.py`, the gaps are added by hand in the new
+container's Development environment, and only then is the schema deployed
+to Production in the Console (`cktool` has no deploy command).
+
+**Done 2026-11-10 (Samuel, checked by Codex and by `check_schema.py`).**
+App ID `com.sdsongs.etudes`: iCloud/CloudKit with only
+`iCloud.com.sdsongs.etudes` assigned, and Push Notifications. Management
+token in the Keychain (team `K352DG4UJA`). The trial export
+(`etudes-journal-schema.ckdb`, sha256 `59985fc7…`) lacked three fields the
+code writes — `Session.userInstrumentLabel`, `Session.userActivityLabel`
+and `Score.sourceAttachmentID`, all STRING: the trial journal has no custom
+instrument or activity label on a session and no score made from an
+attachment, so no non-nil value was ever saved. They were added in the new
+container's Development environment (no index; the engine never queries)
+and the corrected schema deployed to Production. The corrected Development
+export (`etudes-journal-schema-prod-dev.ckdb`) and the Production export
+(`etudes-journal-schema-prod.ckdb`) are byte-for-byte identical (sha256
+`6a67d77f…`), and `check_schema.py` reports 15 record types, 73 fields, 0
+gaps on both and exactly those three gaps on the original. The Production
+export is the schema of record; the three files are on Samuel's Desktop.
+The trial container itself still lacks the three fields in its schema,
+which is harmless there (Development creates them on first use).
 
 Expected record types and fields, derived from `JournalRecordMapping`,
 `JournalMetadataSync`, `JournalProfileSync`, `JournalScoreSync`,
@@ -171,10 +194,16 @@ Steps (Samuel; each with what to verify):
    Verify: open the file; it must contain `RECORD TYPE` blocks for every
    type in the table above, with the fields listed (names and types). Fields
    the table does not list are fine (the development environment also
-   recorded anything an earlier trial build wrote); a field the table lists
-   but the file lacks means the export is not from the trial container.
-   Keep the file beside the other trial evidence; it is the production
-   schema of record.
+   recorded anything an earlier trial build wrote). Do not check by eye:
+
+   ```bash
+   python3 docs/sync-trial/check_schema.py ~/Desktop/etudes-journal-schema.ckdb
+   ```
+
+   Each GAP it prints is a field the code writes that no trial record ever
+   carried a value for; add it in the new container's Development
+   environment (step 3) before deploying, and run the checker again on the
+   Production export (step 4), which must report 0 gaps.
 
 3. **Validate, then import into the new container's Development environment.**
 

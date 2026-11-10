@@ -362,12 +362,13 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
 
 ## C. Configuration (Samuel, in App Store Connect / Supabase / web)
 
-- [ ] **Private sync on the shipping configuration** (prepared 2026-11-04,
-  nothing applied): `docs/sync-trial/production-configuration.md` — the App
-  ID's iCloud/CloudKit (new container `iCloud.com.sdsongs.etudes`) and Push
-  capabilities, the CloudKit schema exported from the trial container and
-  deployed to Production, then the Release enablement patch applied in one
-  commit, a Release build for Device A and a TestFlight upload from it.
+- [ ] **Private sync on the shipping configuration**
+  (`docs/sync-trial/production-configuration.md`). Done 2026-11-10: the App
+  ID's iCloud/CloudKit (only the new container `iCloud.com.sdsongs.etudes`)
+  and Push capabilities; the CloudKit schema exported from the trial
+  container, corrected (three fields, C-184) and deployed to Production.
+  Left: the Release preflight on Device A, then, after review, a TestFlight
+  upload.
 
 - [x] Founding 500 introductory offer: free first year on both products, no end
   date (seen in ASC 2026-09-21). Remove manually at ~500.
@@ -2165,6 +2166,20 @@ the join.
   at CloudKit); and C-174's root cause remains unverified — the mitigation
   is defensive, and the preflight and checkpoint record a recurrence rather
   than explain it away.
+  **Production cloud configuration done (Samuel, 2026-11-10; C-184):** App
+  ID capabilities and the new container; the schema deployed to Production
+  after a correction — the trial container's export lacked
+  `Session.userInstrumentLabel`, `Session.userActivityLabel` and
+  `Score.sourceAttachmentID` (Codex found them), because CloudKit's
+  Development environment creates a field only when a non-nil value is
+  saved and the trial journal never held one; the preparation document had
+  wrongly called the trial schema complete. All three added as STRING. The
+  Production export equals the corrected Development export byte for byte
+  and `docs/sync-trial/check_schema.py` (new: the code's 15 record types and
+  73 fields against an export) reports 0 gaps on it and exactly those three
+  on the original. A Development-environment preflight cannot catch this
+  kind of gap (fields appear just in time there), so the checker is the
+  gate before any Production build sends.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
