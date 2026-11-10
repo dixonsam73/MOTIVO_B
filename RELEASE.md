@@ -466,9 +466,14 @@ the join.
   part 5 needs a **fresh install and a fresh journal made under the
   disposable Apple Account**, the Apple identity and the exact backend
   user id verified before anything is deleted, and a second writer to
-  that account's iCloud journal that is not the iPad. Prepared, not run:
-  `part5-connected-isolation-script.md`, and a sustained-upload trial,
-  `sustained-upload-trial-script.md` (same notes folder). Parts:
+  that account's iCloud journal that is not the iPad. Prepared, not run,
+  in this order (same notes folder): **first** the sustained-upload
+  trial, `sustained-upload-trial-script.md`, on a build carrying the
+  send-gate observation (C-190), TestFlight on Device A and the iPad;
+  **then** part 5, `part5-connected-isolation-script.md`, on a
+  development-signed Release build with a dedicated simulator as the
+  second writer, proved to sync before anything is measured. Part 5's
+  coverage is therefore the Development CloudKit environment only. Parts:
   (1) pre-flight on the production container's Development environment
   with a development-signed Release build and the fixture — enable, the
   ≈ 830 MB first upload (C-174's one-send gate under load; its root cause

@@ -292,7 +292,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                     let task = await MainActor.run { JournalBackgroundTask.begin("score position") }
                     await self.scanScores(reason: "background", positions: true, force: open.map { [$0] } ?? [])
                     if open != nil, self.engine != nil, self.currentDecision().allowed {
-                        if await self.performSend(userDriven: true) { self.log("Background send finished") }
+                        if await self.performSend(userDriven: true, trigger: "background") { self.log("Background send finished") }
                     }
                     await MainActor.run { task.end() }
                 }
@@ -567,7 +567,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard let self else { return }
             self.stateLock.lock(); self.manualSendScheduled = false; self.stateLock.unlock()
-            await self.performSend(userDriven: userDriven)
+            await self.performSend(userDriven: userDriven, trigger: userDriven ? "local change, foreground or activation" : "poll or push")
         }
     }
 
@@ -577,13 +577,32 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// outbox the engine dropped and sends it once, in the builder's order.
     /// Returns whether a send was attempted.
     @discardableResult
-    func performSend(userDriven: Bool, bypassCadence: Bool = false) async -> Bool {
+    func performSend(userDriven: Bool, bypassCadence: Bool = false, trigger: String = "unspecified") async -> Bool {
         guard let engine, currentDecision().allowed else { return false }
-        stateLock.lock(); let mayRun = sendGate.enter(); stateLock.unlock()
-        guard mayRun else { return false }
+        let asked = Date()
+        stateLock.lock()
+        let mayRun = sendGate.enter(now: asked)
+        let flightBegan = sendGate.inFlightSince
+        let keptSoFar = sendGate.keptDuringFlight
+        stateLock.unlock()
+        guard mayRun else {
+            // C-190, observation only: the request is kept exactly as before.
+            let outbox = store.state.outbox
+            JournalDeferredSend.record(JournalDeferredSend(
+                trigger: trigger, activeFor: asked.timeIntervalSince(flightBegan ?? asked), ordinal: keptSoFar, outbox: outbox.count,
+                attachmentsInOutbox: outbox.filter { $0.recordType == JournalSyncRecordType.attachment && $0.op == .save }.count), in: store)
+            logger.notice("send request kept: \(trigger, privacy: .public)")
+            return false
+        }
         defer {
-            stateLock.lock(); let again = sendGate.leave(); stateLock.unlock()
-            if again { Task { await self.performSend(userDriven: userDriven, bypassCadence: bypassCadence) } }
+            stateLock.lock()
+            let kept = sendGate.keptDuringFlight
+            let again = sendGate.leave()
+            stateLock.unlock()
+            if again {
+                log(JournalDeferredSend.ranText(kept: kept, flightLasted: Date().timeIntervalSince(asked)))
+                Task { await self.performSend(userDriven: userDriven, bypassCadence: bypassCadence, trigger: "kept request") }
+            }
         }
         if let episode = store.state.storageFull {
             let outbox = store.state.outbox
@@ -1489,7 +1508,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         guard engine != nil, currentDecision().allowed else { log("Send refused: \(currentDecision().reason ?? "no engine")"); return }
         noteLocalChanges()
         // The diagnostics tap ignores the storage-full cadence: one attempt now, counted like any other.
-        await performSend(userDriven: true, bypassCadence: true)
+        await performSend(userDriven: true, bypassCadence: true, trigger: "manual")
     }
 
     /// Diagnostic: fetch the zone directly with CloudKit, bypassing the engine,

@@ -72,19 +72,62 @@ enum JournalAccountGuard {
 struct JournalSendGate {
     private(set) var inFlight = false
     private(set) var queued = false
+    /// Observation only (C-190): when the send in flight began and how many
+    /// requests were kept while it ran. Neither is read by `enter` or `leave`
+    /// to decide anything.
+    private(set) var inFlightSince: Date?
+    private(set) var keptDuringFlight = 0
 
     /// Whether the caller may send now. When not, the request is kept.
-    mutating func enter() -> Bool {
-        if inFlight { queued = true; return false }
+    mutating func enter(now: Date = Date()) -> Bool {
+        if inFlight { queued = true; keptDuringFlight += 1; return false }
         inFlight = true
+        inFlightSince = now
+        keptDuringFlight = 0
         return true
     }
 
     /// The send finished. Returns whether a kept request should run now.
     mutating func leave() -> Bool {
         inFlight = false
+        inFlightSince = nil
         defer { queued = false }
         return queued
+    }
+}
+
+/// PURE, observation only (C-190). One request kept by `JournalSendGate`
+/// because a send was in flight: what a device run needs to show that a send
+/// was asked for while an upload was still active. It records; it decides
+/// nothing.
+struct JournalDeferredSend: Equatable {
+    /// Who asked: "local change", "foreground", "poll", "background", "manual", "kept request".
+    var trigger: String
+    /// How long the send in flight had been running when this one was asked for.
+    var activeFor: TimeInterval
+    /// 1 for the first request kept during that send, 2 for the second, …
+    var ordinal: Int
+    /// What was waiting to go at that moment.
+    var outbox: Int
+    var attachmentsInOutbox: Int
+
+    var logText: String {
+        let seconds = String(format: "%.1f", max(0, activeFor))
+        return "Send asked for (\(trigger)) while one has been in flight for \(seconds) s: kept, runs once after it (kept request \(ordinal) of this send; outbox \(outbox), \(attachmentsInOutbox) attachment record(s))"
+    }
+
+    /// The line written when the kept request runs, with how long the send
+    /// before it lasted in all.
+    static func ranText(kept: Int, flightLasted: TimeInterval) -> String {
+        let seconds = String(format: "%.1f", max(0, flightLasted))
+        return "Kept send request runs now: the send before it was in flight for \(seconds) s and \(kept) request(s) were kept meanwhile"
+    }
+
+    /// Counts the request and writes its line. The only side effects of the
+    /// observation; the caller's return value does not depend on it.
+    static func record(_ deferred: JournalDeferredSend, in store: JournalSyncStateStore) {
+        store.update { $0.sendRequestsDeferred += 1 }
+        store.log(deferred.logText)
     }
 }
 

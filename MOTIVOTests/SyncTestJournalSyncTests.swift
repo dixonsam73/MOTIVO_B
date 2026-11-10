@@ -257,6 +257,65 @@ final class SyncTestJournalSyncTests: XCTestCase {
         XCTAssertFalse(gate.inFlight)
     }
 
+    // MARK: C-190: a kept send request is recorded, and nothing else changes
+
+    func testAKeptSendRequestIsRecordedWithItsTimingAndTheGateDecidesAsBefore() throws {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        // The gate's answers are those of the test above, with or without a time.
+        var gate = JournalSendGate()
+        XCTAssertTrue(gate.enter(now: t0))
+        XCTAssertEqual(gate.inFlightSince, t0, "the send in flight began now")
+        XCTAssertEqual(gate.keptDuringFlight, 0)
+        XCTAssertFalse(gate.enter(now: t0 + 240), "asked for 4 minutes into the upload: kept, not run")
+        XCTAssertEqual(gate.keptDuringFlight, 1)
+        XCTAssertEqual(gate.inFlightSince, t0, "the kept request does not restart the clock")
+        XCTAssertFalse(gate.enter(now: t0 + 300))
+        XCTAssertEqual(gate.keptDuringFlight, 2, "each kept request is counted")
+        XCTAssertTrue(gate.queued)
+        XCTAssertTrue(gate.leave(), "still exactly one follow-up, however many were kept")
+        XCTAssertNil(gate.inFlightSince)
+        XCTAssertFalse(gate.inFlight)
+        XCTAssertTrue(gate.enter(now: t0 + 600))
+        XCTAssertEqual(gate.keptDuringFlight, 0, "the count belongs to one send")
+        XCTAssertEqual(gate.inFlightSince, t0 + 600)
+        XCTAssertFalse(gate.leave())
+
+        // What the device run reads: the time into the send, who asked, what waited.
+        let deferred = JournalDeferredSend(trigger: "local change, foreground or activation", activeFor: 240.04, ordinal: 1, outbox: 5, attachmentsInOutbox: 4)
+        XCTAssertEqual(deferred.logText,
+                       "Send asked for (local change, foreground or activation) while one has been in flight for 240.0 s: kept, runs once after it (kept request 1 of this send; outbox 5, 4 attachment record(s))")
+        XCTAssertEqual(JournalDeferredSend.ranText(kept: 2, flightLasted: 611.26),
+                       "Kept send request runs now: the send before it was in flight for 611.3 s and 2 request(s) were kept meanwhile")
+
+        // Recording counts it in the state file and writes one line; the
+        // outbox and everything else in the file are as they were.
+        let pending = JournalSyncPendingChange(recordName: "att-1", recordType: JournalSyncRecordType.attachment, op: .save)
+        store.update { $0.outbox = [pending]; $0.recordsSent = 7 }
+        let before = store.state
+        XCTAssertEqual(before.sendRequestsDeferred, 0)
+        JournalDeferredSend.record(deferred, in: store)
+        JournalDeferredSend.record(JournalDeferredSend(trigger: "poll or push", activeFor: 300, ordinal: 2, outbox: 6, attachmentsInOutbox: 4), in: store)
+        let after = store.state
+        XCTAssertEqual(after.sendRequestsDeferred, 2)
+        XCTAssertEqual(after.log.count, before.log.count + 2)
+        XCTAssertEqual(after.log.suffix(2).first?.text, deferred.logText)
+        XCTAssertEqual(after.outbox, before.outbox, "the observation queues and removes nothing")
+        XCTAssertEqual(after.recordsSent, before.recordsSent)
+        XCTAssertEqual(after.outboxSequence, before.outboxSequence)
+
+        // The count survives a relaunch, and a state file written before the
+        // field existed reads as zero.
+        let reloaded = JournalSyncStateStore(fileURL: tempDir.appendingPathComponent("state.json"))
+        XCTAssertEqual(reloaded.state.sendRequestsDeferred, 2)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: tempDir.appendingPathComponent("state.json"))) as? [String: Any])
+        XCTAssertNotNil(object.removeValue(forKey: "sendRequestsDeferred"), "the count is in the file a trial reads over the cable")
+        let olderURL = tempDir.appendingPathComponent("state-before-c190.json")
+        try JSONSerialization.data(withJSONObject: object).write(to: olderURL)
+        let older = JournalSyncStateStore(fileURL: olderURL)
+        XCTAssertEqual(older.state.sendRequestsDeferred, 0)
+        XCTAssertEqual(older.state.outbox, [pending], "and the rest of an older file loads as before")
+    }
+
 }
 
 private extension JournalSyncPersistedState {
