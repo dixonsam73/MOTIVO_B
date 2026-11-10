@@ -1,12 +1,13 @@
-# Private iCloud sync — production configuration (prepared, not applied)
+# Private iCloud sync — production configuration
 
 Written 2026-11-04 for the internal TestFlight trial of the private sync on
-the shipping configuration (Release, bundle `com.sdsongs.etudes`). Everything
-here is **prepared for Samuel's review**: nothing below has been applied to
-the App ID, to App Store Connect, to any CloudKit container, or to the
-Release entitlements. The trial configuration (SyncTest, bundle
-`com.samueldixon.motivo.synctest`, development container
-`iCloud.com.samueldixon.motivo.synctest`) is unchanged and stays the trial's.
+the shipping configuration (Release, bundle `com.sdsongs.etudes`). **State
+2026-11-10:** the App ID capabilities and the schema in Production are done
+(sections 2 and 4), and the Release enablement patch is applied (section
+3). Not done: any TestFlight upload, and anything in App Store Connect. The
+trial configuration (SyncTest, bundle `com.samueldixon.motivo.synctest`,
+development container `iCloud.com.samueldixon.motivo.synctest`) is
+unchanged and stays the trial's.
 
 Sync stays **off by default** with explicit opt-in on every configuration.
 
@@ -28,7 +29,10 @@ Sync stays **off by default** with explicit opt-in on every configuration.
   of them; and, from the running bundle, that the build resolved the
   expected identifier.
 - `docs/sync-trial/production-configuration.patch`: the Release enablement as
-  a patch (section 3). Not applied.
+  a patch (section 3). **Applied 2026-11-10** in one commit, after the App
+  ID and schema steps; the file is kept as the record of exactly what
+  enablement is (reverse it with `git apply -R` only with section 3's
+  warning about withdrawing the capability in mind).
 
 ## 2. Apple Developer and App Store Connect (Samuel)
 
