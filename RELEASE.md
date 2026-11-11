@@ -466,11 +466,12 @@ the join.
   part 5 needs a **fresh install and a fresh journal made under the
   disposable Apple Account**, the Apple identity and the exact backend
   user id verified before anything is deleted, and a second writer to
-  that account's iCloud journal that is not the iPad. Prepared, not run,
-  in this order (same notes folder): **first** the sustained-upload
-  trial, `sustained-upload-trial-script.md`, on a build carrying the
-  send-gate observation (C-190), TestFlight on Device A and the iPad;
-  **then** part 5, `part5-connected-isolation-script.md`, on a
+  that account's iCloud journal that is not the iPad. In this order (same
+  notes folder): **first** the sustained-upload trial,
+  `sustained-upload-trial-script.md`, on a build carrying the send-gate
+  observation (C-190), TestFlight on Device A and the iPad — **run
+  2026-11-11 on build 1912 and passed** (record under "Sync"); **then,
+  prepared and not run,** part 5, `part5-connected-isolation-script.md`, on a
   development-signed Release build with a dedicated simulator as the
   second writer, proved to sync before anything is measured. Part 5's
   coverage is therefore the Development CloudKit environment only. Parts:
@@ -2362,6 +2363,59 @@ the join.
   comparison reports, both timelines, state snapshots, the account
   reads):
   `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/testflight-2026-11-10/`.
+  **Sustained-upload trial (Device A sender, the iPad receiver, TestFlight
+  build 1912 from commit `f26de0a`, Production, Samuel's main Apple
+  Account; 2026-11-11 13:37–14:21; C-190, C-191):** the first run with
+  the send-gate observation, on media this account had never stored and
+  an uplink capped at 2 Mbps (Network Link Conditioner on Device A).
+  *Baseline:* both installs on 1912, every queue empty, the kept-request
+  counter at 0; every figure below is a change from it.
+  *Fresh media:* five videos recorded in Études with Airplane Mode on and
+  Wi-Fi off (the sends were refused with CloudKit's network-unavailable
+  error). Read from the state file before release: **5 files, 174,818,100
+  bytes**, 15 records queued, nothing acknowledged. Floor at 2 Mbps: 699 s.
+  *The upload was sustained.* Released at about 13:52:31; two minutes
+  later nothing was acknowledged. It finished at 14:09:22, 16 min 51 s
+  after release, across three sends.
+  *Sends asked for during it were kept, 13 times, and none trapped.* The
+  first send kept six requests (the app's own checks at 34.2, 111.6 and
+  187.3 s; a notes edit at 207.6 s; a new Thought at 244.6 s; a return to
+  the foreground at 284.9 s). Each is a line in the log with the time the
+  send had been in flight and five attachment records still unsent.
+  *Interruption one, a force-quit* after those: relaunch at 13:58:06
+  rebuilt the engine from saved state, a new send began two seconds
+  later with all 18 records still queued, and kept five more requests,
+  among them another notes edit at 214.5 s.
+  *Interruption two, the connection* after that: Airplane Mode with Wi-Fi
+  off; the send failed with network-unavailable after 396.4 s in flight,
+  the kept request ran once and failed the same way, every record stayed
+  queued. After the connection returned the next send began at the next
+  poll, about a minute later, not at once (C-186(c) again); it kept two
+  more requests and was acknowledged after 200.2 s: **19 records, 5
+  files, 174,818,100 bytes, each once**.
+  *Receiver:* the iPad imported the 19 records and fetched the five files
+  (174,818,100 bytes) by 14:09:52.
+  *Content, from both containers pulled over the cable:* the five videos
+  identical by SHA-256 and size, each present once on each device; 118
+  sessions and 88 attachments on each, every id unique, the same sets
+  (no duplicate journal items); outbox, waiting files and held records
+  empty on both; conflicts 0. The comparator's two flags are explained
+  and not losses: C-189, and C-191 (the stored colour map; Samuel
+  compared the colours on screen and they match). Two relaunches on each
+  device: "Up to date" at once and every counter unchanged. No crash log
+  on either device.
+  *What this does and does not show.* The one-send gate held while an
+  upload stayed active for minutes and further sends were asked for,
+  through two interruptions, on this build and these devices. **It does
+  not establish C-174's root cause, which remains unverified**: the trap
+  did not occur, so nothing was learned about why it once did. The last
+  send's 200 s for 174.8 MB is quicker than the cap allows alone; the
+  three sends together ran for about 15 minutes, so the likeliest reading
+  is that iCloud kept the parts sent before each interruption. That is
+  inferred from the timings, not measured. Evidence (both timelines, the
+  full event logs, state snapshots, both container copies, the
+  comparison):
+  `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/upload-trial-2026-11-11/`.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
