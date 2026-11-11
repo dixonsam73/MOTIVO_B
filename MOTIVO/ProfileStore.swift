@@ -30,6 +30,28 @@ import UIKit
 /// On FIRST SIGHT (nothing applied yet) an absent backend avatar cannot be told
 /// apart from one never uploaded, so it is only recorded — a local copy is
 /// removed only when the version CHANGES after one was already applied.
+///
+/// C-192, second pass (2026-11-11). With one shared profile a device also
+/// PUBLISHES what the private sync brings it, so a changed backend version is
+/// usually an echo: this device's own publication, or another of the owner's
+/// devices publishing the picture the journal already delivered here. Reading
+/// an echo back would re-encode the image and send it through iCloud as a new
+/// edit, which the next Connected device would publish again. The first pass
+/// stopped that by never reading back while sync was on, which also hid a
+/// real change made on a Connected device whose sync is off. Now:
+///
+///  1. a device records the version its OWN publication produced, so it never
+///     reads that back (`AccountDirectoryService.updateSelfAvatarKey`);
+///  2. only a version NEWER than the recorded one is followed (both are the
+///     server's clock), so a row read before this device's own publication
+///     cannot undo it;
+///  3. a newer version showing the SAME PICTURE this device holds is an echo:
+///     recorded, nothing written (`samePicture`);
+///  4. a different picture, or a removal, is a real change. With sync on it is
+///     applied only once it has STOOD for `settleInterval`, because a sibling
+///     can publish an older state for a moment (a photo change that reaches it
+///     as a removal and then the image, C-194; a retried older upload), and
+///     applying that would send the removal or the old picture to every device.
 enum OwnAvatarSync {
     enum Action: Equatable { case none, recordOnly, refresh, remove }
 
@@ -37,25 +59,129 @@ enum OwnAvatarSync {
         (version ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// `journalIsSource` (C-192, 2026-11-11): while the private sync is on, the
-    /// journal carries the one profile to every device and this device
-    /// PUBLISHES it, so the Connected copy is an output here and is not read
-    /// back. Reading it back would re-encode the image, send that through
-    /// iCloud as a new edit, and have the next Connected device publish it
-    /// again: a loop with two Connected devices. Nothing is recorded, so a
-    /// device whose sync is turned off follows the backend again.
+    /// `avatar_version` is the server's `now()` as PostgREST prints it,
+    /// "2026-11-11T19:41:42.302262+00:00", with a fraction of 0 to 6 digits.
+    static func date(ofVersion version: String) -> Date? {
+        let v = normalized(version)
+        guard !v.isEmpty else { return nil }
+        var base = v
+        var fraction = 0.0
+        if let dot = v.firstIndex(of: ".") {
+            let after = v[v.index(after: dot)...]
+            let digits = after.prefix { $0.isNumber }
+            fraction = Double("0." + digits) ?? 0
+            base = String(v[..<dot]) + String(after.dropFirst(digits.count))
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: base)?.addingTimeInterval(fraction)
+    }
+
+    /// Both values are server stamps. A version is only ever stamped, never
+    /// unset, so an empty one cannot follow a set one. Values that are not
+    /// timestamps (never seen from the server) fall back to "different is newer".
+    static func isNewer(_ incoming: String, than last: String) -> Bool {
+        if incoming == last || incoming.isEmpty { return false }
+        if last.isEmpty { return true }
+        if let a = date(ofVersion: incoming), let b = date(ofVersion: last) { return a > b }
+        return true
+    }
+
     static func decide(lastApplied: String?,
                        backendVersion: String?,
                        backendHasAvatar: Bool,
-                       hasPendingLocalChange: Bool,
-                       journalIsSource: Bool = false) -> Action {
+                       hasPendingLocalChange: Bool) -> Action {
         if hasPendingLocalChange { return .none }
-        if journalIsSource { return .none }
         let incoming = normalized(backendVersion)
         guard let last = lastApplied else { return backendHasAvatar ? .refresh : .recordOnly }
-        if last == incoming { return .none }
+        guard isNewer(incoming, than: last) else { return .none }
         return backendHasAvatar ? .refresh : .remove
     }
+
+    // MARK: A real change must stand before a sync-on device applies it
+
+    static let settleInterval: TimeInterval = 120
+
+    /// The backend version this device is waiting on, and when it first saw it.
+    struct Seen: Equatable { var version: String; var at: Date }
+
+    /// PURE. A version seen for the first time starts the wait; the same
+    /// version still standing `interval` later has settled. A clock set back
+    /// starts the wait again.
+    static func settle(seen: Seen?, version: String, now: Date,
+                       interval: TimeInterval = settleInterval) -> (settled: Bool, seen: Seen) {
+        guard let seen, seen.version == version, now >= seen.at else {
+            return (false, Seen(version: version, at: now))
+        }
+        return (now.timeIntervalSince(seen.at) >= interval, seen)
+    }
+
+    #if canImport(UIKit)
+    // MARK: The same picture, whatever the encoding
+
+    /// A 32 x 32 RGBA rendering: small enough that JPEG loss and a PNG
+    /// re-encode disappear, large enough that two photos never look alike.
+    ///
+    /// Drawn at 256 x 256 and averaged down here in 8 x 8 blocks. Drawing
+    /// straight to 32 x 32 lets the system pick the reduction, and it reduces a
+    /// JPEG while decoding it and a PNG afterwards: measured, the SAME pixels
+    /// stored as JPEG and as PNG came out 7 apart (of 255), more than two
+    /// similar photos might.
+    static func thumbnail(of image: UIImage, side: Int = 32) -> [UInt8]? {
+        let block = 8
+        let full = side * block
+        var large = [UInt8](repeating: 0, count: full * full * 4)
+        let drawn: Bool = large.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(data: buffer.baseAddress, width: full, height: full, bitsPerComponent: 8,
+                                          bytesPerRow: full * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.interpolationQuality = .high
+            context.setFillColor(UIColor.white.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: full, height: full))
+            UIGraphicsPushContext(context)
+            image.draw(in: CGRect(x: 0, y: 0, width: full, height: full))
+            UIGraphicsPopContext()
+            return true
+        }
+        guard drawn else { return nil }
+        var pixels = [UInt8](repeating: 255, count: side * side * 4)
+        for y in 0..<side {
+            for x in 0..<side {
+                var sum = [0, 0, 0]
+                for dy in 0..<block {
+                    let row = ((y * block + dy) * full + x * block) * 4
+                    for dx in 0..<block {
+                        let i = row + dx * 4
+                        sum[0] += Int(large[i]); sum[1] += Int(large[i + 1]); sum[2] += Int(large[i + 2])
+                    }
+                }
+                let o = (y * side + x) * 4
+                for c in 0..<3 { pixels[o + c] = UInt8(sum[c] / (block * block)) }
+            }
+        }
+        return pixels
+    }
+
+    /// Mean absolute difference per colour channel, 0 to 255. Measured in the
+    /// tests: a JPEG round trip of the same picture is under 2; different
+    /// pictures are far above the tolerance.
+    static func pictureDistance(_ a: UIImage, _ b: UIImage) -> Double? {
+        guard let x = thumbnail(of: a), let y = thumbnail(of: b), x.count == y.count else { return nil }
+        var total = 0
+        var count = 0
+        for i in stride(from: 0, to: x.count, by: 4) {
+            for c in 0..<3 { total += abs(Int(x[i + c]) - Int(y[i + c])); count += 1 }
+        }
+        return count == 0 ? nil : Double(total) / Double(count)
+    }
+
+    static let samePictureTolerance = 6.0
+
+    static func samePicture(_ a: UIImage, _ b: UIImage) -> Bool {
+        guard let distance = pictureDistance(a, b) else { return false }
+        return distance <= samePictureTolerance
+    }
+    #endif
 }
 
 struct ProfileStore {
@@ -82,6 +208,7 @@ struct ProfileStore {
     }
 
     static func clearPendingLocalAvatarSync() {
+        avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
         UserDefaults.standard.removeObject(forKey: localAvatarSyncStateKey)
     }
 
@@ -90,24 +217,48 @@ struct ProfileStore {
     // published. Each marking gets a number; a promotion clears the marker
     // only if it is still the marking it started from, so the later one is
     // not lost. In memory only: the marker itself survives a relaunch.
-    private static let avatarMarkerLock = NSLock()
+    //
+    // ONE LOCK FOR ALL OF IT (second pass, 2026-11-11). The number and the
+    // stored value used to change in two steps, so a clear could pass its
+    // check, a new marking could land, and the clear could then remove it. The
+    // lock now covers a marking (number and value together), the checked
+    // clear (check and removal together), the sync's own writers (files and
+    // marking together) and the promotion's local delete. Recursive because
+    // the writers mark from inside it.
+    private static let avatarMarkerLock = NSRecursiveLock()
     nonisolated(unsafe) private static var avatarMarkerCount = 0
+    #if DEBUG
+    /// Test-only: runs inside the checked clear, after the check has passed and
+    /// before the removal, so a test can try to mark in exactly that window.
+    nonisolated(unsafe) static var testHookInsideCheckedAvatarClear: (() -> Void)?
+    #endif
 
     static var pendingLocalAvatarGeneration: Int {
         avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
         return avatarMarkerCount
     }
 
+    /// The marker and its number, read together.
+    static func pendingLocalAvatarSnapshot() -> (state: String?, generation: Int) {
+        avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
+        return (UserDefaults.standard.string(forKey: localAvatarSyncStateKey), avatarMarkerCount)
+    }
+
     private static func setPendingLocalAvatar(_ state: String) {
-        avatarMarkerLock.lock(); avatarMarkerCount += 1; avatarMarkerLock.unlock()
+        avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
+        avatarMarkerCount += 1
         UserDefaults.standard.set(state, forKey: localAvatarSyncStateKey)
     }
 
     /// Clears the marker unless the avatar was marked again since `generation`.
     @discardableResult
     static func clearPendingLocalAvatarSync(ifUnchangedSince generation: Int) -> Bool {
-        guard pendingLocalAvatarGeneration == generation else { return false }
-        clearPendingLocalAvatarSync()
+        avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
+        guard avatarMarkerCount == generation else { return false }
+        #if DEBUG
+        testHookInsideCheckedAvatarClear?()
+        #endif
+        UserDefaults.standard.removeObject(forKey: localAvatarSyncStateKey)
         return true
     }
 
@@ -125,6 +276,36 @@ struct ProfileStore {
 
     static func setOwnAvatarAppliedVersion(_ version: String, for userID: String) {
         UserDefaults.standard.set(version, forKey: ownAvatarAppliedVersionKey(for: userID))
+    }
+
+    /// A publication by this device: the version it produced is the one this
+    /// device holds. Never moves the record backwards.
+    static func noteOwnAvatarPublished(version: String?, for userID: String?) {
+        guard let uid = userID?.trimmingCharacters(in: .whitespacesAndNewlines), !uid.isEmpty else { return }
+        let incoming = OwnAvatarSync.normalized(version)
+        guard !incoming.isEmpty else { return }
+        if let last = ownAvatarAppliedVersion(for: uid), !OwnAvatarSync.isNewer(incoming, than: last) { return }
+        setOwnAvatarAppliedVersion(incoming, for: uid)
+    }
+
+    // The backend change a sync-on device is waiting on (`OwnAvatarSync.settle`).
+    private static func ownAvatarSeenVersionKey(for userID: String) -> String { "profile.\(userID).ownAvatarSeenVersion_v1" }
+    private static func ownAvatarSeenAtKey(for userID: String) -> String { "profile.\(userID).ownAvatarSeenAt_v1" }
+
+    static func ownAvatarBackendChangeSeen(for userID: String) -> OwnAvatarSync.Seen? {
+        guard let version = UserDefaults.standard.string(forKey: ownAvatarSeenVersionKey(for: userID)),
+              let at = UserDefaults.standard.object(forKey: ownAvatarSeenAtKey(for: userID)) as? Double else { return nil }
+        return OwnAvatarSync.Seen(version: version, at: Date(timeIntervalSince1970: at))
+    }
+
+    static func setOwnAvatarBackendChangeSeen(_ seen: OwnAvatarSync.Seen?, for userID: String) {
+        if let seen {
+            UserDefaults.standard.set(seen.version, forKey: ownAvatarSeenVersionKey(for: userID))
+            UserDefaults.standard.set(seen.at.timeIntervalSince1970, forKey: ownAvatarSeenAtKey(for: userID))
+        } else {
+            UserDefaults.standard.removeObject(forKey: ownAvatarSeenVersionKey(for: userID))
+            UserDefaults.standard.removeObject(forKey: ownAvatarSeenAtKey(for: userID))
+        }
     }
 
     private static func markPendingLocalAvatarUploadIfNeeded(for userID: String?) {
@@ -506,6 +687,8 @@ struct ProfileStore {
     @discardableResult
     static func writeSyncedAvatar(pngData: Data, for userID: String?, modifiedAt: Date) -> Bool {
         guard let image = UIImage(data: pngData) else { return false }
+        // Files and marking together, so a promotion's local delete cannot fall between them.
+        avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
         var ok = true
         for scope in Set([profileStorageID(for: userID), localProfileStorageID]) {
             guard let derived = avatarDerivedURL(for: scope), let original = avatarOriginalURL(for: scope) else { ok = false; continue }
@@ -529,9 +712,20 @@ struct ProfileStore {
 
     /// Both scopes, and the removal is marked for the Connected profile.
     static func removeSyncedAvatar(for userID: String?) {
+        avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
         deleteAvatarFiles(for: userID)
         deleteAvatarFiles(for: nil)
         setPendingLocalAvatar("delete")
+    }
+
+    /// The promotion of a pending removal drops the identity's copy. Only if
+    /// the avatar has not been marked again since the promotion started: an
+    /// image the sync wrote meanwhile is not this removal's to delete.
+    static func deleteAvatarForPendingDeletion(for userID: String?, ifUnchangedSince generation: Int) -> Bool {
+        avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
+        guard avatarMarkerCount == generation else { return false }
+        deleteAvatarFiles(for: userID)
+        return true
     }
 
     /// True when the identity's avatar file and the local Études one are the

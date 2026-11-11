@@ -748,13 +748,21 @@ public final class AccountDirectoryService {
         return !rows.isEmpty
     }
 
+    /// PURE. The `avatar_version` the server stamped on the row a PATCH returned.
+    nonisolated static func avatarVersion(inPatchResponse data: Data) -> String? {
+        guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
+        return rows.first?["avatar_version"] as? String
+    }
+
     /// Update the caller's `account_directory.avatar_key` (owner-only via RLS).
     /// - Parameter avatarKey: `users/<uid>/avatar.jpg` or nil to clear.
     /// - Important: This is an owner-only metadata update; no profile sync.
-    /// - Returns: success ONLY when the server returned the row it changed;
-    ///   `AvatarKeyNoRowMatched` when there was no row, so the caller keeps its
-    ///   pending marker and tries again once the row exists.
-    public func updateSelfAvatarKey(userID: String, avatarKey: String?) async -> Result<Void, Error> {
+    /// - Returns: success ONLY when the server returned the row it changed,
+    ///   carrying the `avatar_version` it stamped (the caller records it as the
+    ///   version this device holds, so it never reads its own publication
+    ///   back); `AvatarKeyNoRowMatched` when there was no row, so the caller
+    ///   keeps its pending marker and tries again once the row exists.
+    public func updateSelfAvatarKey(userID: String, avatarKey: String?) async -> Result<String?, Error> {
         ConnectedWriteWitness.note(ConnectedWriteWitness.directoryAvatarKey)
         let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !uid.isEmpty else {
@@ -772,7 +780,7 @@ public final class AccountDirectoryService {
             return .failure(error)
         }
 
-        let path = "rest/v1/account_directory?user_id=eq.\(uid)&select=user_id"
+        let path = "rest/v1/account_directory?user_id=eq.\(uid)&select=user_id,avatar_version"
         let headers = [
             "Prefer": "return=representation"
         ]
@@ -798,7 +806,7 @@ public final class AccountDirectoryService {
                 await cache.setMany([updated])
                 await BackendFeedStore.shared.mergeDirectoryAccounts([uid: updated])
             }
-            return .success(())
+            return .success(Self.avatarVersion(inPatchResponse: data))
         case .failure(let error):
             return .failure(error)
         }

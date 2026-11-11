@@ -2421,7 +2421,8 @@ private var sessionSetupSection: some View {
              // 2) Patch account_directory.avatar_key
              let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: avatarKey)
              switch patch {
-             case .success:
+             case .success(let publishedVersion):
+                 ProfileStore.noteOwnAvatarPublished(version: publishedVersion, for: auth.currentUserID)
                  ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
                  return true
              case .failure:

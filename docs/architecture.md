@@ -659,9 +659,11 @@ other one. This is accepted for v1.
   name, location, instruments or avatar that sync delivers to a device signed
   in to Connected is published to that same owner's Connected profile,
   wherever the change was made, a Solo device included. A device not signed
-  in to Connected publishes nothing and gains no credentials. While sync is
-  in use a device does not read its own avatar back from Connected, so two
-  Connected devices cannot publish each other's copies in a loop.
+  in to Connected publishes nothing and gains no credentials. A device
+  recognises a publication of the picture it already holds as an echo and
+  writes nothing, so two Connected devices cannot publish each other's
+  copies in a loop; an avatar replaced or removed on a Connected device
+  whose sync is off is still followed, after it has stood for two minutes.
 - **Signing in to Connected** no longer re-owns journal entries. Publication
   identifiers stay in the Connected domain.
 - **A device not signed in to Connected** can't update a shared post. Its

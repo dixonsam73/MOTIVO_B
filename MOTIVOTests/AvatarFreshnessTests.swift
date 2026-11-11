@@ -16,7 +16,14 @@
 //
 
 import XCTest
+import UIKit
 @testable import Etudes
+
+/// A flag two threads may touch in the marker race test.
+private final class RaceFlags: @unchecked Sendable {
+    var markerFinishedWhileClearWasInside = false
+    var cleared = false
+}
 
 final class AvatarFreshnessTests: XCTestCase {
 
@@ -112,14 +119,196 @@ final class AvatarFreshnessTests: XCTestCase {
         // Changed: follow the backend — replace, or remove if it was removed.
         XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v2", backendHasAvatar: true, hasPendingLocalChange: false), .refresh)
         XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v2", backendHasAvatar: false, hasPendingLocalChange: false), .remove)
-        // C-192: with the private sync in use the journal is the source and this
-        // device publishes it, so the Connected copy is never read back (a
-        // re-encoded copy would go out through iCloud as a new image and be
-        // published again by the next Connected device). Nothing is recorded.
-        XCTAssertEqual(S.decide(lastApplied: nil, backendVersion: "v1", backendHasAvatar: true, hasPendingLocalChange: false, journalIsSource: true), .none)
-        XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v2", backendHasAvatar: true, hasPendingLocalChange: false, journalIsSource: true), .none)
-        XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v2", backendHasAvatar: false, hasPendingLocalChange: false, journalIsSource: true), .none)
-        XCTAssertEqual(S.decide(lastApplied: nil, backendVersion: nil, backendHasAvatar: false, hasPendingLocalChange: false, journalIsSource: true), .none)
+    }
+
+    // MARK: - C-192, second pass: echoes, real changes, and the marker race
+
+    /// `avatar_version` as PostgREST prints it; the fraction has 0 to 6 digits.
+    func testAvatarVersionsAreOrderedAsTheServersClock() throws {
+        typealias S = OwnAvatarSync
+        let a = try XCTUnwrap(S.date(ofVersion: "2026-11-11T19:41:42.302262+00:00"))
+        let b = try XCTUnwrap(S.date(ofVersion: "2026-11-11T19:41:42.3+00:00"))
+        let c = try XCTUnwrap(S.date(ofVersion: "2026-11-11T19:41:43+00:00"))
+        XCTAssertEqual(a.timeIntervalSince(b), 0.002262, accuracy: 0.00001)
+        XCTAssertEqual(c.timeIntervalSince(b), 0.7, accuracy: 0.00001)
+        XCTAssertNotNil(S.date(ofVersion: "2026-11-11T19:41:42.302262Z"))
+        XCTAssertNil(S.date(ofVersion: "")); XCTAssertNil(S.date(ofVersion: "v1"))
+        XCTAssertTrue(S.isNewer("2026-11-11T19:41:43+00:00", than: "2026-11-11T19:41:42.302262+00:00"))
+        XCTAssertFalse(S.isNewer("2026-11-11T19:41:42.3+00:00", than: "2026-11-11T19:41:42.302262+00:00"),
+                       "a shorter fraction is not a later time (a text comparison says it is)")
+        XCTAssertFalse(S.isNewer("2026-11-11T19:41:42.302262+00:00", than: "2026-11-11T19:41:42.302262+00:00"))
+        XCTAssertTrue(S.isNewer("2026-11-11T19:41:42+00:00", than: ""), "a first version follows none")
+        XCTAssertFalse(S.isNewer("", than: "2026-11-11T19:41:42+00:00"), "a version is never unset")
+    }
+
+    /// A row read before this device's own publication must not undo it: the
+    /// device records the version its publication produced, and only a NEWER
+    /// version is followed. Without this the stale "no avatar" row below
+    /// removed the photo the member had just chosen.
+    func testAnOlderBackendVersionIsNeverFollowed() {
+        typealias S = OwnAvatarSync
+        let own = "2026-11-11T19:41:42.302262+00:00", stale = "2026-11-11T19:36:13.811987+00:00", later = "2026-11-11T19:50:00+00:00"
+        XCTAssertEqual(S.decide(lastApplied: own, backendVersion: stale, backendHasAvatar: false, hasPendingLocalChange: false), .none)
+        XCTAssertEqual(S.decide(lastApplied: own, backendVersion: stale, backendHasAvatar: true, hasPendingLocalChange: false), .none)
+        XCTAssertEqual(S.decide(lastApplied: own, backendVersion: own, backendHasAvatar: true, hasPendingLocalChange: false), .none,
+                       "its own publication is not read back")
+        XCTAssertEqual(S.decide(lastApplied: own, backendVersion: later, backendHasAvatar: true, hasPendingLocalChange: false), .refresh)
+        XCTAssertEqual(S.decide(lastApplied: own, backendVersion: later, backendHasAvatar: false, hasPendingLocalChange: false), .remove)
+        // The record never moves backwards.
+        let uid = "c192-" + UUID().uuidString
+        defer { UserDefaults.standard.removeObject(forKey: "profile.\(uid).ownAvatarAppliedVersion_v1") }
+        ProfileStore.noteOwnAvatarPublished(version: own, for: uid)
+        ProfileStore.noteOwnAvatarPublished(version: stale, for: uid)
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: uid), own)
+        ProfileStore.noteOwnAvatarPublished(version: later, for: uid)
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: uid), later)
+        ProfileStore.noteOwnAvatarPublished(version: nil, for: uid)
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: uid), later)
+    }
+
+    /// A real change must stand before a sync-on device applies it.
+    func testABackendChangeSettlesOnlyAfterStandingForTheInterval() {
+        typealias S = OwnAvatarSync
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        let first = S.settle(seen: nil, version: "v1", now: t0)
+        XCTAssertFalse(first.settled); XCTAssertEqual(first.seen, S.Seen(version: "v1", at: t0))
+        XCTAssertFalse(S.settle(seen: first.seen, version: "v1", now: t0.addingTimeInterval(119)).settled)
+        XCTAssertTrue(S.settle(seen: first.seen, version: "v1", now: t0.addingTimeInterval(120)).settled)
+        // A different version starts the wait again (the sibling published the newer state meanwhile).
+        let changed = S.settle(seen: first.seen, version: "v2", now: t0.addingTimeInterval(500))
+        XCTAssertFalse(changed.settled); XCTAssertEqual(changed.seen.version, "v2")
+        // A clock set back starts it again too.
+        XCTAssertFalse(S.settle(seen: first.seen, version: "v1", now: t0.addingTimeInterval(-10)).settled)
+        XCTAssertEqual(S.settleInterval, 120)
+    }
+
+    private func picture(seed: UInt64, side: CGFloat = 256) -> UIImage {
+        var state = seed
+        func next() -> CGFloat { state = state &* 6364136223846793005 &+ 1442695040888963407; return CGFloat((state >> 33) % 1000) / 1000 }
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { ctx in
+            UIColor(red: next(), green: next(), blue: next(), alpha: 1).setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            for _ in 0..<24 {
+                UIColor(red: next(), green: next(), blue: next(), alpha: 1).setFill()
+                ctx.cgContext.fillEllipse(in: CGRect(x: next() * side, y: next() * side, width: next() * side / 2, height: next() * side / 2))
+            }
+        }
+    }
+
+    /// The echo test: what this device publishes (a JPEG of its PNG) and what
+    /// it would read back are the same picture; two photos are not.
+    func testAPublishedCopyIsTheSamePictureAndADifferentPhotoIsNot() throws {
+        let original = picture(seed: 1)
+        let png = try XCTUnwrap(UIImage(data: try XCTUnwrap(original.pngData())))
+        let published = try XCTUnwrap(UIImage(data: try XCTUnwrap(png.jpegData(compressionQuality: 0.9))))
+        let readBack = try XCTUnwrap(UIImage(data: try XCTUnwrap(published.pngData())))
+        let twice = try XCTUnwrap(UIImage(data: try XCTUnwrap(readBack.jpegData(compressionQuality: 0.9))))
+        let echo = try XCTUnwrap(OwnAvatarSync.pictureDistance(png, published))
+        XCTAssertLessThan(echo, 2, "JPEG loss disappears at this size")
+        XCTAssertTrue(OwnAvatarSync.samePicture(png, published))
+        XCTAssertTrue(OwnAvatarSync.samePicture(png, readBack))
+        XCTAssertTrue(OwnAvatarSync.samePicture(png, twice), "a second generation is still the same picture")
+        XCTAssertTrue(OwnAvatarSync.samePicture(png, picture(seed: 1, side: 1024)), "the editor's larger export of the same picture")
+        for other in [UInt64(2), 3, 4, 5] {
+            let distance = try XCTUnwrap(OwnAvatarSync.pictureDistance(png, picture(seed: other)))
+            XCTAssertGreaterThan(distance, OwnAvatarSync.samePictureTolerance * 3, "a different photo is far outside the tolerance")
+            XCTAssertFalse(OwnAvatarSync.samePicture(png, picture(seed: other)))
+        }
+    }
+
+    /// The read-back no longer depends on whether sync is on to decide IF it
+    /// looks, and every publication records the version it produced.
+    func testTheReadBackIsNotBlanketSuppressedAndPublicationsRecordTheirVersion() throws {
+        let auth = code("AuthManager.swift")
+        let start = try XCTUnwrap(auth.range(of: "func syncOwnAvatarFromBackend("))
+        let end = try XCTUnwrap(auth.range(of: "private func scheduleOwnAvatarRecheck("))
+        let body = String(auth[start.lowerBound..<end.lowerBound])
+        XCTAssertFalse(body.contains("journalIsSource"), "the blanket suppression is gone")
+        XCTAssertTrue(body.contains("OwnAvatarSync.samePicture("), "an echo is recognised by its picture")
+        XCTAssertTrue(body.contains("OwnAvatarSync.settle("), "a real change waits with sync on")
+        XCTAssertTrue(body.contains("== appliedAtStart"), "a publication during the download is not overwritten")
+        XCTAssertEqual(auth.components(separatedBy: "ProfileStore.noteOwnAvatarPublished(").count - 1, 2, "the upload and the removal promotion")
+        XCTAssertEqual(code("ProfileView.swift").components(separatedBy: "ProfileStore.noteOwnAvatarPublished(").count - 1, 1, "the Profile screen's own upload")
+        XCTAssertEqual(AccountDirectoryService.avatarVersion(inPatchResponse: Data("[{\"user_id\":\"u\",\"avatar_version\":\"2026-11-11T19:41:42.302262+00:00\"}]".utf8)),
+                       "2026-11-11T19:41:42.302262+00:00")
+        XCTAssertNil(AccountDirectoryService.avatarVersion(inPatchResponse: Data("[]".utf8)))
+    }
+
+    private static let markerKey = "profile.__local_etudes_profile__.avatarSyncState_v1"
+
+    /// THE RACE, with a controlled overlap. The checked clear has passed its
+    /// check and has not yet removed the marker; a new marking arrives on
+    /// another thread in exactly that window. Before the fix the number and the
+    /// stored value changed in two steps, so the marking landed and the clear
+    /// then removed it: the newer pending change was lost. Under one lock the
+    /// marking waits for the clear, and is still there afterwards.
+    func testAMarkingThatArrivesInsideACheckedClearIsNotLost() throws {
+        let saved = UserDefaults.standard.object(forKey: Self.markerKey)
+        defer {
+            ProfileStore.testHookInsideCheckedAvatarClear = nil
+            if let saved { UserDefaults.standard.set(saved, forKey: Self.markerKey) } else { UserDefaults.standard.removeObject(forKey: Self.markerKey) }
+        }
+        ProfileStore.deleteAvatar(for: nil)                                   // the older marking ("delete")
+        let older = ProfileStore.pendingLocalAvatarSnapshot()
+        XCTAssertEqual(older.state, "delete")
+
+        let insideClear = DispatchSemaphore(value: 0)
+        let markerDone = DispatchSemaphore(value: 0)
+        let clearDone = DispatchSemaphore(value: 0)
+        let flags = RaceFlags()
+        ProfileStore.testHookInsideCheckedAvatarClear = {
+            insideClear.signal()
+            // Hold the window open: long enough for the other thread to mark if nothing stops it.
+            flags.markerFinishedWhileClearWasInside = markerDone.wait(timeout: .now() + 0.4) == .success
+        }
+        let olderGeneration = older.generation
+        DispatchQueue.global().async {                                          // the older upload completing
+            flags.cleared = ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: olderGeneration)
+            clearDone.signal()
+        }
+        XCTAssertEqual(insideClear.wait(timeout: .now() + 5), .success, "the clear reached its window")
+        let raceUser = "c192-race-\(UUID().uuidString)"
+        DispatchQueue.global().async {                                          // the newer change being marked
+            ProfileStore.removeSyncedAvatar(for: raceUser)
+            markerDone.signal()
+        }
+        XCTAssertEqual(clearDone.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(markerDone.wait(timeout: .now() + 5), .success)
+        ProfileStore.testHookInsideCheckedAvatarClear = nil
+
+        XCTAssertTrue(flags.cleared, "the older clear was entitled to clear its own marking")
+        XCTAssertFalse(flags.markerFinishedWhileClearWasInside, "the marking could not land between the check and the removal")
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion(), "the newer pending change survives the older completion")
+        XCTAssertEqual(ProfileStore.pendingLocalAvatarSnapshot().generation, older.generation + 1)
+        // And in the other order (marked first): the clear refuses.
+        let newer = ProfileStore.pendingLocalAvatarSnapshot()
+        ProfileStore.deleteAvatar(for: nil)
+        XCTAssertFalse(ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: newer.generation))
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarSync())
+    }
+
+    /// The promotion of a removal must not delete an image the sync wrote after
+    /// the promotion read its marker.
+    func testARemovalPromotionDoesNotDeleteAnImageMarkedSinceItStarted() throws {
+        let saved = UserDefaults.standard.object(forKey: Self.markerKey)
+        let uid = "c192-del-" + UUID().uuidString
+        defer {
+            ProfileStore.removeSyncedAvatar(for: uid)
+            if let saved { UserDefaults.standard.set(saved, forKey: Self.markerKey) } else { UserDefaults.standard.removeObject(forKey: Self.markerKey) }
+        }
+        ProfileStore.removeSyncedAvatar(for: uid)                               // a removal arrives: marked "delete"
+        let removal = ProfileStore.pendingLocalAvatarSnapshot()
+        XCTAssertEqual(removal.state, "delete")
+        let png = try XCTUnwrap(picture(seed: 9).pngData())
+        XCTAssertTrue(ProfileStore.writeSyncedAvatar(pngData: png, for: uid, modifiedAt: Date()))   // then the new image
+        XCTAssertFalse(ProfileStore.deleteAvatarForPendingDeletion(for: uid, ifUnchangedSince: removal.generation))
+        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(ProfileStore.avatarDerivedURL(for: uid))), png, "the new image is untouched")
+        XCTAssertEqual(ProfileStore.pendingLocalAvatarSnapshot().state, "upload")
+        // With nothing marked since, the removal does drop the identity's copy.
+        let current = ProfileStore.pendingLocalAvatarSnapshot()
+        XCTAssertTrue(ProfileStore.deleteAvatarForPendingDeletion(for: uid, ifUnchangedSince: current.generation))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(ProfileStore.avatarDerivedURL(for: uid)).path))
     }
 
     /// C-192, device rerun 2026-11-11. At a first join the pending avatar was

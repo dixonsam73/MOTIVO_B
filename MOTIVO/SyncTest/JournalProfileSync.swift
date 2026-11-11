@@ -54,8 +54,11 @@
 //  snapshot. Both need a Connected identity on THIS device (Connected mode, a
 //  held token, the backend user), so a Solo device publishes nothing and gains
 //  nothing; `ConnectedWriteWitness` counts every attempt for the record.
-//  With sync in use the Connected avatar is not read back, which is what keeps
-//  two Connected devices from publishing each other's copies in a loop.
+//  A publication read back from Connected is recognised as an echo (the same
+//  picture this device holds) and written nowhere, which is what keeps two
+//  Connected devices from publishing each other's copies in a loop; a real
+//  change made on a Connected device whose sync is off is still followed
+//  (`OwnAvatarSync`).
 //
 
 import Foundation

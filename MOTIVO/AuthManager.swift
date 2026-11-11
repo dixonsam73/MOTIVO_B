@@ -264,6 +264,8 @@ final class AuthManager: NSObject, ObservableObject {
     private var directoryHydrationTask: Task<Void, Never>?
     /// C-192: the last queued avatar promotion (see `syncPendingLocalAvatarToConnectedIfNeeded`).
     private var avatarPromotionTail: Task<Void, Never>?
+    /// C-192: the one pending second look at a backend avatar change (`scheduleOwnAvatarRecheck`).
+    private var ownAvatarRecheckTask: Task<Void, Never>?
     private var lastHydratedDirectoryUserID: String?
 
     /// The user id whose directory hydration is running right now.
@@ -470,12 +472,15 @@ final class AuthManager: NSObject, ObservableObject {
     }
 
     private func promotePendingLocalAvatar(reason: String, afterFirstRow: Bool) async {
-        guard ProfileStore.hasPendingLocalAvatarSync() else { return }
+        // The marker and its number, read together: what this promotion
+        // publishes and what it may clear are the same marking.
+        let pending = ProfileStore.pendingLocalAvatarSnapshot()
+        guard let pendingState = pending.state else { return }
         if !afterFirstRow, let absence = directoryRowAbsence,
            absence.owner == backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
            absence.directoryGeneration == DirectoryWriteCoordinator.shared.identityGeneration { return }
         // Cleared at the end only if nothing marked the avatar again meanwhile.
-        let marking = ProfileStore.pendingLocalAvatarGeneration
+        let marking = pending.generation
         guard !LocalFactoryReset.isInProgress else { return }
         guard BackendEnvironment.shared.isConnected else { return }
         guard BackendConfig.isConfigured else { return }
@@ -485,8 +490,11 @@ final class AuthManager: NSObject, ObservableObject {
         guard let backendID = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
               !backendID.isEmpty else { return }
 
-        if ProfileStore.hasPendingLocalAvatarDeletion() {
-            ProfileStore.deleteAvatar(for: connectedStorageID)
+        if pendingState == "delete" {
+            // Not if the avatar was marked again since the snapshot: an image
+            // the sync wrote meanwhile is not this removal's to delete, and the
+            // promotion queued for that marking publishes it.
+            guard ProfileStore.deleteAvatarForPendingDeletion(for: connectedStorageID, ifUnchangedSince: marking) else { return }
 
             // C-33: this result used to be discarded (`_ =`) and the directory
             // patch ran regardless. A failed object delete followed by a
@@ -510,7 +518,7 @@ final class AuthManager: NSObject, ObservableObject {
             }
 
             let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: nil)
-            guard case .success = patch else {
+            guard case .success(let publishedVersion) = patch else {
                 #if DEBUG
                 NSLog("[Auth] pending local avatar deletion retry retained user=%@ reason=%@", backendID, reason)
                 #endif
@@ -519,6 +527,7 @@ final class AuthManager: NSObject, ObservableObject {
 
             await invalidateAvatarCaches(avatarKey: "users/\(backendID)/avatar.jpg")
             backendAvatarKey = nil
+            ProfileStore.noteOwnAvatarPublished(version: publishedVersion, for: connectedStorageID)
             ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
             #if DEBUG
             NSLog("[Auth] promoted local avatar deletion user=%@ reason=%@", backendID, reason)
@@ -527,7 +536,7 @@ final class AuthManager: NSObject, ObservableObject {
         }
 
         #if canImport(UIKit)
-        guard ProfileStore.hasPendingLocalAvatarUpload(),
+        guard pendingState == "upload",
               let localAvatar = ProfileStore.avatarImage(for: nil),
               let jpegData = localAvatar.jpegData(compressionQuality: 0.9) else { return }
 
@@ -553,7 +562,7 @@ final class AuthManager: NSObject, ObservableObject {
 
         await invalidateAvatarCaches(avatarKey: avatarKey)
         let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: avatarKey)
-        guard case .success = patch else {
+        guard case .success(let publishedVersion) = patch else {
             #if DEBUG
             NSLog("[Auth] pending local avatar directory patch retry retained user=%@ reason=%@", backendID, reason)
             #endif
@@ -561,6 +570,7 @@ final class AuthManager: NSObject, ObservableObject {
         }
 
         backendAvatarKey = avatarKey
+        ProfileStore.noteOwnAvatarPublished(version: publishedVersion, for: connectedStorageID)
         ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
         #if DEBUG
         NSLog("[Auth] promoted local avatar upload user=%@ reason=%@", backendID, reason)
@@ -573,24 +583,57 @@ final class AuthManager: NSObject, ObservableObject {
     /// change** — the existing pending flag, which a Connected edit always sets
     /// and only a fully successful sync clears. The decision is
     /// `OwnAvatarSync.decide`; this only carries it out.
-    func syncOwnAvatarFromBackend(avatarKey: String?, avatarVersion: String?) async {
+    ///
+    /// C-192, second pass: an echo is recorded and nothing is written; a real
+    /// change is applied at once with sync off, and once it has stood for
+    /// `OwnAvatarSync.settleInterval` with sync on. See `OwnAvatarSync`.
+    ///
+    /// `syncIsOn` and `fetchImage` default to the real switch and the real
+    /// download; tests pass their own so the paths run without a backend.
+    func syncOwnAvatarFromBackend(avatarKey: String?, avatarVersion: String?,
+                                  syncIsOn syncOverride: Bool? = nil,
+                                  fetchImage: ((String, String?) async -> UIImage?)? = nil) async {
         guard let storageID = currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
               !storageID.isEmpty else { return }
+        let syncIsOn = syncOverride ?? JournalSyncCoordinator.shared.isEnabled
         let key = avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let incoming = OwnAvatarSync.normalized(avatarVersion)
+        let appliedAtStart = ProfileStore.ownAvatarAppliedVersion(for: storageID)
 
-        switch OwnAvatarSync.decide(lastApplied: ProfileStore.ownAvatarAppliedVersion(for: storageID),
+        /// The version is now the one this device holds; nothing is waited on.
+        func record() {
+            ProfileStore.setOwnAvatarAppliedVersion(incoming, for: storageID)
+            ProfileStore.setOwnAvatarBackendChangeSeen(nil, for: storageID)
+        }
+        /// With sync on, a real change waits until it has stood; false = keep waiting.
+        func hasSettled() -> Bool {
+            guard syncIsOn else { return true }
+            let result = OwnAvatarSync.settle(seen: ProfileStore.ownAvatarBackendChangeSeen(for: storageID),
+                                              version: incoming, now: Date())
+            ProfileStore.setOwnAvatarBackendChangeSeen(result.seen, for: storageID)
+            if !result.settled {
+                let remaining = OwnAvatarSync.settleInterval - Date().timeIntervalSince(result.seen.at)
+                scheduleOwnAvatarRecheck(after: max(remaining, 1))
+            }
+            return result.settled
+        }
+
+        switch OwnAvatarSync.decide(lastApplied: appliedAtStart,
                                     backendVersion: avatarVersion,
                                     backendHasAvatar: !key.isEmpty,
-                                    hasPendingLocalChange: ProfileStore.hasPendingLocalAvatarSync(),
-                                    journalIsSource: JournalSyncCoordinator.shared.isEnabled) {
+                                    hasPendingLocalChange: ProfileStore.hasPendingLocalAvatarSync()) {
         case .none:
             return
         case .recordOnly:
-            ProfileStore.setOwnAvatarAppliedVersion(incoming, for: storageID)
+            record()
         case .remove:
+            // Nothing here to remove: the removal is already this device's state
+            // (its own publication, or another device publishing what the
+            // journal delivered here). An echo.
+            guard ProfileStore.avatarImage(for: storageID) != nil else { record(); return }
+            guard hasSettled() else { return }
             ProfileStore.removeAvatarFromConnected(for: storageID)
-            ProfileStore.setOwnAvatarAppliedVersion(incoming, for: storageID)
+            record()
             ownAvatarRevision &+= 1
         case .refresh:
             #if canImport(UIKit)
@@ -598,14 +641,52 @@ final class AuthManager: NSObject, ObservableObject {
             // the cached image first or a stale one could be handed back.
             await RemoteAvatarPipeline.invalidateAvatarCaches(avatarKey: key)
             // Not recorded on failure, so the next hydration tries again.
-            guard let image = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key, version: avatarVersion) else { return }
-            // The member may have edited during the fetch: never overwrite that.
+            let fetched: UIImage?
+            if let fetchImage { fetched = await fetchImage(key, avatarVersion) }
+            else { fetched = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key, version: avatarVersion) }
+            guard let image = fetched else { return }
+            // The member may have edited during the fetch, or this device may
+            // have published meanwhile: never overwrite either.
             guard !ProfileStore.hasPendingLocalAvatarSync(),
-                  currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines) == storageID else { return }
+                  currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines) == storageID,
+                  ProfileStore.ownAvatarAppliedVersion(for: storageID) == appliedAtStart else { return }
+            // The picture this device already holds, published by this owner
+            // from somewhere: an echo. Writing it would re-encode the file and
+            // the private sync would send that on as a new image.
+            if let local = ProfileStore.avatarImage(for: storageID), OwnAvatarSync.samePicture(local, image) {
+                record()
+                return
+            }
+            // A different picture replacing one this device holds is a real
+            // change; filling an absent one needs no wait.
+            if ProfileStore.avatarImage(for: storageID) != nil {
+                guard hasSettled() else { return }
+            }
             ProfileStore.seedAvatarFromConnected(image, for: storageID, replacingExisting: true)
-            ProfileStore.setOwnAvatarAppliedVersion(incoming, for: storageID)
+            record()
             ownAvatarRevision &+= 1
             #endif
+        }
+    }
+
+    /// Looks at the backend avatar again once a change this sync-on device is
+    /// waiting on could have settled. One pending check at a time; a relaunch
+    /// in between is covered by the stored first sighting.
+    private func scheduleOwnAvatarRecheck(after seconds: TimeInterval) {
+        #if DEBUG
+        if UnitTestHost.isActive && Self.unitTestSuppressesPostSessionScheduling { return }
+        #endif
+        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
+        ownAvatarRecheckTask?.cancel()
+        ownAvatarRecheckTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64((seconds + 1) * 1_000_000_000))
+            guard !Task.isCancelled, let self,
+                  self.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines) == bid,
+                  BackendEnvironment.shared.isConnected, !LocalFactoryReset.isInProgress else { return }
+            guard case .success(let row?) = await AccountDirectoryService.shared.fetchSelfRow(userID: bid),
+                  self.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines) == bid else { return }
+            self.backendAvatarKey = row.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+            await self.syncOwnAvatarFromBackend(avatarKey: row.avatarKey, avatarVersion: row.avatarVersion)
         }
     }
 
@@ -1445,8 +1526,8 @@ final class AuthManager: NSObject, ObservableObject {
     ///
     /// No loop: neither call writes the profile stores the sync scans (an
     /// imported avatar is uploaded from the file as it arrived, and the two
-    /// location keys already agree), and with sync in use the avatar is not
-    /// read back from the backend (`OwnAvatarSync.decide`).
+    /// location keys already agree), and a publication read back from the
+    /// backend is recognised as an echo and written nowhere (`OwnAvatarSync`).
     func publishProfileAppliedBySync() async {
         guard !LocalFactoryReset.isInProgress else { return }
         guard BackendEnvironment.shared.isConnected, BackendConfig.isConfigured, hasSupabaseAccessToken else { return }

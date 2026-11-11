@@ -271,6 +271,141 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         XCTAssertEqual(mirrorEvents, 0)
     }
 
+    // MARK: Reading the Connected avatar back (second pass)
+
+    private func photo(_ seed: UInt64) -> UIImage {
+        var state = seed
+        func next() -> CGFloat { state = state &* 6364136223846793005 &+ 1442695040888963407; return CGFloat((state >> 33) % 1000) / 1000 }
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 256, height: 256), format: format).image { ctx in
+            UIColor(red: next(), green: next(), blue: next(), alpha: 1).setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 256, height: 256))
+            for _ in 0..<24 {
+                UIColor(red: next(), green: next(), blue: next(), alpha: 1).setFill()
+                ctx.cgContext.fillEllipse(in: CGRect(x: next() * 256, y: next() * 256, width: next() * 128, height: next() * 128))
+            }
+        }
+    }
+
+    private func clearReadBackState() {
+        for suffix in ["ownAvatarAppliedVersion_v1", "ownAvatarSeenVersion_v1", "ownAvatarSeenAt_v1"] {
+            UserDefaults.standard.removeObject(forKey: "profile.\(appleID).\(suffix)")
+        }
+    }
+
+    /// With sync ON: another of the owner's devices publishing the picture this
+    /// device already holds is an echo (nothing written, nothing sent on), and
+    /// a real replacement or removal made on a Connected device whose sync is
+    /// off is followed once it has stood, and then travels through the sync.
+    func testWithSyncOnAnEchoWritesNothingAndARealChangeIsFollowedOnceItHasStood() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        clearReadBackState()
+        let held = photo(1)
+        let heldPNG = try XCTUnwrap(held.pngData())
+        XCTAssertTrue(ProfileStore.writeSyncedAvatar(pngData: heldPNG, for: appleID, modifiedAt: Date(timeIntervalSince1970: 1_000)))
+        ProfileStore.clearPendingLocalAvatarSync()            // published earlier; nothing pending
+        let v1 = "2026-11-11T19:00:00+00:00", v2 = "2026-11-11T19:05:00+00:00", v3 = "2026-11-11T19:10:00+00:00", v4 = "2026-11-11T19:20:00+00:00"
+        ProfileStore.setOwnAvatarAppliedVersion(v1, for: appleID)
+        var mirrorEvents = 0
+        JournalProfileMirror.onChange = { _ in mirrorEvents += 1 }
+        let key = "users/\(backendID)/avatar.jpg"
+        // What the other device's publication of the SAME picture looks like when fetched.
+        let echo = try XCTUnwrap(UIImage(data: try XCTUnwrap(held.jpegData(compressionQuality: 0.9))))
+
+        // 1. Two Connected devices with sync on: the sibling's publication.
+        await auth.syncOwnAvatarFromBackend(avatarKey: key, avatarVersion: v2, syncIsOn: true) { _, _ in echo }
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), v2, "recorded as held")
+        XCTAssertEqual(try Data(contentsOf: avatarURL()), heldPNG, "the file is untouched: no re-encode")
+        XCTAssertEqual(mirrorEvents, 0, "nothing for the sync to send, so nothing for the sibling to publish again")
+        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync(), "and nothing marked for publication")
+        // The same version again, and an older row, do nothing at all.
+        await auth.syncOwnAvatarFromBackend(avatarKey: key, avatarVersion: v2, syncIsOn: true) { _, _ in XCTFail("no download for a version already held"); return nil }
+        await auth.syncOwnAvatarFromBackend(avatarKey: nil, avatarVersion: v1, syncIsOn: true) { _, _ in nil }
+        XCTAssertEqual(try Data(contentsOf: avatarURL()), heldPNG, "a stale 'no avatar' row removes nothing")
+
+        // 2. The sibling's momentary removal (a photo change that reached it as a
+        //    removal and then the image): seen, waited on, never applied.
+        await auth.syncOwnAvatarFromBackend(avatarKey: nil, avatarVersion: v3, syncIsOn: true) { _, _ in nil }
+        XCTAssertNotNil(ProfileStore.avatarImage(for: appleID), "not removed on first sight")
+        XCTAssertEqual(ProfileStore.ownAvatarBackendChangeSeen(for: appleID)?.version, v3)
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), v2)
+        XCTAssertEqual(mirrorEvents, 0)
+        //    ...and then its publication of the image: an echo again.
+        await auth.syncOwnAvatarFromBackend(avatarKey: key, avatarVersion: v4, syncIsOn: true) { _, _ in echo }
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), v4)
+        XCTAssertNil(ProfileStore.ownAvatarBackendChangeSeen(for: appleID), "nothing is waited on any more")
+        XCTAssertEqual(try Data(contentsOf: avatarURL()), heldPNG)
+        XCTAssertEqual(mirrorEvents, 0, "no unintended removal, no repeated publication")
+
+        // 3. A real replacement from a Connected device whose sync is off.
+        let v5 = "2026-11-11T19:30:00+00:00"
+        let replacement = photo(2)
+        await auth.syncOwnAvatarFromBackend(avatarKey: key, avatarVersion: v5, syncIsOn: true) { _, _ in replacement }
+        XCTAssertEqual(try Data(contentsOf: avatarURL()), heldPNG, "waits: a sibling's older upload would look the same for a moment")
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), v4)
+        // ...still standing after the interval (the first sighting is moved back).
+        ProfileStore.setOwnAvatarBackendChangeSeen(.init(version: v5, at: Date().addingTimeInterval(-OwnAvatarSync.settleInterval - 1)), for: appleID)
+        await auth.syncOwnAvatarFromBackend(avatarKey: key, avatarVersion: v5, syncIsOn: true) { _, _ in replacement }
+        let now = try XCTUnwrap(ProfileStore.avatarImage(for: appleID))
+        XCTAssertTrue(OwnAvatarSync.samePicture(now, replacement), "the replacement is this device's avatar")
+        XCTAssertFalse(OwnAvatarSync.samePicture(now, held))
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), v5)
+        XCTAssertGreaterThan(mirrorEvents, 0, "and the sync carries it to the owner's other devices")
+        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync(), "this device does not publish it back")
+
+        // 4. A real removal from that device: waits, then applies and travels.
+        mirrorEvents = 0
+        let v6 = "2026-11-11T19:40:00+00:00"
+        await auth.syncOwnAvatarFromBackend(avatarKey: nil, avatarVersion: v6, syncIsOn: true) { _, _ in nil }
+        XCTAssertNotNil(ProfileStore.avatarImage(for: appleID))
+        ProfileStore.setOwnAvatarBackendChangeSeen(.init(version: v6, at: Date().addingTimeInterval(-OwnAvatarSync.settleInterval - 1)), for: appleID)
+        await auth.syncOwnAvatarFromBackend(avatarKey: nil, avatarVersion: v6, syncIsOn: true) { _, _ in nil }
+        XCTAssertNil(ProfileStore.avatarImage(for: appleID), "removed here")
+        XCTAssertNil(ProfileStore.avatarImage(for: nil))
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), v6)
+        XCTAssertGreaterThan(mirrorEvents, 0, "and the removal travels through the sync")
+        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync())
+        // The removal once more (its echo from the sibling that then publishes it): nothing.
+        mirrorEvents = 0
+        await auth.syncOwnAvatarFromBackend(avatarKey: nil, avatarVersion: "2026-11-11T19:41:00+00:00", syncIsOn: true) { _, _ in nil }
+        XCTAssertEqual(mirrorEvents, 0)
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), "2026-11-11T19:41:00+00:00")
+    }
+
+    /// Unsent edits are kept, a publication during the download is not
+    /// overwritten, and with sync off a real change is followed at once.
+    func testAnUnsentEditAndAPublicationDuringTheDownloadAreNeverOverwritten() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        clearReadBackState()
+        let held = photo(1)
+        let heldPNG = try XCTUnwrap(held.pngData())
+        let key = "users/\(backendID)/avatar.jpg"
+        let v1 = "2026-11-11T19:00:00+00:00", v2 = "2026-11-11T19:05:00+00:00", v3 = "2026-11-11T19:06:00+00:00"
+        // An unsent edit: the marker is set (the import or the editor set it).
+        XCTAssertTrue(ProfileStore.writeSyncedAvatar(pngData: heldPNG, for: appleID, modifiedAt: Date()))
+        ProfileStore.setOwnAvatarAppliedVersion(v1, for: appleID)
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload())
+        await auth.syncOwnAvatarFromBackend(avatarKey: key, avatarVersion: v2, syncIsOn: false) { _, _ in XCTFail("no download while an edit is unsent"); return nil }
+        await auth.syncOwnAvatarFromBackend(avatarKey: nil, avatarVersion: v2, syncIsOn: false) { _, _ in nil }
+        XCTAssertEqual(try Data(contentsOf: avatarURL()), heldPNG, "an unsent edit is kept against a replacement and a removal")
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), v1)
+        // This device publishes while the download is in flight.
+        ProfileStore.clearPendingLocalAvatarSync()
+        let appleID = self.appleID
+        await auth.syncOwnAvatarFromBackend(avatarKey: key, avatarVersion: v2, syncIsOn: false) { _, _ in
+            ProfileStore.noteOwnAvatarPublished(version: v3, for: appleID)
+            return self.photo(2)
+        }
+        XCTAssertEqual(try Data(contentsOf: avatarURL()), heldPNG, "the older picture does not replace what was just published")
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), v3)
+        // With sync off a real change is followed without a wait.
+        await auth.syncOwnAvatarFromBackend(avatarKey: key, avatarVersion: "2026-11-11T19:10:00+00:00", syncIsOn: false) { _, _ in self.photo(3) }
+        XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(ProfileStore.avatarImage(for: appleID)), photo(3)))
+        await auth.syncOwnAvatarFromBackend(avatarKey: nil, avatarVersion: "2026-11-11T19:11:00+00:00", syncIsOn: false) { _, _ in nil }
+        XCTAssertNil(ProfileStore.avatarImage(for: appleID))
+    }
+
     /// "A Solo device itself must not gain Connected credentials or publish
     /// directly to Supabase": the same import with no token and Solo mode.
     func testWithNoIdentityTheSameImportPublishesNothingAndKeepsTheMarker() async throws {

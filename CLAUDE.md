@@ -98,8 +98,9 @@ in place; don't add a "CORRECTED" paragraph on top of it.
   location, instruments or avatar that iCloud sync delivers, from a Solo
   device included, is published to the same owner's Connected profile by a
   device signed in to Connected. A Solo device publishes nothing and gains
-  no credentials. With sync on, a device does not read its own avatar back
-  from Connected.
+  no credentials. A publication of the picture a device already holds is
+  an echo and is not read back; a real avatar change from a Connected device
+  whose sync is off is followed.
 - Founding 500 = Apple's one-year introductory offer on both products, withdrawn
   manually around 500. There is no custom grant mechanism.
 - M13 (iPad) and M14 (iCloud sync) are deliberately deferred.
