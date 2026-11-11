@@ -735,9 +735,25 @@ public final class AccountDirectoryService {
 
     // MARK: - Phase 15 Step 3A (Avatars) — update self avatar_key
 
+    /// The avatar-key PATCH matched no directory row. Seen on Device A,
+    /// 2026-11-11, at a first join: the pending avatar is promoted BEFORE the
+    /// first directory row is created, the PATCH matched nothing, PostgREST
+    /// answered success (`return=minimal`), and the pending marker was cleared
+    /// with the object uploaded and no key pointing at it.
+    public struct AvatarKeyNoRowMatched: Error {}
+
+    /// PURE. Whether the representation a PATCH returned holds a row.
+    nonisolated static func avatarKeyPatchMatchedARow(_ data: Data) -> Bool {
+        guard let rows = try? JSONSerialization.jsonObject(with: data) as? [Any] else { return false }
+        return !rows.isEmpty
+    }
+
     /// Update the caller's `account_directory.avatar_key` (owner-only via RLS).
     /// - Parameter avatarKey: `users/<uid>/avatar.jpg` or nil to clear.
     /// - Important: This is an owner-only metadata update; no profile sync.
+    /// - Returns: success ONLY when the server returned the row it changed;
+    ///   `AvatarKeyNoRowMatched` when there was no row, so the caller keeps its
+    ///   pending marker and tries again once the row exists.
     public func updateSelfAvatarKey(userID: String, avatarKey: String?) async -> Result<Void, Error> {
         ConnectedWriteWitness.note(ConnectedWriteWitness.directoryAvatarKey)
         let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -756,14 +772,15 @@ public final class AccountDirectoryService {
             return .failure(error)
         }
 
-        let path = "rest/v1/account_directory?user_id=eq.\(uid)"
+        let path = "rest/v1/account_directory?user_id=eq.\(uid)&select=user_id"
         let headers = [
-            "Prefer": "return=minimal"
+            "Prefer": "return=representation"
         ]
 
         let result = await NetworkManager.shared.request(path: path, method: "PATCH", query: nil, jsonBody: body, headers: headers)
         switch result {
-        case .success:
+        case .success(let data):
+            guard Self.avatarKeyPatchMatchedARow(data) else { return .failure(AvatarKeyNoRowMatched()) }
             // Live identity cache update: patch avatar_key in-memory so UI refreshes immediately.
             if let existing = await cache.getMany([uid])[uid] {
                 let updated = DirectoryAccount(userID: existing.userID,

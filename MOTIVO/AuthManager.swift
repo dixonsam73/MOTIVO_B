@@ -452,19 +452,28 @@ final class AuthManager: NSObject, ObservableObject {
     /// and then the new image. Two promotions running together could upload
     /// the image and then delete the object, leaving a key that points at
     /// nothing; in a queue the second starts from the marker as it then is.
-    func syncPendingLocalAvatarToConnectedIfNeeded(reason: String) async {
+    ///
+    /// The key patch must match a directory row or the marker is kept (see
+    /// `AvatarKeyNoRowMatched`). While this session knows the owner has NO
+    /// row, nothing is attempted, so a member who never gets one does not
+    /// upload the image again after every request; `afterFirstRow` is the one
+    /// call made right after the row is first published.
+    func syncPendingLocalAvatarToConnectedIfNeeded(reason: String, afterFirstRow: Bool = false) async {
         guard ProfileStore.hasPendingLocalAvatarSync() else { return }
         let previous = avatarPromotionTail
         let task = Task { @MainActor [weak self] in
             await previous?.value
-            await self?.promotePendingLocalAvatar(reason: reason)
+            await self?.promotePendingLocalAvatar(reason: reason, afterFirstRow: afterFirstRow)
         }
         avatarPromotionTail = task
         await task.value
     }
 
-    private func promotePendingLocalAvatar(reason: String) async {
+    private func promotePendingLocalAvatar(reason: String, afterFirstRow: Bool) async {
         guard ProfileStore.hasPendingLocalAvatarSync() else { return }
+        if !afterFirstRow, let absence = directoryRowAbsence,
+           absence.owner == backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           absence.directoryGeneration == DirectoryWriteCoordinator.shared.identityGeneration { return }
         // Cleared at the end only if nothing marked the avatar again meanwhile.
         let marking = ProfileStore.pendingLocalAvatarGeneration
         guard !LocalFactoryReset.isInProgress else { return }
@@ -748,6 +757,10 @@ final class AuthManager: NSObject, ObservableObject {
                 }
                 self.connectedSetupIncomplete = false
                 await publishLocalProfileSnapshotToDirectoryIfPossible(userID: userID, reason: reason)
+                // C-192: the promotion at the top of this hydration ran before
+                // the row existed, so its key patch matched nothing and kept the
+                // marker. The row exists now (if the publish was accepted).
+                await syncPendingLocalAvatarToConnectedIfNeeded(reason: "\(reason)-afterFirstRow", afterFirstRow: true)
                 #if DEBUG
                 NSLog("[Auth] directory hydration no-row user=%@ reason=%@", userID, reason)
                 #endif

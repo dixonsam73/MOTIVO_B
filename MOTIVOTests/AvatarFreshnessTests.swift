@@ -122,6 +122,30 @@ final class AvatarFreshnessTests: XCTestCase {
         XCTAssertEqual(S.decide(lastApplied: nil, backendVersion: nil, backendHasAvatar: false, hasPendingLocalChange: false, journalIsSource: true), .none)
     }
 
+    /// C-192, device rerun 2026-11-11. At a first join the pending avatar was
+    /// promoted before the first directory row existed: the object went up, the
+    /// key PATCH matched no row and still read as success, and the marker was
+    /// cleared with nothing pointing at the object.
+    func testAnAvatarKeyPatchThatMatchedNoRowIsNotASuccess() throws {
+        XCTAssertFalse(AccountDirectoryService.avatarKeyPatchMatchedARow(Data("[]".utf8)), "no row: keep the marker")
+        XCTAssertFalse(AccountDirectoryService.avatarKeyPatchMatchedARow(Data()), "the old `return=minimal` empty body")
+        XCTAssertFalse(AccountDirectoryService.avatarKeyPatchMatchedARow(Data("{\"message\":\"x\"}".utf8)))
+        XCTAssertTrue(AccountDirectoryService.avatarKeyPatchMatchedARow(Data("[{\"user_id\":\"u\"}]".utf8)))
+        let service = code("AccountDirectoryService.swift")
+        let start = try XCTUnwrap(service.range(of: "public func updateSelfAvatarKey("))
+        let body = String(service[start.lowerBound...].prefix(1_600))
+        XCTAssertTrue(body.contains("return=representation") && body.contains("avatarKeyPatchMatchedARow"),
+                      "the patch must ask for the row back and require it")
+        XCTAssertFalse(body.contains("return=minimal"))
+        // And the first-row hydration promotes again once the row exists.
+        let auth = code("AuthManager.swift")
+        let noRow = try XCTUnwrap(auth.range(of: "self.connectedSetupIncomplete = false"))
+        let after = String(auth[noRow.lowerBound...].prefix(700))
+        let publish = try XCTUnwrap(after.range(of: "publishLocalProfileSnapshotToDirectoryIfPossible("))
+        let promote = try XCTUnwrap(after.range(of: "syncPendingLocalAvatarToConnectedIfNeeded("))
+        XCTAssertTrue(publish.lowerBound < promote.lowerBound, "the row first, then the avatar key")
+    }
+
     /// C-192. A marking made while a promotion is in flight is not cleared by it.
     func testAPromotionClearsOnlyTheMarkingItStartedFrom() {
         let key = "profile.__local_etudes_profile__.avatarSyncState_v1"
