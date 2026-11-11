@@ -470,8 +470,10 @@ the join.
   notes folder): **first** the sustained-upload trial,
   `sustained-upload-trial-script.md`, on a build carrying the send-gate
   observation (C-190), TestFlight on Device A and the iPad — **run
-  2026-11-11 on build 1912 and passed** (record under "Sync"); **then,
-  prepared and not run,** part 5, `part5-connected-isolation-script.md`, on a
+  2026-11-11 on build 1912 and passed** (record under "Sync"); **then**
+  part 5 — **run 2026-11-11 on build 1914: completed, with an imported
+  location reaching the backend (C-192) and a typed location undone
+  (C-193); record under "Sync"** — `part5-connected-isolation-script.md`, on a
   development-signed Release build with a dedicated simulator as the
   second writer, proved to sync before anything is measured. Part 5's
   coverage is therefore the Development CloudKit environment only. Parts:
@@ -2416,44 +2418,98 @@ the join.
   full event logs, state snapshots, both container copies, the
   comparison):
   `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/upload-trial-2026-11-11/`.
-  **Part 5, first attempt (Device A and a dedicated simulator,
-  development-signed Release build 1914 from `2e19e07`, the production
-  container's Development environment, the disposable Apple Account
-  `contact@samuel-dixon.com`; 2026-11-11 14:33–15:40): stopped at step 4
-  by its own stop condition. No Connected account was created and nothing
-  was measured or deleted.** Coverage of what did run is Development
-  CloudKit only.
+  **Part 5, a Connected member with sync on (Device A and a dedicated
+  simulator, development-signed Release build 1914 from `2e19e07`, the
+  disposable Apple Account `contact@samuel-dixon.com`; 2026-11-11
+  14:33–17:03; C-192 to C-194). Coverage: the production container's
+  Development CloudKit environment only; no TestFlight build and nothing
+  on Production CloudKit. The backend is the production Supabase project.**
+  **Result: the run completed. An imported location reached the backend
+  three times out of three; an imported avatar never did. A location
+  typed by hand was undone by the app twice. Deletion removed only the
+  disposable account, and its iCloud journal restored.**
   *Preparation, as corrected after Codex's review.* Device A held no
   Connected identity but its preferences named Samuel's `000703…` as the
   journal's owner in 26 places. Samuel ran the app's own "Remove Études
-  Data from This Device": the log reads "no deletions queued… the cloud
-  journal is untouched", the iPad's record counts did not move, and
-  afterwards the preferences named no Apple identity. Études was then
-  deleted, Device A signed in to the disposable account, a fresh Sandbox
-  Apple Account added, and a new simulator ("Etudes Part 5") signed in to
-  the same account. Backend before any sign-in: two users, Samuel's and
-  one beta tester's, none for the disposable account.
-  *Stage A passed.* First open: set-up screen, no age card, no owner, no
+  Data from This Device" (log: "no deletions queued… the cloud journal is
+  untouched"; the iPad's record counts did not move; afterwards no Apple
+  identity in the preferences). Études was then deleted, Device A signed
+  in to the disposable account, a fresh Sandbox Apple Account added, and
+  a new simulator signed in to the same account. Backend before any
+  sign-in: two users, Samuel's and a beta tester's.
+  *Stage A, passed.* First open: set-up screen, no age card, no owner, no
   backend id, no state file. A Solo journal (four entries, a photo, an
   audio recording, "Alpha", an avatar) had no owner in the store before
   sync was turned on. Sync on: 10 records, bound to iCloud user
-  `_ec5579ae…` (not the main account's `_cd4f590c…`), "Ownerless journal;
-  no owner key". **The simulator is a real second device for this
-  container:** it restored the 10 records and 3 files in about 5 s, bound
-  to the same user and still Solo; an edit made on it reached Device A in
-  1 s by push; a Thought made on Device A reached it in 73 s at its poll
-  (the simulator receives no push).
-  *Stage B stopped at the age gate (C-113 again).* Explore Connected →
-  Continue: Apple's answer was not `confirmed`, so the gate refused
-  (`unconfirmed_adult`), twice, the second time after checking that
-  Settings reads "Confirmation status 18+, confirmed with your credit
-  card" and that Age Range for Apps is "Ask First". This is the same
-  device and Apple Account on which C-113 was found on 2026-10-16. The
-  gate was not worked around. Device A's preferences hold no backend id,
-  so Sign in with Apple never ran.
-  *Left as it is, for Samuel's decision:* Device A and the simulator on
-  the disposable account, each with the small Solo journal, sync on, in
-  the Development environment. Evidence:
+  `_ec5579ae…` (not the main account's), "Ownerless journal". **The
+  simulator is a usable second device for this container:** it restored
+  10 records and 3 files in about 5 s, stayed Solo, sent an edit that
+  reached Device A in 1 s by push, and received one from Device A in 73 s
+  at its poll (a simulator gets no push).
+  *Stage B.* The first two tries at joining were refused by the adult
+  gate as `unconfirmed_adult`. The cause was not C-113: the fresh Sandbox
+  Apple Account's **Age Assurance** fixture was unset, and a
+  development-signed build takes its age answer from there. With Revoke
+  App Consent and the fixture set to 18+ confirmed, the join went through
+  (the gate was not altered). Identity verified in full: one new user,
+  **X = `fae6cdb8-4dc8-411c-ba8a-a79966b479ef`**, created 15:45:05, whose
+  Apple `provider_id` and `sub` equal the id on the device,
+  `001325.eec54efbacdd44f9b733754d3f136e2b.1755`, character for character;
+  the journal's four entries adopted that owner and stayed listed on both
+  devices. Calibration: a hand edit of the location and of the avatar
+  showed in the database read (location, `avatar_version`, the object's
+  etag, size and time) and in the write log filtered by the user, so both
+  checks detect a write.
+  *A control, and the first unexpected result (C-193).* Opening Profile
+  on Device A with nothing pending and nothing typed put the old location
+  back: the field showed "Alpha", not the "Alpha Two" typed eight minutes
+  before, and the app wrote "Alpha" to the backend, the device and iCloud
+  (PATCH at 15:58:26 in a burst that re-read the signed-in user and the
+  membership binding).
+  *Stage C, the measurement* (every read compared on its values, leaving
+  out the read time and `entitled_until`, which Apple's renewals move):
+  | | Backend location | Backend avatar object |
+  |---|---|---|
+  | B0, 16:04:11 | Alpha | 97,219 bytes, version 15:50:20 |
+  | B1, import one ("Beta" and a photo), Profile closed | **Beta** | unchanged |
+  | B2, then Profile opened, left, force-quit, reopened | Beta | unchanged |
+  | B3, import two ("Delta" and a photo), Profile held open | **Delta** | unchanged |
+  | B4, hand edits ("Gamma" typed, a new photo) | **Delta** | **changed** (90,520 bytes, version 16:18:32) |
+  Device A received each import by push within a second or two and
+  showed it, in place when Profile was open. The write log shows a PATCH
+  to `account_directory` from X whenever an avatar import arrived, the
+  app returned to the foreground or Profile was opened or left, each with
+  a re-read of the signed-in user; no upload to the avatar bucket except
+  the hand edits'. **So an imported location reaches the directory row
+  (C-192), and an imported avatar does not.** At B4 the avatar edit held
+  and the typed "Gamma" was replaced 15 s later by "Delta", the value in
+  the device's local location slot (C-193 again).
+  *Samuel's reading, recorded as his:* a Connected member's profile is
+  one profile and is shared by design; the only privacy control is "Let
+  other members find you". On that reading the location following the
+  member is expected and the avatar staying behind is the inconsistency.
+  The sync was built and unit-tested on the opposite rule (an import
+  never publishes). Which rule holds is his decision; the fields disagree
+  with each other either way.
+  *Stage D.* Before deletion: Device A still held X exactly, its outbox
+  was empty, and Device A, iCloud and the simulator agreed on "Delta" and
+  the final avatar. Deviations: the script asked for "Gamma" to be there,
+  which the app had undone; and Device A showed one displaced-photo entry
+  (C-194). Samuel deleted the account at 16:26:34 (Apple asked for a
+  sign-in first, naming the disposable account). After: no user X, no
+  directory row, no avatar object, no posts; the user list is the two
+  from the start, identical; **Samuel's own row identical to the
+  reference in every column at every read of the run**. Device A: no
+  backend id, no Apple identity, "no deletions queued… the cloud journal
+  is untouched", the binding kept; the simulator's journal untouched.
+  Restoration from the set-up card at 17:01:59: 12 records and 3 files in
+  2 s, the same four entries by id as on the simulator, "Delta" and the
+  final avatar, Solo, no age card and no sign-in prompt, outbox empty,
+  conflicts 0.
+  *Left as it is, on Samuel's word only:* Device A and the simulator on
+  the disposable account with the small journal, sync on, Development
+  environment; the Sandbox Apple Account. Evidence (state and preference
+  snapshots at each step, every backend read as pasted):
   `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/part5-2026-11-11/`.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
