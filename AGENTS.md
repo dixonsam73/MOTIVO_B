@@ -94,6 +94,12 @@ in place; don't add a "CORRECTED" paragraph on top of it.
   them as "never shared".
 - Unsharing deletes the backend post (demote first, then delete, through the
   durable queue).
+- **One shared profile** (decided 2026-11-11, C-192). A change to the name,
+  location, instruments or avatar that iCloud sync delivers, from a Solo
+  device included, is published to the same owner's Connected profile by a
+  device signed in to Connected. A Solo device publishes nothing and gains
+  no credentials. With sync on, a device does not read its own avatar back
+  from Connected.
 - Founding 500 = Apple's one-year introductory offer on both products, withdrawn
   manually around 500. There is no custom grant mechanism.
 - M13 (iPad) and M14 (iCloud sync) are deliberately deferred.

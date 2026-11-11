@@ -473,7 +473,8 @@ the join.
   2026-11-11 on build 1912 and passed** (record under "Sync"); **then**
   part 5 — **run 2026-11-11 on build 1914: completed, with an imported
   location reaching the backend (C-192) and a typed location undone
-  (C-193); record under "Sync"** — `part5-connected-isolation-script.md`, on a
+  (C-193); both corrected the same day and the affected cases rerun on
+  build 1918; records under "Sync"** — `part5-connected-isolation-script.md`, on a
   development-signed Release build with a dedicated simulator as the
   second writer, proved to sync before anything is measured. Part 5's
   coverage is therefore the Development CloudKit environment only. Parts:
@@ -2489,8 +2490,8 @@ the join.
   other members find you". On that reading the location following the
   member is expected and the avatar staying behind is the inconsistency.
   The sync was built and unit-tested on the opposite rule (an import
-  never publishes). Which rule holds is his decision; the fields disagree
-  with each other either way.
+  never publishes). The fields disagreed with each other either way.
+  He decided the same day: one shared profile (the rerun record below).
   *Stage D.* Before deletion: Device A still held X exactly, its outbox
   was empty, and Device A, iCloud and the simulator agreed on "Delta" and
   the final avatar. Deviations: the script asked for "Gamma" to be there,
@@ -2511,6 +2512,60 @@ the join.
   environment; the Sandbox Apple Account. Evidence (state and preference
   snapshots at each step, every backend read as pasted):
   `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/part5-2026-11-11/`.
+  **Part 5 rerun: one shared profile (C-192) and typed locations (C-193),
+  2026-11-11 18:50–19:50, builds 1917 (`d2c9c32`) and 1918 (`27f799d`).**
+  A policy change and its test, not a second verdict on the run above.
+  *Decision (Samuel):* Études has one shared profile; a profile change
+  arriving through iCloud, from a Solo device included, updates the same
+  owner's Connected profile, location and avatar alike; a Solo device
+  gains no Connected credentials and publishes nothing. Coverage as
+  before: **Development CloudKit only** (development-signed Release on
+  Device A, the simulator "Etudes Part 5", the disposable Apple Account);
+  the production Supabase project. Script
+  `part5-rerun-shared-profile-script.md`, same notes folder.
+  *Identity.* Before: the two known users only. A fresh Sandbox purchaser.
+  The join at 19:09:03 made exactly one new user, **X2 =
+  `0d569065-a369-476a-83e8-ddb99a4466ac`**, whose Apple identity equals
+  the one on the device character for character (`001325…1755`, the
+  disposable account, as in the first run). Samuel's row was identical to
+  its reference at the start, after the join and at the end.
+  | Case | Device A | Backend row and avatar object |
+  |---|---|---|
+  | Solo, before the join (1917): simulator sets "Hotel" and a photo | received by push 18:54:26; avatar marked for publication; no backend id | no user exists |
+  | Join (1917) | marker cleared | location **Hotel**; object uploaded 19:09:16 but **avatar_key NULL** (the finding below) |
+  | M1, import with Profile closed (1918): "India" and a photo | applied 19:22:22 and 19:23:18, untouched | **India**; object 19:23:18, key set, version 19:23:23 |
+  | M2, import with Profile open (1918): "Juliet" and a photo | both changed on the open screen, 19:36:03 and 19:36:12 | **Juliet**; object and version 19:36:13 |
+  | M3, typed "Kilo" and a chosen photo on Device A (1918) | sent 19:41:28 and 19:41:47 | **Kilo**; object and version 19:41:42 |
+  | M3 after background, reopening Profile, force-quit and relaunch | "Kilo" and the photo throughout (Samuel); both location keys "Kilo" | identical to the read before, in every value |
+  | M4, three and a half idle minutes (19:44:40–19:48:14) | no counter changed on either device | identical again at 19:49:29 |
+  *Found at the join, fixed in `27f799d`.* The Solo-held location was
+  published and the photo was uploaded, but the row's `avatar_key` and
+  `avatar_version` were NULL: the pending avatar is promoted before the
+  first directory row exists, the key PATCH matched no row, PostgREST
+  answered success and the marker was cleared. The patch must now return
+  the row, and the first-row hydration promotes again once the row is
+  published. **The join was not repeated on build 1918** (it needs another
+  new user): on a device this fix has unit-test cover only. X2's key was
+  set by the next avatar publish (M1).
+  *No loop, and the same profile everywhere.* Device A sent nothing
+  through iCloud after any import-driven publish (records sent stayed at
+  26 through the join, M1 and M2; the two at M3 are the typed edit). The
+  simulator received "Kilo" and the photo at 19:42:28. At the end both
+  devices show "Kilo", and the avatar file is byte-identical in all four
+  copies (identity and local copy on each; SHA-256 `b0fc173d76cdbd06…`).
+  Conflicts 0 on Device A; the simulator's 1 is the first run's.
+  No photo change arrived as a removal first in this run (C-194 stays
+  open; its path is covered by unit test only).
+  *Not covered:* Production CloudKit and TestFlight; two Connected devices
+  with sync on (the loop guard between them rests on unit tests and the
+  code); a Connected device with sync off changing the avatar, which a
+  sync-on device now does not pick up (C-192's recorded consequence);
+  the fixed join on a device.
+  *Left as it is, on Samuel's word only:* **X2 exists in production**
+  (private posts on, 0 posts, "let other members find you" off); Device A
+  Connected as X2 on build 1918 and the simulator Solo, both on the
+  disposable account; two Sandbox Apple Accounts. Evidence:
+  `…/part5-rerun-2026-11-11/` in the same notes folder.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
