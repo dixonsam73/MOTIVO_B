@@ -729,9 +729,21 @@ public final class AccountDirectoryService {
         if case .applied(let receipt) = outcome {
             await applyReceiptToCaches(receipt, cacheKey: uid, owner: owner,
                                        capturedGeneration: capturedGeneration, epoch: seq)
+            // The caller's own row is evidenced to exist, whoever wrote it
+            // (hydration, the Profile screen, set-up). See `ownRowAppliedNotification`.
+            NotificationCenter.default.post(name: Self.ownRowAppliedNotification, object: nil, userInfo: ["owner": owner])
         }
         return outcome
     }
+
+    /// Posted on the main actor when the server returned the caller's own
+    /// directory row for a profile write; `userInfo["owner"]` is the lowercased
+    /// user id. A photo waiting to be attached needs a row to attach to, and at
+    /// a first join the row can be created by any of three writers, so the
+    /// account listens here instead of after one of them. Seen on Device A,
+    /// 2026-11-11 21:13: the row was created by a writer that did not promote
+    /// the photo, and it stayed uploaded and unattached.
+    static let ownRowAppliedNotification = Notification.Name("AccountDirectoryService.ownRowApplied")
 
     // MARK: - Phase 15 Step 3A (Avatars) — update self avatar_key
 

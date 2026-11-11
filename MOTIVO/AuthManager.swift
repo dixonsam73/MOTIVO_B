@@ -266,6 +266,8 @@ final class AuthManager: NSObject, ObservableObject {
     private var avatarPromotionTail: Task<Void, Never>?
     /// C-192: the one pending second look at a backend avatar change (`scheduleOwnAvatarRecheck`).
     private var ownAvatarRecheckTask: Task<Void, Never>?
+    /// C-192: listens for the owner's directory row being evidenced (`directoryRowWasEvidenced`).
+    private var ownRowAppliedObserver: NSObjectProtocol?
     private var lastHydratedDirectoryUserID: String?
 
     /// The user id whose directory hydration is running right now.
@@ -337,6 +339,14 @@ final class AuthManager: NSObject, ObservableObject {
 
         self.currentUserID = Keychain.get("appleUserID")
         self.displayName = Keychain.get("displayName")
+
+        // C-192: a photo waiting for a directory row is attached when one is evidenced.
+        ownRowAppliedObserver = NotificationCenter.default.addObserver(
+            forName: AccountDirectoryService.ownRowAppliedNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let owner = note.userInfo?["owner"] as? String
+            Task { @MainActor [weak self] in await self?.directoryRowWasEvidenced(owner: owner) }
+        }
 
         // Prefer Supabase user ID if present (Step 7). Otherwise fall back to Step 5 stub.
         if let supaUserID = UserDefaults.standard.string(forKey: Self.supabaseUserIDDefaultsKey), !supaUserID.isEmpty {
@@ -458,8 +468,9 @@ final class AuthManager: NSObject, ObservableObject {
     /// The key patch must match a directory row or the marker is kept (see
     /// `AvatarKeyNoRowMatched`). While this session knows the owner has NO
     /// row, nothing is attempted, so a member who never gets one does not
-    /// upload the image again after every request; `afterFirstRow` is the one
-    /// call made right after the row is first published.
+    /// upload the image again after every request; `afterFirstRow` is the
+    /// call made when a write has just evidenced the row
+    /// (`directoryRowWasEvidenced`).
     func syncPendingLocalAvatarToConnectedIfNeeded(reason: String, afterFirstRow: Bool = false) async {
         guard ProfileStore.hasPendingLocalAvatarSync() else { return }
         let previous = avatarPromotionTail
@@ -837,11 +848,11 @@ final class AuthManager: NSObject, ObservableObject {
                     return
                 }
                 self.connectedSetupIncomplete = false
-                await publishLocalProfileSnapshotToDirectoryIfPossible(userID: userID, reason: reason)
                 // C-192: the promotion at the top of this hydration ran before
                 // the row existed, so its key patch matched nothing and kept the
-                // marker. The row exists now (if the publish was accepted).
-                await syncPendingLocalAvatarToConnectedIfNeeded(reason: "\(reason)-afterFirstRow", afterFirstRow: true)
+                // marker. Whichever write creates the row, here or elsewhere,
+                // `directoryRowWasEvidenced` then attaches the photo.
+                await publishLocalProfileSnapshotToDirectoryIfPossible(userID: userID, reason: reason)
                 #if DEBUG
                 NSLog("[Auth] directory hydration no-row user=%@ reason=%@", userID, reason)
                 #endif
@@ -1513,6 +1524,18 @@ final class AuthManager: NSObject, ObservableObject {
     /// hydration, which needs a backend to answer.
     func markDirectoryHydratedForTesting() { lastHydratedDirectoryUserID = backendUserID }
     #endif
+
+    /// The server has just returned this owner's directory row for a profile
+    /// write (`AccountDirectoryService.ownRowAppliedNotification`). A photo
+    /// still waiting is attached now: at a first join it was uploaded before
+    /// any row existed, and the row may have been created by the hydration,
+    /// the Profile screen or set-up.
+    func directoryRowWasEvidenced(owner: String?) async {
+        guard let owner, !owner.isEmpty,
+              owner == backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              ProfileStore.hasPendingLocalAvatarSync() else { return }
+        await syncPendingLocalAvatarToConnectedIfNeeded(reason: "directory-row-evidenced", afterFirstRow: true)
+    }
 
     /// C-192 (policy, 2026-11-11): Études has one shared profile. A profile
     /// change the private sync applied on this device (made on any of the

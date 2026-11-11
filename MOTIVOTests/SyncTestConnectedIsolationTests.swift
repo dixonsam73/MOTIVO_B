@@ -406,6 +406,39 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         XCTAssertNil(ProfileStore.avatarImage(for: appleID))
     }
 
+    /// Device A, 2026-11-11 21:13, build 1920: at a fresh join the waiting photo
+    /// was uploaded before any directory row existed, the row was then created
+    /// by a writer that did not promote it, and it stayed unattached. Now any
+    /// evidenced write to the owner's row attaches it.
+    func testAWaitingPhotoIsPromotedWhenTheOwnersRowIsEvidenced() async throws {
+        Keychain.set(fakeAccessToken(subject: backendID), for: "supabaseAccessToken_v1")
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        XCTAssertTrue(ProfileStore.writeSyncedAvatar(pngData: try XCTUnwrap(photo(1).pngData()), for: appleID, modifiedAt: Date()))
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload())
+        // Somebody else's row, or no row named: nothing.
+        await auth.directoryRowWasEvidenced(owner: UUID().uuidString.lowercased())
+        await auth.directoryRowWasEvidenced(owner: nil)
+        XCTAssertEqual(ConnectedWriteWitness.total, 0)
+        // This owner's row: the photo is published (attempted against the stub).
+        await auth.directoryRowWasEvidenced(owner: backendID)
+        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarUpload), 1)
+        XCTAssertTrue(StageHConnectedStub.requests.contains { $0.path.contains("avatars/users/\(backendID)/avatar.jpg") })
+        // The announcement itself reaches the account.
+        NotificationCenter.default.post(name: AccountDirectoryService.ownRowAppliedNotification, object: nil, userInfo: ["owner": backendID])
+        let reached = expectation(description: "the announcement started a second attempt")
+        Task { @MainActor in
+            for _ in 0..<50 where ConnectedWriteWitness.count(ConnectedWriteWitness.avatarUpload) < 2 { try? await Task.sleep(nanoseconds: 50_000_000) }
+            reached.fulfill()
+        }
+        await fulfillment(of: [reached], timeout: 5)
+        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarUpload), 2)
+        // With nothing waiting, an evidenced row starts nothing.
+        ProfileStore.clearPendingLocalAvatarSync()
+        await auth.directoryRowWasEvidenced(owner: backendID)
+        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarUpload), 2)
+    }
+
     /// "A Solo device itself must not gain Connected credentials or publish
     /// directly to Supabase": the same import with no token and Solo mode.
     func testWithNoIdentityTheSameImportPublishesNothingAndKeepsTheMarker() async throws {

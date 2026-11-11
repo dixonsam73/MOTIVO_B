@@ -326,13 +326,16 @@ final class AvatarFreshnessTests: XCTestCase {
         XCTAssertTrue(body.contains("return=representation") && body.contains("avatarKeyPatchMatchedARow"),
                       "the patch must ask for the row back and require it")
         XCTAssertFalse(body.contains("return=minimal"))
-        // And the first-row hydration promotes again once the row exists.
+        // And the photo is attached when ANY write evidences the row: the three
+        // writers of the own row all go through one function, which says so.
+        let applied = try XCTUnwrap(service.range(of: "if case .applied(let receipt) = outcome {"))
+        XCTAssertTrue(String(service[applied.lowerBound...].prefix(700)).contains("Self.ownRowAppliedNotification"),
+                      "an evidenced own-row write is announced")
         let auth = code("AuthManager.swift")
-        let noRow = try XCTUnwrap(auth.range(of: "self.connectedSetupIncomplete = false"))
-        let after = String(auth[noRow.lowerBound...].prefix(700))
-        let publish = try XCTUnwrap(after.range(of: "publishLocalProfileSnapshotToDirectoryIfPossible("))
-        let promote = try XCTUnwrap(after.range(of: "syncPendingLocalAvatarToConnectedIfNeeded("))
-        XCTAssertTrue(publish.lowerBound < promote.lowerBound, "the row first, then the avatar key")
+        XCTAssertTrue(auth.contains("forName: AccountDirectoryService.ownRowAppliedNotification"), "and the account listens")
+        let handler = try XCTUnwrap(auth.range(of: "func directoryRowWasEvidenced(owner: String?) async {"))
+        XCTAssertTrue(String(auth[handler.lowerBound...].prefix(600)).contains("afterFirstRow: true"),
+                      "the row is evidenced, so the no-row skip does not apply")
     }
 
     /// C-192. A marking made while a promotion is in flight is not cleared by it.
