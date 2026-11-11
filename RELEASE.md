@@ -2416,6 +2416,45 @@ the join.
   full event logs, state snapshots, both container copies, the
   comparison):
   `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/upload-trial-2026-11-11/`.
+  **Part 5, first attempt (Device A and a dedicated simulator,
+  development-signed Release build 1914 from `2e19e07`, the production
+  container's Development environment, the disposable Apple Account
+  `contact@samuel-dixon.com`; 2026-11-11 14:33–15:40): stopped at step 4
+  by its own stop condition. No Connected account was created and nothing
+  was measured or deleted.** Coverage of what did run is Development
+  CloudKit only.
+  *Preparation, as corrected after Codex's review.* Device A held no
+  Connected identity but its preferences named Samuel's `000703…` as the
+  journal's owner in 26 places. Samuel ran the app's own "Remove Études
+  Data from This Device": the log reads "no deletions queued… the cloud
+  journal is untouched", the iPad's record counts did not move, and
+  afterwards the preferences named no Apple identity. Études was then
+  deleted, Device A signed in to the disposable account, a fresh Sandbox
+  Apple Account added, and a new simulator ("Etudes Part 5") signed in to
+  the same account. Backend before any sign-in: two users, Samuel's and
+  one beta tester's, none for the disposable account.
+  *Stage A passed.* First open: set-up screen, no age card, no owner, no
+  backend id, no state file. A Solo journal (four entries, a photo, an
+  audio recording, "Alpha", an avatar) had no owner in the store before
+  sync was turned on. Sync on: 10 records, bound to iCloud user
+  `_ec5579ae…` (not the main account's `_cd4f590c…`), "Ownerless journal;
+  no owner key". **The simulator is a real second device for this
+  container:** it restored the 10 records and 3 files in about 5 s, bound
+  to the same user and still Solo; an edit made on it reached Device A in
+  1 s by push; a Thought made on Device A reached it in 73 s at its poll
+  (the simulator receives no push).
+  *Stage B stopped at the age gate (C-113 again).* Explore Connected →
+  Continue: Apple's answer was not `confirmed`, so the gate refused
+  (`unconfirmed_adult`), twice, the second time after checking that
+  Settings reads "Confirmation status 18+, confirmed with your credit
+  card" and that Age Range for Apps is "Ask First". This is the same
+  device and Apple Account on which C-113 was found on 2026-10-16. The
+  gate was not worked around. Device A's preferences hold no backend id,
+  so Sign in with Apple never ran.
+  *Left as it is, for Samuel's decision:* Device A and the simulator on
+  the disposable account, each with the small Solo journal, sync on, in
+  the Development environment. Evidence:
+  `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/part5-2026-11-11/`.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
