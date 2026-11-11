@@ -151,7 +151,7 @@ xcodebuild test -project MOTIVO.xcodeproj -scheme MOTIVO -only-testing:MOTIVOTes
   CloudKit or push; `SyncOffByDefaultTests` guards all of this. A new
   synced field must be added to the Production schema first
   (`docs/sync-trial/check_schema.py`). On TestFlight as an internal build since 2026-11-10
-  (build 1908); not distributed more widely.
+  (build 1912 since 2026-11-11); not distributed more widely.
 
 ## Devices and Sandbox
 
