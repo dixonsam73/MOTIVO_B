@@ -118,8 +118,7 @@ enum JournalRecovery {
             applied.append("name")
         }
         if let location = value(entry, field: "Location") {
-            ProfileStore.setLocation(location, for: scope.locationUserID)
-            if scope.locationUserID != nil { ProfileStore.setLocation(location, for: nil) }
+            ProfileStore.commitLocation(location, for: scope.locationUserID)
             applied.append("location")
         }
         guard !applied.isEmpty else { return .failed("Only the instrument was displaced; choose it again in the instrument list.") }

@@ -389,7 +389,7 @@ final class SyncTestProfileTests: XCTestCase {
         XCTAssertEqual(removal["userModifiedAt"] as? Date, Date(timeIntervalSince1970: 7_000))
     }
 
-    func testAvatarImportWritesBytesVerbatimSetsNoConnectedMarkerAndRemovalAndConflictsFollowTheClock() throws {
+    func testAvatarImportWritesBytesVerbatimMarksItForTheConnectedProfileAndRemovalAndConflictsFollowTheClock() throws {
         makeProfile(name: "Samuel")
         _ = scan(); store.update { $0.outbox.removeAll() }   // the profile text is already exchanged
         let png = pngData(0.6)
@@ -402,7 +402,7 @@ final class SyncTestProfileTests: XCTestCase {
         XCTAssertNotNil(ProfileStore.avatarImage(for: scope.avatarUserID))
         XCTAssertNotNil(ProfileStore.avatarOriginalImage(for: scope.avatarUserID), "the editor opens with a copy to re-crop")
         XCTAssertNotNil(ProfileStore.avatarImage(for: nil), "both scopes, as the editor writes")
-        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync(), "an import is not a local edit: no Solo→Connected marker")
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload(), "C-192, one shared profile: marked for the owner's Connected profile")
         XCTAssertEqual(store.state.assetHashes[JournalProfileSync.avatarName], incoming[JournalRecordMapping.fileHashKey] as? String)
         XCTAssertTrue(scan().isEmpty, "the imported file is what the server holds; nothing goes back")
         // The same record again: nothing.
@@ -417,7 +417,7 @@ final class SyncTestProfileTests: XCTestCase {
         XCTAssertEqual(store.state.assetHashes[JournalProfileSync.avatarName], "")
         XCTAssertEqual(JournalProfileSync.displacedAvatars().count, 1)
         XCTAssertTrue(scan().isEmpty, "removed stays removed: the next scan sends nothing")
-        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync())
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion(), "C-192: the removal is marked for the Connected profile too")
         // A local avatar set AFTER that (newer clock) meets an older server image: kept, and resent.
         let local = UIImage(data: pngData(0.9))!
         ProfileStore.saveAvatarDerived(local, for: scope.avatarUserID)
@@ -535,7 +535,10 @@ final class SyncTestProfileTests: XCTestCase {
 
     // MARK: Connected isolation
 
-    func testPrivateSyncStartsNoConnectedWriteAndTheRemotePathsRefuseWithoutAnIdentity() throws {
+    /// C-192 changed the policy (one shared profile): an import now MARKS the
+    /// avatar for the Connected profile. On a device with no identity that is
+    /// all it does.
+    func testOnADeviceWithNoIdentityAnImportMarksTheAvatarAndStartsNoConnectedWrite() throws {
         // The trial's identity state: an owner key, no Connected identity, no backend id, no token.
         XCTAssertFalse(ProfileMaintenancePolicy.mayAttemptRemoteMaintenance(
             hasConnectedIdentity: false, isBackendConfigured: BackendConfig.isConfigured, hasAccessToken: false, backendUserID: nil),
@@ -551,12 +554,9 @@ final class SyncTestProfileTests: XCTestCase {
         _ = applyProfile(serverProfile(name: "Samuel Dixon", location: "London", primary: "", stamp: Date(timeIntervalSince1970: 1_000)))
         _ = applyAvatar(serverAvatar(png: pngData(0.5), stamp: Date(timeIntervalSince1970: 1_000)))
         setLocation(ProfileStore.presentedLocation(for: scope.locationUserID))   // what persistProfileEdits does on close
-        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarUpload())
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload(), "held for a later join, like an avatar chosen in Solo")
         XCTAssertFalse(ProfileStore.hasPendingLocalAvatarDeletion())
         XCTAssertEqual(ConnectedWriteWitness.total, 0, "no directory upsert, avatar key patch, avatar upload or delete was attempted")
-        // The avatar hydration decision the Connected path uses has nothing pending to promote.
-        XCTAssertEqual(OwnAvatarSync.decide(lastApplied: nil, backendVersion: nil, backendHasAvatar: false,
-                                            hasPendingLocalChange: ProfileStore.hasPendingLocalAvatarSync()), .recordOnly)
         // A deliberate local edit keeps its legitimate marker (existing Solo→Connected behaviour is untouched).
         ProfileStore.saveAvatarDerived(UIImage(data: pngData(0.8))!, for: nil)
         XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload())

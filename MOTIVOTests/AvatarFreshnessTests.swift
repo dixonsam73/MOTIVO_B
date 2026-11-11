@@ -112,5 +112,28 @@ final class AvatarFreshnessTests: XCTestCase {
         // Changed: follow the backend — replace, or remove if it was removed.
         XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v2", backendHasAvatar: true, hasPendingLocalChange: false), .refresh)
         XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v2", backendHasAvatar: false, hasPendingLocalChange: false), .remove)
+        // C-192: with the private sync in use the journal is the source and this
+        // device publishes it, so the Connected copy is never read back (a
+        // re-encoded copy would go out through iCloud as a new image and be
+        // published again by the next Connected device). Nothing is recorded.
+        XCTAssertEqual(S.decide(lastApplied: nil, backendVersion: "v1", backendHasAvatar: true, hasPendingLocalChange: false, journalIsSource: true), .none)
+        XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v2", backendHasAvatar: true, hasPendingLocalChange: false, journalIsSource: true), .none)
+        XCTAssertEqual(S.decide(lastApplied: "v1", backendVersion: "v2", backendHasAvatar: false, hasPendingLocalChange: false, journalIsSource: true), .none)
+        XCTAssertEqual(S.decide(lastApplied: nil, backendVersion: nil, backendHasAvatar: false, hasPendingLocalChange: false, journalIsSource: true), .none)
+    }
+
+    /// C-192. A marking made while a promotion is in flight is not cleared by it.
+    func testAPromotionClearsOnlyTheMarkingItStartedFrom() {
+        let key = "profile.__local_etudes_profile__.avatarSyncState_v1"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer { if let saved { UserDefaults.standard.set(saved, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        ProfileStore.deleteAvatar(for: nil)                       // marks "delete"
+        let removal = ProfileStore.pendingLocalAvatarGeneration   // a promotion starts here
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion())
+        ProfileStore.deleteAvatar(for: nil)                       // marked again meanwhile
+        XCTAssertFalse(ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: removal), "the later marking survives")
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarSync())
+        XCTAssertTrue(ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: ProfileStore.pendingLocalAvatarGeneration))
+        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync())
     }
 }

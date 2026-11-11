@@ -45,10 +45,17 @@
 //  writes a default primary instrument on its own, and that must never beat an
 //  established profile from the other device.
 //
-//  Nothing here starts any Connected work. Imports write the avatar through
-//  writers that set no pending Solo→Connected marker; the only paths that reach
-//  Supabase (`ProfileMaintenancePolicy`, directory hydration) need a Connected
-//  identity, and `ConnectedWriteWitness` counts every attempt for the record.
+//  ONE SHARED PROFILE (policy, 2026-11-11, C-192; it replaces "the private
+//  sync starts no Connected work"). A profile change this file applies, made
+//  on any of the owner's devices including a Solo one, also belongs on the
+//  same owner's Connected profile. After an import the engine calls
+//  `AuthManager.publishProfileAppliedBySync`: the avatar goes through the
+//  pending marker the import writers set, the text through the background
+//  snapshot. Both need a Connected identity on THIS device (Connected mode, a
+//  held token, the backend user), so a Solo device publishes nothing and gains
+//  nothing; `ConnectedWriteWitness` counts every attempt for the record.
+//  With sync in use the Connected avatar is not read back, which is what keeps
+//  two Connected devices from publishing each other's copies in a loop.
 //
 
 import Foundation
@@ -264,9 +271,12 @@ enum JournalProfileMirror {
 }
 
 /// PURE. Values the private sync put on the Profile screen, so the
-/// screen's `onChange` handlers schedule no directory publish for them. A
-/// value is consumed once; the person typing exactly that text later skips
-/// one debounce, which the next keystroke restores.
+/// screen's `onChange` handlers schedule no directory publish for them: the
+/// account publishes what the sync applied, whether or not this screen is
+/// open (`AuthManager.publishProfileAppliedBySync`, C-192), and a second
+/// publish from the screen would only repeat it. A value is consumed once;
+/// the person typing exactly that text later skips one debounce, which the
+/// next keystroke restores.
 struct ProfileSyncHydrationFilter: Equatable {
     private var hydrated: Set<String> = []
     mutating func noteHydrated(_ value: String) { hydrated.insert(value) }
@@ -275,8 +285,9 @@ struct ProfileSyncHydrationFilter: Equatable {
 }
 
 /// Counts every attempt to write the Connected directory or the
-/// Connected avatar object, whatever the outcome, so the device run can show
-/// that private sync started none. Incremented at the four entry points.
+/// Connected avatar object, whatever the outcome, so a test or a device run
+/// can show which the private sync started (none on a Solo device). Incremented
+/// at the four entry points.
 enum ConnectedWriteWitness {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var counts: [String: Int] = [:]
@@ -532,8 +543,7 @@ enum JournalProfileSync {
             if profile.value(forKey: "id") == nil { profile.setValue(UUID(), forKey: "id") }
             importer.save()
             JournalProfileMirror.suppressed = true
-            ProfileStore.setLocation(apply.location, for: scope.locationUserID)
-            if scope.locationUserID != nil { ProfileStore.setLocation(apply.location, for: nil) }
+            ProfileStore.commitLocation(apply.location, for: scope.locationUserID)
             JournalProfileMirror.suppressed = false
             outcome.applied = 1
         }

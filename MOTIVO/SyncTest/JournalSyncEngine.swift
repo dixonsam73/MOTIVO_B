@@ -1992,6 +1992,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             Task { @MainActor in
                 if avatarChanged { JournalSyncCoordinator.shared.auth?.noteAvatarChangedBySync() }
                 NotificationCenter.default.post(name: JournalProfileSync.didApplyNotification, object: nil)
+                await JournalSyncCoordinator.shared.auth?.publishProfileAppliedBySync()   // C-192
             }
         }
     }
@@ -2250,6 +2251,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                     Task { @MainActor in
                         if outcome.avatarChanged { JournalSyncCoordinator.shared.auth?.noteAvatarChangedBySync() }
                         NotificationCenter.default.post(name: JournalProfileSync.didApplyNotification, object: nil)
+                        await JournalSyncCoordinator.shared.auth?.publishProfileAppliedBySync()   // C-192
                     }
                 }
                 return

@@ -1798,7 +1798,9 @@ private var sessionSetupSection: some View {
          }
 
          let backendAvatarKey = auth.backendAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-         guard backendAvatarKey.isEmpty == false else {
+         // C-192: a removal still waiting to be published (the device cannot
+         // publish right now) must not be undone by fetching the image it removes.
+         guard backendAvatarKey.isEmpty == false, !ProfileStore.hasPendingLocalAvatarDeletion() else {
              avatarImage = nil
              return
          }
@@ -1833,6 +1835,9 @@ private var sessionSetupSection: some View {
 
      private func copyLocalAvatarIntoConnectedScope(_ localAvatar: UIImage, currentUserID: String?) {
          guard currentUserID != nil else { return }
+         // C-192: an avatar the private sync applied is in both scopes already;
+         // a rewrite would re-encode it and go out as a new image.
+         guard !ProfileStore.avatarScopesHoldTheSameFile(for: currentUserID) else { return }
 
          ProfileStore.saveAvatarDerived(localAvatar, for: currentUserID)
 
@@ -2038,7 +2043,8 @@ private var sessionSetupSection: some View {
              ]))
          }
          let outcome = save()
-         ProfileStore.setLocation(locationText, for: auth.backendUserID)
+         // C-193: both keys, or the background publish puts the older one back.
+         ProfileStore.commitLocation(locationText, for: auth.backendUserID)
          switch outcome {
          case .success:
              // Evidenced success ONLY — never optimistic.
@@ -2401,6 +2407,7 @@ private var sessionSetupSection: some View {
          defer { avatarSyncInFlight = false }
 
          // 1) Upload (overwrite) avatars/users/<uid>/avatar.jpg
+         let marking = ProfileStore.pendingLocalAvatarGeneration
          let upload = await NetworkManager.shared.uploadAvatarJPEG(data: jpegData, backendUserID: backendID)
          switch upload {
          case .failure:
@@ -2415,7 +2422,7 @@ private var sessionSetupSection: some View {
              let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: avatarKey)
              switch patch {
              case .success:
-                 ProfileStore.clearPendingLocalAvatarSync()
+                 ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
                  return true
              case .failure:
                  avatarSyncErrorMessage = "Uploaded your avatar, but couldn’t update your profile. Please try again."

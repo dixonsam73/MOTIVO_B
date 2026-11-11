@@ -652,8 +652,16 @@ other one. This is accepted for v1.
   action** on that device, never by watching Core Data changes. Changes
   imported by sync are tagged with the importer's author, and every observer
   that could reach Connected ignores them.
-- **Sync can never cause** publishing, re-publishing, directory or profile
-  writes, or any other backend effect.
+- **Sync can never cause** publishing or re-publishing of journal entries, or
+  any other backend effect, with one exception.
+- **The profile is one shared profile** (Samuel's decision, 2026-11-11,
+  C-192; before it, sync caused no profile write either). A change to the
+  name, location, instruments or avatar that sync delivers to a device signed
+  in to Connected is published to that same owner's Connected profile,
+  wherever the change was made, a Solo device included. A device not signed
+  in to Connected publishes nothing and gains no credentials. While sync is
+  in use a device does not read its own avatar back from Connected, so two
+  Connected devices cannot publish each other's copies in a loop.
 - **Signing in to Connected** no longer re-owns journal entries. Publication
   identifiers stay in the Connected domain.
 - **A device not signed in to Connected** can't update a shared post. Its

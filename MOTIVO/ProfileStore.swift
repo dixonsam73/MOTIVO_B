@@ -37,11 +37,20 @@ enum OwnAvatarSync {
         (version ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// `journalIsSource` (C-192, 2026-11-11): while the private sync is on, the
+    /// journal carries the one profile to every device and this device
+    /// PUBLISHES it, so the Connected copy is an output here and is not read
+    /// back. Reading it back would re-encode the image, send that through
+    /// iCloud as a new edit, and have the next Connected device publish it
+    /// again: a loop with two Connected devices. Nothing is recorded, so a
+    /// device whose sync is turned off follows the backend again.
     static func decide(lastApplied: String?,
                        backendVersion: String?,
                        backendHasAvatar: Bool,
-                       hasPendingLocalChange: Bool) -> Action {
+                       hasPendingLocalChange: Bool,
+                       journalIsSource: Bool = false) -> Action {
         if hasPendingLocalChange { return .none }
+        if journalIsSource { return .none }
         let incoming = normalized(backendVersion)
         guard let last = lastApplied else { return backendHasAvatar ? .refresh : .recordOnly }
         if last == incoming { return .none }
@@ -76,6 +85,32 @@ struct ProfileStore {
         UserDefaults.standard.removeObject(forKey: localAvatarSyncStateKey)
     }
 
+    // C-192: the marker is one value, and a photo change can arrive as a
+    // removal followed by the new image while the removal is still being
+    // published. Each marking gets a number; a promotion clears the marker
+    // only if it is still the marking it started from, so the later one is
+    // not lost. In memory only: the marker itself survives a relaunch.
+    private static let avatarMarkerLock = NSLock()
+    nonisolated(unsafe) private static var avatarMarkerCount = 0
+
+    static var pendingLocalAvatarGeneration: Int {
+        avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
+        return avatarMarkerCount
+    }
+
+    private static func setPendingLocalAvatar(_ state: String) {
+        avatarMarkerLock.lock(); avatarMarkerCount += 1; avatarMarkerLock.unlock()
+        UserDefaults.standard.set(state, forKey: localAvatarSyncStateKey)
+    }
+
+    /// Clears the marker unless the avatar was marked again since `generation`.
+    @discardableResult
+    static func clearPendingLocalAvatarSync(ifUnchangedSince generation: Int) -> Bool {
+        guard pendingLocalAvatarGeneration == generation else { return false }
+        clearPendingLocalAvatarSync()
+        return true
+    }
+
     // MARK: - P5-I / C-34 R2 — the backend avatar version this device last applied
 
     private static func ownAvatarAppliedVersionKey(for userID: String) -> String {
@@ -94,13 +129,13 @@ struct ProfileStore {
 
     private static func markPendingLocalAvatarUploadIfNeeded(for userID: String?) {
         if profileStorageID(for: userID) == localProfileStorageID {
-            UserDefaults.standard.set("upload", forKey: localAvatarSyncStateKey)
+            setPendingLocalAvatar("upload")
         }
     }
 
     private static func markPendingLocalAvatarDeletionIfNeeded(for userID: String?) {
         if profileStorageID(for: userID) == localProfileStorageID {
-            UserDefaults.standard.set("delete", forKey: localAvatarSyncStateKey)
+            setPendingLocalAvatar("delete")
         }
     }
 
@@ -159,6 +194,35 @@ struct ProfileStore {
         let previous = UserDefaults.standard.string(forKey: locationKey(for: uid))
         UserDefaults.standard.set(trimmed, forKey: locationKey(for: uid))
         if previous != trimmed { JournalProfileMirror.locationChanged() }
+    }
+
+    /// C-193 — a location the person committed, or one the private sync
+    /// applied. Études has ONE profile: the value goes under the identity's key
+    /// and is also the local Études location.
+    ///
+    /// Writing only the identity's key left the local key holding the older
+    /// value, and `locationForBackgroundPublish` prefers the local key: the next
+    /// background publish (after any validated request) put the old value back
+    /// and published it. Seen 2026-11-11: "Alpha Two" became "Alpha" and "Gamma"
+    /// became "Delta" within seconds. A cleared location came back the same way.
+    static func commitLocation(_ value: String, for userID: String?) {
+        setLocation(value, for: userID)
+        if profileStorageID(for: userID) != localProfileStorageID { setLocation(value, for: nil) }
+    }
+
+    /// The location the background snapshot publish sends for `userID`.
+    ///
+    /// The local Études location wins when it holds a value, and is adopted
+    /// under the identity's key: that is how a location edited while signed out
+    /// reaches the Connected profile at the next sign-in. It is only safe
+    /// because every writer with an identity present writes BOTH keys
+    /// (`commitLocation`), so the local key is never the older one.
+    static func locationForBackgroundPublish(for userID: String) -> String {
+        let local = location(for: nil).trimmingCharacters(in: .whitespacesAndNewlines)
+        let scoped = location(for: userID).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !local.isEmpty else { return scoped }
+        if local != scoped { setLocation(local, for: userID) }
+        return local
     }
 
     /// C-27 — at sign-out the local Études profile keeps the location the signed-in
@@ -429,8 +493,15 @@ struct ProfileStore {
     //
     // An avatar received from the other device is written byte for byte (a
     // re-encode would change its hash and the two devices would send it back
-    // and forth) and clocked with the sender's file time. Neither writer sets
-    // the Solo→Connected pending marker: the image is not a local edit.
+    // and forth) and clocked with the sender's file time.
+    //
+    // C-192 (policy, 2026-11-11): Études has one shared profile, so both
+    // writers SET the pending marker. A device holding a Connected identity
+    // then publishes the image (or the removal) to that owner's Connected
+    // profile through the existing promotion; a Solo device publishes nothing
+    // and keeps the marker, exactly as for an avatar chosen in Solo, until it
+    // joins. Before this the writers set no marker and an imported avatar
+    // never reached the Connected profile while an imported location did.
 
     @discardableResult
     static func writeSyncedAvatar(pngData: Data, for userID: String?, modifiedAt: Date) -> Bool {
@@ -452,13 +523,26 @@ struct ProfileStore {
                 cache.setObject(image, forKey: original.path as NSString)
             }
         }
+        if ok { setPendingLocalAvatar("upload") }
         return ok
     }
 
-    /// Both scopes, no marker (the removal is the other device's edit).
+    /// Both scopes, and the removal is marked for the Connected profile.
     static func removeSyncedAvatar(for userID: String?) {
         deleteAvatarFiles(for: userID)
         deleteAvatarFiles(for: nil)
+        setPendingLocalAvatar("delete")
+    }
+
+    /// True when the identity's avatar file and the local Études one are the
+    /// same bytes (what a sync import leaves). The promotion then uploads
+    /// without rewriting the identity's copy: a rewrite re-encodes the PNG,
+    /// which the private sync would send to the other devices as a new image.
+    static func avatarScopesHoldTheSameFile(for userID: String?) -> Bool {
+        guard profileStorageID(for: userID) != localProfileStorageID,
+              let scoped = avatarDerivedURL(for: userID), let local = avatarDerivedURL(for: nil),
+              let a = try? Data(contentsOf: scoped), let b = try? Data(contentsOf: local) else { return false }
+        return a == b
     }
 
     /// Backwards-compatibility: treat this as saving the derived/display avatar.
@@ -473,15 +557,22 @@ struct ProfileStore {
 
     private static func deleteAvatarFiles(for userID: String?) {
         let fm = FileManager.default
+        var removed = false
         if let url = avatarOriginalURL(for: userID) {
+            if fm.fileExists(atPath: url.path) { removed = true }
             try? fm.removeItem(at: url)
             cache.removeObject(forKey: url.path as NSString)
         }
         if let url = avatarDerivedURL(for: userID) {
+            if fm.fileExists(atPath: url.path) { removed = true }
             try? fm.removeItem(at: url)
             cache.removeObject(forKey: url.path as NSString)
         }
-        JournalProfileMirror.avatarRemoved()
+        // C-192: removing nothing is not a removal. Publishing a removal the
+        // sync applied calls this for files already gone; telling the sync
+        // "removed now" would give this device a newer clock than the photo
+        // that follows the removal, and it would delete that photo everywhere.
+        if removed { JournalProfileMirror.avatarRemoved() }
     }
 
     /// The ONE place a backend avatar becomes the local copy. It writes the

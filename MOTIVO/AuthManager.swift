@@ -262,6 +262,8 @@ final class AuthManager: NSObject, ObservableObject {
 
     // Profile privacy hydration (fresh install consistency)
     private var directoryHydrationTask: Task<Void, Never>?
+    /// C-192: the last queued avatar promotion (see `syncPendingLocalAvatarToConnectedIfNeeded`).
+    private var avatarPromotionTail: Task<Void, Never>?
     private var lastHydratedDirectoryUserID: String?
 
     /// The user id whose directory hydration is running right now.
@@ -445,8 +447,26 @@ final class AuthManager: NSObject, ObservableObject {
     /// Best-effort promotion of a pending Études avatar change into the active Connected scope.
     /// The pending marker is retained on any unavailable/offline/backend failure so a later
     /// authentication refresh or ProfileView appearance can retry safely.
+    ///
+    /// C-192: ONE AT A TIME. A photo change can reach this device as a removal
+    /// and then the new image. Two promotions running together could upload
+    /// the image and then delete the object, leaving a key that points at
+    /// nothing; in a queue the second starts from the marker as it then is.
     func syncPendingLocalAvatarToConnectedIfNeeded(reason: String) async {
         guard ProfileStore.hasPendingLocalAvatarSync() else { return }
+        let previous = avatarPromotionTail
+        let task = Task { @MainActor [weak self] in
+            await previous?.value
+            await self?.promotePendingLocalAvatar(reason: reason)
+        }
+        avatarPromotionTail = task
+        await task.value
+    }
+
+    private func promotePendingLocalAvatar(reason: String) async {
+        guard ProfileStore.hasPendingLocalAvatarSync() else { return }
+        // Cleared at the end only if nothing marked the avatar again meanwhile.
+        let marking = ProfileStore.pendingLocalAvatarGeneration
         guard !LocalFactoryReset.isInProgress else { return }
         guard BackendEnvironment.shared.isConnected else { return }
         guard BackendConfig.isConfigured else { return }
@@ -490,7 +510,7 @@ final class AuthManager: NSObject, ObservableObject {
 
             await invalidateAvatarCaches(avatarKey: "users/\(backendID)/avatar.jpg")
             backendAvatarKey = nil
-            ProfileStore.clearPendingLocalAvatarSync()
+            ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
             #if DEBUG
             NSLog("[Auth] promoted local avatar deletion user=%@ reason=%@", backendID, reason)
             #endif
@@ -502,11 +522,16 @@ final class AuthManager: NSObject, ObservableObject {
               let localAvatar = ProfileStore.avatarImage(for: nil),
               let jpegData = localAvatar.jpegData(compressionQuality: 0.9) else { return }
 
-        ProfileStore.saveAvatarDerivedFromConnectedHydration(localAvatar, for: connectedStorageID)
-        if let localOriginal = ProfileStore.avatarOriginalImage(for: nil) {
-            ProfileStore.saveAvatarOriginal(localOriginal, for: connectedStorageID)
-        } else {
-            ProfileStore.saveAvatarOriginal(localAvatar, for: connectedStorageID)
+        // C-192: an avatar the private sync applied is already in both scopes,
+        // byte for byte. Rewriting the identity's copy would re-encode it, and
+        // the sync would send that to the other devices as a new image.
+        if !ProfileStore.avatarScopesHoldTheSameFile(for: connectedStorageID) {
+            ProfileStore.saveAvatarDerivedFromConnectedHydration(localAvatar, for: connectedStorageID)
+            if let localOriginal = ProfileStore.avatarOriginalImage(for: nil) {
+                ProfileStore.saveAvatarOriginal(localOriginal, for: connectedStorageID)
+            } else {
+                ProfileStore.saveAvatarOriginal(localAvatar, for: connectedStorageID)
+            }
         }
 
         let upload = await NetworkManager.shared.uploadAvatarJPEG(data: jpegData, backendUserID: backendID)
@@ -527,7 +552,7 @@ final class AuthManager: NSObject, ObservableObject {
         }
 
         backendAvatarKey = avatarKey
-        ProfileStore.clearPendingLocalAvatarSync()
+        ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
         #if DEBUG
         NSLog("[Auth] promoted local avatar upload user=%@ reason=%@", backendID, reason)
         #endif
@@ -548,7 +573,8 @@ final class AuthManager: NSObject, ObservableObject {
         switch OwnAvatarSync.decide(lastApplied: ProfileStore.ownAvatarAppliedVersion(for: storageID),
                                     backendVersion: avatarVersion,
                                     backendHasAvatar: !key.isEmpty,
-                                    hasPendingLocalChange: ProfileStore.hasPendingLocalAvatarSync()) {
+                                    hasPendingLocalChange: ProfileStore.hasPendingLocalAvatarSync(),
+                                    journalIsSource: JournalSyncCoordinator.shared.isEnabled) {
         case .none:
             return
         case .recordOnly:
@@ -816,13 +842,10 @@ final class AuthManager: NSObject, ObservableObject {
             : localDisplayName
         guard !displayNameToPublish.isEmpty else { return }
 
-        let localLocation = ProfileStore.location(for: nil).trimmingCharacters(in: .whitespacesAndNewlines)
-        let backendScopedLocation = ProfileStore.location(for: userID).trimmingCharacters(in: .whitespacesAndNewlines)
-        let locationToPublish = localLocation.isEmpty ? backendScopedLocation : localLocation
+        // C-193: the choice between the two keys lives in `ProfileStore`, with
+        // the rule that keeps it from publishing an older value.
+        let locationToPublish = ProfileStore.locationForBackgroundPublish(for: userID)
         let locationOrNil: String? = locationToPublish.isEmpty ? nil : locationToPublish
-        if !localLocation.isEmpty, localLocation != backendScopedLocation {
-            ProfileStore.setLocation(localLocation, for: userID)
-        }
 
         let instrumentsToPublish = localInstruments
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -1390,6 +1413,52 @@ final class AuthManager: NSObject, ObservableObject {
     /// Stage H: the private sync wrote or removed the avatar files; the screens
     /// key their redraw on this revision (as a Connected replacement does).
     func noteAvatarChangedBySync() { ownAvatarRevision &+= 1 }
+
+    #if DEBUG
+    /// Test-only: stands in for this identity's completed first directory
+    /// hydration, which needs a backend to answer.
+    func markDirectoryHydratedForTesting() { lastHydratedDirectoryUserID = backendUserID }
+    #endif
+
+    /// C-192 (policy, 2026-11-11): Études has one shared profile. A profile
+    /// change the private sync applied on this device (made on any of the
+    /// owner's devices, a Solo one included) is published to the SAME owner's
+    /// Connected profile: the avatar through the pending-marker promotion, the
+    /// name, location and instruments through the background snapshot.
+    ///
+    /// Nothing here gives a device an identity. Every gate below and inside the
+    /// two calls is the existing one (Connected mode, configured backend, a
+    /// held token, this backend user), so a Solo device does nothing at all.
+    ///
+    /// No loop: neither call writes the profile stores the sync scans (an
+    /// imported avatar is uploaded from the file as it arrived, and the two
+    /// location keys already agree), and with sync in use the avatar is not
+    /// read back from the backend (`OwnAvatarSync.decide`).
+    func publishProfileAppliedBySync() async {
+        guard !LocalFactoryReset.isInProgress else { return }
+        guard BackendEnvironment.shared.isConnected, BackendConfig.isConfigured, hasSupabaseAccessToken else { return }
+        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
+        // A hydration already running reads the stores the import just wrote
+        // only if it had not reached them yet, so let it finish and publish
+        // again under the same claim the scheduler uses. The claim also makes
+        // the publish's own session preflight a no-op instead of a second pass.
+        await directoryHydrationTask?.value
+        guard backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines) == bid else { return }
+        // Before this identity's first hydration (a launch whose catch-up
+        // import lands first), the hydration does both steps itself, in the
+        // order the first directory INSERT needs (CP-3: the age band first).
+        // Publishing here instead would also hold the claim it has to take.
+        guard lastHydratedDirectoryUserID == bid else {
+            scheduleDirectoryHydrationIfNeeded(reason: "sync-import")
+            return
+        }
+        guard SessionRefreshPolicy.shouldBeginDirectoryHydration(inFlightUserID: directoryHydrationInFlightUserID,
+                                                                 targetUserID: bid) else { return }
+        directoryHydrationInFlightUserID = bid
+        defer { releaseDirectoryHydrationClaim(bid) }
+        await syncPendingLocalAvatarToConnectedIfNeeded(reason: "sync-import")
+        await publishLocalProfileSnapshotToDirectoryIfPossible(userID: bid, reason: "sync-import")
+    }
 
     /// Sync Test diagnostics only (the DEBUG screen). The Keychain outlives an
     /// uninstall, so a fresh Sync Test install would otherwise start with the
