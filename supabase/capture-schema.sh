@@ -63,7 +63,25 @@ q() {
   # random `boundary` token plus a warning string; leaving those in would make
   # every refresh produce a diff on every file, which would render the snapshot
   # diff worthless as a record of what actually changed.
-  supabase db query "$TARGET" "$2" | jq -S '.rows' > "$OUT/$1.json"
+  #
+  # JSON IS ASKED FOR, NOT ASSUMED (2026-11-12). The CLI prints JSON on its own
+  # only when it detects an AI agent running it; in a person's terminal it
+  # prints a table, jq failed on it, and the `>` had already emptied the
+  # snapshot file. With --output-format json a person gets a bare array of
+  # rows and an agent gets the wrapped object, so both shapes are read.
+  #
+  # The result goes to a temporary file and replaces the snapshot only when it
+  # is an array of rows. An error body, or anything else, stops the capture
+  # with the snapshot file as it was.
+  local tmp
+  tmp="$(mktemp "$OUT/.$1.XXXXXX")"
+  if ! supabase db query "$TARGET" --output-format json "$2" \
+       | jq -S 'if type == "array" then . elif (type == "object" and (.rows | type) == "array") then .rows else error("not a result set") end' > "$tmp"; then
+    rm -f "$tmp"
+    echo "error: capturing '$1' failed; $OUT/$1.json was left as it was" >&2
+    exit 1
+  fi
+  mv "$tmp" "$OUT/$1.json"
   printf "  %-18s %8s bytes\n" "$1" "$(wc -c < "$OUT/$1.json" | tr -d ' ')"
 }
 
