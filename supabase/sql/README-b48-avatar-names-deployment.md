@@ -156,12 +156,11 @@ HTTP part:
 (one with no reference, one with the old fixed name), none nonconforming, the
 three policies as expected, no constraint yet, one stored object.
 
-**The fidelity gate on the new versions** differs from the committed snapshot
-in the two policies and the constraint (this change) and in four Supabase
-platform triggers on `storage.buckets` that storage v1.94.2 creates
-(`enforce_versioning_status_transition`, `protect_active_lifecycle_states`,
-`wake_lifecycle_on_policy_write`, `wake_lifecycle_on_versioning_enable`). The
-snapshot dates from storage v1.80.2 (B-49). Recapture the snapshot from
-production **before** the apply, so the diff after it is this change alone.
+**The snapshot was recaptured from production on 2026-11-12, before the
+apply.** Its only change is four Supabase platform triggers on
+`storage.buckets` that came with storage v1.94.2 (B-49). Against it, the
+fidelity gate on the local stack (production's versions and storage level,
+this migration applied) differs in exactly the two avatar policies and the
+constraint. After the apply and the next recapture the gate should be met.
 
 Not shown by a local rehearsal: the hosted storage backend.
