@@ -177,8 +177,19 @@ build() {  # $1=S $2=B $3=with_membership(0/1)
   putobj attachments "users/$B/connected/$RECV.pdf" "b-to-s" >/dev/null
   putobj avatars "users/$S/avatar.jpg" "s-avatar" image/jpeg >/dev/null
   putobj avatars "users/$B/avatar.jpg" "b-avatar" image/jpeg >/dev/null
+  # B-48 / a name per upload (2026-11-12): a second image in each avatar folder,
+  # under a per-upload name. The reference stays on the fixed name here, so this
+  # one is a LEFTOVER nothing points at; AVREF=new (below) swaps the two roles.
+  LS="users/$S/avatar-$(python3 -c 'import uuid;print(uuid.uuid4().hex)').jpg"
+  LB="users/$B/avatar-$(python3 -c 'import uuid;print(uuid.uuid4().hex)').jpg"
+  putobj avatars "$LS" "s-avatar-2" image/jpeg >/dev/null
+  putobj avatars "$LB" "b-avatar-2" image/jpeg >/dev/null
   sq "update account_directory set avatar_key='users/$S/avatar.jpg' where user_id='$S';"
   sq "update account_directory set avatar_key='users/$B/avatar.jpg' where user_id='$B';"
+  if [ "${AVREF:-old}" = "new" ]; then   # the reference names the per-upload image; the fixed name is the leftover
+    sq "update account_directory set avatar_key='$LS' where user_id='$S';"
+    sq "update account_directory set avatar_key='$LB' where user_id='$B';"
+  fi
   ca() { sq "insert into connected_attachments (asset_id,sender_user_id,recipient_user_id,storage_path,filename,byte_count,deleted_at)
              values ('$1','$2','$3','users/$2/connected/$1.pdf','f.pdf',12,$4);"; }
   ca "$DOOM" "$S" "$B" "now()"
@@ -251,6 +262,19 @@ is C1-7 "$(psq "select coalesce(avatar_key,'NULL') from account_directory where 
 is C1-8 "$(objs attachments "users/$B/")" "1" "B's object untouched"
 is C1-9 "$(has avatars "users/$B/avatar.jpg")" "1" "B's avatar untouched"
 is C1-10 "$(psq "select count(*) from public.membership where user_id='$S' and cleanup_completed_at is not null;")" "1" "completion recorded"
+is C1-11 "$(objs avatars "users/$S/")" "0" "the per-upload leftover in the avatar folder is gone too: nothing is left"
+is C1-12 "$(has avatars "$LB"):$(objs avatars "users/$B/")" "1:2" "B's per-upload image untouched"
+destroy "$S" "$B"
+
+# ================================================================ CLEANUP: the reference names a per-upload image
+S=$(newid); B=$(newid); AVREF=new build "$S" "$B" 1
+plan '{"*":{"ri":"attest_ri_lapsed","status":2}}'
+is C5-0 "$(psq "select avatar_key from account_directory where user_id='$S';"):$(objs avatars "users/$S/")" "$LS:2" "(fixture) referenced per-upload image + a fixed-name leftover"
+R=$(runC "{\"mode\":\"execute\",\"user_id\":\"$S\"}"); echo "$R" > "$EVID/c5.json"
+is C5-1 "$(printf '%s' "$R" | grep -c '"decision":"cleaned"')" "1" "cleanup: cleaned"
+is C5-2 "$(objs avatars "users/$S/")" "0" "the referenced image and the leftover are both gone"
+is C5-3 "$(psq "select coalesce(avatar_key,'NULL') from account_directory where user_id='$S';")" "NULL" "avatar_key cleared"
+is C5-4 "$(objs avatars "users/$B/"):$(psq "select avatar_key from account_directory where user_id='$B';")" "2:$LB" "B's images and reference untouched"
 destroy "$S" "$B"
 
 # ================================================================ CLEANUP: attachment failure
@@ -295,6 +319,21 @@ is D1-3 "$(bytes attachments "users/$S/$PS/att1.pdf")" "gone" "...bytes gone (lo
 is D1-4 "$(has avatars "users/$S/avatar.jpg")" "0" "avatar gone"
 is D1-5 "$(psq "select count(*) from auth.users where id='$S';")" "0" "auth user removed last"
 is D1-6 "$(objs attachments "users/$B/")" "1" "B's object untouched"
+is D1-7 "$(objs avatars "users/$S/")" "0" "the per-upload leftover in the avatar folder is gone too: nothing is left"
+is D1-8 "$(has avatars "$LB"):$(objs avatars "users/$B/")" "1:2" "B's per-upload image untouched"
+destroy "$S" "$B"
+
+# ================================================================ ACCOUNT DELETION: the reference names a per-upload image
+read -r S TOK <<<"$(gotrue_user)"; B=$(newid); AVREF=new build "$S" "$B" 0
+is D5-0 "$(psq "select avatar_key from account_directory where user_id='$S';"):$(objs avatars "users/$S/")" "$LS:2" "(fixture) referenced per-upload image + a fixed-name leftover"
+# B-48: with the constraint in place S's reference cannot name B's image, so
+# neither sweep can be pointed at it. (On a stack without the migration this FAILS.)
+is D5-0b "$(refuses "update account_directory set avatar_key='users/$B/avatar.jpg' where user_id='$S';")" "refused" "B-48: S's reference cannot be pointed at B's image"
+R=$(runD "$TOK"); echo "$R" > "$EVID/d5.json"
+is D5-1 "$(printf '%s' "$R" | grep -c '"success":true')" "1" "delete_account: success"
+is D5-2 "$(objs avatars "users/$S/")" "0" "the referenced image and the leftover are both gone"
+is D5-3 "$(psq "select count(*) from auth.users where id='$S';")" "0" "auth user removed"
+is D5-4 "$(objs avatars "users/$B/"):$(psq "select avatar_key from account_directory where user_id='$B';")" "2:$LB" "B's images and reference untouched"
 destroy "$S" "$B"
 
 # ================================================================ ACCOUNT DELETION: attachment failure
