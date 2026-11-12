@@ -51,10 +51,12 @@ publish a photo against the old INSERT policy. Old builds are unaffected by
 the server change: they write only the fixed name, which every policy and the
 CHECK still accept.
 
-1. **Storage version** (B-47). The rehearsal ran on storage-api `v1.80.2`
-   (`supabase/.temp/storage-version`). If Supabase has upgraded production
-   storage since 2026-10-15, re-pin, rebuild the local stack and run the
-   rehearsal again before going on.
+1. **Service versions** (B-47, B-49). Checked 2026-11-12 with
+   `supabase services`: production had moved to storage-api `v1.94.2`,
+   PostgREST `v14.5` and gotrue `v2.197.0`. The local pins in
+   `supabase/.temp/` were set to those, the stack rebuilt, and both
+   rehearsals run again on them: same results (below). If the versions have
+   moved again by the day of the apply, do the same before going on.
 2. **Preflight.**
    ```
    supabase db query --linked -f supabase/sql/2026-11-12-b48-avatar-names-preflight-production.sql
@@ -112,8 +114,12 @@ Expect `rolled back | t` (policies as before, constraint still validated).
 
 ## What the rehearsal showed (local stack, 2026-11-12)
 
-`supabase/tests/b48/rehearse.sh`, storage-api v1.80.2, PostgREST v14.1,
-Postgres 17.6, membership enforcement ON for the HTTP part:
+`supabase/tests/b48/rehearse.sh`, run twice with the same result (78 checks):
+first on storage-api v1.80.2 and PostgREST v14.1, then, after the version
+check, on **production's versions, storage-api v1.94.2 (81 storage
+migrations, the last `revoke-extra-lifecycle-postgres-grants`), PostgREST
+v14.5 and gotrue v2.197.0**. Postgres 17.6, membership enforcement ON for the
+HTTP part:
 
 - **Guards:** the migration applies with an existing old-name reference and
   leaves it untouched; a second run is refused; **eight kinds of reference
@@ -136,10 +142,22 @@ Postgres 17.6, membership enforcement ON for the HTTP part:
   is already gone answers HTTP 400 with body `statusCode "404"`, `not_found`,
   which the app reads as gone; a delete of another member's image answers
   `403`, which it does not.
-- **Edge Functions** (`p6-single-delete/e2e.sh`, both unchanged): expiry
+- **Edge Functions** (`p6-single-delete/e2e.sh`, both unchanged, 82 checks on
+  each set of versions): expiry
   cleanup and account deletion each remove a referenced image **and** a second
   image in the folder, whichever of the two forms is the referenced one, and
   leave another member's images and reference alone.
 
-Not shown by a local rehearsal: the hosted storage backend, and production's
-own rows (the preflight reads those).
+**Preflight on production, 2026-11-12 (Samuel): passed.** Two directory rows
+(one with no reference, one with the old fixed name), none nonconforming, the
+three policies as expected, no constraint yet, one stored object.
+
+**The fidelity gate on the new versions** differs from the committed snapshot
+in the two policies and the constraint (this change) and in four Supabase
+platform triggers on `storage.buckets` that storage v1.94.2 creates
+(`enforce_versioning_status_transition`, `protect_active_lifecycle_states`,
+`wake_lifecycle_on_policy_write`, `wake_lifecycle_on_versioning_enable`). The
+snapshot dates from storage v1.80.2 (B-49). Recapture the snapshot from
+production **before** the apply, so the diff after it is this change alone.
+
+Not shown by a local rehearsal: the hosted storage backend.
