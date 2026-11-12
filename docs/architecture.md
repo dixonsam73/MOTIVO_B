@@ -663,7 +663,11 @@ other one. This is accepted for v1.
   recognises a publication of the picture it already holds as an echo and
   writes nothing, so two Connected devices cannot publish each other's
   copies in a loop; an avatar replaced or removed on a Connected device
-  whose sync is off is still followed, after it has stood for two minutes.
+  whose sync is off is still followed, after it has stood for two minutes,
+  and enters the journal clocked just after the state it displaces, so it
+  never outranks a newer photo the journal has yet to deliver. A removal
+  is published to Connected only when the profile still shows the picture
+  it removes.
 - **Signing in to Connected** no longer re-owns journal entries. Publication
   identifiers stay in the Connected domain.
 - **A device not signed in to Connected** can't update a shared post. Its

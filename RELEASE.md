@@ -2619,6 +2619,41 @@ the join.
   (photo attached, private posts on, 0 posts); Device A Connected as X4 on
   build 1922, the simulator Solo, both on the disposable account; four
   Sandbox Apple Accounts used.
+  **Avatar safety, third pass after Codex's results review, 2026-11-12
+  (`492da2f`). Automated tests only; no device was used, by instruction.
+  The join evidence above stands as it was.**
+  *A replacement delayed beyond the wait was a lasting deletion, two
+  ways.* (a) A device whose iCloud is behind applied a published removal
+  after the wait and clocked it "now", so the replacement, chosen earlier
+  and delivered late, lost to it on every device. A change read back from
+  the Connected profile is now clocked a millisecond after the state it
+  displaces, so it loses to anything newer the journal brings. (b) A
+  device with the journal's removal of the OLD photo waiting published it
+  over the NEW photo another device had already published. A removal is
+  now published only when the profile still shows the picture it removes
+  (`AvatarRemovalGuard`, by a remembered rendering of the removed photo);
+  otherwise it is withdrawn and the profile's photo comes to the device.
+  *The read-back's check and write are one step* under the lock the
+  sync's writers take, so an iCloud import lands before or after, never
+  between. The Profile screen's own fill uses the same writer.
+  *Found by the new overlap test: a deadlock present since `d6543e9`.* The
+  avatar marker was a UserDefaults value written under that lock; its
+  change notification waits for the main thread when posted from the
+  sync's thread, and the main thread hung if it asked for the lock
+  meanwhile. The marker is now a small file. **Builds 1920 and 1922 carry
+  this hazard** (Device A and the simulator only; it did not occur in the
+  runs above). Neither has been replaced.
+  *Tests.* Six tests reproduced the two issues on `6c6006e` before the fix
+  (log kept beside the evidence, `third-pass-reproduction-before-fix.log`).
+  Full target on `492da2f`: 1,424 tests (SyncTest scheme), 1,231 (Debug),
+  the seven known order-dependent failures; C-195 in one of three runs.
+  *Limits that remain:* none of this pass ran on a device or with two
+  real Connected devices; an OLDER PHOTO published late over a newer one
+  (not a removal) can still be read back as a real replacement after the
+  wait; a removal made by hand on a device whose profile shows a photo
+  that device has not yet seen is withdrawn and has to be made again; the
+  check before publishing a removal and the removal itself are two
+  requests, milliseconds apart. C-194 stays deferred.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
