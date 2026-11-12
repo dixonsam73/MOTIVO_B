@@ -221,18 +221,6 @@ enum AvatarRemovalGuard {
     }
 }
 
-#if canImport(UIKit)
-/// What the backend shows for the owner's avatar, as a promotion needs it
-/// before publishing a removal. Tests supply one; the app reads the row and
-/// downloads the image.
-struct AvatarBackendProbe {
-    var rowExists: Bool
-    var avatarKey: String?
-    var avatarVersion: String?
-    var image: UIImage?
-}
-#endif
-
 struct ProfileStore {
     #if DEBUG
     /// Test-only: runs immediately before a backend read-back writes or removes

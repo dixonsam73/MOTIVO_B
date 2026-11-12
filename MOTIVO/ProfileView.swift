@@ -2414,30 +2414,34 @@ private var sessionSetupSection: some View {
          avatarSyncInFlight = true
          defer { avatarSyncInFlight = false }
 
-         // 1) Upload (overwrite) avatars/users/<uid>/avatar.jpg
+         // Store the image, then point the reference at it, with the one
+         // publication the promotion also uses: the reference write is
+         // conditional on the version read first, and is repeated with the
+         // image if another device wrote the reference meanwhile
+         // (`AvatarPublication`, fourth pass).
          let marking = ProfileStore.pendingLocalAvatarGeneration
-         let upload = await NetworkManager.shared.uploadAvatarJPEG(data: jpegData, backendUserID: backendID)
-         switch upload {
-         case .failure:
+         switch await AvatarPublication.publish(jpeg: jpegData, userID: backendID, backend: auth.avatarBackend) {
+         case .published(let avatarKey, let publishedVersion):
+             // Bust remote caches for this key (image + signed URL), because content may have changed.
+             await invalidateRemoteAvatarCaches(avatarKey: avatarKey)
+             ProfileStore.noteOwnAvatarPublished(version: publishedVersion, for: auth.currentUserID)
+             ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
+             return true
+         case .couldNotRead, .uploadFailed:
              avatarSyncErrorMessage = "Couldn’t upload your avatar. Please try again."
              showAvatarSyncErrorAlert = true
              return false
-         case .success(let avatarKey):
-             // Bust remote caches for this key (image + signed URL), because content may have changed.
-             await invalidateRemoteAvatarCaches(avatarKey: avatarKey)
-
-             // 2) Patch account_directory.avatar_key
-             let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: avatarKey)
-             switch patch {
-             case .success(let publishedVersion):
-                 ProfileStore.noteOwnAvatarPublished(version: publishedVersion, for: auth.currentUserID)
-                 ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
-                 return true
-             case .failure:
-                 avatarSyncErrorMessage = "Uploaded your avatar, but couldn’t update your profile. Please try again."
-                 showAvatarSyncErrorAlert = true
-                 return false
-             }
+         case .referenceFailed:
+             avatarSyncErrorMessage = "Uploaded your avatar, but couldn’t update your profile. Please try again."
+             showAvatarSyncErrorAlert = true
+             return false
+         case .noRow:
+             // Nothing was stored: there is no profile row to point at it yet.
+             // The photo is kept on the device, marked, and is published when
+             // the row exists. The alert keeps its general wording.
+             avatarSyncErrorMessage = nil
+             showAvatarSyncErrorAlert = true
+             return false
          }
      }
 

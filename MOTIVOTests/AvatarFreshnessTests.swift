@@ -19,6 +19,25 @@ import XCTest
 import UIKit
 @testable import Etudes
 
+/// A backend whose reference is written by someone else during every upload.
+@MainActor
+private final class AlwaysMovingBackend: AvatarBackend {
+    let inner: FakeAvatarBackend
+    var uploads = 0
+    init(_ inner: FakeAvatarBackend) { self.inner = inner }
+    func probe(userID: String, withImage: Bool) async -> AvatarBackendProbe? { await inner.probe(userID: userID, withImage: withImage) }
+    func upload(jpeg: Data, userID: String) async -> String? {
+        uploads += 1
+        let key = await inner.upload(jpeg: jpeg, userID: userID)
+        _ = await inner.otherDevice.setKey(FakeAvatarBackend.path, userID: userID, ifVersionIs: inner.version ?? "")
+        return key
+    }
+    func deleteObject(userID: String) async -> Bool { await inner.deleteObject(userID: userID) }
+    func setKey(_ key: String?, userID: String, ifVersionIs expected: String) async -> AvatarKeyWrite {
+        await inner.setKey(key, userID: userID, ifVersionIs: expected)
+    }
+}
+
 /// A flag two threads may touch in the marker race test.
 private final class RaceFlags: @unchecked Sendable {
     var markerFinishedWhileClearWasInside = false
@@ -228,8 +247,8 @@ final class AvatarFreshnessTests: XCTestCase {
         XCTAssertTrue(body.contains("OwnAvatarSync.samePicture("), "an echo is recognised by its picture")
         XCTAssertTrue(body.contains("OwnAvatarSync.settle("), "a real change waits with sync on")
         XCTAssertTrue(body.contains("== appliedAtStart"), "a publication during the download is not overwritten")
-        XCTAssertEqual(auth.components(separatedBy: "ProfileStore.noteOwnAvatarPublished(").count - 1, 3,
-                       "the upload, the removal, and a removal found already made")
+        XCTAssertEqual(auth.components(separatedBy: "ProfileStore.noteOwnAvatarPublished(").count - 1, 2,
+                       "the upload and the removal")
         XCTAssertEqual(code("ProfileView.swift").components(separatedBy: "ProfileStore.noteOwnAvatarPublished(").count - 1, 1, "the Profile screen's own upload")
         XCTAssertEqual(AccountDirectoryService.avatarVersion(inPatchResponse: Data("[{\"user_id\":\"u\",\"avatar_version\":\"2026-11-11T19:41:42.302262+00:00\"}]".utf8)),
                        "2026-11-11T19:41:42.302262+00:00")
@@ -303,6 +322,75 @@ final class AvatarFreshnessTests: XCTestCase {
             XCTAssertTrue(body.contains("avatarMarkerLock.lock()") && body.contains("nothingHasMarkedTheAvatar(since: generation)"),
                           "\(name) checks and writes under the avatar lock")
         }
+    }
+
+    /// FOURTH PASS. Every write of the avatar reference is conditional on the
+    /// version read first, and a removal writes the reference BEFORE it deletes
+    /// the image. No unconditional write and no delete-first order is left.
+    func testEveryReferenceWriteIsConditionalAndARemovalWritesItBeforeDeletingTheImage() throws {
+        let auth = code("AuthManager.swift"), view = code("ProfileView.swift"), service = code("AccountDirectoryService.swift")
+        let backend = code("AvatarBackend.swift")
+        // One writer of the reference, and it always carries the condition.
+        XCTAssertTrue(service.contains("public func updateSelfAvatarKey(userID: String, avatarKey: String?, ifVersionIs expected: String) async"),
+                      "the condition is not optional")
+        let start = try XCTUnwrap(service.range(of: "public func updateSelfAvatarKey("))
+        XCTAssertTrue(String(service[start.lowerBound...].prefix(1_600)).contains("Self.avatarVersionFilter(ifVersionIs: expected)"))
+        for (name, source) in [("AuthManager", auth), ("ProfileView", view)] {
+            XCTAssertFalse(source.contains("updateSelfAvatarKey("), "\(name) writes the reference only through the backend seam")
+            XCTAssertFalse(source.contains("uploadAvatarJPEG(") || source.contains("deleteAvatarObject("), "\(name) stores and deletes only through it too")
+        }
+        XCTAssertEqual(backend.components(separatedBy: "updateSelfAvatarKey(").count - 1, 1, "the network adapter is the one caller")
+        // The removal: the reference, then the image.
+        let removal = try XCTUnwrap(auth.range(of: "if pendingState == \"delete\" {"))
+        let upload = try XCTUnwrap(auth.range(of: "guard pendingState == \"upload\","))
+        let branch = String(auth[removal.lowerBound..<upload.lowerBound])
+        let write = try XCTUnwrap(branch.range(of: "avatarBackend.setKey(nil, userID: backendID, ifVersionIs: seenVersion)"))
+        let delete = try XCTUnwrap(branch.range(of: "avatarBackend.deleteObject(userID: backendID)"))
+        XCTAssertTrue(write.lowerBound < delete.lowerBound, "the reference is written before the image is deleted")
+        XCTAssertEqual(branch.components(separatedBy: "avatarBackend.deleteObject(").count - 1, 1, "and there is one deletion, after it")
+        // The publication reads the version before it stores the image.
+        let publish = try XCTUnwrap(backend.range(of: "static func publish(jpeg: Data, userID: String, backend: AvatarBackend) async -> Outcome {"))
+        let body = String(backend[publish.lowerBound...].prefix(900))
+        let read = try XCTUnwrap(body.range(of: "backend.probe(")), store = try XCTUnwrap(body.range(of: "backend.upload("))
+        let point = try XCTUnwrap(body.range(of: "backend.setKey(key, userID: userID, ifVersionIs:"))
+        XCTAssertTrue(read.lowerBound < store.lowerBound && store.lowerBound < point.lowerBound)
+    }
+
+    /// The publication on its own: nothing is stored without a row; the first
+    /// reference is written on "never stamped"; a refused write stores again.
+    @MainActor
+    func testAPublicationStoresNothingWithoutARowAndRepeatsAfterARefusedWrite() async throws {
+        let jpeg = try XCTUnwrap(picture(seed: 3).jpegData(compressionQuality: 0.9))
+        let backend = FakeAvatarBackend()
+        backend.rowExists = false
+        let none = await AvatarPublication.publish(jpeg: jpeg, userID: "fake", backend: backend)
+        XCTAssertEqual(none, .noRow)
+        XCTAssertEqual(backend.log, ["this: probe"], "no image is stored for a row that does not exist")
+        backend.rowExists = true
+        guard case .published(_, let version) = await AvatarPublication.publish(jpeg: jpeg, userID: "fake", backend: backend) else { return XCTFail() }
+        XCTAssertEqual(version, backend.version)
+        XCTAssertNotNil(backend.object); XCTAssertEqual(backend.key, FakeAvatarBackend.path)
+        // Another device writes the reference while this one is storing its image.
+        let other = backend.otherDevice
+        let held = AvatarTestGate()
+        backend.gates["this.setKey"] = held
+        let publishing = Task { @MainActor in await AvatarPublication.publish(jpeg: jpeg, userID: "fake", backend: backend) }
+        await held.waitUntilArrived()
+        _ = await other.setKey(nil, userID: "fake", ifVersionIs: backend.version ?? "")
+        _ = await other.deleteObject(userID: "fake")
+        held.open()
+        guard case .published = await publishing.value else { return XCTFail("the publication did not recover") }
+        XCTAssertEqual(backend.count("this: setKey REFUSED"), 1)
+        XCTAssertNotNil(backend.object, "the image the other device deleted was stored again")
+        XCTAssertEqual(backend.key, FakeAvatarBackend.path)
+        // A backend that always refuses: it stops after its rounds and reports it.
+        let stubborn = FakeAvatarBackend(picture: picture(seed: 1))
+        stubborn.afterNextProbe = nil
+        stubborn.gates = [:]
+        let alwaysMoving = AlwaysMovingBackend(stubborn)
+        let outcome = await AvatarPublication.publish(jpeg: jpeg, userID: "fake", backend: alwaysMoving)
+        XCTAssertEqual(outcome, .referenceFailed)
+        XCTAssertEqual(alwaysMoving.uploads, AvatarPublication.rounds)
     }
 
     /// The removal guard, row by row.

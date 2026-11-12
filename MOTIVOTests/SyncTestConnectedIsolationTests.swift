@@ -230,15 +230,19 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         // 2. What the engine calls after the import. Before the identity's first
         //    directory hydration it only asks for that hydration (which publishes
         //    in the order the first row needs); afterwards it publishes itself.
+        //    The avatar goes to a backend in memory; the text to the stub.
+        let backend = FakeAvatarBackend()
+        auth.avatarBackend = backend
         await auth.publishProfileAppliedBySync()
         XCTAssertEqual(ConnectedWriteWitness.total, 0, "not before the first hydration (scheduling is off in this fixture)")
+        XCTAssertTrue(backend.log.isEmpty)
         auth.markDirectoryHydratedForTesting()
         await auth.publishProfileAppliedBySync()
-        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarUpload), 1, "the avatar is published")
+        XCTAssertEqual(backend.count("this: upload"), 1, "the avatar is published")
+        XCTAssertNotNil(backend.key); XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(backend.object), try XCTUnwrap(UIImage(data: png))))
         XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.directoryUpsert), 1, "and so is the text, once")
-        XCTAssertTrue(StageHConnectedStub.requests.contains { $0.path.contains("avatars") })
         XCTAssertTrue(try XCTUnwrap(upserts().last).contains("\"location\":\"Beta\""), "the imported location is what the publish carries")
-        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload(), "the stub failed the upload, so the marker stays for a retry")
+        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync(), "published, so nothing is waiting")
         // No loop: the publish wrote nothing the sync scans.
         XCTAssertEqual(try Data(contentsOf: avatarURL()), png, "the identity's file is still the imported bytes, not a re-encode")
         XCTAssertEqual(mirrorEvents, 0, "nothing the publish did is a new edit for the sync to send")
@@ -251,7 +255,7 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         await auth.publishProfileAppliedBySync()
         XCTAssertTrue(try XCTUnwrap(upserts().last).contains("\"location\":\"Gamma\""), "C-193: the typed value, not the imported one")
         XCTAssertEqual(ProfileStore.presentedLocation(for: auth.backendUserID), "Gamma")
-        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarUpload), 2, "the failed upload was retried from the kept marker")
+        XCTAssertEqual(backend.count("this: upload"), 1, "the avatar was not published again")
 
         // 4. A photo change arrives as a removal and then the new image (C-194).
         //    The removal is published; publishing it must not give this device a
@@ -262,11 +266,9 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         XCTAssertEqual(removal.applied, 1)
         XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion())
         // The profile still shows the picture this removal removes (third pass: `AvatarRemovalGuard`).
-        let shown = try XCTUnwrap(UIImage(data: png))
-        let avatarKey = "users/\(backendID)/avatar.jpg"
-        auth.avatarBackendProbeForTesting = { AvatarBackendProbe(rowExists: true, avatarKey: avatarKey, avatarVersion: "2026-11-11T19:00:00+00:00", image: shown) }
         await auth.publishProfileAppliedBySync()
-        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarDelete), 1, "the removal is published")
+        XCTAssertEqual(backend.count("this: deleteObject"), 1, "the removal is published")
+        XCTAssertNil(backend.key); XCTAssertNil(backend.object)
         XCTAssertEqual(mirrorEvents, 0, "publishing a removal already applied is not a removal")
         XCTAssertEqual(store.state.avatarRemovedAt, removedAt)
         let next = pngData(0.8)
@@ -277,7 +279,8 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: avatarURL()), next)
         XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload(), "the marker follows the latest state")
         await auth.publishProfileAppliedBySync()
-        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarUpload), 3, "the new image is published after the removal")
+        XCTAssertEqual(backend.count("this: upload"), 2, "the new image is published after the removal")
+        XCTAssertNotNil(backend.key); XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(backend.object), try XCTUnwrap(UIImage(data: next))))
         XCTAssertEqual(mirrorEvents, 0)
     }
 
@@ -519,13 +522,14 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         ProfileStore.clearPendingLocalAvatarSync()
         XCTAssertEqual(journalAvatar(nil, stamp: removed, scope: scope).applied, 1)            // the journal's removal of the old photo
         XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion())
-        let key = "users/\(backendID)/avatar.jpg"
 
         // The Connected profile shows a DIFFERENT photo (the holder published the new one).
-        auth.avatarBackendProbeForTesting = { AvatarBackendProbe(rowExists: true, avatarKey: key, avatarVersion: "2026-11-11T19:30:00+00:00", image: self.photo(2)) }
+        let backend = FakeAvatarBackend(picture: photo(2))
+        auth.avatarBackend = backend
         await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "third-pass")
-        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarDelete), 0, "the object is not deleted")
-        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.directoryAvatarKey), 0, "and the key is not cleared")
+        XCTAssertEqual(backend.count("this: deleteObject"), 0, "the object is not deleted")
+        XCTAssertEqual(backend.entries(by: "this").filter { $0.contains("setKey") }, [], "and the key is not cleared")
+        XCTAssertNotNil(backend.key); XCTAssertNotNil(backend.object)
         XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync(), "the removal is withdrawn, not retried")
         // Instead the photo the profile shows comes to this device, clocked just
         // after the removal it undoes, so the journal's own copy of the new
@@ -541,9 +545,11 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         ProfileStore.clearPendingLocalAvatarSync()
         XCTAssertEqual(journalAvatar(nil, stamp: Date().addingTimeInterval(-200), scope: scope).applied, 1)
         let published = try XCTUnwrap(UIImage(data: try XCTUnwrap(photo(1).jpegData(compressionQuality: 0.9))))
-        auth.avatarBackendProbeForTesting = { AvatarBackendProbe(rowExists: true, avatarKey: key, avatarVersion: "2026-11-11T19:40:00+00:00", image: published) }
+        let same = FakeAvatarBackend(picture: published)
+        auth.avatarBackend = same
         await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "third-pass")
-        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarDelete), 1, "the removal of the picture the profile shows is published")
+        XCTAssertEqual(same.count("this: deleteObject"), 1, "the removal of the picture the profile shows is published")
+        XCTAssertNil(same.key); XCTAssertNil(same.object)
     }
 
     /// ISSUE 2. The read-back has decided to write; an iCloud import of a newer
@@ -641,6 +647,143 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), v1, "and recorded nothing about a state it did not apply")
     }
 
+    // MARK: Fourth pass — an outdated removal against a newer publication
+
+    /// This device held photo 1 through the journal and published it; the
+    /// journal's removal of photo 1 is waiting to be published.
+    private func arrangeAWaitingRemovalOfPhotoOne(_ auth: AuthManager) throws {
+        clearReadBackState()
+        let scope = JournalProfileScope(locationUserID: auth.backendUserID, avatarUserID: auth.currentUserID)
+        JournalProfileMirror.onChange = { [store] event in JournalProfileSync.noteMirrorEvent(event, store: store!) }
+        JournalProfileMirror.removalClock = { [store] in store!.state.avatarRemovedAt }
+        auth.syncIsOnOverrideForTesting = true
+        XCTAssertEqual(journalAvatar(try XCTUnwrap(photo(1).pngData()), stamp: Date().addingTimeInterval(-3_600), scope: scope).applied, 1)
+        ProfileStore.clearPendingLocalAvatarSync()
+        XCTAssertEqual(journalAvatar(nil, stamp: Date().addingTimeInterval(-1_800), scope: scope).applied, 1)
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion())
+    }
+
+    private func asPublished(_ picture: UIImage) throws -> UIImage {
+        try XCTUnwrap(UIImage(data: try XCTUnwrap(picture.jpegData(compressionQuality: 0.9))))
+    }
+
+    /// THE RACE Codex named. This device checks: the profile still shows photo 1,
+    /// the picture its waiting removal removes. Then, before it deletes
+    /// anything, another of the owner's devices publishes photo 2 (the image
+    /// and the reference). Before the fix the removal went on: it deleted the
+    /// stored image, which was now photo 2, and cleared the reference to it.
+    func testAPhotoPublishedBetweenTheRemovalCheckAndTheDeletionIsNotErased() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        try arrangeAWaitingRemovalOfPhotoOne(auth)
+        let backend = FakeAvatarBackend(picture: try asPublished(photo(1)))
+        auth.avatarBackend = backend
+        backend.afterNextProbe = { _ = await backend.otherDevicePublishes(self.photo(2)) }     // after the check, before the deletion
+
+        await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "fourth-pass")
+
+        XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(backend.object, "the stored image was erased"), photo(2)), "the newer photo is still stored")
+        XCTAssertEqual(backend.key, FakeAvatarBackend.path, "and the directory still refers to it")
+        XCTAssertEqual(backend.count("this: deleteObject"), 0, "the outdated removal deleted nothing")
+        XCTAssertEqual(backend.count("this: setKey nil"), 0, "and cleared nothing")
+        XCTAssertEqual(backend.count("this: setKey REFUSED"), 1, "the server refused its write: the reference had been written since the check")
+        // The removal is not about the photo the profile now shows: it is withdrawn, and that photo comes here.
+        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync())
+        XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(ProfileStore.avatarImage(for: appleID)), photo(2)))
+    }
+
+    /// The same race caught half way: the other device's IMAGE has been stored
+    /// after this device's check, its REFERENCE write has not landed yet. This
+    /// device cannot tell (the reference is unchanged), so its removal goes
+    /// through and deletes the stored image. The other device's reference
+    /// write is then refused, because the row has been written since it read
+    /// it, and it stores its image again. Before the fix that write was
+    /// unconditional: the directory pointed at an image that no longer existed.
+    func testAnImageStoredAfterTheCheckWhoseReferenceHasNotLandedIsStoredAgain() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        try arrangeAWaitingRemovalOfPhotoOne(auth)
+        let backend = FakeAvatarBackend(picture: try asPublished(photo(1)))
+        auth.avatarBackend = backend
+        let held = AvatarTestGate()
+        backend.gates["other.setKey"] = held
+        var other: Task<AvatarPublication.Outcome, Never>?
+        backend.afterNextProbe = {
+            other = Task { @MainActor in await backend.otherDevicePublishes(self.photo(2)) }
+            await held.waitUntilArrived()                     // its image is stored; its reference write is held
+        }
+
+        await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "fourth-pass")
+        held.open()
+        let outcome = await try XCTUnwrap(other).value
+
+        guard case .published = outcome else { return XCTFail("the other device did not finish publishing: \(outcome)") }
+        XCTAssertEqual(backend.count("other: setKey REFUSED"), 1, "its reference write was refused: a removal had been written since it read the row")
+        XCTAssertEqual(backend.count("other: upload"), 2, "so it stored its image again")
+        XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(backend.object, "the directory points at an image that does not exist"), photo(2)))
+        XCTAssertEqual(backend.key, FakeAvatarBackend.path)
+    }
+
+    /// The same race on the other branch of a removal: the reference is already
+    /// clear and only a leftover image has to go. Another device publishes
+    /// after the check; the leftover delete must not take its image.
+    func testALeftoverImageIsNotDeletedOnceAnotherDeviceHasPublishedOverIt() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        try arrangeAWaitingRemovalOfPhotoOne(auth)
+        let backend = FakeAvatarBackend(picture: try asPublished(photo(1)))
+        _ = await backend.otherDevice.setKey(nil, userID: "fake", ifVersionIs: backend.version ?? "")   // reference cleared earlier; the image was left
+        XCTAssertNil(backend.key); XCTAssertNotNil(backend.object)
+        auth.avatarBackend = backend
+        backend.afterNextProbe = { _ = await backend.otherDevicePublishes(self.photo(2)) }
+
+        await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "fourth-pass")
+
+        XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(backend.object, "the stored image was erased"), photo(2)))
+        XCTAssertEqual(backend.key, FakeAvatarBackend.path)
+        XCTAssertEqual(backend.count("this: deleteObject"), 0)
+    }
+
+    /// With no race the removal still goes through, in the new order: the
+    /// reference first (conditionally), then the image. If the image cannot be
+    /// deleted the removal keeps waiting and finishes at the next attempt.
+    func testARemovalClearsTheReferenceThenTheImageAndFinishesAnInterruptedDelete() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        try arrangeAWaitingRemovalOfPhotoOne(auth)
+        let backend = FakeAvatarBackend(picture: try asPublished(photo(1)))
+        auth.avatarBackend = backend
+        backend.deletesFail = true
+        await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "fourth-pass")
+        XCTAssertEqual(backend.entries(by: "this").suffix(2), ["this: setKey nil", "this: deleteObject FAILED"], "the reference, then the image")
+        XCTAssertNil(backend.key); XCTAssertNotNil(backend.object)
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion(), "the image is still there, so the removal is still waiting")
+        backend.deletesFail = false
+        await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "fourth-pass, again")
+        XCTAssertNil(backend.object, "the leftover image is deleted at the next attempt")
+        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync())
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), backend.version, "and the standing version is recorded")
+    }
+
+    /// The network adapter sends the condition PostgREST needs, in a form that
+    /// survives the URL (a "+" in a query is read as a space).
+    func testTheConditionalReferenceWriteIsSentAsAFilterOnTheVersion() async throws {
+        XCTAssertEqual(AccountDirectoryService.avatarVersionFilter(ifVersionIs: "2026-11-12T11:55:05.496451+00:00"),
+                       URLQueryItem(name: "avatar_version", value: "eq.2026-11-12T11:55:05.496451Z"))
+        XCTAssertEqual(AccountDirectoryService.avatarVersionFilter(ifVersionIs: ""), URLQueryItem(name: "avatar_version", value: "is.null"))
+        XCTAssertEqual(AccountDirectoryService.avatarVersionFilter(ifVersionIs: "  "), URLQueryItem(name: "avatar_version", value: "is.null"))
+        XCTAssertNil(AccountDirectoryService.avatarVersionFilter(ifVersionIs: "2026-11-12T12:55:05+01:00"), "an offset that cannot be written safely: the write is not attempted")
+        Keychain.set(fakeAccessToken(subject: backendID), for: "supabaseAccessToken_v1")
+        _ = AuthManager(identityService: LocalStubIdentityService())
+        let outcome = await NetworkAvatarBackend().setKey(nil, userID: backendID, ifVersionIs: "2026-11-12T11:55:05.496451+00:00")
+        XCTAssertEqual(outcome, .failed, "the stub fails the request")
+        let sent = try XCTUnwrap(StageHConnectedStub.requests.last { $0.path.contains("account_directory") })
+        let query = try XCTUnwrap(sent.query)
+        XCTAssertTrue(query.contains("avatar_version=eq.2026-11-12T11:55:05.496451Z"), query)
+        XCTAssertTrue(query.contains("user_id=eq.\(backendID)"), query)
+        XCTAssertFalse(query.contains("+"), "no plus sign reaches the server")
+    }
+
     /// Device A, 2026-11-11 21:13, build 1920: at a fresh join the waiting photo
     /// was uploaded before any directory row existed, the row was then created
     /// by a writer that did not promote it, and it stayed unattached. Now any
@@ -651,27 +794,37 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         defer { clearReadBackState() }
         XCTAssertTrue(ProfileStore.writeSyncedAvatar(pngData: try XCTUnwrap(photo(1).pngData()), for: appleID, modifiedAt: Date()))
         XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload())
+        let backend = FakeAvatarBackend()
+        backend.rowExists = false
+        auth.avatarBackend = backend
+        // No row yet: nothing is stored and the photo keeps waiting.
+        await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "before the row")
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload())
+        XCTAssertNil(backend.key)
         // Somebody else's row, or no row named: nothing.
+        backend.rowExists = true
+        let before = backend.log.count
         await auth.directoryRowWasEvidenced(owner: UUID().uuidString.lowercased())
         await auth.directoryRowWasEvidenced(owner: nil)
-        XCTAssertEqual(ConnectedWriteWitness.total, 0)
-        // This owner's row: the photo is published (attempted against the stub).
+        XCTAssertEqual(backend.log.count, before)
+        // This owner's row: the photo is published and attached.
         await auth.directoryRowWasEvidenced(owner: backendID)
-        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarUpload), 1)
-        XCTAssertTrue(StageHConnectedStub.requests.contains { $0.path.contains("avatars/users/\(backendID)/avatar.jpg") })
+        XCTAssertNotNil(backend.key); XCTAssertNotNil(backend.object)
+        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync())
         // The announcement itself reaches the account.
+        XCTAssertTrue(ProfileStore.writeSyncedAvatar(pngData: try XCTUnwrap(photo(2).pngData()), for: appleID, modifiedAt: Date()))
         NotificationCenter.default.post(name: AccountDirectoryService.ownRowAppliedNotification, object: nil, userInfo: ["owner": backendID])
-        let reached = expectation(description: "the announcement started a second attempt")
+        let reached = expectation(description: "the announcement published the waiting photo")
         Task { @MainActor in
-            for _ in 0..<50 where ConnectedWriteWitness.count(ConnectedWriteWitness.avatarUpload) < 2 { try? await Task.sleep(nanoseconds: 50_000_000) }
+            for _ in 0..<50 where ProfileStore.hasPendingLocalAvatarSync() { try? await Task.sleep(nanoseconds: 50_000_000) }
             reached.fulfill()
         }
         await fulfillment(of: [reached], timeout: 5)
-        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarUpload), 2)
+        XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(backend.object), photo(2)))
         // With nothing waiting, an evidenced row starts nothing.
-        ProfileStore.clearPendingLocalAvatarSync()
+        let quiet = backend.log.count
         await auth.directoryRowWasEvidenced(owner: backendID)
-        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarUpload), 2)
+        XCTAssertEqual(backend.log.count, quiet)
     }
 
     /// "A Solo device itself must not gain Connected credentials or publish
@@ -686,8 +839,11 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         let scope = JournalProfileScope(locationUserID: auth.backendUserID, avatarUserID: auth.currentUserID)
         importProfile(serverProfile(location: "Beta", stamp: Date(timeIntervalSince1970: 1_000)), scope: scope)
         _ = JournalProfileSync.applyAvatar(serverAvatar(png: pngData(0.5), stamp: Date(timeIntervalSince1970: 1_000)), scope: scope, store: store) { _ in }
+        let backend = FakeAvatarBackend()
+        auth.avatarBackend = backend
         await auth.publishProfileAppliedBySync()
         await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "solo")
+        XCTAssertTrue(backend.log.isEmpty, "the avatar backend was not even looked at")
         XCTAssertEqual(StageHConnectedStub.requests.count, 0, "nothing was sent anywhere")
         XCTAssertEqual(ConnectedWriteWitness.total, 0)
         XCTAssertFalse(auth.hasConnectedIdentity, "and the device gained no identity")

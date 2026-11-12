@@ -262,6 +262,10 @@ final class AuthManager: NSObject, ObservableObject {
 
     // Profile privacy hydration (fresh install consistency)
     private var directoryHydrationTask: Task<Void, Never>?
+    #if canImport(UIKit)
+    /// The Connected profile's avatar. The network in the app; tests put one in memory.
+    lazy var avatarBackend: AvatarBackend = NetworkAvatarBackend()
+    #endif
     /// C-192: the last queued avatar promotion (see `syncPendingLocalAvatarToConnectedIfNeeded`).
     private var avatarPromotionTail: Task<Void, Never>?
     /// C-192: the one pending second look at a backend avatar change (`scheduleOwnAvatarRecheck`).
@@ -442,7 +446,7 @@ final class AuthManager: NSObject, ObservableObject {
     /// failures, 401/403, 5xx — is treated as "still there", which is the safe
     /// direction: the pointer survives, nothing is orphaned, and the pending
     /// marker retries.
-    private static func avatarObjectIsAbsent(after result: Result<Void, Error>) -> Bool {
+    static func avatarObjectIsAbsent(after result: Result<Void, Error>) -> Bool {
         switch result {
         case .success:
             return true
@@ -502,82 +506,91 @@ final class AuthManager: NSObject, ObservableObject {
               !backendID.isEmpty else { return }
 
         if pendingState == "delete" {
-            // Third pass: a removal is published only when the profile still
-            // shows the picture this device removed (`AvatarRemovalGuard`).
-            // If the look fails, nothing is published and the marker stays.
             #if canImport(UIKit)
-            guard let probe = await avatarBackendProbe(backendID: backendID), probe.rowExists else { return }
-            let backendHasAvatar = !(probe.avatarKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            if backendHasAvatar, probe.image == nil { return }
-            let showsTheRemovedPicture: Bool? = probe.image.flatMap { image in
-                ProfileStore.removedAvatarThumbnail().map { OwnAvatarSync.samePicture(thumbnail: $0, image) }
-            }
-            switch AvatarRemovalGuard.decide(backendHasAvatar: backendHasAvatar, backendShowsTheRemovedPicture: showsTheRemovedPicture) {
-            case .publish:
-                break
-            case .alreadyRemoved:
-                // Nothing to remove from the row. The object must still be gone
-                // (C-33) before this device stops trying.
-                let objectDelete = await NetworkManager.shared.deleteAvatarObject(backendUserID: backendID)
-                guard Self.avatarObjectIsAbsent(after: objectDelete) else { return }
-                // The identity's own copy goes with the removal, as when it is published.
-                guard ProfileStore.deleteAvatarForPendingDeletion(for: connectedStorageID, ifUnchangedSince: marking) else { return }
+            // A second look only when the server refuses the reference write
+            // because the reference has been written since this one.
+            for _ in 0..<2 {
+                // Third pass: a removal is published only when the profile still
+                // shows the picture this device removed (`AvatarRemovalGuard`).
+                // If the look fails, nothing is published and the marker stays.
+                guard let probe = await avatarBackend.probe(userID: backendID, withImage: true), probe.rowExists else { return }
+                let seenVersion = OwnAvatarSync.normalized(probe.avatarVersion)
+                let backendHasAvatar = !(probe.avatarKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if backendHasAvatar, probe.image == nil { return }
+                let showsTheRemovedPicture: Bool? = probe.image.flatMap { image in
+                    ProfileStore.removedAvatarThumbnail().map { OwnAvatarSync.samePicture(thumbnail: $0, image) }
+                }
+                if AvatarRemovalGuard.decide(backendHasAvatar: backendHasAvatar,
+                                             backendShowsTheRemovedPicture: showsTheRemovedPicture) == .yieldToBackend {
+                    // The profile shows a photo this removal is not about. Withdraw
+                    // the removal and take that photo instead; it enters the journal
+                    // clocked just after the removal, so the journal's own copy of a
+                    // newer photo still wins when it arrives.
+                    guard ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking) else { return }
+                    backendAvatarKey = probe.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let image = probe.image
+                    await syncOwnAvatarFromBackend(avatarKey: probe.avatarKey, avatarVersion: probe.avatarVersion) { _, _ in image }
+                    return
+                }
+
+                // FOURTH PASS (2026-11-12): THE REFERENCE FIRST, CONDITIONALLY;
+                // THE IMAGE ONLY AFTER THE SERVER HAS ACCEPTED THAT WRITE.
+                //
+                // The look above and the deletion below are separate requests,
+                // and another of the owner's devices can publish a new photo
+                // between them. The image has one fixed name, so deleting it
+                // then deletes THAT photo, and clearing the reference clears the
+                // reference to it. So the reference is cleared with a write the
+                // server makes only if `avatar_version` is still what the look
+                // read. If another device has written the reference since, the
+                // server refuses, nothing has been deleted, and this device
+                // looks again (the photo now shown is not the one this removal
+                // removes, so the removal is withdrawn above).
+                //
+                // The same write is made when the reference is already clear and
+                // only a leftover image is to go: it changes nothing but the
+                // version, and it is what a device half way through publishing
+                // is refused by, so it stores its image again.
+                //
+                // THIS REVERSES C-33's ORDER, deliberately. C-33 proved the image
+                // gone before dropping the reference, so a failed delete could
+                // not strand an image nothing points at. That order is exactly
+                // what deletes a newer photo here. In the new order a failed
+                // delete leaves an image with no reference until this device
+                // tries again: the marker is kept until the image is known to be
+                // gone, and the next attempt finds the reference clear and
+                // deletes the leftover. An image stranded for good now needs
+                // this device never to try again (app deleted in that moment),
+                // and even then deleting the account removes it: the server
+                // sweeps the member's avatar folder, not only the reference
+                // (B-20).
+                let write = await avatarBackend.setKey(nil, userID: backendID, ifVersionIs: seenVersion)
+                if write == .notMatched { continue }
+                guard case .written(let publishedVersion) = write else {
+                    #if DEBUG
+                    NSLog("[Auth] pending local avatar deletion retry retained user=%@ reason=%@", backendID, reason)
+                    #endif
+                    return
+                }
                 backendAvatarKey = nil
-                ProfileStore.noteOwnAvatarPublished(version: probe.avatarVersion, for: connectedStorageID)
+                // Not if the avatar was marked again since the snapshot: an image
+                // the sync wrote meanwhile is not this removal's to delete, and the
+                // promotion queued for that marking publishes it over what is left.
+                guard ProfileStore.deleteAvatarForPendingDeletion(for: connectedStorageID, ifUnchangedSince: marking) else { return }
+                guard await avatarBackend.deleteObject(userID: backendID) else {
+                    #if DEBUG
+                    NSLog("[Auth] pending local avatar object delete retry retained user=%@ reason=%@", backendID, reason)
+                    #endif
+                    return
+                }
+                await invalidateAvatarCaches(avatarKey: "users/\(backendID)/avatar.jpg")
+                ProfileStore.noteOwnAvatarPublished(version: publishedVersion, for: connectedStorageID)
                 ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
-                return
-            case .yieldToBackend:
-                // The profile shows a photo this removal is not about. Withdraw
-                // the removal and take that photo instead; it enters the journal
-                // clocked just after the removal, so the journal's own copy of a
-                // newer photo still wins when it arrives.
-                guard ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking) else { return }
-                backendAvatarKey = probe.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let image = probe.image
-                await syncOwnAvatarFromBackend(avatarKey: probe.avatarKey, avatarVersion: probe.avatarVersion) { _, _ in image }
-                return
-            }
-            #endif
-            // Not if the avatar was marked again since the snapshot: an image
-            // the sync wrote meanwhile is not this removal's to delete, and the
-            // promotion queued for that marking publishes it.
-            guard ProfileStore.deleteAvatarForPendingDeletion(for: connectedStorageID, ifUnchangedSince: marking) else { return }
-
-            // C-33: this result used to be discarded (`_ =`) and the directory
-            // patch ran regardless. A failed object delete followed by a
-            // successful patch strands `avatars/users/<uid>/avatar.jpg` with
-            // nothing pointing at it — unrecoverable from the client, because
-            // every later path keys off the column that was just nulled, and
-            // `delete_account_v1` deletes the avatar by reading that same
-            // column (B-20). The pointer is the only handle on the object, so
-            // it must outlive any failure to remove what it points at.
-            //
-            // Ordering is therefore forced: prove the object is gone, THEN drop
-            // the pointer. On any other outcome the pending marker is retained
-            // and the whole operation retries later — the same shape the upload
-            // branch below already uses.
-            let objectDelete = await NetworkManager.shared.deleteAvatarObject(backendUserID: backendID)
-            guard Self.avatarObjectIsAbsent(after: objectDelete) else {
                 #if DEBUG
-                NSLog("[Auth] pending local avatar object delete retry retained user=%@ reason=%@", backendID, reason)
+                NSLog("[Auth] promoted local avatar deletion user=%@ reason=%@", backendID, reason)
                 #endif
                 return
             }
-
-            let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: nil)
-            guard case .success(let publishedVersion) = patch else {
-                #if DEBUG
-                NSLog("[Auth] pending local avatar deletion retry retained user=%@ reason=%@", backendID, reason)
-                #endif
-                return
-            }
-
-            await invalidateAvatarCaches(avatarKey: "users/\(backendID)/avatar.jpg")
-            backendAvatarKey = nil
-            ProfileStore.noteOwnAvatarPublished(version: publishedVersion, for: connectedStorageID)
-            ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
-            #if DEBUG
-            NSLog("[Auth] promoted local avatar deletion user=%@ reason=%@", backendID, reason)
             #endif
             return
         }
@@ -599,8 +612,7 @@ final class AuthManager: NSObject, ObservableObject {
             }
         }
 
-        let upload = await NetworkManager.shared.uploadAvatarJPEG(data: jpegData, backendUserID: backendID)
-        guard case .success(let avatarKey) = upload else {
+        guard case .published(let avatarKey, let publishedVersion) = await AvatarPublication.publish(jpeg: jpegData, userID: backendID, backend: avatarBackend) else {
             #if DEBUG
             NSLog("[Auth] pending local avatar upload retry retained user=%@ reason=%@", backendID, reason)
             #endif
@@ -608,14 +620,6 @@ final class AuthManager: NSObject, ObservableObject {
         }
 
         await invalidateAvatarCaches(avatarKey: avatarKey)
-        let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: avatarKey)
-        guard case .success(let publishedVersion) = patch else {
-            #if DEBUG
-            NSLog("[Auth] pending local avatar directory patch retry retained user=%@ reason=%@", backendID, reason)
-            #endif
-            return
-        }
-
         backendAvatarKey = avatarKey
         ProfileStore.noteOwnAvatarPublished(version: publishedVersion, for: connectedStorageID)
         ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
@@ -624,25 +628,6 @@ final class AuthManager: NSObject, ObservableObject {
         #endif
         #endif
     }
-
-    #if canImport(UIKit)
-    /// What the Connected profile shows for the avatar right now: the row, and
-    /// the picture if it has one. Nil if the row could not be read.
-    private func avatarBackendProbe(backendID: String) async -> AvatarBackendProbe? {
-        #if DEBUG
-        if let avatarBackendProbeForTesting { return await avatarBackendProbeForTesting() }
-        #endif
-        guard case .success(let row) = await AccountDirectoryService.shared.fetchSelfRow(userID: backendID) else { return nil }
-        guard let row else { return AvatarBackendProbe(rowExists: false, avatarKey: nil, avatarVersion: nil, image: nil) }
-        let key = row.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        var image: UIImage?
-        if !key.isEmpty {
-            await RemoteAvatarPipeline.invalidateAvatarCaches(avatarKey: key)
-            image = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key, version: row.avatarVersion)
-        }
-        return AvatarBackendProbe(rowExists: true, avatarKey: row.avatarKey, avatarVersion: row.avatarVersion, image: image)
-    }
-    #endif
 
     /// P5-I / C-34 R2 (B1). The backend avatar and version are authoritative for
     /// the Connected profile **when this device has no unsynced local avatar
@@ -1588,9 +1573,6 @@ final class AuthManager: NSObject, ObservableObject {
     func noteAvatarChangedBySync() { ownAvatarRevision &+= 1 }
 
     #if DEBUG
-    /// Test-only: what the backend shows for the avatar, in place of the row
-    /// read and the image download a removal promotion makes.
-    var avatarBackendProbeForTesting: (() async -> AvatarBackendProbe?)?
     /// Test-only: whether the private sync counts as on, where a test cannot
     /// turn the real one on.
     var syncIsOnOverrideForTesting: Bool?

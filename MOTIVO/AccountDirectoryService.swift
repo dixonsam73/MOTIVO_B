@@ -747,7 +747,9 @@ public final class AccountDirectoryService {
 
     // MARK: - Phase 15 Step 3A (Avatars) — update self avatar_key
 
-    /// The avatar-key PATCH matched no directory row. Seen on Device A,
+    /// The avatar-key PATCH matched no directory row: there is none, or (the
+    /// write is conditional, see `updateSelfAvatarKey`) the reference has been
+    /// written by someone else since the caller read it. First seen on Device A,
     /// 2026-11-11, at a first join: the pending avatar is promoted BEFORE the
     /// first directory row is created, the PATCH matched nothing, PostgREST
     /// answered success (`return=minimal`), and the pending marker was cleared
@@ -760,6 +762,19 @@ public final class AccountDirectoryService {
         return !rows.isEmpty
     }
 
+    /// PURE. The filter that makes a reference write conditional on the row's
+    /// `avatar_version` still being `expected` ("" = never stamped). The value
+    /// is written with "Z": the request's query is built from items, which
+    /// leaves a "+" as it is, and the server reads a "+" as a space. Nil for a
+    /// value that cannot be written that way; the caller then does not write.
+    nonisolated static func avatarVersionFilter(ifVersionIs expected: String) -> URLQueryItem? {
+        let value = expected.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { return URLQueryItem(name: "avatar_version", value: "is.null") }
+        if value.hasSuffix("Z") { return URLQueryItem(name: "avatar_version", value: "eq.\(value)") }
+        guard value.hasSuffix("+00:00") else { return nil }
+        return URLQueryItem(name: "avatar_version", value: "eq.\(value.dropLast(6))Z")
+    }
+
     /// PURE. The `avatar_version` the server stamped on the row a PATCH returned.
     nonisolated static func avatarVersion(inPatchResponse data: Data) -> String? {
         guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
@@ -769,12 +784,18 @@ public final class AccountDirectoryService {
     /// Update the caller's `account_directory.avatar_key` (owner-only via RLS).
     /// - Parameter avatarKey: `users/<uid>/avatar.jpg` or nil to clear.
     /// - Important: This is an owner-only metadata update; no profile sync.
+    /// - Parameter expected: the row's `avatar_version` as the caller last read
+    ///   it ("" = never stamped). **The write is CONDITIONAL on it**: the server
+    ///   updates the row only if the version is still that value, in the same
+    ///   statement, so two devices cannot both write over one reading. Fourth
+    ///   pass (2026-11-12): an outdated removal used to clear a reference
+    ///   another device had written a moment before.
     /// - Returns: success ONLY when the server returned the row it changed,
     ///   carrying the `avatar_version` it stamped (the caller records it as the
     ///   version this device holds, so it never reads its own publication
-    ///   back); `AvatarKeyNoRowMatched` when there was no row, so the caller
-    ///   keeps its pending marker and tries again once the row exists.
-    public func updateSelfAvatarKey(userID: String, avatarKey: String?) async -> Result<String?, Error> {
+    ///   back); `AvatarKeyNoRowMatched` when no row matched, so the caller
+    ///   keeps its pending marker and looks again.
+    public func updateSelfAvatarKey(userID: String, avatarKey: String?, ifVersionIs expected: String) async -> Result<String?, Error> {
         ConnectedWriteWitness.note(ConnectedWriteWitness.directoryAvatarKey)
         let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !uid.isEmpty else {
@@ -792,12 +813,18 @@ public final class AccountDirectoryService {
             return .failure(error)
         }
 
-        let path = "rest/v1/account_directory?user_id=eq.\(uid)&select=user_id,avatar_version"
+        guard let condition = Self.avatarVersionFilter(ifVersionIs: expected) else {
+            return .failure(NSError(domain: "AccountDirectoryService", code: 2,
+                                    userInfo: [NSLocalizedDescriptionKey: "avatar version cannot be written as a condition"]))
+        }
+        let query = [URLQueryItem(name: "user_id", value: "eq.\(uid)"),
+                     condition,
+                     URLQueryItem(name: "select", value: "user_id,avatar_version")]
         let headers = [
             "Prefer": "return=representation"
         ]
 
-        let result = await NetworkManager.shared.request(path: path, method: "PATCH", query: nil, jsonBody: body, headers: headers)
+        let result = await NetworkManager.shared.request(path: "rest/v1/account_directory", method: "PATCH", query: query, jsonBody: body, headers: headers)
         switch result {
         case .success(let data):
             guard Self.avatarKeyPatchMatchedARow(data) else { return .failure(AvatarKeyNoRowMatched()) }
