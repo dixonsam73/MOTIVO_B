@@ -54,8 +54,9 @@ CHECK still accept.
 1. **Service versions** (B-47, B-49). Checked 2026-11-12 with
    `supabase services`: production had moved to storage-api `v1.94.2`,
    PostgREST `v14.5` and gotrue `v2.197.0`. The local pins in
-   `supabase/.temp/` were set to those, the stack rebuilt, and both
-   rehearsals run again on them: same results (below). If the versions have
+   `supabase/.temp/` were set to those (and `storage-migration` to
+   production's last storage migration, `lifecycle-writer-coordination`),
+   the stack rebuilt, and both rehearsals run again: same results (below). If the versions have
    moved again by the day of the apply, do the same before going on.
 2. **Preflight.**
    ```
@@ -116,9 +117,12 @@ Expect `rolled back | t` (policies as before, constraint still validated).
 
 `supabase/tests/b48/rehearse.sh`, run twice with the same result (78 checks):
 first on storage-api v1.80.2 and PostgREST v14.1, then, after the version
-check, on **production's versions, storage-api v1.94.2 (81 storage
-migrations, the last `revoke-extra-lifecycle-postgres-grants`), PostgREST
-v14.5 and gotrue v2.197.0**. Postgres 17.6, membership enforcement ON for the
+check, on **production's versions, storage-api v1.94.2, PostgREST v14.5 and
+gotrue v2.197.0, with storage frozen at production's own migration level**
+(80 migrations, the last `lifecycle-writer-coordination`, read from
+production 2026-11-12; the v1.94.2 image alone runs one more,
+`revoke-extra-lifecycle-postgres-grants`, and the rehearsal passed at that
+level too). Postgres 17.6, membership enforcement ON for the
 HTTP part:
 
 - **Guards:** the migration applies with an existing old-name reference and
