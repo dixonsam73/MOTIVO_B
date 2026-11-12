@@ -17,6 +17,18 @@ import XCTest
 import UIKit
 @testable import Etudes
 
+/// The record's file, refusing writes when a test says so.
+private final class FlakyDisk {
+    var refuses: (Data) -> Bool = { _ in false }
+    private(set) var refused = 0
+    func write(_ data: Data, to url: URL) throws {
+        if refuses(data) { refused += 1; throw CocoaError(.fileWriteNoPermission) }
+        try data.write(to: url, options: .atomic)
+    }
+    /// The record of a reference write (an entry with the version it is conditional on).
+    static func holdsAReferenceWrite(_ data: Data) -> Bool { String(decoding: data, as: UTF8.self).contains("writeExpected") }
+}
+
 @MainActor
 final class AvatarUniqueNameTests: XCTestCase {
     private let uid = "fake"
@@ -314,7 +326,7 @@ final class AvatarUniqueNameTests: XCTestCase {
         var url = ledgerFile()
         var ledger = AvatarWorkLedger(userID: uid, fileURL: url)
         var name = AvatarObjectName.make(userID: uid)
-        ledger.begin(name: name, digest: AvatarWorkLedger.digest(jpeg(1)))
+        XCTAssertTrue(ledger.begin(name: name, digest: AvatarWorkLedger.digest(jpeg(1))))
         _ = await backend.upload(jpeg: jpeg(1), key: name)
         // While the publication is still running in this process it is NOT touched.
         await settleOnAFreshRead(backend, ledger)
@@ -330,9 +342,9 @@ final class AvatarUniqueNameTests: XCTestCase {
         backend = FakeAvatarBackend(picture: photo(9)); url = ledgerFile()
         ledger = AvatarWorkLedger(userID: uid, fileURL: url)
         name = AvatarObjectName.make(userID: uid)
-        ledger.begin(name: name, digest: AvatarWorkLedger.digest(jpeg(1)))
+        XCTAssertTrue(ledger.begin(name: name, digest: AvatarWorkLedger.digest(jpeg(1))))
         _ = await backend.upload(jpeg: jpeg(1), key: name)
-        ledger.willWrite(pointingAt: name, displacing: backend.key, expected: backend.version ?? "")
+        XCTAssertNotNil(ledger.willWrite(pointingAt: name, displacing: backend.key, expected: backend.version ?? ""))
         relaunched = AvatarWorkLedger(userID: uid, fileURL: url)
         await settleOnAFreshRead(backend, relaunched)
         XCTAssertNotNil(backend.objects[name], "a write that may have been sent: the image is kept")
@@ -343,6 +355,124 @@ final class AvatarUniqueNameTests: XCTestCase {
         guard case .published(let key, _) = await publish(2, backend, relaunched) else { return XCTFail() }
         XCTAssertEqual(Array(backend.objects.keys), [key]); shows(backend, 2)
         XCTAssertEqual(Set(backend.deletions.map(\.name)), [name, backend.legacyName])
+    }
+
+    // MARK: - The record comes first
+
+    /// THE FINAL CORRECTION (2026-11-12). The record of a reference write could
+    /// not be written to the file. Before the fix that failure was ignored and
+    /// the write was sent anyway, with only the upload on record; after a
+    /// restart the clean-up took the image for an upload no write was ever
+    /// sent for and deleted it, while the reference request was still on its
+    /// way. Now the request is not sent, in this attempt or any retry, and
+    /// what the clean-up finds after a restart is the truth.
+    func testAReferenceWriteThatCannotBeRecordedIsNeverSentAndNothingPendingIsDeletedAfterARestart() async throws {
+        let backend = FakeAvatarBackend(picture: photo(9))                 // the profile shows an older build's photo
+        let url = ledgerFile()
+        let disk = FlakyDisk()
+        let ledger = AvatarWorkLedger(userID: uid, fileURL: url)
+        ledger.writer = disk.write
+        disk.refuses = FlakyDisk.holdsAReferenceWrite                      // the upload can be recorded; the write cannot
+        backend.nextSetKeyIsDelayed = true                                 // were a write sent, it would be left pending
+
+        let outcome = await publish(1, backend, ledger)
+
+        XCTAssertEqual(outcome, .recordFailed)
+        XCTAssertEqual(disk.refused, 1, "precondition: the record of the write was refused by the disk")
+        XCTAssertEqual(backend.entries(by: "this").filter { $0.contains("setKey") }, [], "NO UNRECORDED REFERENCE REQUEST WAS SENT")
+        XCTAssertTrue(backend.nextSetKeyIsDelayed, "(the backend never saw one)")
+        let stored = try XCTUnwrap(backend.unreferenced.first, "the image had been stored")
+        XCTAssertEqual(ledger.entries[stored]?.writeExpected, nil, "memory holds no write either: it is never ahead of the file")
+        XCTAssertNil(ledger.entries[backend.legacyName], "and nothing is on record as displaced")
+
+        // A retry in the same process cannot get past the file.
+        let again = await publish(1, backend, ledger)
+        XCTAssertEqual(again, .recordFailed)
+        XCTAssertEqual(disk.refused, 2)
+        XCTAssertEqual(backend.entries(by: "this").filter { $0.contains("setKey") }, [], "the retry sent none either")
+        XCTAssertNil(backend.objects[stored], "the first attempt's image, for which no write was sent, was cleared up on the way")
+        let second = try XCTUnwrap(backend.unreferenced.first)
+
+        // The app stops. A new process reads the file and clears up.
+        let relaunched = AvatarWorkLedger(userID: uid, fileURL: url)
+        XCTAssertEqual(relaunched.entries, ledger.entries, "the file holds exactly what the process believed")
+        await settleOnAFreshRead(backend, relaunched)
+        backend.deliverTheDelayedWrite()                                   // nothing was ever on its way
+        XCTAssertEqual(backend.key, backend.legacyName, "the reference is untouched"); shows(backend, 9)
+        XCTAssertNotNil(backend.objects[backend.legacyName], "the profile's photo was not deleted")
+        XCTAssertEqual(backend.deletions.map(\.name), [stored, second], "only the two images no write was sent for")
+        XCTAssertTrue(relaunched.entries.isEmpty)
+
+        // The disk recovers. This time the write IS recorded, sent, and left
+        // unanswered: a PENDING publication. Restart, clean up: it is kept.
+        let healed = AvatarWorkLedger(userID: uid, fileURL: url)
+        backend.nextSetKeyIsDelayed = true
+        let pendingOutcome = await publish(1, backend, healed)
+        XCTAssertEqual(pendingOutcome, .referenceFailed)
+        XCTAssertEqual(backend.count("this: setKey SENT, NO ANSWER"), 1)
+        let pending = try XCTUnwrap(backend.unreferenced.first)
+        let afterRestart = AvatarWorkLedger(userID: uid, fileURL: url)
+        XCTAssertNotNil(afterRestart.entries[pending]?.writeExpected, "the write is in the file")
+        await settleOnAFreshRead(backend, afterRestart)
+        XCTAssertNotNil(backend.objects[pending], "NO PENDING PUBLICATION IS DELETED")
+        XCTAssertEqual(backend.deletions.count, 2, "nothing more was deleted")
+        backend.deliverTheDelayedWrite()
+        XCTAssertEqual(backend.key, pending); shows(backend, 1)
+    }
+
+    /// The same one step earlier: the upload cannot be recorded, so it is not
+    /// sent. Nothing reaches the server but the read.
+    func testAnUploadThatCannotBeRecordedIsNotSent() async throws {
+        let backend = FakeAvatarBackend(picture: photo(9))
+        let disk = FlakyDisk()
+        let ledger = AvatarWorkLedger(userID: uid, fileURL: ledgerFile())
+        ledger.writer = disk.write
+        disk.refuses = { _ in true }
+        for _ in 0..<2 {
+            let outcome = await publish(1, backend, ledger)
+            XCTAssertEqual(outcome, .recordFailed)
+        }
+        XCTAssertEqual(backend.log, ["this: probe", "this: probe"], "no upload, no write, no delete")
+        XCTAssertTrue(ledger.entries.isEmpty, "and memory holds nothing the file does not")
+        XCTAssertFalse(ledger.begin(name: AvatarObjectName.make(userID: uid), digest: "x"))
+        XCTAssertNil(ledger.willWrite(pointingAt: nil, displacing: backend.legacyName, expected: backend.version ?? ""))
+        disk.refuses = { _ in false }
+        guard case .published(let key, _) = await publish(1, backend, ledger) else { return XCTFail() }
+        XCTAssertEqual(Array(backend.objects.keys), [key]); shows(backend, 1)
+    }
+
+    /// A record that EXISTS AND CANNOT BE READ is not an empty record. Nothing
+    /// is recorded (so nothing is sent) and nothing is deleted until it can be
+    /// read, and it is not written over: the pending publication it holds is
+    /// still there afterwards.
+    func testARecordThatCannotBeReadStopsEverythingAndIsNotWrittenOver() async throws {
+        let backend = FakeAvatarBackend(picture: photo(9))
+        let url = ledgerFile()
+        let first = AvatarWorkLedger(userID: uid, fileURL: url)
+        backend.nextSetKeyIsDelayed = true
+        let unanswered = await publish(1, backend, first)
+        XCTAssertEqual(unanswered, .referenceFailed)
+        let pending = try XCTUnwrap(backend.unreferenced.first)
+        // The file is there and unreadable (here: something that is not a file).
+        let aside = url.appendingPathExtension("aside"); files.append(aside)
+        try FileManager.default.moveItem(at: url, to: aside)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+        let blocked = AvatarWorkLedger(userID: uid, fileURL: url)
+        XCTAssertTrue(blocked.entries.isEmpty, "precondition: it could not be read")
+        let outcome = await publish(2, backend, blocked)
+        XCTAssertEqual(outcome, .recordFailed)
+        await settleOnAFreshRead(backend, blocked)
+        XCTAssertEqual(backend.entries(by: "this").filter { !$0.hasSuffix("probe") }, ["this: upload", "this: setKey SENT, NO ANSWER"],
+                       "nothing was sent while the record could not be read")
+        XCTAssertNotNil(backend.objects[pending])
+        // It becomes readable again: the same object picks the record up, whole.
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.moveItem(at: aside, to: url)
+        await settleOnAFreshRead(backend, blocked)
+        XCTAssertNotNil(blocked.entries[pending]?.writeExpected, "the pending publication is still on record")
+        XCTAssertNotNil(backend.objects[pending], "and still stored"); XCTAssertTrue(backend.deletions.isEmpty)
+        backend.deliverTheDelayedWrite()
+        XCTAssertEqual(backend.key, pending); shows(backend, 1)
     }
 
     // MARK: - Whose image it is
@@ -403,7 +533,8 @@ final class AvatarUniqueNameTests: XCTestCase {
         backend.deletesFail = false
         let fresh = AvatarWorkLedger(userID: uid, fileURL: nil)
         // A device that only knows: "my image `second` has a write conditional on v1".
-        fresh.begin(name: second, digest: "x"); fresh.willWrite(pointingAt: second, displacing: first, expected: v1 ?? ""); fresh.end(name: second)
+        XCTAssertTrue(fresh.begin(name: second, digest: "x"))
+        XCTAssertNotNil(fresh.willWrite(pointingAt: second, displacing: first, expected: v1 ?? "")); fresh.end(name: second)
         // A stale read: the row as it was BEFORE that write (photo 1, version v1).
         await fresh.settle(rowExists: true, key: first, version: v1, backend: backend)
         XCTAssertNotNil(backend.objects[second], "the stale read does not condemn the published image")

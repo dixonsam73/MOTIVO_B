@@ -573,10 +573,12 @@ final class AuthManager: NSObject, ObservableObject {
                 var publishedVersion = probe.avatarVersion
                 if backendHasAvatar {
                     let held = (probe.avatarKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    let recorded = ledger.willWrite(pointingAt: nil, displacing: held, expected: seenVersion)
+                    // Not sent unless it is on record in the file first: the
+                    // marker stays and the removal is tried again later.
+                    guard let record = ledger.willWrite(pointingAt: nil, displacing: held, expected: seenVersion) else { return }
                     let write = await avatarBackend.setKey(nil, userID: backendID, ifVersionIs: seenVersion)
                     if write == .notMatched {
-                        ledger.writeWasRefused(pointingAt: nil, recorded: recorded)
+                        ledger.writeWasRefused(pointingAt: nil, recorded: record.displaced)
                         continue
                     }
                     guard case .written(let version) = write else {

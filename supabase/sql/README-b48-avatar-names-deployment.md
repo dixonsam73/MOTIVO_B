@@ -1,7 +1,8 @@
 # B-48 + avatar image names per upload — deployment (PREPARED, NOT EXECUTED)
 
-**Prepared** 2026-11-12. **Nothing here has run against production.** It needs
-one Codex review round of the SQL and Samuel's approval; Samuel runs it.
+**Prepared** 2026-11-12. **Nothing here has run against production.** Codex's
+review of the SQL passed 2026-11-12 (the files are unchanged since `4c8a4c1`).
+Samuel runs it, starting with the read-only preflight.
 
 ## What changes on the server
 

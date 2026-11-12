@@ -360,7 +360,12 @@ final class AvatarFreshnessTests: XCTestCase {
         // The publication reads the version, stores under a new name, records
         // the write, and only then sends it.
         let publish = try XCTUnwrap(backend.range(of: "static func publish(jpeg: Data, userID: String, backend: AvatarBackend, ledger: AvatarWorkLedger) async -> Outcome {"))
-        let body = String(backend[publish.lowerBound...].prefix(2_600))
+        let body = String(backend[publish.lowerBound...].prefix(3_400))
+        // Neither request is sent unless its record was written to the file.
+        XCTAssertTrue(body.contains("guard ledger.begin(name: name, digest: digest) else { return .recordFailed }"))
+        XCTAssertTrue(body.contains("guard let record = ledger.willWrite(pointingAt: name, displacing: probe.avatarKey, expected: expected) else {"))
+        XCTAssertTrue(branch.contains("guard let record = ledger.willWrite(pointingAt: nil, displacing: held, expected: seenVersion) else { return }"))
+        XCTAssertFalse(backend.contains("try? data.write"), "and no write to the record's file has its failure ignored")
         let read = try XCTUnwrap(body.range(of: "backend.probe(")), begin = try XCTUnwrap(body.range(of: "ledger.begin(name: name, digest: digest)"))
         let store = try XCTUnwrap(body.range(of: "backend.upload(jpeg: jpeg, key: name)"))
         let willWrite = try XCTUnwrap(body.range(of: "ledger.willWrite(pointingAt: name, displacing: probe.avatarKey, expected: expected)"))

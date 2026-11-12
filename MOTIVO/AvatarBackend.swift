@@ -118,6 +118,12 @@ protocol AvatarBackend: AnyObject {
 ///
 /// Deletion work that failed stays in the file and is tried again at the next
 /// publication, removal, or first read of the row after launch.
+///
+/// THE FILE COMES FIRST. No upload and no reference write is sent unless the
+/// record of it has been written to the file, successfully; and the state in
+/// memory is only ever what the file holds (`commit`). All of the above rests
+/// on that: a request the file does not know about is one the clean-up after
+/// a restart would misjudge.
 @MainActor
 final class AvatarWorkLedger {
     struct Entry: Codable, Equatable {
@@ -132,62 +138,108 @@ final class AvatarWorkLedger {
         var dead: Bool = false
     }
 
+    /// What `willWrite` put on record. Having one is the permission to send.
+    struct WriteRecord {
+        /// The name newly recorded as "held by the reference", if this call did so.
+        let displaced: String?
+    }
+
     let userID: String
     private let fileURL: URL?
+    /// ALWAYS WHAT THE FILE HOLDS. Never ahead of it: see `commit`.
     private(set) var entries: [String: Entry] = [:]
+    /// False until the file has been read (or found absent). While false
+    /// nothing can be recorded, so nothing is sent.
+    private var loaded = false
     /// Names a publication in THIS process is working on right now. Never
     /// written to the file: after a relaunch nothing is in flight.
     private var inFlight: Set<String> = []
+    /// The write to the file. A seam so a test can make it fail.
+    var writer: (Data, URL) throws -> Void = { data, url in try data.write(to: url, options: .atomic) }
 
     /// `fileURL` nil = memory only (tests of the algorithm on its own).
     init(userID: String, fileURL: URL?) {
         self.userID = userID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         self.fileURL = fileURL
-        if let fileURL, let data = try? Data(contentsOf: fileURL),
-           let stored = try? JSONDecoder().decode([Entry].self, from: data) {
-            for entry in stored where AvatarObjectName.isOwn(entry.name, userID: self.userID) { entries[entry.name] = entry }
-        }
+        _ = ready()
     }
 
-    private func save() {
-        guard let fileURL else { return }
-        let list = entries.values.sorted { $0.name < $1.name }
-        if list.isEmpty { try? FileManager.default.removeItem(at: fileURL); return }
-        guard let data = try? JSONEncoder().encode(list) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+    /// Reads the file once. A file that EXISTS AND CANNOT BE READ (the device
+    /// has not been unlocked since it started, say) is not an empty record:
+    /// the record is unavailable, every attempt to record fails, and the read
+    /// is tried again at the next use. Writing a fresh record over one that
+    /// could not be read would lose the work it holds.
+    private func ready() -> Bool {
+        if loaded { return true }
+        guard let fileURL else { loaded = true; return true }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { loaded = true; return true }
+        guard let data = try? Data(contentsOf: fileURL) else { return false }
+        // Written whole or not at all (atomic), so unreadable CONTENT is not
+        // expected; if it happens the record starts empty, which can only
+        // leave images undeleted, never delete one.
+        let stored = (try? JSONDecoder().decode([Entry].self, from: data)) ?? []
+        for entry in stored where AvatarObjectName.isOwn(entry.name, userID: userID) { entries[entry.name] = entry }
+        loaded = true
+        return true
+    }
+
+    /// THE ONLY WAY THE RECORD CHANGES: the new state is written to the file,
+    /// and only when that write has succeeded does it become the state in
+    /// memory. If the write fails nothing has changed anywhere, the caller is
+    /// told, and it must not send the request the record was for.
+    ///
+    /// (Final correction, 2026-11-12. The write's failure used to be ignored.
+    /// A reference write could then be sent with only the upload on record;
+    /// after a restart that image looked like an upload no write was ever
+    /// sent for, and the clean-up deleted it while the reference request was
+    /// still on its way. And because memory ran ahead of the file, a retry in
+    /// the same process would have passed without the file ever being right.)
+    private func commit(_ change: (inout [String: Entry]) -> Void) -> Bool {
+        guard ready() else { return false }
+        var next = entries
+        change(&next)
+        if next == entries { return true }
+        if let fileURL {
+            guard let data = try? JSONEncoder().encode(next.values.sorted { $0.name < $1.name }) else { return false }
+            do { try writer(data, fileURL) } catch { return false }
+        }
+        entries = next
+        return true
     }
 
     static func digest(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Before the upload request: the name exists in the record first, so an
-    /// image stored by a request the app did not live to hear about is known.
-    func begin(name: String, digest: String) {
-        entries[name] = Entry(name: name, writeExpected: nil, mine: true, digest: digest)
+    /// Before the upload request: the name is in the file first, so an image
+    /// stored by a request the app did not live to hear about is known.
+    /// FALSE = NOT RECORDED: THE UPLOAD MUST NOT BE SENT.
+    func begin(name: String, digest: String) -> Bool {
+        guard commit({ $0[name] = Entry(name: name, writeExpected: nil, mine: true, digest: digest) }) else { return false }
         inFlight.insert(name)
-        save()
+        return true
     }
 
     /// Before the reference write that points at `name` (nil: the write clears
-    /// the reference) and takes it away from `displacing`. Returns the name
-    /// newly put on record as "held by the reference", if this call did so.
-    @discardableResult
-    func willWrite(pointingAt name: String?, displacing: String?, expected: String) -> String? {
-        if let name, var entry = entries[name] {
-            entry.writeExpected = expected
-            entries[name] = entry
-        }
-        var recorded: String?
+    /// the reference) and takes it away from `displacing`.
+    /// NIL = NOT RECORDED: THE REFERENCE WRITE MUST NOT BE SENT. The image
+    /// stored for it then has no write on record, truthfully, and is cleared
+    /// up as an upload no write was sent for.
+    func willWrite(pointingAt name: String?, displacing: String?, expected: String) -> WriteRecord? {
+        guard ready() else { return nil }
+        if let name, entries[name]?.mine != true { return nil }      // its upload was never recorded
+        var displaced: String?
         // Only an avatar of this member is ever queued for deletion, whatever
         // the row says (B-48: the reference was unchecked text).
         if let old = displacing?.trimmingCharacters(in: .whitespacesAndNewlines), !old.isEmpty, old != name,
            AvatarObjectName.isOwn(old, userID: userID), entries[old] == nil {
-            entries[old] = Entry(name: old, writeExpected: expected, mine: false, digest: nil)
-            recorded = old
+            displaced = old
         }
-        save()
-        return recorded
+        let recorded = commit { next in
+            if let name { next[name]?.writeExpected = expected }
+            if let displaced { next[displaced] = Entry(name: displaced, writeExpected: expected, mine: false, digest: nil) }
+        }
+        return recorded ? WriteRecord(displaced: displaced) : nil
     }
 
     /// THE SERVER ANSWERED AND REFUSED the write (no row matched). That is a
@@ -199,10 +251,13 @@ final class AvatarWorkLedger {
     ///     it comes off again: whoever did displace it deletes it. If an
     ///     EARLIER attempt of this device put it there, it stays, because that
     ///     attempt's write may be the one that displaced it.
+    /// If this cannot be written to the file, nothing changes: the names stay
+    /// on record as "write sent", which a later read of the row settles.
     func writeWasRefused(pointingAt name: String?, recorded: String?) {
-        if let name, entries[name]?.mine == true { entries[name]?.dead = true }
-        if let recorded, entries[recorded]?.mine == false, entries[recorded]?.dead == false { entries[recorded] = nil }
-        save()
+        _ = commit { next in
+            if let name, next[name]?.mine == true { next[name]?.dead = true }
+            if let recorded, next[recorded]?.mine == false, next[recorded]?.dead == false { next[recorded] = nil }
+        }
     }
 
     /// The publication working on `name` has returned, whatever its outcome.
@@ -219,35 +274,38 @@ final class AvatarWorkLedger {
     var owesDeletion: Bool { entries.values.contains { $0.dead } }
     func owesDeletion(of name: String) -> Bool { entries[name]?.dead == true }
 
-    /// Applies the rule to one read of the row. Changes the record only.
+    /// Applies the rule to one read of the row. Changes the record only (and
+    /// not at all if the change cannot be written to the file).
     func resolve(rowExists: Bool, key: String?, version: String?) {
         let reference = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        for (name, entry) in entries {
-            if rowExists, name == reference {
-                // The row names it: alive, whatever was thought.
-                if entry.mine {
-                    // This device's own image stays on record while it is the
-                    // photo, so it is cleaned up if a build that deletes
-                    // nothing displaces it later.
-                    if entry.dead { entries[name]?.dead = false }
-                } else if entry.dead || Self.isStrictlyNewer(version, than: entry.writeExpected ?? "") {
-                    // An image the reference held and still (or again) names
-                    // at a LATER version: this device's write that would have
-                    // displaced it can no longer be accepted, so nothing is
-                    // owed. At the SAME version that write may still arrive:
-                    // the name stays on record.
-                    entries[name] = nil
+        let working = inFlight
+        _ = commit { next in
+            for (name, entry) in next {
+                if rowExists, name == reference {
+                    // The row names it: alive, whatever was thought.
+                    if entry.mine {
+                        // This device's own image stays on record while it is the
+                        // photo, so it is cleaned up if a build that deletes
+                        // nothing displaces it later.
+                        if entry.dead { next[name]?.dead = false }
+                    } else if entry.dead || Self.isStrictlyNewer(version, than: entry.writeExpected ?? "") {
+                        // An image the reference held and still (or again) names
+                        // at a LATER version: this device's write that would have
+                        // displaced it can no longer be accepted, so nothing is
+                        // owed. At the SAME version that write may still arrive:
+                        // the name stays on record.
+                        next[name] = nil
+                    }
+                    continue
                 }
-                continue
+                if entry.dead { continue }
+                guard let expected = entry.writeExpected else {
+                    if entry.mine, !working.contains(name) { next[name]?.dead = true }
+                    continue
+                }
+                if rowExists, Self.isStrictlyNewer(version, than: expected) { next[name]?.dead = true }
             }
-            if entry.dead { continue }
-            guard let expected = entry.writeExpected else {
-                if entry.mine, !inFlight.contains(name) { entries[name]?.dead = true }
-                continue
-            }
-            if rowExists, Self.isStrictlyNewer(version, than: expected) { entries[name]?.dead = true }
         }
-        save()
     }
 
     /// One read of the row, then every deletion that read allows. Nothing a
@@ -258,8 +316,9 @@ final class AvatarWorkLedger {
         for name in entries.values.filter({ $0.dead }).map(\.name).sorted() {
             guard entries[name]?.dead == true, !inFlight.contains(name), name != reference else { continue }
             if await backend.deleteObject(key: name) {
-                entries[name] = nil
-                save()
+                // If this cannot be written, the deletion stays owed and is
+                // sent again later, for a name that is by then gone.
+                _ = commit { $0[name] = nil }
             }
         }
     }
@@ -319,6 +378,9 @@ enum AvatarPublication {
         case couldNotRead
         case uploadFailed
         case referenceFailed
+        /// This device could not write its record of the work to its own
+        /// file, so the request the record was for was NOT SENT.
+        case recordFailed
     }
 
     static let rounds = 3
@@ -337,13 +399,19 @@ enum AvatarPublication {
                 return .published(key: key, version: probe.avatarVersion)
             }
             let name = AvatarObjectName.make(userID: userID)
-            ledger.begin(name: name, digest: digest)
+            // NOTHING IS SENT THAT IS NOT ON RECORD IN THE FILE FIRST.
+            guard ledger.begin(name: name, digest: digest) else { return .recordFailed }
             guard await backend.upload(jpeg: jpeg, key: name) else {
                 ledger.end(name: name)      // no write was sent for it: abandoned, deleted at the next settle
                 return .uploadFailed
             }
             let expected = OwnAvatarSync.normalized(probe.avatarVersion)
-            let recorded = ledger.willWrite(pointingAt: name, displacing: probe.avatarKey, expected: expected)
+            guard let record = ledger.willWrite(pointingAt: name, displacing: probe.avatarKey, expected: expected) else {
+                // The write could not be recorded, so it is not sent. On
+                // record the image is what it is: stored, no write sent.
+                ledger.end(name: name)
+                return .recordFailed
+            }
             let write = await backend.setKey(name, userID: userID, ifVersionIs: expected)
             ledger.end(name: name)
             switch write {
@@ -355,7 +423,7 @@ enum AvatarPublication {
             case .notMatched:
                 // Refused for certain: `name` is deleted at the next settle
                 // (the top of the next round, or the next time this runs).
-                ledger.writeWasRefused(pointingAt: name, recorded: recorded)
+                ledger.writeWasRefused(pointingAt: name, recorded: record.displaced)
                 continue
             case .failed:
                 return .referenceFailed     // unknown outcome: `name` is kept until a read settles it

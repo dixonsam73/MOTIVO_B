@@ -898,6 +898,32 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(ProfileStore.avatarImage(for: appleID)), photo(2)))
     }
 
+    /// The removal's reference write cannot be recorded in the file, so it is
+    /// NOT SENT: nothing is cleared, nothing deleted, and the removal keeps
+    /// waiting. When the file can be written again the removal goes through.
+    func testARemovalWhoseReferenceWriteCannotBeRecordedIsNotSent() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        try arrangeAWaitingRemovalOfPhotoOne(auth)
+        let (backend, first) = try await backendShowingPhotoOnePublishedByThisBuild()
+        auth.avatarBackend = backend
+        let ledger = auth.avatarLedger(for: backendID)
+        ledger.writer = { _, _ in throw CocoaError(.fileWriteNoPermission) }
+        for attempt in ["first", "retry"] {
+            await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: attempt)
+            XCTAssertEqual(backend.entries(by: "this").filter { $0.contains("setKey") }, [], "\(attempt): no unrecorded reference request was sent")
+            XCTAssertEqual(backend.key, first); XCTAssertNotNil(backend.referenced)
+            XCTAssertTrue(backend.deletions.isEmpty)
+            XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion(), "\(attempt): the removal is still waiting")
+            XCTAssertTrue(ledger.entries.isEmpty, "\(attempt): memory holds nothing the file does not")
+        }
+        ledger.writer = { data, url in try data.write(to: url, options: .atomic) }
+        await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "the file can be written")
+        XCTAssertNil(backend.key); XCTAssertTrue(backend.objects.isEmpty)
+        XCTAssertEqual(backend.deletions.map(\.name), [first])
+        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync())
+    }
+
     /// A delete this device could not make is on record in a file. After a
     /// relaunch, the first read of the owner's row makes it: only as that
     /// owner, and never for the image the row names.

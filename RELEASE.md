@@ -2694,7 +2694,16 @@ the join.
   with its answer lost is never deleted: it stays on record until a read
   of the row shows a strictly later version and another reference. A
   delete that fails stays on record and is retried at the next
-  publication, removal, or first read of the row after launch. *B-48,*
+  publication, removal, or first read of the row after launch. *The
+  record comes first* (final correction after Codex's review of the
+  implementation, same day): no upload and no reference write is sent
+  unless its record has been written to the file, and memory never holds
+  more than the file. A failed write stops that attempt, and any retry,
+  before the request; a record that exists and cannot be read stops
+  everything and is not written over. Before this a failed write was
+  ignored, a reference write could go out with only the upload on
+  record, and the clean-up after a restart deleted that image while the
+  request was pending. *B-48,*
   found while planning this: `avatar_key` was unchecked text and two
   service-role sweeps delete what it names; a CHECK now ties it to the
   row's own folder. *Server:* migration `20261112120000`, preflight,
@@ -2702,20 +2711,22 @@ the join.
   `README-b48-avatar-names-deployment.md`. The rollback keeps the
   ownership constraint (Codex's second correction) and refuses while any
   per-upload image exists. **Order: server first** (a new build cannot
-  publish a photo against the old INSERT policy), one Codex round, Samuel
-  runs it. *Evidence, all local:* `supabase/tests/b48/rehearse.sh`, 78
+  publish a photo against the old INSERT policy). Codex's SQL review
+  passed 2026-11-12; Samuel runs the preflight and then the apply. *Evidence, all local:* `supabase/tests/b48/rehearse.sh`, 78
   checks with real member sessions (guards, storage policies, the
   reference check, rollback); `p6-single-delete/e2e.sh`, 82 checks (both
   Edge Functions, unchanged, remove a referenced image and a second one
   in the folder, either form); the fidelity gate differs from the
-  snapshot in exactly the two policies and the constraint. App: 97
+  snapshot in exactly the two policies and the constraint. App: 101
   focused tests, among them the delayed delete outlasting another
   device's refused and repeated publication, for a removal and for a
   replacement, and the unanswered, lost-answer and late-arriving
-  reference writes. Full target: 1,453 tests (SyncTest scheme), 1,252
+  reference writes, and a record that cannot be written or read (those
+  fail with the old fault put back: 25 assertions). Full target, run
+  before the final correction: 1,453 tests (SyncTest scheme), 1,252
   (Debug), the seven known order-dependent failures and no other (the
-  local Supabase stack was up, so the tests that need it ran); Release
-  builds.
+  local Supabase stack was up, so the tests that need it ran). After it:
+  the focused tests on both schemes, and the Release build.
   *Not covered:* guarantees hold between builds from this one on (an
   older build still overwrites the fixed name and writes without a
   condition); an older PHOTO published late over a newer one can still

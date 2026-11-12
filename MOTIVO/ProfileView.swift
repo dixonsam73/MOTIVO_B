@@ -2428,7 +2428,7 @@ private var sessionSetupSection: some View {
              ProfileStore.noteOwnAvatarPublished(version: publishedVersion, for: auth.currentUserID)
              ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
              return true
-         case .couldNotRead, .uploadFailed:
+         case .couldNotRead, .uploadFailed, .recordFailed:
              avatarSyncErrorMessage = "Couldn’t upload your avatar. Please try again."
              showAvatarSyncErrorAlert = true
              return false
