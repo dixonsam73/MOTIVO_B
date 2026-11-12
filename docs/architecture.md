@@ -667,7 +667,9 @@ other one. This is accepted for v1.
   and enters the journal clocked just after the state it displaces, so it
   never outranks a newer photo the journal has yet to deliver. A removal
   is published to Connected only when the profile still shows the picture
-  it removes.
+  it removes. Every write of the avatar reference is conditional on the
+  version the device read (the server checks and writes in one statement),
+  and a removal writes the reference before it deletes the image.
 - **Signing in to Connected** no longer re-owns journal entries. Publication
   identifiers stay in the Connected domain.
 - **A device not signed in to Connected** can't update a shared post. Its

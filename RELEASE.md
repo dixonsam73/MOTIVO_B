@@ -2654,6 +2654,34 @@ the join.
   that device has not yet seen is withdrawn and has to be made again; the
   check before publishing a removal and the removal itself are two
   requests, milliseconds apart. C-194 stays deferred.
+  **Avatar safety, fourth pass, 2026-11-12 (`16d6170`): an outdated
+  removal against a newer publication. Automated tests only.** The last
+  limit above was the fault: after a removal's check and before its
+  deletion, another device could publish a new photo, and the removal
+  then deleted that photo's image (it has one fixed name) and cleared its
+  reference. Five tests reproduced it on `b33fdae`
+  (`fourth-pass-reproduction-before-fix.log`). *The fix:* every write of
+  the avatar reference is conditional on `avatar_version`, the stamp the
+  server puts on each reference write, as a filter on the request, so the
+  server checks and writes in one statement. A removal writes the
+  reference first and deletes the image only once that write is
+  accepted; a refused write deletes nothing and the device looks again.
+  A publication reads the version before storing the image, and if its
+  reference write is refused (a removal landed in between) it stores the
+  image again. *This reverses C-33's order* (image first), which is what
+  deleted the newer photo; a failed image delete now leaves an image with
+  no reference until the device retries (the marker is kept), and account
+  deletion sweeps the folder in any case (B-20). Full target: 1,431 tests
+  (SyncTest scheme), 1,233 (Debug), the seven known failures.
+  *What it cannot close:* the storage API has no conditional delete. If
+  this device's reference write is accepted and its one delete request,
+  already sent, reaches the server only after the other device has been
+  refused, read again, stored again and written its reference, that
+  image is deleted with its reference set. Closing it needs a backend
+  change, **proposed and not made**: an image name per upload, so a
+  delete names exactly the image the device checked (storage policies on
+  the `avatars` bucket, the client's upload and cleanup, and the fixed
+  name assumed in B-20's sweep).
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
