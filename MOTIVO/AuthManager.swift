@@ -265,6 +265,16 @@ final class AuthManager: NSObject, ObservableObject {
     #if canImport(UIKit)
     /// The Connected profile's avatar. The network in the app; tests put one in memory.
     lazy var avatarBackend: AvatarBackend = NetworkAvatarBackend()
+    /// What this device still owes each member's avatar folder (unfinished
+    /// publications, images to delete), one record per backend user.
+    private var avatarLedgers: [String: AvatarWorkLedger] = [:]
+    func avatarLedger(for backendUserID: String) -> AvatarWorkLedger {
+        let uid = backendUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let ledger = avatarLedgers[uid] { return ledger }
+        let ledger = AvatarWorkLedger(userID: uid, fileURL: ProfileStore.avatarWorkFileURL(forBackendUser: uid))
+        avatarLedgers[uid] = ledger
+        return ledger
+    }
     #endif
     /// C-192: the last queued avatar promotion (see `syncPendingLocalAvatarToConnectedIfNeeded`).
     private var avatarPromotionTail: Task<Void, Never>?
@@ -430,22 +440,22 @@ final class AuthManager: NSObject, ObservableObject {
 
     // MARK: - M7B Avatar promotion
 
-    /// C-33: is the avatar object known to be gone, such that dropping the
-    /// pointer to it cannot strand anything?
+    /// Is the named avatar image known to be gone, so the delete this device
+    /// owes for it (`AvatarWorkLedger`) can come off the record?
     ///
     /// True for an outright success, and for a response that says the object
-    /// was not there to begin with — in that case there is nothing to strand,
-    /// and refusing to clear the column would leave the member's deletion never
-    /// propagating to peers, which is a worse outcome than the orphan this
-    /// guard exists to prevent.
+    /// was not there to begin with (another device, or an earlier request of
+    /// this one, already deleted it).
     ///
-    /// **The exact response Supabase Storage returns for a DELETE of a missing
-    /// object is NOT established here**, and is deliberately not asserted: it
-    /// may be a bare 404 or a 400 whose body carries a 404. The body check is a
-    /// defensive superset for that reason. Everything else — transport
-    /// failures, 401/403, 5xx — is treated as "still there", which is the safe
-    /// direction: the pointer survives, nothing is orphaned, and the pending
-    /// marker retries.
+    /// **Observed on the local stack, 2026-11-12 (storage-api v1.80.2,
+    /// `supabase/tests/b48/rehearse.sh`):** a DELETE of a missing object
+    /// answers HTTP 400 with the body `{"statusCode":"404","error":"not_found",
+    /// "message":"Object not found","code":"NoSuchKey"}`; a DELETE the policy
+    /// refuses answers `"statusCode":"403"`, "Access denied", which is NOT
+    /// read as gone. The hosted service was not probed, so the body check
+    /// stays a defensive superset (a bare 404 counts too). Everything else —
+    /// transport failures, 401/403, 5xx — is treated as "still there", which
+    /// is the safe direction: the deletion stays owed and is retried.
     static func avatarObjectIsAbsent(after result: Result<Void, Error>) -> Bool {
         switch result {
         case .success:
@@ -533,57 +543,67 @@ final class AuthManager: NSObject, ObservableObject {
                     return
                 }
 
-                // FOURTH PASS (2026-11-12): THE REFERENCE FIRST, CONDITIONALLY;
-                // THE IMAGE ONLY AFTER THE SERVER HAS ACCEPTED THAT WRITE.
+                // THE REFERENCE FIRST, CONDITIONALLY; THEN THE EXACT IMAGE IT HELD.
                 //
-                // The look above and the deletion below are separate requests,
+                // The look above and the writes below are separate requests,
                 // and another of the owner's devices can publish a new photo
-                // between them. The image has one fixed name, so deleting it
-                // then deletes THAT photo, and clearing the reference clears the
-                // reference to it. So the reference is cleared with a write the
+                // between them. So the reference is cleared with a write the
                 // server makes only if `avatar_version` is still what the look
-                // read. If another device has written the reference since, the
-                // server refuses, nothing has been deleted, and this device
-                // looks again (the photo now shown is not the one this removal
-                // removes, so the removal is withdrawn above).
+                // read (fourth pass). If another device has written the
+                // reference since, the server refuses, nothing has been
+                // deleted, and this device looks again (the photo now shown is
+                // not the one this removal removes, so the removal is
+                // withdrawn above).
                 //
-                // The same write is made when the reference is already clear and
-                // only a leftover image is to go: it changes nothing but the
-                // version, and it is what a device half way through publishing
-                // is refused by, so it stores its image again.
+                // The image is then deleted BY THE NAME THE REFERENCE HELD, and
+                // only once the server has accepted the write that displaced
+                // it. Every upload has its own name, so however late that
+                // delete arrives it cannot reach a photo published since
+                // (2026-11-12; with one fixed name it could, and did). The
+                // name is on record before the write is sent
+                // (`AvatarWorkLedger`): if the write's outcome is never heard,
+                // nothing is deleted until a read of the row settles it, and a
+                // delete that fails is tried again.
                 //
-                // THIS REVERSES C-33's ORDER, deliberately. C-33 proved the image
-                // gone before dropping the reference, so a failed delete could
-                // not strand an image nothing points at. That order is exactly
-                // what deletes a newer photo here. In the new order a failed
-                // delete leaves an image with no reference until this device
-                // tries again: the marker is kept until the image is known to be
-                // gone, and the next attempt finds the reference clear and
-                // deletes the leftover. An image stranded for good now needs
-                // this device never to try again (app deleted in that moment),
-                // and even then deleting the account removes it: the server
-                // sweeps the member's avatar folder, not only the reference
-                // (B-20).
-                let write = await avatarBackend.setKey(nil, userID: backendID, ifVersionIs: seenVersion)
-                if write == .notMatched { continue }
-                guard case .written(let publishedVersion) = write else {
-                    #if DEBUG
-                    NSLog("[Auth] pending local avatar deletion retry retained user=%@ reason=%@", backendID, reason)
-                    #endif
-                    return
+                // C-33's order stays reversed (reference, then image): a failed
+                // delete leaves an image nothing points at until the retry.
+                let ledger = avatarLedger(for: backendID)
+                // Whatever earlier attempts left: settled on this read.
+                await ledger.settle(rowExists: true, key: probe.avatarKey, version: probe.avatarVersion, backend: avatarBackend)
+                var publishedVersion = probe.avatarVersion
+                if backendHasAvatar {
+                    let held = (probe.avatarKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let recorded = ledger.willWrite(pointingAt: nil, displacing: held, expected: seenVersion)
+                    let write = await avatarBackend.setKey(nil, userID: backendID, ifVersionIs: seenVersion)
+                    if write == .notMatched {
+                        ledger.writeWasRefused(pointingAt: nil, recorded: recorded)
+                        continue
+                    }
+                    guard case .written(let version) = write else {
+                        #if DEBUG
+                        NSLog("[Auth] pending local avatar deletion retry retained user=%@ reason=%@", backendID, reason)
+                        #endif
+                        return
+                    }
+                    publishedVersion = version
+                    // The server's answer is the read: the image is displaced.
+                    await ledger.settle(rowExists: true, key: nil, version: version, backend: avatarBackend)
                 }
+                // The reference is clear: already (another device, or an earlier
+                // attempt of this one whose answer was lost), or just now.
                 backendAvatarKey = nil
                 // Not if the avatar was marked again since the snapshot: an image
                 // the sync wrote meanwhile is not this removal's to delete, and the
-                // promotion queued for that marking publishes it over what is left.
+                // promotion queued for that marking publishes it.
                 guard ProfileStore.deleteAvatarForPendingDeletion(for: connectedStorageID, ifUnchangedSince: marking) else { return }
-                guard await avatarBackend.deleteObject(userID: backendID) else {
+                // The marker is what brings this device back: kept while an
+                // image this removal displaced is still to be deleted.
+                guard !ledger.owesDeletion else {
                     #if DEBUG
                     NSLog("[Auth] pending local avatar object delete retry retained user=%@ reason=%@", backendID, reason)
                     #endif
                     return
                 }
-                await invalidateAvatarCaches(avatarKey: "users/\(backendID)/avatar.jpg")
                 ProfileStore.noteOwnAvatarPublished(version: publishedVersion, for: connectedStorageID)
                 ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
                 #if DEBUG
@@ -612,7 +632,8 @@ final class AuthManager: NSObject, ObservableObject {
             }
         }
 
-        guard case .published(let avatarKey, let publishedVersion) = await AvatarPublication.publish(jpeg: jpegData, userID: backendID, backend: avatarBackend) else {
+        guard case .published(let avatarKey, let publishedVersion) = await AvatarPublication.publish(jpeg: jpegData, userID: backendID, backend: avatarBackend,
+                                                                                                   ledger: avatarLedger(for: backendID)) else {
             #if DEBUG
             NSLog("[Auth] pending local avatar upload retry retained user=%@ reason=%@", backendID, reason)
             #endif
@@ -753,6 +774,18 @@ final class AuthManager: NSObject, ObservableObject {
             await self.syncOwnAvatarFromBackend(avatarKey: row.avatarKey, avatarVersion: row.avatarVersion)
         }
     }
+
+    #if canImport(UIKit)
+    /// Applies one read of the owner's row to the avatar storage work on
+    /// record, and makes the deletions it allows. Only as that owner, Connected.
+    func settleAvatarWork(owner: String, key: String?, version: String?) async {
+        let uid = owner.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !uid.isEmpty, !LocalFactoryReset.isInProgress, BackendEnvironment.shared.isConnected,
+              BackendConfig.isConfigured, hasSupabaseAccessToken,
+              backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == uid else { return }
+        await avatarLedger(for: uid).settle(rowExists: true, key: key, version: version, backend: avatarBackend)
+    }
+    #endif
 
     private func invalidateAvatarCaches(avatarKey: String) async {
         let trimmed = avatarKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -926,6 +959,12 @@ final class AuthManager: NSObject, ObservableObject {
             self.backendAvatarKey = row.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines)
             // P5-I / C-34 R2: follow a replacement made on another device.
             Task { await self.syncOwnAvatarFromBackend(avatarKey: row.avatarKey, avatarVersion: row.avatarVersion) }
+            #if canImport(UIKit)
+            // The first read of the row after launch: finish whatever avatar
+            // storage work an earlier run left (an interrupted publication, a
+            // delete that failed). Decided on this read; see `AvatarWorkLedger`.
+            Task { await self.settleAvatarWork(owner: userID, key: row.avatarKey, version: row.avatarVersion) }
+            #endif
 
             let viewContext = PersistenceController.shared.container.viewContext
             ProfileStore.hydrateMissingLocalIdentity(

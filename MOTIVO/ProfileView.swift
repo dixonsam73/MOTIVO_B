@@ -2414,13 +2414,14 @@ private var sessionSetupSection: some View {
          avatarSyncInFlight = true
          defer { avatarSyncInFlight = false }
 
-         // Store the image, then point the reference at it, with the one
-         // publication the promotion also uses: the reference write is
-         // conditional on the version read first, and is repeated with the
-         // image if another device wrote the reference meanwhile
-         // (`AvatarPublication`, fourth pass).
+         // Store the image under a new name, point the reference at it, delete
+         // the image the reference named before: the one publication the
+         // promotion also uses. The reference write is conditional on the
+         // version read first, and is repeated with the image if another
+         // device wrote the reference meanwhile (`AvatarPublication`).
          let marking = ProfileStore.pendingLocalAvatarGeneration
-         switch await AvatarPublication.publish(jpeg: jpegData, userID: backendID, backend: auth.avatarBackend) {
+         switch await AvatarPublication.publish(jpeg: jpegData, userID: backendID, backend: auth.avatarBackend,
+                                                ledger: auth.avatarLedger(for: backendID)) {
          case .published(let avatarKey, let publishedVersion):
              // Bust remote caches for this key (image + signed URL), because content may have changed.
              await invalidateRemoteAvatarCaches(avatarKey: avatarKey)

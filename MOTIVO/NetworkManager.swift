@@ -6,7 +6,7 @@
 //  SEARCH-TOKEN: 20260210_182200_Phase15_Step3A_AvatarUploadDelete
 //
 //  CHANGE-ID: 20260210_194800_Phase15_AvatarUIDLowercase_RLSFix
-//  SCOPE: Phase 15 Step 3B — normalize backendUserID to lowercase when constructing avatar storage path to satisfy RLS policy users/<auth.uid()>/avatar.jpg; no other behavior changes.
+//  SCOPE: Phase 15 Step 3B — normalize backendUserID to lowercase when constructing avatar storage path to satisfy the RLS policy on users/<auth.uid()>/ (now done in AvatarObjectName); no other behavior changes.
 //  SEARCH-TOKEN: 20260210_194800_Phase15_AvatarUIDLowercase_RLSFix
 //
 
@@ -496,21 +496,22 @@ public final class NetworkManager {
 
     // MARK: - Phase 15 Step 3A (Avatars) — backend primitives (upload/delete)
 
-    /// Uploads (upserts) the caller's avatar JPEG to the `avatars` bucket.
-    /// Storage key convention (locked): `users/<uid>/avatar.jpg`
-    /// - Returns: The `avatar_key` string to store in `account_directory.avatar_key`.
-    public func uploadAvatarJPEG(data: Data, backendUserID: String) async -> Result<String, Error> {
+    /// Stores an avatar JPEG in the `avatars` bucket under exactly `objectKey`
+    /// (`users/<uid>/avatar-<32 hex>.jpg`, a name per upload: see
+    /// `AvatarObjectName`). CREATE ONLY: no upsert header is sent, and the
+    /// server's policies allow no update of such a name, so an image is
+    /// written once and can never be overwritten.
+    public func uploadAvatarJPEG(data: Data, objectKey: String) async -> Result<String, Error> {
         ConnectedWriteWitness.note(ConnectedWriteWitness.avatarUpload)
         guard let baseURL else {
             return .failure(NetworkError.notConfigured)
         }
 
-        let uid = backendUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !uid.isEmpty else {
-            return .failure(NetworkError.invalidURL("empty backendUserID"))
+        let key = objectKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard key.hasPrefix("users/"), key.hasSuffix(".jpg") else {
+            return .failure(NetworkError.invalidURL("not an avatar object key"))
         }
 
-        let key = "users/\(uid)/avatar.jpg"
         let encodedKey = percentEncodePathSegments(key)
         let path = "storage/v1/object/avatars/\(encodedKey)"
 
@@ -531,7 +532,6 @@ public final class NetworkManager {
         }
 
         request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
-        request.setValue("true", forHTTPHeaderField: "x-upsert")
 
 
         do {
@@ -553,20 +553,20 @@ public final class NetworkManager {
         }
     }
 
-    /// Deletes the caller's avatar object from the `avatars` bucket.
-    /// Storage key convention (locked): `users/<uid>/avatar.jpg`
-    public func deleteAvatarObject(backendUserID: String) async -> Result<Void, Error> {
+    /// Deletes exactly `objectKey` from the `avatars` bucket: the one image
+    /// named, never "the member's avatar". A delete that arrives late can
+    /// therefore only remove the image it was sent for.
+    public func deleteAvatarObject(objectKey: String) async -> Result<Void, Error> {
         ConnectedWriteWitness.note(ConnectedWriteWitness.avatarDelete)
         guard let baseURL else {
             return .failure(NetworkError.notConfigured)
         }
 
-        let uid = backendUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !uid.isEmpty else {
-            return .failure(NetworkError.invalidURL("empty backendUserID"))
+        let key = objectKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard key.hasPrefix("users/"), key.hasSuffix(".jpg") else {
+            return .failure(NetworkError.invalidURL("not an avatar object key"))
         }
 
-        let key = "users/\(uid)/avatar.jpg"
         let encodedKey = percentEncodePathSegments(key)
         let path = "storage/v1/object/avatars/\(encodedKey)"
 
@@ -616,7 +616,7 @@ import UIKit
 #endif
 
 /// Shared cache/pipeline for remote directory avatars (bucket: 'avatars').
-/// Path convention: `users/<uid>/avatar.jpg` stored in `account_directory.avatar_key`.
+/// Path convention: `users/<uid>/avatar-<32 hex>.jpg` (or the older fixed `users/<uid>/avatar.jpg`), as stored in `account_directory.avatar_key`.
 actor RemoteAvatarSignedURLCache {
     static let shared = RemoteAvatarSignedURLCache()
 
@@ -685,7 +685,7 @@ enum RemoteAvatarImageCache {
 /// error and no test failure for the site you forget. One lookup path cannot be
 /// missed.
 ///
-/// The key already encodes the subject (`users/<uid>/avatar.jpg`), so it is a
+/// The key already encodes the subject (`users/<uid>/…`), so it is a
 /// sufficient index on its own.
 actor RemoteAvatarVersionRegistry {
     static let shared = RemoteAvatarVersionRegistry()
@@ -716,7 +716,7 @@ actor RemoteAvatarVersionRegistry {
 enum RemoteAvatarPipeline {
     /// Returns a decoded UIImage for a directory avatar, using shared signed URL + image caches.
     /// - Parameters:
-    ///   - avatarKey: path within 'avatars' bucket (e.g. users/<uid>/avatar.jpg)
+    ///   - avatarKey: path within 'avatars' bucket (e.g. users/<uid>/avatar-<32 hex>.jpg)
     ///   - expiresInSeconds: signed URL TTL (default mirrors remote attachment TTL used elsewhere)
     /// - Parameter version: `account_directory.avatar_version` for this key, when the
     ///   caller has it. **Optional so the four owner-side callers, which invalidate

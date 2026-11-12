@@ -248,6 +248,15 @@ struct ProfileStore {
     // same wait exists in the app whenever sync is on. A file write posts
     // nothing. The file holds "upload", "delete" or "none"; when it has never
     // been written, the value an older build left in UserDefaults is read.
+    /// The record of avatar storage work this device still owes one backend
+    /// user's folder (`AvatarWorkLedger`). A file for the marker's reason: no
+    /// UserDefaults write, so nothing waits for the main thread.
+    static func avatarWorkFileURL(forBackendUser backendUserID: String) -> URL? {
+        let uid = backendUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !uid.isEmpty, uid.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { return nil }
+        return baseProfilesDir()?.appendingPathComponent("__avatar_work_\(uid).json", isDirectory: false)
+    }
+
     private static func avatarMarkerFileURL() -> URL? {
         baseProfilesDir()?.appendingPathComponent("__avatar_sync_state", isDirectory: false)
     }

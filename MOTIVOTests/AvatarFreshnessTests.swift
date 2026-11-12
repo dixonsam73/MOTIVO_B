@@ -26,13 +26,13 @@ private final class AlwaysMovingBackend: AvatarBackend {
     var uploads = 0
     init(_ inner: FakeAvatarBackend) { self.inner = inner }
     func probe(userID: String, withImage: Bool) async -> AvatarBackendProbe? { await inner.probe(userID: userID, withImage: withImage) }
-    func upload(jpeg: Data, userID: String) async -> String? {
+    func upload(jpeg: Data, key: String) async -> Bool {
         uploads += 1
-        let key = await inner.upload(jpeg: jpeg, userID: userID)
-        _ = await inner.otherDevice.setKey(FakeAvatarBackend.path, userID: userID, ifVersionIs: inner.version ?? "")
-        return key
+        let stored = await inner.upload(jpeg: jpeg, key: key)
+        _ = await inner.otherDevice.setKey(inner.key, userID: inner.userID, ifVersionIs: inner.version ?? "")
+        return stored
     }
-    func deleteObject(userID: String) async -> Bool { await inner.deleteObject(userID: userID) }
+    func deleteObject(key: String) async -> Bool { await inner.deleteObject(key: key) }
     func setKey(_ key: String?, userID: String, ifVersionIs expected: String) async -> AvatarKeyWrite {
         await inner.setKey(key, userID: userID, ifVersionIs: expected)
     }
@@ -340,57 +340,75 @@ final class AvatarFreshnessTests: XCTestCase {
             XCTAssertFalse(source.contains("uploadAvatarJPEG(") || source.contains("deleteAvatarObject("), "\(name) stores and deletes only through it too")
         }
         XCTAssertEqual(backend.components(separatedBy: "updateSelfAvatarKey(").count - 1, 1, "the network adapter is the one caller")
-        // The removal: the reference, then the image.
+        // The removal: the reference, then the image it held, and the image
+        // only through the record of work, by its name.
         let removal = try XCTUnwrap(auth.range(of: "if pendingState == \"delete\" {"))
         let upload = try XCTUnwrap(auth.range(of: "guard pendingState == \"upload\","))
         let branch = String(auth[removal.lowerBound..<upload.lowerBound])
+        let record = try XCTUnwrap(branch.range(of: "ledger.willWrite(pointingAt: nil, displacing: held, expected: seenVersion)"))
         let write = try XCTUnwrap(branch.range(of: "avatarBackend.setKey(nil, userID: backendID, ifVersionIs: seenVersion)"))
-        let delete = try XCTUnwrap(branch.range(of: "avatarBackend.deleteObject(userID: backendID)"))
+        let delete = try XCTUnwrap(branch.range(of: "await ledger.settle(rowExists: true, key: nil, version: version, backend: avatarBackend)"))
+        XCTAssertTrue(record.lowerBound < write.lowerBound, "the name the reference holds is on record before the write is sent")
         XCTAssertTrue(write.lowerBound < delete.lowerBound, "the reference is written before the image is deleted")
-        XCTAssertEqual(branch.components(separatedBy: "avatarBackend.deleteObject(").count - 1, 1, "and there is one deletion, after it")
-        // The publication reads the version before it stores the image.
-        let publish = try XCTUnwrap(backend.range(of: "static func publish(jpeg: Data, userID: String, backend: AvatarBackend) async -> Outcome {"))
-        let body = String(backend[publish.lowerBound...].prefix(900))
-        let read = try XCTUnwrap(body.range(of: "backend.probe(")), store = try XCTUnwrap(body.range(of: "backend.upload("))
-        let point = try XCTUnwrap(body.range(of: "backend.setKey(key, userID: userID, ifVersionIs:"))
-        XCTAssertTrue(read.lowerBound < store.lowerBound && store.lowerBound < point.lowerBound)
+        // Nothing but the record of work ever deletes a stored image, and it deletes by name.
+        for (name, source) in [("AuthManager", auth), ("ProfileView", view)] {
+            XCTAssertFalse(source.contains("deleteObject("), "\(name) deletes no stored image itself")
+        }
+        XCTAssertEqual(backend.components(separatedBy: "backend.deleteObject(key: name)").count - 1, 1, "one place deletes, by the exact name")
+        XCTAssertFalse(code("NetworkManager.swift").contains("x-upsert"), "and no avatar upload can overwrite")
+        XCTAssertFalse(code("NetworkManager.swift").contains("/avatar.jpg\""), "nor is the fixed name built anywhere in the network layer")
+        // The publication reads the version, stores under a new name, records
+        // the write, and only then sends it.
+        let publish = try XCTUnwrap(backend.range(of: "static func publish(jpeg: Data, userID: String, backend: AvatarBackend, ledger: AvatarWorkLedger) async -> Outcome {"))
+        let body = String(backend[publish.lowerBound...].prefix(2_600))
+        let read = try XCTUnwrap(body.range(of: "backend.probe(")), begin = try XCTUnwrap(body.range(of: "ledger.begin(name: name, digest: digest)"))
+        let store = try XCTUnwrap(body.range(of: "backend.upload(jpeg: jpeg, key: name)"))
+        let willWrite = try XCTUnwrap(body.range(of: "ledger.willWrite(pointingAt: name, displacing: probe.avatarKey, expected: expected)"))
+        let point = try XCTUnwrap(body.range(of: "backend.setKey(name, userID: userID, ifVersionIs: expected)"))
+        XCTAssertTrue(read.lowerBound < begin.lowerBound && begin.lowerBound < store.lowerBound, "the name is on record before the image is stored")
+        XCTAssertTrue(store.lowerBound < willWrite.lowerBound && willWrite.lowerBound < point.lowerBound, "and the write is on record before it is sent")
     }
 
     /// The publication on its own: nothing is stored without a row; the first
-    /// reference is written on "never stamped"; a refused write stores again.
+    /// reference is written on "never stamped"; a refused write stores again,
+    /// under another name, and the image it could not publish is deleted.
     @MainActor
     func testAPublicationStoresNothingWithoutARowAndRepeatsAfterARefusedWrite() async throws {
         let jpeg = try XCTUnwrap(picture(seed: 3).jpegData(compressionQuality: 0.9))
         let backend = FakeAvatarBackend()
+        let ledger = AvatarWorkLedger(userID: "fake", fileURL: nil)
         backend.rowExists = false
-        let none = await AvatarPublication.publish(jpeg: jpeg, userID: "fake", backend: backend)
+        let none = await AvatarPublication.publish(jpeg: jpeg, userID: "fake", backend: backend, ledger: ledger)
         XCTAssertEqual(none, .noRow)
         XCTAssertEqual(backend.log, ["this: probe"], "no image is stored for a row that does not exist")
         backend.rowExists = true
-        guard case .published(_, let version) = await AvatarPublication.publish(jpeg: jpeg, userID: "fake", backend: backend) else { return XCTFail() }
+        guard case .published(let first, let version) = await AvatarPublication.publish(jpeg: jpeg, userID: "fake", backend: backend, ledger: ledger) else { return XCTFail() }
         XCTAssertEqual(version, backend.version)
-        XCTAssertNotNil(backend.object); XCTAssertEqual(backend.key, FakeAvatarBackend.path)
-        // Another device writes the reference while this one is storing its image.
+        XCTAssertTrue(AvatarObjectName.isPerUpload(first, userID: "fake"))
+        XCTAssertNotNil(backend.referenced); XCTAssertEqual(backend.key, first)
+        // Another device removes the photo while this one is publishing a new one.
+        let next = try XCTUnwrap(picture(seed: 4).jpegData(compressionQuality: 0.9))
         let other = backend.otherDevice
         let held = AvatarTestGate()
         backend.gates["this.setKey"] = held
-        let publishing = Task { @MainActor in await AvatarPublication.publish(jpeg: jpeg, userID: "fake", backend: backend) }
+        let publishing = Task { @MainActor in await AvatarPublication.publish(jpeg: next, userID: "fake", backend: backend, ledger: ledger) }
         await held.waitUntilArrived()
         _ = await other.setKey(nil, userID: "fake", ifVersionIs: backend.version ?? "")
-        _ = await other.deleteObject(userID: "fake")
+        _ = await other.deleteObject(key: first)
         held.open()
-        guard case .published = await publishing.value else { return XCTFail("the publication did not recover") }
+        guard case .published(let second, _) = await publishing.value else { return XCTFail("the publication did not recover") }
         XCTAssertEqual(backend.count("this: setKey REFUSED"), 1)
-        XCTAssertNotNil(backend.object, "the image the other device deleted was stored again")
-        XCTAssertEqual(backend.key, FakeAvatarBackend.path)
+        XCTAssertEqual(backend.count("this: upload"), 3, "one for the first photo, two for the second")
+        XCTAssertEqual(backend.key, second); XCTAssertNotNil(backend.referenced)
+        XCTAssertEqual(backend.unreferenced, [], "the image whose write was refused was deleted, by its own name")
+        XCTAssertTrue(ledger.entries.keys.sorted() == [second], "and this device's record holds only its published image")
         // A backend that always refuses: it stops after its rounds and reports it.
         let stubborn = FakeAvatarBackend(picture: picture(seed: 1))
-        stubborn.afterNextProbe = nil
-        stubborn.gates = [:]
         let alwaysMoving = AlwaysMovingBackend(stubborn)
-        let outcome = await AvatarPublication.publish(jpeg: jpeg, userID: "fake", backend: alwaysMoving)
+        let outcome = await AvatarPublication.publish(jpeg: jpeg, userID: "fake", backend: alwaysMoving, ledger: AvatarWorkLedger(userID: "fake", fileURL: nil))
         XCTAssertEqual(outcome, .referenceFailed)
         XCTAssertEqual(alwaysMoving.uploads, AvatarPublication.rounds)
+        XCTAssertNotNil(stubborn.referenced, "the photo the profile shows was never touched")
     }
 
     /// The removal guard, row by row.

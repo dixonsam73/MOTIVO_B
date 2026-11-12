@@ -296,7 +296,10 @@ public final class AccountDirectoryService {
             method: "GET",
             query: query,
             jsonBody: nil,
-            headers: [:]
+            // Never a stored response: what is published, and which stored
+            // avatar image may be deleted (`AvatarWorkLedger`), is decided on
+            // this read.
+            headers: ["Cache-Control": "no-cache"]
         )
 
         switch result {
@@ -782,7 +785,9 @@ public final class AccountDirectoryService {
     }
 
     /// Update the caller's `account_directory.avatar_key` (owner-only via RLS).
-    /// - Parameter avatarKey: `users/<uid>/avatar.jpg` or nil to clear.
+    /// - Parameter avatarKey: the image's key in the `avatars` bucket
+    ///   (`AvatarObjectName`), or nil to clear. The server accepts only a key in
+    ///   the row's own folder (B-48).
     /// - Important: This is an owner-only metadata update; no profile sync.
     /// - Parameter expected: the row's `avatar_version` as the caller last read
     ///   it ("" = never stamped). **The write is CONDITIONAL on it**: the server
