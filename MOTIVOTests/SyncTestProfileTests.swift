@@ -53,7 +53,7 @@ final class SyncTestProfileTests: XCTestCase {
         savedLocalKeyExisted = UserDefaults.standard.object(forKey: "profile.__local_etudes_profile__.location") != nil
         savedLocalLocation = UserDefaults.standard.string(forKey: "profile.__local_etudes_profile__.location")
         UserDefaults.standard.set("", forKey: "profile.__local_etudes_profile__.location")
-        UserDefaults.standard.removeObject(forKey: "profile.__local_etudes_profile__.avatarSyncState_v1")
+        ProfileStore.clearPendingLocalAvatarSync()
         ProfileStore.removeSyncedAvatar(for: scope.avatarUserID)
         JournalProfileMirror.onChange = nil
         JournalProfileMirror.suppressed = false
@@ -75,7 +75,7 @@ final class SyncTestProfileTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "profile.\(scope.locationUserID!).location")
         if savedLocalKeyExisted { UserDefaults.standard.set(savedLocalLocation ?? "", forKey: "profile.__local_etudes_profile__.location") }
         else { UserDefaults.standard.removeObject(forKey: "profile.__local_etudes_profile__.location") }
-        UserDefaults.standard.removeObject(forKey: "profile.__local_etudes_profile__.avatarSyncState_v1")
+        ProfileStore.clearPendingLocalAvatarSync()
         JournalProfileSync.clearDisplacedAvatars()
         keptContexts.removeAll()
         container = nil

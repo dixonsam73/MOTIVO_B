@@ -255,13 +255,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             // Stage H: location and avatar write points (ProfileStore).
             JournalProfileMirror.onChange = { [weak self] event in
                 guard let self else { return }
-                switch event {
-                case .avatarRemoved: self.store.update { $0.avatarRemovedAt = Date() }
-                case .primaryChosen: self.store.update { $0.profilePrimaryChosen = true }
-                case .changed: break
-                }
+                JournalProfileSync.noteMirrorEvent(event, store: self.store)
                 self.scheduleProfileScan()
             }
+            JournalProfileMirror.removalClock = { [weak self] in self?.store.state.avatarRemovedAt }
             // Stage I: the Scores library's write points. Metadata after a short
             // pause. A reading position is saved locally on every page turn but
             // shared only at an explicit boundary: the viewer's dismissal or the

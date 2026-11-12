@@ -502,6 +502,42 @@ final class AuthManager: NSObject, ObservableObject {
               !backendID.isEmpty else { return }
 
         if pendingState == "delete" {
+            // Third pass: a removal is published only when the profile still
+            // shows the picture this device removed (`AvatarRemovalGuard`).
+            // If the look fails, nothing is published and the marker stays.
+            #if canImport(UIKit)
+            guard let probe = await avatarBackendProbe(backendID: backendID), probe.rowExists else { return }
+            let backendHasAvatar = !(probe.avatarKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if backendHasAvatar, probe.image == nil { return }
+            let showsTheRemovedPicture: Bool? = probe.image.flatMap { image in
+                ProfileStore.removedAvatarThumbnail().map { OwnAvatarSync.samePicture(thumbnail: $0, image) }
+            }
+            switch AvatarRemovalGuard.decide(backendHasAvatar: backendHasAvatar, backendShowsTheRemovedPicture: showsTheRemovedPicture) {
+            case .publish:
+                break
+            case .alreadyRemoved:
+                // Nothing to remove from the row. The object must still be gone
+                // (C-33) before this device stops trying.
+                let objectDelete = await NetworkManager.shared.deleteAvatarObject(backendUserID: backendID)
+                guard Self.avatarObjectIsAbsent(after: objectDelete) else { return }
+                // The identity's own copy goes with the removal, as when it is published.
+                guard ProfileStore.deleteAvatarForPendingDeletion(for: connectedStorageID, ifUnchangedSince: marking) else { return }
+                backendAvatarKey = nil
+                ProfileStore.noteOwnAvatarPublished(version: probe.avatarVersion, for: connectedStorageID)
+                ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking)
+                return
+            case .yieldToBackend:
+                // The profile shows a photo this removal is not about. Withdraw
+                // the removal and take that photo instead; it enters the journal
+                // clocked just after the removal, so the journal's own copy of a
+                // newer photo still wins when it arrives.
+                guard ProfileStore.clearPendingLocalAvatarSync(ifUnchangedSince: marking) else { return }
+                backendAvatarKey = probe.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let image = probe.image
+                await syncOwnAvatarFromBackend(avatarKey: probe.avatarKey, avatarVersion: probe.avatarVersion) { _, _ in image }
+                return
+            }
+            #endif
             // Not if the avatar was marked again since the snapshot: an image
             // the sync wrote meanwhile is not this removal's to delete, and the
             // promotion queued for that marking publishes it.
@@ -589,6 +625,25 @@ final class AuthManager: NSObject, ObservableObject {
         #endif
     }
 
+    #if canImport(UIKit)
+    /// What the Connected profile shows for the avatar right now: the row, and
+    /// the picture if it has one. Nil if the row could not be read.
+    private func avatarBackendProbe(backendID: String) async -> AvatarBackendProbe? {
+        #if DEBUG
+        if let avatarBackendProbeForTesting { return await avatarBackendProbeForTesting() }
+        #endif
+        guard case .success(let row) = await AccountDirectoryService.shared.fetchSelfRow(userID: backendID) else { return nil }
+        guard let row else { return AvatarBackendProbe(rowExists: false, avatarKey: nil, avatarVersion: nil, image: nil) }
+        let key = row.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var image: UIImage?
+        if !key.isEmpty {
+            await RemoteAvatarPipeline.invalidateAvatarCaches(avatarKey: key)
+            image = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key, version: row.avatarVersion)
+        }
+        return AvatarBackendProbe(rowExists: true, avatarKey: row.avatarKey, avatarVersion: row.avatarVersion, image: image)
+    }
+    #endif
+
     /// P5-I / C-34 R2 (B1). The backend avatar and version are authoritative for
     /// the Connected profile **when this device has no unsynced local avatar
     /// change** — the existing pending flag, which a Connected edit always sets
@@ -606,7 +661,16 @@ final class AuthManager: NSObject, ObservableObject {
                                   fetchImage: ((String, String?) async -> UIImage?)? = nil) async {
         guard let storageID = currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
               !storageID.isEmpty else { return }
+        #if DEBUG
+        let syncIsOn = syncOverride ?? syncIsOnOverrideForTesting ?? JournalSyncCoordinator.shared.isEnabled
+        #else
         let syncIsOn = syncOverride ?? JournalSyncCoordinator.shared.isEnabled
+        #endif
+        // Every marking of the avatar (an iCloud import, an edit) moves this
+        // number. Whatever this read-back decides is carried out only if it has
+        // not moved, and that check is made together with the write
+        // (`ProfileStore.applyAvatarFromBackend`, `.removeAvatarFromBackend`).
+        let generation = ProfileStore.pendingLocalAvatarGeneration
         let key = avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let incoming = OwnAvatarSync.normalized(avatarVersion)
         let appliedAtStart = ProfileStore.ownAvatarAppliedVersion(for: storageID)
@@ -641,9 +705,12 @@ final class AuthManager: NSObject, ObservableObject {
             // Nothing here to remove: the removal is already this device's state
             // (its own publication, or another device publishing what the
             // journal delivered here). An echo.
-            guard ProfileStore.avatarImage(for: storageID) != nil else { record(); return }
+            guard ProfileStore.avatarImage(for: storageID) != nil else {
+                if ProfileStore.pendingLocalAvatarGeneration == generation { record() }
+                return
+            }
             guard hasSettled() else { return }
-            ProfileStore.removeAvatarFromConnected(for: storageID)
+            guard ProfileStore.removeAvatarFromBackend(for: storageID, ifUnchangedSince: generation, journalIsOn: syncIsOn) else { return }
             record()
             ownAvatarRevision &+= 1
         case .refresh:
@@ -659,6 +726,7 @@ final class AuthManager: NSObject, ObservableObject {
             // The member may have edited during the fetch, or this device may
             // have published meanwhile: never overwrite either.
             guard !ProfileStore.hasPendingLocalAvatarSync(),
+                  ProfileStore.pendingLocalAvatarGeneration == generation,
                   currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines) == storageID,
                   ProfileStore.ownAvatarAppliedVersion(for: storageID) == appliedAtStart else { return }
             // The picture this device already holds, published by this owner
@@ -673,7 +741,7 @@ final class AuthManager: NSObject, ObservableObject {
             if ProfileStore.avatarImage(for: storageID) != nil {
                 guard hasSettled() else { return }
             }
-            ProfileStore.seedAvatarFromConnected(image, for: storageID, replacingExisting: true)
+            guard ProfileStore.applyAvatarFromBackend(image, for: storageID, ifUnchangedSince: generation, journalIsOn: syncIsOn) else { return }
             record()
             ownAvatarRevision &+= 1
             #endif
@@ -1518,6 +1586,15 @@ final class AuthManager: NSObject, ObservableObject {
     /// Stage H: the private sync wrote or removed the avatar files; the screens
     /// key their redraw on this revision (as a Connected replacement does).
     func noteAvatarChangedBySync() { ownAvatarRevision &+= 1 }
+
+    #if DEBUG
+    /// Test-only: what the backend shows for the avatar, in place of the row
+    /// read and the image download a removal promotion makes.
+    var avatarBackendProbeForTesting: (() async -> AvatarBackendProbe?)?
+    /// Test-only: whether the private sync counts as on, where a test cannot
+    /// turn the real one on.
+    var syncIsOnOverrideForTesting: Bool?
+    #endif
 
     #if DEBUG
     /// Test-only: stands in for this identity's completed first directory

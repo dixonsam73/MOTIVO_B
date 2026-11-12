@@ -60,6 +60,11 @@ final class StageHConnectedStub: URLProtocol {
     override func stopLoading() {}
 }
 
+/// A flag two threads may touch in the read-back overlap tests.
+private final class OverlapFlags: @unchecked Sendable {
+    var importFinishedInsideTheWindow = false
+}
+
 @MainActor
 final class SyncTestConnectedIsolationTests: XCTestCase {
 
@@ -121,13 +126,14 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         savedLocalLocation = UserDefaults.standard.object(forKey: "profile.__local_etudes_profile__.location")
         UserDefaults.standard.removeObject(forKey: "profile.__local_etudes_profile__.location")
         ProfileStore.removeSyncedAvatar(for: appleID)
-        UserDefaults.standard.removeObject(forKey: "profile.__local_etudes_profile__.avatarSyncState_v1")
+        ProfileStore.clearPendingLocalAvatarSync()
     }
 
     override func tearDownWithError() throws {
         JournalProfileMirror.onChange = nil
+        JournalProfileMirror.removalClock = nil
         ProfileStore.removeSyncedAvatar(for: appleID)
-        UserDefaults.standard.removeObject(forKey: "profile.__local_etudes_profile__.avatarSyncState_v1")
+        ProfileStore.clearPendingLocalAvatarSync()
         if let savedLocalLocation { UserDefaults.standard.set(savedLocalLocation, forKey: "profile.__local_etudes_profile__.location") }
         else { UserDefaults.standard.removeObject(forKey: "profile.__local_etudes_profile__.location") }
         UserDefaults.standard.removeObject(forKey: "profile.\(backendID).location")
@@ -255,6 +261,10 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         let removal = JournalProfileSync.applyAvatar(serverAvatar(png: nil, stamp: removedAt), scope: scope, store: store) { _ in }
         XCTAssertEqual(removal.applied, 1)
         XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion())
+        // The profile still shows the picture this removal removes (third pass: `AvatarRemovalGuard`).
+        let shown = try XCTUnwrap(UIImage(data: png))
+        let avatarKey = "users/\(backendID)/avatar.jpg"
+        auth.avatarBackendProbeForTesting = { AvatarBackendProbe(rowExists: true, avatarKey: avatarKey, avatarVersion: "2026-11-11T19:00:00+00:00", image: shown) }
         await auth.publishProfileAppliedBySync()
         XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarDelete), 1, "the removal is published")
         XCTAssertEqual(mirrorEvents, 0, "publishing a removal already applied is not a removal")
@@ -404,6 +414,231 @@ final class SyncTestConnectedIsolationTests: XCTestCase {
         XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(ProfileStore.avatarImage(for: appleID)), photo(3)))
         await auth.syncOwnAvatarFromBackend(avatarKey: nil, avatarVersion: "2026-11-11T19:11:00+00:00", syncIsOn: false) { _, _ in nil }
         XCTAssertNil(ProfileStore.avatarImage(for: appleID))
+    }
+
+    // MARK: Third pass — removals that must not last, and an atomic read-back
+
+    private func journalAvatar(_ png: Data?, stamp: Date, scope: JournalProfileScope, pending: Bool? = nil) -> JournalProfileSync.Outcome {
+        JournalProfileSync.applyAvatar(serverAvatar(png: png, stamp: stamp), scope: scope, store: store, localPending: pending) { _ in }
+    }
+
+    private func scanProfile(_ scope: JournalProfileScope) -> [String] {
+        var names: [String] = []
+        importerContext.performAndWait {
+            names = JournalProfileSync.scan(context: importerContext, scope: scope, store: store).map(\.recordName)
+        }
+        return names
+    }
+
+    /// ISSUE 1a, as Codex stated it. Another of the owner's devices publishes a
+    /// removal the journal carried; this device's journal is behind, so it
+    /// still holds the old photo. The replacement was chosen ten minutes ago
+    /// but reaches the journal late, after the two-minute wait has run out and
+    /// this device has applied the backend removal. Before the fix the applied
+    /// removal was clocked "now", newer than the replacement, so this device
+    /// kept "no photo" and sent that over the replacement: a lasting deletion.
+    func testAReplacementDelayedBeyondTheWaitStillWinsOverABackendRemoval() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        clearReadBackState()
+        let scope = JournalProfileScope(locationUserID: auth.backendUserID, avatarUserID: auth.currentUserID)
+        JournalProfileMirror.onChange = { [store] event in JournalProfileSync.noteMirrorEvent(event, store: store!) }
+        JournalProfileMirror.removalClock = { [store] in store!.state.avatarRemovedAt }
+        auth.syncIsOnOverrideForTesting = true
+        let oldPNG = try XCTUnwrap(photo(1).pngData()), newPNG = try XCTUnwrap(photo(2).pngData())
+        let chosenOld = Date().addingTimeInterval(-3_600), chosenNew = Date().addingTimeInterval(-600)
+        XCTAssertEqual(journalAvatar(oldPNG, stamp: chosenOld, scope: scope).applied, 1)      // held through the journal
+        ProfileStore.clearPendingLocalAvatarSync()                                             // and published earlier
+        let v1 = "2026-11-11T19:00:00+00:00", v2 = "2026-11-11T19:30:00+00:00"
+        ProfileStore.setOwnAvatarAppliedVersion(v1, for: appleID)
+
+        // The backend removal, seen and still standing after the wait.
+        await auth.syncOwnAvatarFromBackend(avatarKey: nil, avatarVersion: v2, syncIsOn: true) { _, _ in nil }
+        XCTAssertNotNil(ProfileStore.avatarImage(for: appleID), "not on first sight")
+        ProfileStore.setOwnAvatarBackendChangeSeen(.init(version: v2, at: Date().addingTimeInterval(-OwnAvatarSync.settleInterval - 1)), for: appleID)
+        await auth.syncOwnAvatarFromBackend(avatarKey: nil, avatarVersion: v2, syncIsOn: true) { _, _ in nil }
+        XCTAssertNil(ProfileStore.avatarImage(for: appleID), "applied once it has stood")
+        XCTAssertEqual(scanProfile(scope), [JournalProfileSync.avatarName], "and the sync has this device's removal to send")
+
+        // The delayed replacement arrives (the send of our removal is rejected by it).
+        let outcome = journalAvatar(newPNG, stamp: chosenNew, scope: scope, pending: true)
+        XCTAssertEqual(outcome.applied, 1, "the replacement is taken")
+        XCTAssertTrue(outcome.resend.isEmpty, "this device does not send its removal over it")
+        XCTAssertEqual(try Data(contentsOf: avatarURL()), newPNG, "the photo is back, byte for byte")
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload(), "and it will be published")
+        XCTAssertLessThan(try XCTUnwrap(store.state.avatarRemovedAt), chosenNew,
+                          "a removal read back from the backend is clocked just after the photo it removed, never 'now'")
+    }
+
+    /// The same rule for a replacement read back: it displaces only the photo
+    /// this device held, never a newer one the journal brings later.
+    func testAPictureReadBackFromTheBackendNeverOutranksANewerJournalPhoto() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        clearReadBackState()
+        let scope = JournalProfileScope(locationUserID: auth.backendUserID, avatarUserID: auth.currentUserID)
+        JournalProfileMirror.onChange = { [store] event in JournalProfileSync.noteMirrorEvent(event, store: store!) }
+        JournalProfileMirror.removalClock = { [store] in store!.state.avatarRemovedAt }
+        auth.syncIsOnOverrideForTesting = true
+        let heldPNG = try XCTUnwrap(photo(1).pngData()), laterPNG = try XCTUnwrap(photo(3).pngData())
+        let chosenHeld = Date().addingTimeInterval(-3_600), chosenLater = Date().addingTimeInterval(-600)
+        XCTAssertEqual(journalAvatar(heldPNG, stamp: chosenHeld, scope: scope).applied, 1)
+        ProfileStore.clearPendingLocalAvatarSync()
+        let v1 = "2026-11-11T19:00:00+00:00", v2 = "2026-11-11T19:30:00+00:00"
+        ProfileStore.setOwnAvatarAppliedVersion(v1, for: appleID)
+        ProfileStore.setOwnAvatarBackendChangeSeen(.init(version: v2, at: Date().addingTimeInterval(-OwnAvatarSync.settleInterval - 1)), for: appleID)
+        await auth.syncOwnAvatarFromBackend(avatarKey: "users/\(backendID)/avatar.jpg", avatarVersion: v2, syncIsOn: true) { _, _ in self.photo(2) }
+        XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(ProfileStore.avatarImage(for: appleID)), photo(2)), "the real replacement is applied")
+        let stamp = try XCTUnwrap(JournalAssetHash.stamp(of: avatarURL())).mtime
+        XCTAssertGreaterThan(stamp, chosenHeld.timeIntervalSince1970, "it outranks the photo it replaced")
+        XCTAssertLessThan(stamp, chosenHeld.timeIntervalSince1970 + 1, "by a hair, not by 'now'")
+        XCTAssertEqual(scanProfile(scope), [JournalProfileSync.avatarName])
+        let outcome = journalAvatar(laterPNG, stamp: chosenLater, scope: scope, pending: true)
+        XCTAssertEqual(outcome.applied, 1); XCTAssertTrue(outcome.resend.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: avatarURL()), laterPNG, "a newer journal photo arriving late still wins")
+    }
+
+    /// ISSUE 1b. The device that holds the NEW photo has published it. This
+    /// device is the other one: it imported the journal's removal of the OLD
+    /// photo and has it waiting. Publishing that removal would delete the new
+    /// photo from the Connected profile, and the holder would then apply the
+    /// removal and send it to every device. A removal is published only when
+    /// the Connected profile still shows the picture it removes.
+    func testARemovalIsNotPublishedOverAPhotoItDoesNotRemove() async throws {
+        Keychain.set(fakeAccessToken(subject: backendID), for: "supabaseAccessToken_v1")
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        clearReadBackState()
+        let scope = JournalProfileScope(locationUserID: auth.backendUserID, avatarUserID: auth.currentUserID)
+        JournalProfileMirror.onChange = { [store] event in JournalProfileSync.noteMirrorEvent(event, store: store!) }
+        JournalProfileMirror.removalClock = { [store] in store!.state.avatarRemovedAt }
+        auth.syncIsOnOverrideForTesting = true
+        let oldPNG = try XCTUnwrap(photo(1).pngData())
+        let chosenOld = Date().addingTimeInterval(-3_600), removed = Date().addingTimeInterval(-1_800), chosenNew = Date().addingTimeInterval(-600)
+        XCTAssertEqual(journalAvatar(oldPNG, stamp: chosenOld, scope: scope).applied, 1)
+        ProfileStore.clearPendingLocalAvatarSync()
+        XCTAssertEqual(journalAvatar(nil, stamp: removed, scope: scope).applied, 1)            // the journal's removal of the old photo
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion())
+        let key = "users/\(backendID)/avatar.jpg"
+
+        // The Connected profile shows a DIFFERENT photo (the holder published the new one).
+        auth.avatarBackendProbeForTesting = { AvatarBackendProbe(rowExists: true, avatarKey: key, avatarVersion: "2026-11-11T19:30:00+00:00", image: self.photo(2)) }
+        await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "third-pass")
+        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarDelete), 0, "the object is not deleted")
+        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.directoryAvatarKey), 0, "and the key is not cleared")
+        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync(), "the removal is withdrawn, not retried")
+        // Instead the photo the profile shows comes to this device, clocked just
+        // after the removal it undoes, so the journal's own copy of the new
+        // photo (chosen later than the removal) still wins when it arrives.
+        XCTAssertTrue(OwnAvatarSync.samePicture(try XCTUnwrap(ProfileStore.avatarImage(for: appleID)), photo(2)))
+        let stamp = try XCTUnwrap(JournalAssetHash.stamp(of: avatarURL())).mtime
+        XCTAssertGreaterThan(stamp, removed.timeIntervalSince1970); XCTAssertLessThan(stamp, removed.timeIntervalSince1970 + 1)
+        XCTAssertLessThan(stamp, chosenNew.timeIntervalSince1970)
+
+        // The ordinary case is unchanged: the profile still shows the picture
+        // this removal removes, so the removal is published.
+        XCTAssertEqual(journalAvatar(oldPNG, stamp: Date().addingTimeInterval(-300), scope: scope).applied, 1)
+        ProfileStore.clearPendingLocalAvatarSync()
+        XCTAssertEqual(journalAvatar(nil, stamp: Date().addingTimeInterval(-200), scope: scope).applied, 1)
+        let published = try XCTUnwrap(UIImage(data: try XCTUnwrap(photo(1).jpegData(compressionQuality: 0.9))))
+        auth.avatarBackendProbeForTesting = { AvatarBackendProbe(rowExists: true, avatarKey: key, avatarVersion: "2026-11-11T19:40:00+00:00", image: published) }
+        await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "third-pass")
+        XCTAssertEqual(ConnectedWriteWitness.count(ConnectedWriteWitness.avatarDelete), 1, "the removal of the picture the profile shows is published")
+    }
+
+    /// ISSUE 2. The read-back has decided to write; an iCloud import of a newer
+    /// photo arrives on the sync's thread at exactly that moment. Before the
+    /// fix the check and the write were separate steps, so the import landed
+    /// between them and the read-back then overwrote it with the older backend
+    /// picture. Under the avatar lock the import waits and is the later write.
+    func testAnImportArrivingAsTheReadBackWritesIsNotOverwritten() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState(); ProfileStore.testHookBeforeBackendAvatarWrite = nil }
+        clearReadBackState()
+        let scope = JournalProfileScope(locationUserID: auth.backendUserID, avatarUserID: auth.currentUserID)
+        let heldPNG = try XCTUnwrap(photo(1).pngData()), importedPNG = try XCTUnwrap(photo(3).pngData())
+        XCTAssertEqual(journalAvatar(heldPNG, stamp: Date().addingTimeInterval(-3_600), scope: scope).applied, 1)
+        ProfileStore.clearPendingLocalAvatarSync()
+        let v1 = "2026-11-11T19:00:00+00:00", v2 = "2026-11-11T19:30:00+00:00"
+        ProfileStore.setOwnAvatarAppliedVersion(v1, for: appleID)
+        ProfileStore.setOwnAvatarBackendChangeSeen(.init(version: v2, at: Date().addingTimeInterval(-OwnAvatarSync.settleInterval - 1)), for: appleID)
+
+        let record = serverAvatar(png: importedPNG, stamp: Date().addingTimeInterval(-60))
+        let importDone = DispatchSemaphore(value: 0)
+        let flags = OverlapFlags()
+        let store = self.store!
+        ProfileStore.testHookBeforeBackendAvatarWrite = {
+            // The sync's thread imports now. Give it time to finish if nothing stops it.
+            DispatchQueue.global().async {
+                _ = JournalProfileSync.applyAvatar(record, scope: scope, store: store) { _ in }
+                importDone.signal()
+            }
+            flags.importFinishedInsideTheWindow = importDone.wait(timeout: .now() + 0.4) == .success
+            if flags.importFinishedInsideTheWindow { importDone.signal() }
+        }
+        await auth.syncOwnAvatarFromBackend(avatarKey: "users/\(backendID)/avatar.jpg", avatarVersion: v2, syncIsOn: true) { _, _ in self.photo(2) }
+        ProfileStore.testHookBeforeBackendAvatarWrite = nil
+        XCTAssertEqual(importDone.wait(timeout: .now() + 5), .success)
+
+        XCTAssertFalse(flags.importFinishedInsideTheWindow, "the import could not land between the read-back's check and its write")
+        XCTAssertEqual(try Data(contentsOf: avatarURL()), importedPNG, "the newer import is what the device holds")
+        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(ProfileStore.avatarDerivedURL(for: nil))), importedPNG)
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload(), "and it is marked for publication")
+    }
+
+    /// The same window for a removal read back from the backend.
+    func testAnImportArrivingAsTheReadBackRemovesIsNotDeleted() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState(); ProfileStore.testHookBeforeBackendAvatarWrite = nil }
+        clearReadBackState()
+        let scope = JournalProfileScope(locationUserID: auth.backendUserID, avatarUserID: auth.currentUserID)
+        let heldPNG = try XCTUnwrap(photo(1).pngData()), importedPNG = try XCTUnwrap(photo(3).pngData())
+        XCTAssertEqual(journalAvatar(heldPNG, stamp: Date().addingTimeInterval(-3_600), scope: scope).applied, 1)
+        ProfileStore.clearPendingLocalAvatarSync()
+        let v1 = "2026-11-11T19:00:00+00:00", v2 = "2026-11-11T19:30:00+00:00"
+        ProfileStore.setOwnAvatarAppliedVersion(v1, for: appleID)
+        ProfileStore.setOwnAvatarBackendChangeSeen(.init(version: v2, at: Date().addingTimeInterval(-OwnAvatarSync.settleInterval - 1)), for: appleID)
+        let record = serverAvatar(png: importedPNG, stamp: Date().addingTimeInterval(-60))
+        let importDone = DispatchSemaphore(value: 0)
+        let flags = OverlapFlags()
+        let store = self.store!
+        ProfileStore.testHookBeforeBackendAvatarWrite = {
+            DispatchQueue.global().async {
+                _ = JournalProfileSync.applyAvatar(record, scope: scope, store: store) { _ in }
+                importDone.signal()
+            }
+            flags.importFinishedInsideTheWindow = importDone.wait(timeout: .now() + 0.4) == .success
+            if flags.importFinishedInsideTheWindow { importDone.signal() }
+        }
+        await auth.syncOwnAvatarFromBackend(avatarKey: nil, avatarVersion: v2, syncIsOn: true) { _, _ in nil }
+        ProfileStore.testHookBeforeBackendAvatarWrite = nil
+        XCTAssertEqual(importDone.wait(timeout: .now() + 5), .success)
+        XCTAssertFalse(flags.importFinishedInsideTheWindow)
+        XCTAssertEqual(try Data(contentsOf: avatarURL()), importedPNG, "the newer import survives the removal that was already under way")
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload())
+    }
+
+    /// And the plain order, with no overlap: an import that lands while the
+    /// backend picture is still downloading makes the read-back stand down.
+    func testAnImportDuringTheDownloadMakesTheReadBackStandDown() async throws {
+        let auth = AuthManager(identityService: LocalStubIdentityService())
+        defer { clearReadBackState() }
+        clearReadBackState()
+        let scope = JournalProfileScope(locationUserID: auth.backendUserID, avatarUserID: auth.currentUserID)
+        let heldPNG = try XCTUnwrap(photo(1).pngData()), importedPNG = try XCTUnwrap(photo(3).pngData())
+        XCTAssertEqual(journalAvatar(heldPNG, stamp: Date().addingTimeInterval(-3_600), scope: scope).applied, 1)
+        ProfileStore.clearPendingLocalAvatarSync()
+        let v1 = "2026-11-11T19:00:00+00:00", v2 = "2026-11-11T19:30:00+00:00"
+        ProfileStore.setOwnAvatarAppliedVersion(v1, for: appleID)
+        ProfileStore.setOwnAvatarBackendChangeSeen(.init(version: v2, at: Date().addingTimeInterval(-OwnAvatarSync.settleInterval - 1)), for: appleID)
+        await auth.syncOwnAvatarFromBackend(avatarKey: "users/\(backendID)/avatar.jpg", avatarVersion: v2, syncIsOn: true) { _, _ in
+            _ = self.journalAvatar(importedPNG, stamp: Date().addingTimeInterval(-60), scope: scope)
+            // Even with the marker gone again (published meanwhile), the avatar has changed since the read-back began.
+            ProfileStore.clearPendingLocalAvatarSync()
+            return self.photo(2)
+        }
+        XCTAssertEqual(try Data(contentsOf: avatarURL()), importedPNG, "the read-back did not write over what arrived meanwhile")
+        XCTAssertEqual(ProfileStore.ownAvatarAppliedVersion(for: appleID), v1, "and recorded nothing about a state it did not apply")
     }
 
     /// Device A, 2026-11-11 21:13, build 1920: at a fresh join the waiting photo

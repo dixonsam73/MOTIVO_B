@@ -1806,6 +1806,9 @@ private var sessionSetupSection: some View {
          }
 
          avatarImage = nil
+         // Third pass: whatever is fetched is written only if nothing has marked
+         // the avatar since now (an iCloud import, an edit), checked with the write.
+         let requestedGeneration = ProfileStore.pendingLocalAvatarGeneration
          avatarRefreshTask = Task {
              let requestedUserID = currentUserID
              let requestedAvatarKey = backendAvatarKey
@@ -1823,9 +1826,10 @@ private var sessionSetupSection: some View {
                      avatarImage = localAvatar
                  } else {
                      if let fetchedImage {
-                         seedLocalAvatarFromFetchedConnectedAvatar(fetchedImage, currentUserID: auth.currentUserID)
+                         seedLocalAvatarFromFetchedConnectedAvatar(fetchedImage, currentUserID: auth.currentUserID,
+                                                                   ifUnchangedSince: requestedGeneration)
                      }
-                     avatarImage = fetchedImage
+                     avatarImage = ProfileStore.avatarImage(for: auth.currentUserID) ?? fetchedImage
                  }
 
                  avatarRefreshTask = nil
@@ -1858,13 +1862,17 @@ private var sessionSetupSection: some View {
          }
      }
 
-     private func seedLocalAvatarFromFetchedConnectedAvatar(_ fetchedImage: UIImage, currentUserID: String?) {
+     private func seedLocalAvatarFromFetchedConnectedAvatar(_ fetchedImage: UIImage, currentUserID: String?,
+                                                            ifUnchangedSince generation: Int) {
          guard currentUserID != nil else { return }
 
          // A fetched Connected avatar is already backend-authoritative, so it should also become
-         // the local Études avatar without creating a pending upload marker. P5-I: routed through
-         // the one ProfileStore seeding function; first seeding keeps an existing connected copy.
-         ProfileStore.seedAvatarFromConnected(fetchedImage, for: currentUserID, replacingExisting: false)
+         // the local Études avatar without creating a pending upload marker. The caller has just
+         // found no local copy. Third pass: the write goes through the one atomic read-back
+         // writer, so an import that landed during the fetch is not overwritten, and with sync
+         // on the picture is clocked just after the removal it fills, never "now".
+         _ = ProfileStore.applyAvatarFromBackend(fetchedImage, for: currentUserID, ifUnchangedSince: generation,
+                                                 journalIsOn: JournalSyncCoordinator.shared.isEnabled)
      }
 
      @MainActor

@@ -12,10 +12,11 @@
 //
 //  WHAT THIS IS: a model. Two devices, one iCloud journal record and one
 //  backend avatar are plain values; every DECISION is the app's own pure
-//  function (`OwnAvatarSync.decide`, `.settle`, `JournalProfileMerge
-//  .decideAvatar`), wired in the order `AuthManager` and the sync engine wire
-//  them: import → mark → publish → record the version; hydrate → echo, wait
-//  or apply. A FILE is a picture plus an encoding: an import copies the file
+//  function (`OwnAvatarSync.decide`, `.settle`, `AvatarRemovalGuard.decide`,
+//  `JournalProfileMerge.decideAvatar`), wired in the order `AuthManager` and
+//  the sync engine wire them: import → mark → publish (a removal only past
+//  the guard) → record the version; hydrate → echo, wait or apply, clocked
+//  just after the state displaced. A FILE is a picture plus an encoding: an import copies the file
 //  byte for byte, a read-back from the backend is a NEW encoding of the same
 //  picture (that is what makes a read-back a new edit to the sync, and the
 //  loop possible). "The same picture" is the picture number; the picture
@@ -62,6 +63,10 @@ final class TwoConnectedPublishersTests: XCTestCase {
         var publications = 0
         var removalsApplied = 0
         var readBacksApplied = 0
+        /// The picture this device last removed (`ProfileStore.removedAvatarThumbnail`).
+        var removedPicture: Int?
+        /// A device whose iCloud is behind: it reaches the backend, not the journal.
+        var journalPaused = false
     }
 
     private var journal = Journal(picture: 1, stamp: Date(timeIntervalSince1970: 1_000))
@@ -73,6 +78,11 @@ final class TwoConnectedPublishersTests: XCTestCase {
     /// Off = the first pass's danger: every newer version is applied as a change.
     private var echoRule = true
     private var settleRule = true
+    /// Off = a change read back is clocked "now" (before the third pass).
+    private var displacedClockRule = true
+    /// Off = a waiting removal is published whatever the profile shows (before the third pass).
+    private var removalGuardRule = true
+    private var photoEverMissingFromBackend = false
 
     override func setUp() {
         super.setUp()
@@ -82,7 +92,8 @@ final class TwoConnectedPublishersTests: XCTestCase {
             Device(name: $0, file: journal.file, stamp: journal.stamp, knownJournalStamp: journal.stamp, applied: backend.version)
         }
         now = Date(timeIntervalSince1970: 10_000); encodings = 0
-        echoRule = true; settleRule = true
+        echoRule = true; settleRule = true; displacedClockRule = true; removalGuardRule = true
+        photoEverMissingFromBackend = false
     }
 
     // MARK: The three steps a device takes, in the app's order
@@ -91,11 +102,13 @@ final class TwoConnectedPublishersTests: XCTestCase {
     private func exchange(_ i: Int) {
         var d = devices[i]
         defer { devices[i] = d }
+        guard !d.journalPaused else { return }
         guard d.knownJournalStamp != journal.stamp || d.stamp != journal.stamp || d.file != journal.file else { return }
         switch JournalProfileMerge.decideAvatar(localHash: d.file.hash, localStamp: d.stamp, localPending: false,
                                                 serverHash: journal.file.hash, serverStamp: journal.stamp) {
         case .nothing: break
         case .takeServer:                       // an import: written byte for byte, and MARKED for the Connected profile
+            if journal.file.picture == nil { d.removedPicture = d.picture }
             d.file = journal.file; d.stamp = journal.stamp; d.marker = true
         case .keepLocalAndSend:                 // this device's is newer: it goes up
             journal = Journal(file: d.file, stamp: d.stamp)
@@ -104,11 +117,31 @@ final class TwoConnectedPublishersTests: XCTestCase {
     }
 
     /// The promotion: publish what is marked, and record the version it produced.
+    /// A removal goes through `AvatarRemovalGuard` first.
     private func publish(_ i: Int) {
         guard devices[i].marker else { return }
+        if devices[i].picture == nil, removalGuardRule {
+            let shows: Bool? = devices[i].removedPicture.map { $0 == backend.picture }
+            switch AvatarRemovalGuard.decide(backendHasAvatar: backend.picture != nil, backendShowsTheRemovedPicture: shows) {
+            case .publish: break
+            case .alreadyRemoved:
+                devices[i].applied = backend.version; devices[i].marker = false
+                return
+            case .yieldToBackend:
+                devices[i].marker = false
+                hydrate(i)                      // the profile's photo comes here instead
+                return
+            }
+        }
         devices[i].applied = backend.write(devices[i].picture)
+        if backend.picture == nil { photoEverMissingFromBackend = true }
         devices[i].marker = false
         devices[i].publications += 1
+    }
+
+    /// The journal clock a change read back from the backend gets.
+    private func clockForAReadBack(displacing stamp: Date) -> Date {
+        displacedClockRule ? stamp.addingTimeInterval(0.001) : now
     }
 
     /// The hydration read-back, as `AuthManager.syncOwnAvatarFromBackend` orders it.
@@ -130,12 +163,13 @@ final class TwoConnectedPublishersTests: XCTestCase {
         case .remove:
             guard d.picture != nil else { record(); return }
             guard settled() else { return }
-            d.file = File(picture: nil); d.stamp = now; d.removalsApplied += 1      // a local removal: the sync sends it
+            d.removedPicture = d.picture
+            d.file = File(picture: nil); d.stamp = clockForAReadBack(displacing: d.stamp); d.removalsApplied += 1
             record()
         case .refresh:
             if echoRule, d.picture == backend.picture { record(); return }
             if d.picture != nil { guard settled() else { return } }
-            d.file = newEncoding(of: backend.picture); d.stamp = now; d.readBacksApplied += 1   // a re-encoded copy: a new edit to the sync
+            d.file = newEncoding(of: backend.picture); d.stamp = clockForAReadBack(displacing: d.stamp); d.readBacksApplied += 1   // a re-encoded copy
             record()
         }
     }
@@ -191,40 +225,85 @@ final class TwoConnectedPublishersTests: XCTestCase {
         XCTAssertEqual(devices.map(\.readBacksApplied), [0, 0])
     }
 
-    /// C-194: a photo change that reaches the other device as a REMOVAL and
-    /// then the image. The other device publishes the removal first. The device
-    /// that holds the photo looks at the backend in that window (a relaunch).
-    func testASiblingsMomentaryRemovalNeverRemovesThePhoto() {
+    /// C-194 with the holder Connected. D1 chooses photo 4 and publishes it. The
+    /// journal carries a REMOVAL first and the image later; D2 imports the
+    /// removal and has it waiting. The profile shows photo 4, which that
+    /// removal is not about, so D2 does not publish it.
+    func testARemovalThatIsNotAboutTheProfilesPhotoIsNeverPublished() {
         devices[0].file = newEncoding(of: 4); devices[0].stamp = now; devices[0].marker = true   // D1 chooses photo 4
         publish(0)                                                                    // and publishes it
         let chosen = devices[0].file
         journal = Journal(picture: nil, stamp: now.addingTimeInterval(-1))            // the removal reaches the journal first
-        exchange(1); publish(1)                                                       // D2 imports it and publishes the removal
-        XCTAssertNil(backend.picture, "the Connected profile shows no photo for a moment")
-        hydrate(0)                                                                    // D1 relaunches right now
-        XCTAssertEqual(devices[0].picture, 4, "seen, waited on, not applied")
-        XCTAssertNotNil(devices[0].seen)
-        journal = Journal(file: chosen, stamp: now)                                   // then the image
+        devices[0].journalPaused = true                                               // (D1's image is still to be sent)
+        exchange(1); publish(1)                                                       // D2 imports the removal; the guard looks
+        XCTAssertEqual(backend.picture, 4, "the removal of photo 1 is not published over photo 4")
+        XCTAssertEqual(devices[1].picture, 4, "D2 takes the profile's photo instead")
+        // Hours later, far beyond any wait, D1's image reaches the journal.
+        now.addTimeInterval(4 * 3_600)
+        devices[0].journalPaused = false
+        journal = Journal(file: chosen, stamp: devices[0].stamp)
         XCTAssertTrue(run())
         assertSettled(on: 4)
+        XCTAssertFalse(photoEverMissingFromBackend, "the Connected profile never lost the photo")
         XCTAssertEqual(devices.map(\.removalsApplied), [0, 0], "no unintended removal")
-        XCTAssertEqual(devices[0].readBacksApplied, 0)
     }
 
-    /// The same sequence WITHOUT the wait: the photo is removed everywhere.
-    /// This is what the settle rule is for, and that this test would catch its loss.
-    func testWithoutTheWaitThatRemovalWouldSpreadToEveryDevice() {
-        settleRule = false
+    /// The same sequence WITHOUT the guard and with a read-back clocked "now":
+    /// the photo is removed everywhere, for good. What the third pass is for.
+    func testWithoutTheGuardAndTheClockThatSequenceIsALastingDeletion() {
+        removalGuardRule = false; displacedClockRule = false
         devices[0].file = newEncoding(of: 4); devices[0].stamp = now; devices[0].marker = true
         publish(0)
+        let chosen = devices[0].file
         journal = Journal(picture: nil, stamp: now.addingTimeInterval(-1))
-        exchange(1); publish(1)
-        now.addTimeInterval(5)
-        hydrate(0)
-        XCTAssertNil(devices[0].picture, "applied at once")
+        devices[0].journalPaused = true
+        exchange(1); publish(1)                                                       // D2 publishes the stale removal
+        XCTAssertNil(backend.picture)
+        for _ in 0..<4 { hydrate(0); now.addTimeInterval(60) }                        // D1 sees it stand past the wait
+        XCTAssertNil(devices[0].picture, "D1 has applied the removal to the photo it chose")
+        devices[0].journalPaused = false
+        journal = Journal(file: chosen, stamp: Date(timeIntervalSince1970: 10_000))   // the image, with its own (older) clock
+        XCTAssertTrue(run())
+        XCTAssertEqual(devices.map(\.picture), [nil, nil], "gone from both devices")
+        XCTAssertNil(journal.picture, "gone from the journal")
+        XCTAssertNil(backend.picture, "and gone from the profile")
+    }
+
+    /// CODEX'S CASE. A removal the journal really carried is published by D2.
+    /// D1's iCloud is behind, so it still holds the old photo and only sees the
+    /// backend. The replacement was chosen meanwhile but reaches the journal
+    /// LATE, after D1's two-minute wait has run out and D1 has applied the
+    /// removal. It must still win everywhere.
+    func testAReplacementDelayedBeyondTheWaitIsNotALastingDeletion() {
+        devices[0].journalPaused = true
+        journal = Journal(picture: nil, stamp: now)                                   // the removal, in the journal
+        exchange(1); publish(1)                                                       // D2 imports and publishes it
+        XCTAssertNil(backend.picture)
+        let replacement = Journal(file: newEncoding(of: 5), stamp: now.addingTimeInterval(30))   // chosen half a minute later...
+        for _ in 0..<4 { hydrate(0); now.addTimeInterval(60) }                        // ...but D1 only sees the backend, for four minutes
+        XCTAssertNil(devices[0].picture, "D1 has applied the removal once it had stood")
         XCTAssertEqual(devices[0].removalsApplied, 1)
-        exchange(0)
-        XCTAssertNil(journal.picture, "and sent to the journal with a newer clock than the photo")
+        journal = replacement                                                         // the replacement finally arrives
+        devices[0].journalPaused = false
+        XCTAssertTrue(run())
+        assertSettled(on: 5)
+    }
+
+    /// The same case with the read-back clocked "now": D1's removal outranks the
+    /// replacement, and the photo is gone from every device.
+    func testWithAReadBackClockedNowThatDelayIsALastingDeletion() {
+        displacedClockRule = false
+        devices[0].journalPaused = true
+        journal = Journal(picture: nil, stamp: now)
+        exchange(1); publish(1)
+        let replacement = Journal(file: newEncoding(of: 5), stamp: now.addingTimeInterval(30))
+        for _ in 0..<4 { hydrate(0); now.addTimeInterval(60) }
+        XCTAssertNil(devices[0].picture)
+        journal = replacement
+        devices[0].journalPaused = false
+        XCTAssertTrue(run())
+        XCTAssertEqual(devices.map(\.picture), [nil, nil], "the replacement lost to a removal applied four minutes after it was chosen")
+        XCTAssertNil(journal.picture); XCTAssertNil(backend.picture)
     }
 
     /// A real replacement, and a real removal, made on a Connected device whose

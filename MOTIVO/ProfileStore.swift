@@ -181,10 +181,65 @@ enum OwnAvatarSync {
         guard let distance = pictureDistance(a, b) else { return false }
         return distance <= samePictureTolerance
     }
+
+    /// The same measure against a thumbnail kept from a photo that no longer
+    /// exists (`ProfileStore.removedAvatarThumbnail`).
+    static func samePicture(thumbnail x: [UInt8], _ image: UIImage) -> Bool {
+        guard let y = thumbnail(of: image), x.count == y.count, !x.isEmpty else { return false }
+        var total = 0
+        var count = 0
+        for i in stride(from: 0, to: x.count, by: 4) {
+            for c in 0..<3 { total += abs(Int(x[i + c]) - Int(y[i + c])); count += 1 }
+        }
+        return Double(total) / Double(count) <= samePictureTolerance
+    }
     #endif
 }
 
+/// PURE. Whether a waiting REMOVAL may be published to the Connected profile.
+///
+/// Third pass (2026-11-12). A removal removes one picture. The private sync can
+/// carry a removal that is already out of date (a photo change that travels as
+/// a removal and then the image, C-194, with the image arriving minutes or
+/// hours later), and by the time this device publishes it another of the
+/// owner's devices may have published the NEW photo. Publishing the removal
+/// then deletes that photo from the profile; its holder reads the removal
+/// back, applies it and sends it to every device, and the photo is gone for
+/// good. So a removal is published only when the profile still shows the
+/// picture this device removed. Anything else on the profile is a photo this
+/// removal is not about: it is withdrawn, and the photo comes to this device
+/// instead. In doubt the photo is kept; a removal can be made again, a lost
+/// photo cannot.
+enum AvatarRemovalGuard {
+    enum Decision: Equatable { case publish, alreadyRemoved, yieldToBackend }
+
+    /// `backendShowsTheRemovedPicture` is nil when this device kept no record of
+    /// the picture it removed.
+    static func decide(backendHasAvatar: Bool, backendShowsTheRemovedPicture: Bool?) -> Decision {
+        guard backendHasAvatar else { return .alreadyRemoved }
+        return backendShowsTheRemovedPicture == true ? .publish : .yieldToBackend
+    }
+}
+
+#if canImport(UIKit)
+/// What the backend shows for the owner's avatar, as a promotion needs it
+/// before publishing a removal. Tests supply one; the app reads the row and
+/// downloads the image.
+struct AvatarBackendProbe {
+    var rowExists: Bool
+    var avatarKey: String?
+    var avatarVersion: String?
+    var image: UIImage?
+}
+#endif
+
 struct ProfileStore {
+    #if DEBUG
+    /// Test-only: runs immediately before a backend read-back writes or removes
+    /// the local avatar, so a test can land an iCloud import in that window.
+    nonisolated(unsafe) static var testHookBeforeBackendAvatarWrite: (() -> Void)?
+    #endif
+
     // MARK: - Keys
     private static let localProfileStorageID = "__local_etudes_profile__"
     private static func profileStorageID(for userID: String?) -> String {
@@ -195,13 +250,37 @@ struct ProfileStore {
     private static let localAvatarSyncStateKey = "profile.__local_etudes_profile__.avatarSyncState_v1"
 
     // MARK: - Local Avatar Sync State
-    static func hasPendingLocalAvatarUpload() -> Bool {
-        UserDefaults.standard.string(forKey: localAvatarSyncStateKey) == "upload"
+    // THE MARKER LIVES IN A FILE (third pass, 2026-11-12). It was a UserDefaults
+    // value. Writing UserDefaults posts its change notification before the
+    // write returns, and the sync engine observes that notification on the
+    // main queue, so a marking made on the sync's thread WAITED FOR THE MAIN
+    // THREAD while holding the avatar lock; the main thread deadlocked the
+    // moment it asked for that lock. Found by the overlap test for the
+    // read-back, in the test host, with the engine's observer installed; the
+    // same wait exists in the app whenever sync is on. A file write posts
+    // nothing. The file holds "upload", "delete" or "none"; when it has never
+    // been written, the value an older build left in UserDefaults is read.
+    private static func avatarMarkerFileURL() -> URL? {
+        baseProfilesDir()?.appendingPathComponent("__avatar_sync_state", isDirectory: false)
     }
 
-    static func hasPendingLocalAvatarDeletion() -> Bool {
-        UserDefaults.standard.string(forKey: localAvatarSyncStateKey) == "delete"
+    private static func storedAvatarMarker() -> String? {
+        if let url = avatarMarkerFileURL(), let data = try? Data(contentsOf: url) {
+            let text = String(decoding: data, as: UTF8.self)
+            return text == "upload" || text == "delete" ? text : nil
+        }
+        let legacy = UserDefaults.standard.string(forKey: localAvatarSyncStateKey)
+        return legacy == "upload" || legacy == "delete" ? legacy : nil
     }
+
+    private static func storeAvatarMarker(_ state: String?) {
+        guard let url = avatarMarkerFileURL() else { return }
+        try? Data((state ?? "none").utf8).write(to: url, options: .atomic)
+    }
+
+    static func hasPendingLocalAvatarUpload() -> Bool { storedAvatarMarker() == "upload" }
+
+    static func hasPendingLocalAvatarDeletion() -> Bool { storedAvatarMarker() == "delete" }
 
     static func hasPendingLocalAvatarSync() -> Bool {
         hasPendingLocalAvatarUpload() || hasPendingLocalAvatarDeletion()
@@ -209,7 +288,7 @@ struct ProfileStore {
 
     static func clearPendingLocalAvatarSync() {
         avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
-        UserDefaults.standard.removeObject(forKey: localAvatarSyncStateKey)
+        storeAvatarMarker(nil)
     }
 
     // C-192: the marker is one value, and a photo change can arrive as a
@@ -241,13 +320,13 @@ struct ProfileStore {
     /// The marker and its number, read together.
     static func pendingLocalAvatarSnapshot() -> (state: String?, generation: Int) {
         avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
-        return (UserDefaults.standard.string(forKey: localAvatarSyncStateKey), avatarMarkerCount)
+        return (storedAvatarMarker(), avatarMarkerCount)
     }
 
     private static func setPendingLocalAvatar(_ state: String) {
         avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
         avatarMarkerCount += 1
-        UserDefaults.standard.set(state, forKey: localAvatarSyncStateKey)
+        storeAvatarMarker(state)
     }
 
     /// Clears the marker unless the avatar was marked again since `generation`.
@@ -258,7 +337,7 @@ struct ProfileStore {
         #if DEBUG
         testHookInsideCheckedAvatarClear?()
         #endif
-        UserDefaults.standard.removeObject(forKey: localAvatarSyncStateKey)
+        storeAvatarMarker(nil)
         return true
     }
 
@@ -749,7 +828,26 @@ struct ProfileStore {
         markPendingLocalAvatarDeletionIfNeeded(for: userID)
     }
 
-    private static func deleteAvatarFiles(for userID: String?) {
+    // MARK: The picture last removed (for `AvatarRemovalGuard`)
+
+    private static func removedAvatarThumbnailURL() -> URL? {
+        baseProfilesDir()?.appendingPathComponent("__last_removed_avatar.thumb", isDirectory: false)
+    }
+
+    /// A 32 x 32 rendering of the photo this device last removed, kept so a
+    /// waiting removal can be checked against what the profile shows.
+    static func removedAvatarThumbnail() -> [UInt8]? {
+        guard let url = removedAvatarThumbnailURL(), let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+        return [UInt8](data)
+    }
+
+    private static func keepThumbnailOfAvatarAboutToBeRemoved(at url: URL) {
+        guard let image = UIImage(contentsOfFile: url.path), let pixels = OwnAvatarSync.thumbnail(of: image),
+              let target = removedAvatarThumbnailURL() else { return }
+        try? Data(pixels).write(to: target, options: .atomic)
+    }
+
+    private static func deleteAvatarFiles(for userID: String?, removalClock: Date? = nil) {
         let fm = FileManager.default
         var removed = false
         if let url = avatarOriginalURL(for: userID) {
@@ -758,7 +856,10 @@ struct ProfileStore {
             cache.removeObject(forKey: url.path as NSString)
         }
         if let url = avatarDerivedURL(for: userID) {
-            if fm.fileExists(atPath: url.path) { removed = true }
+            if fm.fileExists(atPath: url.path) {
+                removed = true
+                keepThumbnailOfAvatarAboutToBeRemoved(at: url)
+            }
             try? fm.removeItem(at: url)
             cache.removeObject(forKey: url.path as NSString)
         }
@@ -766,7 +867,7 @@ struct ProfileStore {
         // sync applied calls this for files already gone; telling the sync
         // "removed now" would give this device a newer clock than the photo
         // that follows the removal, and it would delete that photo everywhere.
-        if removed { JournalProfileMirror.avatarRemoved() }
+        if removed { JournalProfileMirror.avatarRemoved(at: removalClock) }
     }
 
     /// The ONE place a backend avatar becomes the local copy. It writes the
@@ -784,12 +885,67 @@ struct ProfileStore {
         saveAvatarOriginal(image, for: nil)
     }
 
-    /// P5-I / C-34 R2: the backend avatar was removed on another device. Clears
-    /// both scopes WITHOUT a pending-deletion marker, which would loop back into
-    /// a sync that re-deletes what is already gone.
-    static func removeAvatarFromConnected(for userID: String?) {
-        deleteAvatarFiles(for: userID)
-        deleteAvatarFiles(for: nil)
+    // MARK: A change read back from the Connected profile (third pass, 2026-11-12)
+    //
+    // Two rules, both about the private sync.
+    //
+    // ATOMIC. The read-back decides on the main actor; an iCloud import writes
+    // on the sync's thread. The check ("nothing has marked the avatar since
+    // this read-back began, and nothing is waiting") and the write happen here
+    // under the lock the sync's writers take, so an import can land before
+    // (the read-back then stands down) or after (the import is the later
+    // write), never between.
+    //
+    // NEVER "NOW". A change read back used to enter the journal clocked at the
+    // moment this device applied it, which outranked anything the journal had
+    // not delivered yet: a replacement photo chosen ten minutes earlier and
+    // arriving late lost to the removal this device had just applied, on every
+    // device, for good. With sync on the change is clocked a millisecond after
+    // the state it displaces (the photo this device held, or the removal the
+    // journal holds), so it displaces exactly that and loses to anything newer.
+
+    private static func modificationDate(of url: URL?) -> Date? {
+        guard let url, let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+        return attributes[.modificationDate] as? Date
+    }
+
+    private static func nothingHasMarkedTheAvatar(since generation: Int) -> Bool {
+        avatarMarkerCount == generation && storedAvatarMarker() == nil
+    }
+
+    /// Writes the backend's picture as this device's avatar, both scopes.
+    /// False, and nothing written, if the avatar was marked since `generation`.
+    static func applyAvatarFromBackend(_ image: UIImage, for userID: String?, ifUnchangedSince generation: Int,
+                                       journalIsOn: Bool) -> Bool {
+        avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
+        guard nothingHasMarkedTheAvatar(since: generation) else { return false }
+        #if DEBUG
+        testHookBeforeBackendAvatarWrite?()
+        #endif
+        let displaced = modificationDate(of: avatarDerivedURL(for: userID)) ?? JournalProfileMirror.removalClock?()
+        seedAvatarFromConnected(image, for: userID, replacingExisting: true)
+        if journalIsOn, let displaced {
+            let clock = displaced.addingTimeInterval(0.001)
+            for url in [avatarDerivedURL(for: userID), avatarDerivedURL(for: nil)].compactMap({ $0 }) {
+                try? FileManager.default.setAttributes([.modificationDate: clock], ofItemAtPath: url.path)
+            }
+            JournalProfileMirror.avatarChanged()
+        }
+        return true
+    }
+
+    /// Removes this device's avatar because the backend's was removed, both
+    /// scopes. False, and nothing removed, if the avatar was marked since `generation`.
+    static func removeAvatarFromBackend(for userID: String?, ifUnchangedSince generation: Int, journalIsOn: Bool) -> Bool {
+        avatarMarkerLock.lock(); defer { avatarMarkerLock.unlock() }
+        guard nothingHasMarkedTheAvatar(since: generation) else { return false }
+        #if DEBUG
+        testHookBeforeBackendAvatarWrite?()
+        #endif
+        let clock = journalIsOn ? modificationDate(of: avatarDerivedURL(for: userID))?.addingTimeInterval(0.001) : nil
+        deleteAvatarFiles(for: userID, removalClock: clock)
+        deleteAvatarFiles(for: nil, removalClock: clock)
+        return true
     }
 
     private static func downscale(_ img: UIImage, maxSide: CGFloat) -> UIImage {

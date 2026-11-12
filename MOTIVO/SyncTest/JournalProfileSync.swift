@@ -251,9 +251,14 @@ enum JournalProfileMerge {
 /// The app's write points call this. Installed by the engine; inert before.
 enum JournalProfileMirror {
     /// Set by the sync import while it writes, so its own writes do not scan.
-    enum Event { case changed, avatarRemoved, primaryChosen }
+    /// `avatarRemovedAt`: a removal with its own clock (one read back from the
+    /// Connected profile, which must not be clocked "now"; see `ProfileStore`).
+    enum Event: Equatable { case changed, avatarRemoved, avatarRemovedAt(Date), primaryChosen }
     nonisolated(unsafe) static var suppressed = false
     nonisolated(unsafe) static var onChange: ((Event) -> Void)?
+    /// The clock of the removal the journal currently holds for this device,
+    /// if it holds one. Installed by the engine with `onChange`.
+    nonisolated(unsafe) static var removalClock: (() -> Date?)?
     /// True while the Profile screen's name or location field has focus: the
     /// scan waits, so a typing pause (or the field emptied before retyping)
     /// never becomes a record. Seen 2026-10-26: an emptied name went up and
@@ -268,7 +273,10 @@ enum JournalProfileMirror {
 
     static func locationChanged() { guard !suppressed else { return }; onChange?(.changed) }
     static func avatarChanged() { guard !suppressed else { return }; onChange?(.changed) }
-    static func avatarRemoved() { guard !suppressed else { return }; onChange?(.avatarRemoved) }
+    static func avatarRemoved(at clock: Date? = nil) {
+        guard !suppressed else { return }
+        onChange?(clock.map { .avatarRemovedAt($0) } ?? .avatarRemoved)
+    }
     /// The instrument list's row tap: a deliberate primary-instrument choice.
     static func primaryChosen() { guard !suppressed else { return }; onChange?(.primaryChosen) }
 }
@@ -328,6 +336,19 @@ enum JournalProfileSync {
 
     static let avatarName = JournalSyncRecordType.profileAvatarRecordName
     static let profileName = JournalSyncRecordType.profileRecordName
+
+    // MARK: Write points
+
+    /// What the engine records when one of the app's write points fires. Here,
+    /// and not inline in the engine, so tests run the same code.
+    static func noteMirrorEvent(_ event: JournalProfileMirror.Event, store: JournalSyncStateStore) {
+        switch event {
+        case .avatarRemoved: store.update { $0.avatarRemovedAt = Date() }
+        case .avatarRemovedAt(let clock): store.update { $0.avatarRemovedAt = clock }
+        case .primaryChosen: store.update { $0.profilePrimaryChosen = true }
+        case .changed: break
+        }
+    }
 
     // MARK: Current values
 

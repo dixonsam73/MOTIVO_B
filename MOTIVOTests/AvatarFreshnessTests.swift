@@ -228,14 +228,14 @@ final class AvatarFreshnessTests: XCTestCase {
         XCTAssertTrue(body.contains("OwnAvatarSync.samePicture("), "an echo is recognised by its picture")
         XCTAssertTrue(body.contains("OwnAvatarSync.settle("), "a real change waits with sync on")
         XCTAssertTrue(body.contains("== appliedAtStart"), "a publication during the download is not overwritten")
-        XCTAssertEqual(auth.components(separatedBy: "ProfileStore.noteOwnAvatarPublished(").count - 1, 2, "the upload and the removal promotion")
+        XCTAssertEqual(auth.components(separatedBy: "ProfileStore.noteOwnAvatarPublished(").count - 1, 3,
+                       "the upload, the removal, and a removal found already made")
         XCTAssertEqual(code("ProfileView.swift").components(separatedBy: "ProfileStore.noteOwnAvatarPublished(").count - 1, 1, "the Profile screen's own upload")
         XCTAssertEqual(AccountDirectoryService.avatarVersion(inPatchResponse: Data("[{\"user_id\":\"u\",\"avatar_version\":\"2026-11-11T19:41:42.302262+00:00\"}]".utf8)),
                        "2026-11-11T19:41:42.302262+00:00")
         XCTAssertNil(AccountDirectoryService.avatarVersion(inPatchResponse: Data("[]".utf8)))
     }
 
-    private static let markerKey = "profile.__local_etudes_profile__.avatarSyncState_v1"
 
     /// THE RACE, with a controlled overlap. The checked clear has passed its
     /// check and has not yet removed the marker; a new marking arrives on
@@ -244,10 +244,9 @@ final class AvatarFreshnessTests: XCTestCase {
     /// then removed it: the newer pending change was lost. Under one lock the
     /// marking waits for the clear, and is still there afterwards.
     func testAMarkingThatArrivesInsideACheckedClearIsNotLost() throws {
-        let saved = UserDefaults.standard.object(forKey: Self.markerKey)
         defer {
             ProfileStore.testHookInsideCheckedAvatarClear = nil
-            if let saved { UserDefaults.standard.set(saved, forKey: Self.markerKey) } else { UserDefaults.standard.removeObject(forKey: Self.markerKey) }
+            ProfileStore.clearPendingLocalAvatarSync()
         }
         ProfileStore.deleteAvatar(for: nil)                                   // the older marking ("delete")
         let older = ProfileStore.pendingLocalAvatarSnapshot()
@@ -288,14 +287,101 @@ final class AvatarFreshnessTests: XCTestCase {
         XCTAssertTrue(ProfileStore.hasPendingLocalAvatarSync())
     }
 
+    /// Third pass: every write of a backend picture or removal onto this device
+    /// goes through the two atomic writers; no other path is left.
+    func testEveryBackendReadBackWriteGoesThroughTheAtomicWriters() throws {
+        let auth = code("AuthManager.swift"), view = code("ProfileView.swift"), store = code("ProfileStore.swift")
+        XCTAssertFalse(auth.contains("seedAvatarFromConnected("), "the account no longer writes a backend picture directly")
+        XCTAssertFalse(view.contains("seedAvatarFromConnected("), "nor does the Profile screen")
+        XCTAssertFalse(store.contains("func removeAvatarFromConnected("), "the unguarded removal is gone, not kept beside the guarded one")
+        XCTAssertEqual(auth.components(separatedBy: "ProfileStore.applyAvatarFromBackend(").count - 1, 1)
+        XCTAssertEqual(auth.components(separatedBy: "ProfileStore.removeAvatarFromBackend(").count - 1, 1)
+        XCTAssertEqual(view.components(separatedBy: "ProfileStore.applyAvatarFromBackend(").count - 1, 1)
+        for name in ["static func applyAvatarFromBackend(", "static func removeAvatarFromBackend("] {
+            let start = try XCTUnwrap(store.range(of: name))
+            let body = String(store[start.lowerBound...].prefix(500))
+            XCTAssertTrue(body.contains("avatarMarkerLock.lock()") && body.contains("nothingHasMarkedTheAvatar(since: generation)"),
+                          "\(name) checks and writes under the avatar lock")
+        }
+    }
+
+    /// The removal guard, row by row.
+    func testARemovalIsPublishedOnlyOverThePictureItRemoves() {
+        typealias G = AvatarRemovalGuard
+        XCTAssertEqual(G.decide(backendHasAvatar: false, backendShowsTheRemovedPicture: nil), .alreadyRemoved)
+        XCTAssertEqual(G.decide(backendHasAvatar: false, backendShowsTheRemovedPicture: true), .alreadyRemoved)
+        XCTAssertEqual(G.decide(backendHasAvatar: true, backendShowsTheRemovedPicture: true), .publish)
+        XCTAssertEqual(G.decide(backendHasAvatar: true, backendShowsTheRemovedPicture: false), .yieldToBackend,
+                       "a different photo on the profile is not what this removal removes")
+        XCTAssertEqual(G.decide(backendHasAvatar: true, backendShowsTheRemovedPicture: nil), .yieldToBackend,
+                       "no record of the removed picture: in doubt the photo is kept")
+    }
+
+    /// The picture a removal removes is remembered, so the guard has something to compare.
+    func testTheRemovedPictureIsRemembered() throws {
+        let uid = "c192-thumb-" + UUID().uuidString
+        defer { ProfileStore.removeSyncedAvatar(for: uid); ProfileStore.clearPendingLocalAvatarSync() }
+        let removed = picture(seed: 6)
+        XCTAssertTrue(ProfileStore.writeSyncedAvatar(pngData: try XCTUnwrap(removed.pngData()), for: uid, modifiedAt: Date()))
+        ProfileStore.removeSyncedAvatar(for: uid)
+        let thumbnail = try XCTUnwrap(ProfileStore.removedAvatarThumbnail())
+        let published = try XCTUnwrap(UIImage(data: try XCTUnwrap(removed.jpegData(compressionQuality: 0.9))))
+        XCTAssertTrue(OwnAvatarSync.samePicture(thumbnail: thumbnail, published), "the profile's JPEG of the removed photo")
+        XCTAssertFalse(OwnAvatarSync.samePicture(thumbnail: thumbnail, picture(seed: 7)), "a different photo")
+    }
+
+    /// THE DEADLOCK (third pass). With the sync engine running, a change to
+    /// UserDefaults is observed on the main queue, and posting it from another
+    /// thread waits for the main thread. The marker used to be a UserDefaults
+    /// value written under the avatar lock: the sync's thread held the lock and
+    /// waited for the main thread, and the main thread hung as soon as it asked
+    /// for the lock. Reproduced here with the same kind of observer: the main
+    /// thread is held while the other thread marks, then asks for the lock.
+    func testMarkingOnTheSyncsThreadNeverWaitsForTheMainThread() throws {
+        let observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { _ in }
+        defer { NotificationCenter.default.removeObserver(observer); ProfileStore.clearPendingLocalAvatarSync() }
+        let uid = "c192-main-" + UUID().uuidString
+        let png = try XCTUnwrap(picture(seed: 4).pngData())
+        let marked = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {                         // the sync's thread: an import, then a removal
+            _ = ProfileStore.writeSyncedAvatar(pngData: png, for: uid, modifiedAt: Date())
+            ProfileStore.removeSyncedAvatar(for: uid)
+            marked.signal()
+        }
+        // The main thread does not return to its run loop: if the marking needed it, this would time out.
+        XCTAssertEqual(marked.wait(timeout: .now() + 5), .success, "the marking finished without the main thread")
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion(), "and the main thread can take the lock straight away")
+        // No UserDefaults value is involved any more.
+        XCTAssertFalse(code("ProfileStore.swift").contains("UserDefaults.standard.set(state, forKey: localAvatarSyncStateKey)"))
+    }
+
+    /// The marker an older build left in UserDefaults is still honoured until
+    /// this build first writes its own.
+    func testAMarkerLeftByAnOlderBuildIsStillRead() throws {
+        let key = "profile.__local_etudes_profile__.avatar" + "SyncState_v1"
+        let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let file = base.appendingPathComponent("Profiles/__avatar_sync_state")
+        let savedFile = try? Data(contentsOf: file)
+        let savedLegacy = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let savedFile { try? savedFile.write(to: file) } else { try? FileManager.default.removeItem(at: file) }
+            if let savedLegacy { UserDefaults.standard.set(savedLegacy, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        try? FileManager.default.removeItem(at: file)
+        UserDefaults.standard.set("upload", forKey: key)
+        XCTAssertTrue(ProfileStore.hasPendingLocalAvatarUpload(), "never written here: the older build's value stands")
+        ProfileStore.clearPendingLocalAvatarSync()
+        XCTAssertFalse(ProfileStore.hasPendingLocalAvatarSync(), "once written here, the file decides, whatever UserDefaults still holds")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: key), "upload")
+    }
+
     /// The promotion of a removal must not delete an image the sync wrote after
     /// the promotion read its marker.
     func testARemovalPromotionDoesNotDeleteAnImageMarkedSinceItStarted() throws {
-        let saved = UserDefaults.standard.object(forKey: Self.markerKey)
         let uid = "c192-del-" + UUID().uuidString
         defer {
             ProfileStore.removeSyncedAvatar(for: uid)
-            if let saved { UserDefaults.standard.set(saved, forKey: Self.markerKey) } else { UserDefaults.standard.removeObject(forKey: Self.markerKey) }
+            ProfileStore.clearPendingLocalAvatarSync()
         }
         ProfileStore.removeSyncedAvatar(for: uid)                               // a removal arrives: marked "delete"
         let removal = ProfileStore.pendingLocalAvatarSnapshot()
@@ -340,9 +426,7 @@ final class AvatarFreshnessTests: XCTestCase {
 
     /// C-192. A marking made while a promotion is in flight is not cleared by it.
     func testAPromotionClearsOnlyTheMarkingItStartedFrom() {
-        let key = "profile.__local_etudes_profile__.avatarSyncState_v1"
-        let saved = UserDefaults.standard.object(forKey: key)
-        defer { if let saved { UserDefaults.standard.set(saved, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        defer { ProfileStore.clearPendingLocalAvatarSync() }
         ProfileStore.deleteAvatar(for: nil)                       // marks "delete"
         let removal = ProfileStore.pendingLocalAvatarGeneration   // a promotion starts here
         XCTAssertTrue(ProfileStore.hasPendingLocalAvatarDeletion())
