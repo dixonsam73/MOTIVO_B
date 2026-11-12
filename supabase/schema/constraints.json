@@ -6,6 +6,12 @@
     "table_name": "account_directory"
   },
   {
+    "conname": "account_directory_avatar_key_own_folder",
+    "contype": "c",
+    "definition": "CHECK (((avatar_key IS NULL) OR (avatar_key = (('users/'::text || (user_id)::text) || '/avatar.jpg'::text)) OR (avatar_key ~ (('^users/'::text || (user_id)::text) || '/avatar-[0-9a-f]{32}\\.jpg$'::text))))",
+    "table_name": "account_directory"
+  },
+  {
     "conname": "account_directory_pkey",
     "contype": "p",
     "definition": "PRIMARY KEY (user_id)",

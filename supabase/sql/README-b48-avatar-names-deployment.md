@@ -1,8 +1,18 @@
-# B-48 + avatar image names per upload — deployment (PREPARED, NOT EXECUTED)
+# B-48 + avatar image names per upload — deployment (APPLIED 2026-11-12)
 
-**Prepared** 2026-11-12. **Nothing here has run against production.** Codex's
-review of the SQL passed 2026-11-12 (the files are unchanged since `4c8a4c1`).
-Samuel runs it, starting with the read-only preflight.
+**Applied to production on 2026-11-12** by Samuel, after Codex's review of the
+SQL (the files were unchanged since `4c8a4c1`; only the apply file's header
+comment has been corrected since). Steps 1 to 4 below are done; step 5, the
+app build, is not.
+
+| Step | Result |
+|---|---|
+| Preflight | passed: 2 directory rows, 0 nonconforming, three policies as expected, no constraint |
+| Apply | final row `applied \| 2 \| 1 \| 0 \| 1` |
+| Recapture | exactly the two avatar policies and the new constraint changed |
+| `verify-baseline.sh` | gate met (the one standing approved exception) |
+
+**The rollback script has not been run.** Its conditions below still stand.
 
 ## What changes on the server
 

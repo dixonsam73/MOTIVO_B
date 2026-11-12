@@ -123,6 +123,14 @@ in place; don't add a "CORRECTED" paragraph on top of it.
   works. Use PostgREST with a real JWT.
 - `supabase storage rm` silently does nothing (CLI 2.113.0). See
   `supabase/README.md` for the working route.
+- The `supabase` CLI prints JSON only when it detects an agent; in Samuel's
+  terminal it prints a table. A script he runs must pass
+  `--output-format json`.
+- Avatars (B-48, applied 2026-11-12): `account_directory.avatar_key` may only
+  name an image in the row's own `users/<user_id>/` folder (a CHECK), either
+  the old `avatar.jpg` or a per-upload `avatar-<32 hex>.jpg`. Per-upload
+  images can be inserted and deleted by their owner, never updated. The
+  rollback script restores policies only; the constraint stays.
 - Every production schema change must also land in `supabase/migrations/`, or
   local rehearsals test the wrong thing.
 - Secrets live in `~/.etudes-secrets/` and Supabase secrets, never in the repo.

@@ -1,5 +1,6 @@
 -- B-48 + avatar image names per upload. PRODUCTION APPLY.
--- NOT APPLIED. Requires one Codex review round and Samuel's approval.
+-- APPLIED TO PRODUCTION 2026-11-12 by Samuel, after Codex's review. Final row:
+-- applied | 2 | 1 | 0 | 1. Do not run again (the pre-guard would refuse it).
 -- Prepared and rehearsed locally 2026-11-12 (supabase/tests/b48/rehearse.sh).
 -- Run the preflight first: 2026-11-12-b48-avatar-names-preflight-production.sql
 -- Run: supabase db query --linked -f supabase/sql/2026-11-12-b48-avatar-names-apply-production.sql

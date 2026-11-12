@@ -2680,8 +2680,9 @@ the join.
   image is deleted with its reference set. Closed by the next entry: an
   image name per upload, so a delete names exactly one image.
   **An avatar image name per upload, and B-48, 2026-11-12 (`4c8a4c1`
-  server files, `a38a72b` app and tests). The server change is PREPARED
-  AND NOT APPLIED.** Each upload
+  server files, `a38a72b` app and tests). The server change was APPLIED
+  TO PRODUCTION on 2026-11-12; the app change is in no distributed build
+  yet.** Each upload
   is stored as `users/<uid>/avatar-<32 hex>.jpg`, written once and never
   overwritten, and every delete names one image, so a delete that arrives
   late can only remove the old one. The old fixed name stays valid and is
@@ -2711,8 +2712,18 @@ the join.
   `README-b48-avatar-names-deployment.md`. The rollback keeps the
   ownership constraint (Codex's second correction) and refuses while any
   per-upload image exists. **Order: server first** (a new build cannot
-  publish a photo against the old INSERT policy). Codex's SQL review
-  passed 2026-11-12; Samuel runs the preflight and then the apply. *Evidence, all local:* `supabase/tests/b48/rehearse.sh`, 78
+  publish a photo against the old INSERT policy). *Deployed 2026-11-12*
+  after Codex's SQL review: Samuel ran the preflight (two directory
+  rows, none nonconforming, policies as expected) and the apply (final
+  row `applied | 2 | 1 | 0 | 1`). Before it, production was found on
+  newer service versions than the rehearsal (storage v1.94.2, PostgREST
+  v14.5; B-49), so both rehearsals were repeated on those versions at
+  production's storage migration level, with the same results, and the
+  snapshot was recaptured (`capture-schema.sh` had to be fixed first: it
+  assumed JSON, which the CLI prints only for an agent). After the
+  apply the recapture changed exactly the two policies and the
+  constraint, and the fidelity gate is met. Older builds are unaffected.
+  *Evidence before the apply, all local:* `supabase/tests/b48/rehearse.sh`, 78
   checks with real member sessions (guards, storage policies, the
   reference check, rollback); `p6-single-delete/e2e.sh`, 82 checks (both
   Edge Functions, unchanged, remove a referenced image and a second one

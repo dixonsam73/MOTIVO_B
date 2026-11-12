@@ -283,7 +283,7 @@
     "cmd": "DELETE",
     "permissive": "PERMISSIVE",
     "policyname": "avatars_delete_owner_only",
-    "qual": "((bucket_id = 'avatars'::text) AND (name = (('users/'::text || (auth.uid())::text) || '/avatar.jpg'::text)))",
+    "qual": "((bucket_id = 'avatars'::text) AND ((name = (('users/'::text || (auth.uid())::text) || '/avatar.jpg'::text)) OR (name ~ (('^users/'::text || (auth.uid())::text) || '/avatar-[0-9a-f]{32}\\.jpg$'::text))))",
     "roles": "{authenticated}",
     "schemaname": "storage",
     "tablename": "objects",
@@ -297,7 +297,7 @@
     "roles": "{authenticated}",
     "schemaname": "storage",
     "tablename": "objects",
-    "with_check": "(( SELECT enforcement_gate('storage.avatars_insert'::text) AS enforcement_gate) AND ((bucket_id = 'avatars'::text) AND (name = (('users/'::text || (auth.uid())::text) || '/avatar.jpg'::text))))"
+    "with_check": "(( SELECT enforcement_gate('storage.avatars_insert'::text) AS enforcement_gate) AND (bucket_id = 'avatars'::text) AND ((name = (('users/'::text || (auth.uid())::text) || '/avatar.jpg'::text)) OR (name ~ (('^users/'::text || (auth.uid())::text) || '/avatar-[0-9a-f]{32}\\.jpg$'::text))))"
   },
   {
     "cmd": "SELECT",
