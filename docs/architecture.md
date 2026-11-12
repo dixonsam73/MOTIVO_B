@@ -670,6 +670,16 @@ other one. This is accepted for v1.
   it removes. Every write of the avatar reference is conditional on the
   version the device read (the server checks and writes in one statement),
   and a removal writes the reference before it deletes the image.
+- **Every avatar upload has its own image name** (`avatar-<32 hex>.jpg` in
+  the member's folder; 2026-11-12, C-196), written once and never
+  overwritten, and every delete names one image, so a delete that arrives
+  late can only remove the image it was sent for. A device deletes the
+  image its own accepted reference write displaced and its own uploads
+  that can no longer be pointed at; an image whose reference write is
+  pending or of unknown outcome is kept until a read of the row settles it
+  (`AvatarWorkLedger`, a file in `Profiles/`). The server lets a member's
+  reference name only an image in that member's own folder (B-48). **The
+  server half is prepared and not yet applied; it goes first.**
 - **Signing in to Connected** no longer re-owns journal entries. Publication
   identifiers stay in the Connected domain.
 - **A device not signed in to Connected** can't update a shared post. Its

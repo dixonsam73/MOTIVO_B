@@ -2677,11 +2677,53 @@ the join.
   this device's reference write is accepted and its one delete request,
   already sent, reaches the server only after the other device has been
   refused, read again, stored again and written its reference, that
-  image is deleted with its reference set. Closing it needs a backend
-  change, **proposed and not made**: an image name per upload, so a
-  delete names exactly the image the device checked (storage policies on
-  the `avatars` bucket, the client's upload and cleanup, and the fixed
-  name assumed in B-20's sweep).
+  image is deleted with its reference set. Closed by the next entry: an
+  image name per upload, so a delete names exactly one image.
+  **An avatar image name per upload, and B-48, 2026-11-12 (`4c8a4c1`
+  server files, `a38a72b` app and tests). The server change is PREPARED
+  AND NOT APPLIED.** Each upload
+  is stored as `users/<uid>/avatar-<32 hex>.jpg`, written once and never
+  overwritten, and every delete names one image, so a delete that arrives
+  late can only remove the old one. The old fixed name stays valid and is
+  never written by this build. *What the device deletes* is decided by a
+  record it keeps in a file (`AvatarWorkLedger`), after Codex's
+  correction: the exact image a reference write of its own displaced,
+  whoever stored it, once the server accepted that write; and its own
+  uploads whose reference write can no longer be accepted or was never
+  sent. An image whose reference write is pending, failed, or was made
+  with its answer lost is never deleted: it stays on record until a read
+  of the row shows a strictly later version and another reference. A
+  delete that fails stays on record and is retried at the next
+  publication, removal, or first read of the row after launch. *B-48,*
+  found while planning this: `avatar_key` was unchecked text and two
+  service-role sweeps delete what it names; a CHECK now ties it to the
+  row's own folder. *Server:* migration `20261112120000`, preflight,
+  apply and policy-only rollback in `supabase/sql/` with
+  `README-b48-avatar-names-deployment.md`. The rollback keeps the
+  ownership constraint (Codex's second correction) and refuses while any
+  per-upload image exists. **Order: server first** (a new build cannot
+  publish a photo against the old INSERT policy), one Codex round, Samuel
+  runs it. *Evidence, all local:* `supabase/tests/b48/rehearse.sh`, 78
+  checks with real member sessions (guards, storage policies, the
+  reference check, rollback); `p6-single-delete/e2e.sh`, 82 checks (both
+  Edge Functions, unchanged, remove a referenced image and a second one
+  in the folder, either form); the fidelity gate differs from the
+  snapshot in exactly the two policies and the constraint. App: 97
+  focused tests, among them the delayed delete outlasting another
+  device's refused and repeated publication, for a removal and for a
+  replacement, and the unanswered, lost-answer and late-arriving
+  reference writes. Full target: 1,453 tests (SyncTest scheme), 1,252
+  (Debug), the seven known order-dependent failures and no other (the
+  local Supabase stack was up, so the tests that need it ran); Release
+  builds.
+  *Not covered:* guarantees hold between builds from this one on (an
+  older build still overwrites the fixed name and writes without a
+  condition); an older PHOTO published late over a newer one can still
+  be read back as a replacement; an image left by a device that never
+  runs again, or a fixed-name image an older build left unreferenced,
+  stays until account deletion or expiry (decision D4); nothing ran on a
+  device or against the hosted backend. First real use is at the
+  internal TestFlight checkpoint (D5).
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
