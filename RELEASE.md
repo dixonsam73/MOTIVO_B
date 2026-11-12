@@ -474,7 +474,8 @@ the join.
   part 5 — **run 2026-11-11 on build 1914: completed, with an imported
   location reaching the backend (C-192) and a typed location undone
   (C-193); both corrected the same day and the affected cases rerun on
-  build 1918; records under "Sync"** — `part5-connected-isolation-script.md`, on a
+  build 1918, and the avatar read-back corrected and checked on build
+  1922 the next day; records under "Sync"** — `part5-connected-isolation-script.md`, on a
   development-signed Release build with a dedicated simulator as the
   second writer, proved to sync before anything is measured. Part 5's
   coverage is therefore the Development CloudKit environment only. Parts:
@@ -2559,13 +2560,65 @@ the join.
   *Not covered:* Production CloudKit and TestFlight; two Connected devices
   with sync on (the loop guard between them rests on unit tests and the
   code); a Connected device with sync off changing the avatar, which a
-  sync-on device now does not pick up (C-192's recorded consequence);
-  the fixed join on a device.
-  *Left as it is, on Samuel's word only:* **X2 exists in production**
-  (private posts on, 0 posts, "let other members find you" off); Device A
-  Connected as X2 on build 1918 and the simulator Solo, both on the
-  disposable account; two Sandbox Apple Accounts. Evidence:
+  sync-on device did not pick up at this build (corrected in the pass
+  below); the fixed join on a device (run in the pass below).
+  *Left at the end of this run:* X2 in production (private posts on, 0
+  posts, "let other members find you" off), Device A Connected as X2 on
+  build 1918 and the simulator Solo; X2 was used again and then deleted by
+  Samuel in the pass below. Evidence:
   `…/part5-rerun-2026-11-11/` in the same notes folder.
+  **Avatar correction pass after Codex's review, 2026-11-11 20:40 to
+  2026-11-12 12:00, builds 1920 (`d6543e9`) and 1922 (`62bc081`).** Three
+  device checks, on verified disposable users only; coverage as before,
+  **Development CloudKit only**. Plan, the guarded script and every read:
+  `…/avatar-pass-2026-11-11/` in the same notes folder.
+  *What changed (C-192, second pass).* The blanket "no read-back while sync
+  is on" is replaced: a device records the version its own publication
+  produced, follows only a newer one, treats a newer version showing the
+  picture it already holds as an echo (nothing written), and applies a
+  different picture or a removal at once with sync off and after it has
+  stood two minutes with sync on. The pending-avatar marker changes under
+  one lock. A waiting photo is attached whenever any write evidences the
+  owner's row.
+  *Second device.* The simulator cannot pass Apple's age check, so it
+  cannot be Connected. By Samuel's decision the "other device" was the
+  backend itself: he ran `backend_avatar_edit.sh`, which makes the app's
+  own two writes in the app's order as the service role, guarded to the one
+  disposable user. **Two physical Connected devices were not tested**; the
+  pair is covered by `TwoConnectedPublishersTests`, a model on the app's
+  own decision functions. The iPad was not switched; the age gate was not
+  bypassed.
+  | Check | Device A (sync on) | Backend afterwards |
+  |---|---|---|
+  | First launch on 1920, user X2: the standing photo | downloaded, measured as the picture it holds, version recorded; files unchanged, nothing sent | unchanged since 19:41 |
+  | **Replacement** made on the backend 20:47:44 | relaunched 20:48:13; new picture written 20:50:21 (the two-minute wait); sent through iCloud once; simulator had it 20:51:15, byte-identical | version still 20:47:44: not published back |
+  | **Removal** made on the backend 20:52:58 | relaunched 20:54:19; photo removed 20:56:29; sent once; simulator removed it 20:57:53 | key NULL, version still 20:52:58, no object |
+  | **Fresh join**, build 1920, user X3 (21:12:46) | photo uploaded 21:13:02, key patch matched no row, marker kept | **failed**: row present, avatar_key NULL five and fifteen minutes later |
+  | The same user after installing 1922 | attached at the launch, 21:29:21; publication recorded; nothing sent | key and version set |
+  | **Fresh join**, build 1922, user X4 (2026-11-12 11:54:51) | no relaunch, no edit; marker cleared; version 11:55:05.496451 recorded | **passed**: key set, version 11:55:05.496451, object 11:55:05, 14 s after the account was created |
+  *The failure on 1920 and its fix (`62bc081`).* The own row has three
+  writers (the hydration snapshot, the Profile screen, set-up). `27f799d`
+  promoted again only after the hydration's own publish; at that join the
+  row was created by another writer and an idle app never retried. Now the
+  one profile write announces an evidenced own row and the account attaches
+  a waiting photo then.
+  *Identities.* Each join used a fresh Sandbox purchaser and was verified
+  before anything was measured: X3 `ce8b7689-…` and X4 `e56086bc-…`, each
+  exactly one new user with the disposable address and Apple identity
+  `001325…1755`. X2 and X3 were deleted by Samuel in the app (X3 while its
+  membership was lapsed); the user list returned to the original two each
+  time. Samuel's own row was identical to its reference at every read.
+  *Not covered:* two physical Connected devices; a real second device
+  making the backend change; Production CloudKit and TestFlight. *Limits
+  of the design:* a real change reaches a sync-on device two minutes after
+  the launch that first sees it; a replacement so close to the held
+  picture that it measures the same (tolerance 6 of 255 on a 32 x 32
+  rendering) is treated as an echo; each Connected device still publishes
+  an imported change once. C-194 stays deferred.
+  *Left as it is, on Samuel's word only:* **X4 exists in production**
+  (photo attached, private posts on, 0 posts); Device A Connected as X4 on
+  build 1922, the simulator Solo, both on the disposable account; four
+  Sandbox Apple Accounts used.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
