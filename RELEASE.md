@@ -2777,11 +2777,14 @@ the join.
   *The finding:* after the restore Device A created and sent two
   instrument rows the journal in iCloud had never held (C-198).
   Evidence: `…/testflight-2026-11-12/` in the notes folder.
-  **C-197 corrected in the app 2026-11-13, not yet on a device or in a
-  TestFlight build.** Still to do before distribution goes beyond Internal
-  Only: the two-device check on the trial container described in the C-197
-  row (a first device on an empty zone; a second device joining with the
-  same journal and a few differences). C-198's backfill is left as it is.
+  **C-197 corrected in the app and run on two devices 2026-11-13** (Études
+  Sync Test 1944 on Device A and the iPad, trial container, a new zone, so
+  nothing in iCloud was deleted). The join behaved as predicted in every
+  case; the record is in the C-197 row. It found one defect, C-199 (a
+  starred attachment both devices hold is listed as displaced). Still to do
+  before distribution goes beyond Internal Only: correct C-199, and Samuel
+  and Codex read the device record. Not in a TestFlight build. C-198's
+  backfill is left as it is.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
