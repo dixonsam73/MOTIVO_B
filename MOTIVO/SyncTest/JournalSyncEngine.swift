@@ -242,7 +242,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             // The system's account notification, independent of any engine
             // instance: while dormant there is no engine to tell us.
             accountObserver = NotificationCenter.default.addObserver(forName: .CKAccountChanged, object: nil, queue: nil) { [weak self] _ in
-                Task { await self?.reconcile(trigger: "iCloud account changed (system)") }
+                Task.detached { await self?.reconcile(trigger: "iCloud account changed (system)") }
             }
         }
         if !observersInstalled {
@@ -279,7 +279,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             #if canImport(UIKit)
             backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
                 guard let self else { return }
-                Task {
+                Task.detached {
                     // The app is about to be suspended: without background time
                     // the queued position only leaves at the next foreground
                     // (1861 on device: queued, not sent; the other device opened
@@ -361,7 +361,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             let again = reconcileQueued
             reconcileQueued = false
             stateLock.unlock()
-            if again { Task { await self.reconcile(trigger: "queued") } }
+            if again { Task.detached { await self.reconcile(trigger: "queued") } }
         }
 
         let st = store.state
@@ -563,7 +563,15 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         guard !manualSendScheduled else { stateLock.unlock(); return }
         manualSendScheduled = true
         stateLock.unlock()
-        Task { [weak self] in
+        // C-174 (cause found 2026-11-13): DETACHED. This is called from inside
+        // CKSyncEngine's delegate callbacks (a sent-changes event, a rejected
+        // save) and from the reconcile an account-change event starts. A plain
+        // unstructured task inherits the callback's context, and CloudKit then traps
+        // in `sendChanges` ("Cannot await a call into CKSyncEngine from within
+        // a delegate callback … Try performing this in a detached Task") if
+        // this task is the one that reaches it. It did, whenever no other send
+        // was in flight: 4 s after sync was turned on over a small journal.
+        Task.detached { [weak self] in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard let self else { return }
             self.stateLock.lock(); self.manualSendScheduled = false; self.stateLock.unlock()
@@ -623,7 +631,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             stateLock.unlock()
             if again {
                 log(JournalDeferredSend.ranText(kept: kept, flightLasted: Date().timeIntervalSince(asked)))
-                Task { await self.performSend(userDriven: userDriven, bypassCadence: bypassCadence, trigger: "kept request") }
+                Task.detached { await self.performSend(userDriven: userDriven, bypassCadence: bypassCadence, trigger: "kept request") }
             }
         }
         if let episode = store.state.storageFull {
@@ -1382,7 +1390,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 Task { await self.recomputeGate(trigger: description) }
             }
             guard pending else { return }
-            Task { await self.reconcile(trigger: "network path satisfied") }
+            Task.detached { await self.reconcile(trigger: "network path satisfied") }
         }
         monitor.start(queue: DispatchQueue(label: "com.samueldixon.motivo.synctest.path"))
         pathMonitor = monitor
@@ -1642,7 +1650,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         // A dropped instance may still finish an operation: nothing it reports
         // is applied, and its state is never saved.
         guard isCurrent(syncEngine) else {
-            if case .accountChange = event { Task { await reconcile(trigger: "account change from a dropped engine") } }
+            if case .accountChange = event { Task.detached { await self.reconcile(trigger: "account change from a dropped engine") } }
             else { log("Event from a dropped engine ignored (\("\(event)".components(separatedBy: "(").first ?? ""))") }
             return
         }
@@ -1652,7 +1660,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
         case .accountChange(let e):
             log("Engine account change: \(String(describing: e.changeType).components(separatedBy: "(").first ?? "")")
-            Task { await reconcile(trigger: "engine account change") }
+            // C-174: detached, so nothing the reconcile starts inherits this callback.
+            Task.detached { await self.reconcile(trigger: "engine account change") }
 
         case .fetchedDatabaseChanges(let e):
             // The account guard covers downloads too, not just uploads.
@@ -2292,7 +2301,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             if record.recordType == JournalSyncRecordType.savedList {
                 // Lists: the server copy wins a rejected send (whole list).
                 stateLock.lock(); let generation = dormantGeneration; stateLock.unlock()
-                Task { await self.applyDeferredSendConflict(server: server, recordID: record.recordID, generation: generation) }
+                Task.detached { await self.applyDeferredSendConflict(server: server, recordID: record.recordID, generation: generation) }
                 return
             }
             if JournalSyncRecordType.isProfileRecordName(name) {
@@ -2321,7 +2330,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             if JournalSyncRecordType.isScoreRecordName(name) || JournalSyncRecordType.isSettingsRecordName(name) {
                 // Stages I and J: the same rule as the import, with our save known to be pending.
                 stateLock.lock(); let generation = dormantGeneration; stateLock.unlock()
-                Task { await self.applyDeferredSendConflict(server: server, recordID: record.recordID, generation: generation) }
+                Task.detached { await self.applyDeferredSendConflict(server: server, recordID: record.recordID, generation: generation) }
                 return
             }
             var resend = false

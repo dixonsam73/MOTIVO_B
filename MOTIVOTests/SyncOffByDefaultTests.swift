@@ -377,6 +377,41 @@ final class SyncOffByDefaultTests: XCTestCase {
         }
     }
 
+    /// C-174: CloudKit traps ("Cannot await a call into CKSyncEngine from
+    /// within a delegate callback … Try performing this in a detached Task")
+    /// when `sendChanges` is reached from a task that was started inside one
+    /// of the engine's delegate callbacks: an unstructured `Task { }` inherits
+    /// the callback's context, and so does a task started further down that
+    /// chain. The trap itself needs CloudKit and cannot be driven here; this
+    /// guards the shape that prevents it. Every task that leads to a send, or
+    /// to the reconcile and conflict work a callback starts, is DETACHED.
+    func testEveryTaskThatCanReachASendIsDetachedFromTheDelegateCallbacks() throws {
+        let engine = try XCTUnwrap(swiftSources().first { $0.path == "SyncTest/JournalSyncEngine.swift" }).text
+        XCTAssertEqual(engine.components(separatedBy: "engine.sendChanges()").count - 1, 1, "sendChanges is called in one place, performSend")
+        // No inheriting task starts a send, a reconcile or a deferred conflict on its own line…
+        for line in engine.split(separator: "\n") where line.contains("Task {") {
+            for call in ["performSend(", "reconcile(", "applyDeferredSendConflict("] {
+                XCTAssertFalse(line.contains(call), "an inheriting task must not start \(call): \(line.trimmingCharacters(in: .whitespaces))")
+            }
+        }
+        // …nor in the two multi-line launches.
+        func body(from start: String, to end: String) throws -> String {
+            let a = try XCTUnwrap(engine.range(of: start), start)
+            let b = try XCTUnwrap(engine.range(of: end, range: a.upperBound..<engine.endIndex), end)
+            return String(engine[a.lowerBound..<b.lowerBound])
+        }
+        for (name, text) in [("scheduleManualSend", try body(from: "private func scheduleManualSend(", to: "enum SendDecision")),
+                             ("the background send", try body(from: "UIApplication.didEnterBackgroundNotification", to: "installPathMonitorIfNeeded()"))] {
+            XCTAssertTrue(text.contains("performSend("), "\(name) is where a send starts")
+            XCTAssertTrue(text.contains("Task.detached"), "\(name) must start its send in a detached task")
+            XCTAssertFalse(text.contains("Task {"), "\(name) must not use an inheriting task")
+        }
+        // The callbacks themselves start nothing that inherits and then awaits the engine.
+        let callbacks = try body(from: "func handleEvent(_ event: CKSyncEngine.Event", to: "func nextRecordZoneChangeBatch(")
+        XCTAssertTrue(callbacks.contains("Task.detached { await self.reconcile(trigger: \"engine account change\") }"),
+                      "the account-change event, which is what started the task that trapped")
+    }
+
     /// C-197: the record zone is "Journal". Only the trial build, on the trial
     /// container, can be given another name, for a device trial that must
     /// start from a zone that does not exist; Release and Debug cannot.
