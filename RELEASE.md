@@ -2789,8 +2789,18 @@ the join.
   text names the cause (a CKSyncEngine call made from a task that started
   inside a delegate callback). Corrected the same evening (`f7d7eff`: those
   tasks are detached); the same join on build 1948 ran the same sequence
-  and stayed up. Not in a TestFlight build yet. C-198's backfill is left
-  as it is.
+  and stayed up. C-198's backfill is left as it is.
+  **Release archive prepared 2026-11-13, not uploaded: Etudes 1949
+  (`12ed4d8`)**, `~/Library/Developer/Xcode/Archives/2026-11-13/`. Checked
+  on the archive and on an app-store export made only to read its signing:
+  bundle `com.sdsongs.etudes`, container `iCloud.com.sdsongs.etudes`
+  (Production), no trial-zone key so the zone is "Journal", push
+  production, `get-task-allow` false, no StoreKit file; entitlements
+  identical to build 1937. Tests at that code: 1492 (SyncTest scheme) and
+  1257 (Debug), the seven known failures only, with the off-by-default and
+  scheme guards passing. Samuel pushes and uploads; Internal Only. The
+  two-device checklist is in the shared notes
+  (`testflight-1949-2026-11-13/checklist.md`).
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
