@@ -162,9 +162,26 @@ enum JournalRecovery {
 
     /// Makes an attachment again from what was kept, in `session`. The file
     /// is copied back into the journal before the row is saved.
+    /// Why a kept attachment was not made again. Thrown, never skipped: a
+    /// caller that went on would report success and remove the kept file.
+    enum RestoreRefusal: LocalizedError {
+        case unreadable, attachmentExists
+        var errorDescription: String? {
+            switch self {
+            case .unreadable: return "The kept attachment could not be read. Nothing was restored."
+            case .attachmentExists: return "An attachment with the same identity is already in the journal. Nothing was restored, and the kept copy is still here."
+            }
+        }
+    }
+
+    /// Throws before touching any row or file when the kept record cannot be
+    /// read, or an attachment with its id already exists (it may have come
+    /// back by sync since): that attachment and its file are left alone.
     private static func recreate(_ kept: JournalKeptAttachment, in session: NSManagedObject, context: NSManagedObjectContext, copied: inout [URL]) throws {
-        guard let record = JournalSyncStateStore.decodeWholeRecord(kept.record), let uuid = UUID(uuidString: record.recordID.recordName),
-              fetch("Attachment", id: uuid, in: context) == nil else { return }
+        guard let record = JournalSyncStateStore.decodeWholeRecord(kept.record), let uuid = UUID(uuidString: record.recordID.recordName) else {
+            throw RestoreRefusal.unreadable
+        }
+        guard fetch("Attachment", id: uuid, in: context) == nil else { throw RestoreRefusal.attachmentExists }
         let row = NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.attachment, into: context)
         _ = JournalRecordMapping.apply(record, to: row)
         if let fileName = kept.keptFileName {

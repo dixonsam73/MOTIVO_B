@@ -829,6 +829,61 @@ final class SyncTestPopulatedEnableTests: XCTestCase {
         XCTAssertTrue(keptFiles(for: aid).isEmpty, "the kept copy is used up")
     }
 
+    /// Restore must never write over an attachment that is already there. The
+    /// kept attachment's id has come back (here with different bytes): Restore
+    /// stops, says so, and leaves the row, both files and the entry as they are.
+    @MainActor
+    func testRestoreStopsWhenAnAttachmentWithTheKeptIdAlreadyExistsAndKeepsBothFilesAndTheEntry() async throws {
+        let (sid, aid, _, tombstones) = try seedEntryWithARecording()
+        let cloudSession = try cloudCopy(.session, sid, tag: "s1")
+        tracker.bootstrapIfNeeded()
+        let engine = makeEngine()
+        let complete = await firstFetch(engine, [cloudSession], deleted: tombstones.filter { $0.1 != "Session" })
+        defer { for url in keptFiles(for: aid) { try? FileManager.default.removeItem(at: url) } }
+        XCTAssertTrue(complete); XCTAssertFalse(exists("Attachment", aid))
+        let kept = try XCTUnwrap(keptFiles(for: aid).first)
+        // The same id is in the journal again, with other bytes, at the path a restore would write to.
+        let present = JournalRecordMapping.materialisedURL(recordName: aid.uuidString, ext: "jpg")
+        try Data("a different recording under the same id".utf8).write(to: present)
+        try seedAttachment(aid, session: sid, file: present, name: "arrived since", clock: backupClock)
+
+        let entry = try XCTUnwrap(JournalRecovery.entries(store: store).first)
+        let outcome = JournalRecovery.restore(entry, store: store, context: container.viewContext)
+        guard case .failed(let message) = outcome else { return XCTFail("restore must not report success: \(outcome)") }
+        XCTAssertTrue(message.contains("already"), "the person is told why: \(message)")
+        XCTAssertEqual(try Data(contentsOf: present), Data("a different recording under the same id".utf8), "the attachment that is there keeps its bytes")
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "arrived since", "and its row is untouched")
+        XCTAssertEqual(value("Attachment", aid, "fileURL") as? String, present.path)
+        XCTAssertEqual(value("Attachment", aid, "isThumbnail") as? Bool, false)
+        XCTAssertEqual(try Data(contentsOf: kept), Data("the only copy of this recording".utf8), "the kept copy keeps its bytes")
+        XCTAssertEqual(JournalRecovery.entries(store: store).map(\.id), [entry.id], "and the entry is still on the list, unresolved")
+        XCTAssertFalse(container.viewContext.hasChanges, "nothing is left half-made in the context")
+    }
+
+    /// The same guard when a whole entry is restored: one of its attachments'
+    /// ids already exists elsewhere. Nothing is made, nothing kept is removed.
+    @MainActor
+    func testRestoringADeletedEntryStopsWhenOneOfItsAttachmentIdsAlreadyExists() async throws {
+        let (sid, aid, _, tombstones) = try seedEntryWithARecording()
+        let elsewhere = try seedSession(title: "Another entry", notes: "", clock: backupClock)
+        tracker.bootstrapIfNeeded()
+        let engine = makeEngine()
+        let complete = await firstFetch(engine, [try cloudCopy(.session, elsewhere, tag: "s2")], deleted: tombstones)
+        defer { for url in keptFiles(for: aid) { try? FileManager.default.removeItem(at: url) } }
+        XCTAssertTrue(complete); XCTAssertFalse(exists("Session", sid))
+        let kept = try XCTUnwrap(keptFiles(for: aid).first)
+        let present = JournalRecordMapping.materialisedURL(recordName: aid.uuidString, ext: "jpg")
+        try Data("a different recording under the same id".utf8).write(to: present)
+        try seedAttachment(aid, session: elsewhere, file: present, name: "arrived since", clock: backupClock)
+
+        let entry = try XCTUnwrap(JournalRecovery.entries(store: store).first)
+        guard case .failed = JournalRecovery.restore(entry, store: store, context: container.viewContext) else { return XCTFail("restore must not report success") }
+        XCTAssertFalse(exists("Session", sid), "the entry is not half-restored without its recording")
+        XCTAssertEqual(try Data(contentsOf: present), Data("a different recording under the same id".utf8))
+        XCTAssertEqual(try Data(contentsOf: kept), Data("the only copy of this recording".utf8))
+        XCTAssertEqual(JournalRecovery.entries(store: store).map(\.id), [entry.id])
+    }
+
     /// If the content cannot be kept, it is not deleted and the first fetch
     /// is not complete: the file that cannot be copied, and the recovery
     /// entry that cannot be written. The next attempt keeps it, then deletes.
