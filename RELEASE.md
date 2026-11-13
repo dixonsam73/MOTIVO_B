@@ -2791,16 +2791,22 @@ the join.
   tasks are detached); the same join on build 1948 ran the same sequence
   and stayed up. C-198's backfill is left as it is.
   **Release archive prepared 2026-11-13, not uploaded: Etudes 1949
-  (`12ed4d8`)**, `~/Library/Developer/Xcode/Archives/2026-11-13/`. Checked
-  on the archive and on an app-store export made only to read its signing:
-  bundle `com.sdsongs.etudes`, container `iCloud.com.sdsongs.etudes`
-  (Production), no trial-zone key so the zone is "Journal", push
-  production, `get-task-allow` false, no StoreKit file; entitlements
-  identical to build 1937. Tests at that code: 1492 (SyncTest scheme) and
-  1257 (Debug), the seven known failures only, with the off-by-default and
-  scheme guards passing. Samuel pushes and uploads; Internal Only. The
-  two-device checklist is in the shared notes
-  (`testflight-1949-2026-11-13/checklist.md`).
+  (`12ed4d8`)**, `~/Library/Developer/Xcode/Archives/2026-11-13/`. Read from
+  the archive's Info.plist: bundle `com.sdsongs.etudes`, container
+  `iCloud.com.sdsongs.etudes`, commit `12ed4d8`, no trial-zone key so the
+  zone is "Journal", no StoreKit file. The archive itself is
+  development-signed, as Xcode archives are; **production signing and
+  entitlements were verified from an App Store export of it** (made only
+  for that, not uploaded): Apple Distribution, iCloud environment
+  Production, production push, `get-task-allow` false, identical to build
+  1937's. Tests at that code: 1492 (SyncTest scheme) and 1257 (Debug), the
+  seven known failures only, with the off-by-default and scheme guards
+  passing. **Codex closed the bounded C-174 and archive review 2026-11-13:
+  no blocking issue; the qualification stands that one successful device
+  repeat does not prove every timing-dependent crash is gone.** Next:
+  Samuel uploads 1949 to TestFlight, Internal Only, and it is installed on
+  Device A and the iPad against the checklist and read-only evidence
+  scripts in the shared notes (`testflight-1949-2026-11-13/`).
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
