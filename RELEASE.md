@@ -2681,8 +2681,8 @@ the join.
   image name per upload, so a delete names exactly one image.
   **An avatar image name per upload, and B-48, 2026-11-12 (`4c8a4c1`
   server files, `a38a72b` app and tests). The server change was APPLIED
-  TO PRODUCTION on 2026-11-12; the app change is in no distributed build
-  yet.** Each upload
+  TO PRODUCTION on 2026-11-12; the app change is in TestFlight build 1937
+  (Internal Only) since 2026-11-13.** Each upload
   is stored as `users/<uid>/avatar-<32 hex>.jpg`, written once and never
   overwritten, and every delete names one image, so a delete that arrives
   late can only remove the old one. The old fixed name stays valid and is
@@ -2744,8 +2744,39 @@ the join.
   be read back as a replacement; an image left by a device that never
   runs again, or a fixed-name image an older build left unreferenced,
   stays until account deletion or expiry (decision D4); nothing ran on a
-  device or against the hosted backend. First real use is at the
-  internal TestFlight checkpoint (D5).
+  device or against the hosted backend. First real use was at the
+  internal TestFlight checkpoint (next entry).
+  **Internal TestFlight checkpoint, build 1937 (`97bf739`): run
+  2026-11-13 and passed, with one finding (C-198).** Samuel uploaded the
+  archive as Internal Only. Two qualifications: part A ran on a
+  development-signed build of the same commit, not the TestFlight binary;
+  and C-197 (turning sync on on a device that already holds the journal)
+  is still untested, so this does not show populated-device joining.
+  *Part A, the avatar against production (Device A, disposable user X4,
+  one Sandbox resubscription on its existing Sandbox account; the sheet
+  said Sandbox):* a published photo left exactly one stored image, named
+  `avatar-<32 hex>.jpg`, with the row's reference naming it and the old
+  `avatar.jpg` gone; a replacement left one image under a new name, the
+  previous one deleted, and the same name and version nearly four minutes
+  later; a removal left the reference null and no image; the device's
+  record held one name, then the next, then nothing. X4 was then deleted
+  with the app's own Delete Account (backend id verified over the cable
+  immediately before): user, row and per-upload image gone. Samuel's row
+  and the other user were identical in every read.
+  *Part B, sync between Device A and the iPad (TestFlight 1937,
+  Production, Samuel's main Apple Account, neither signed in to
+  Connected):* a populated sync-off install (build 1922 with the fixture)
+  kept its journal and stayed off through the TestFlight upgrade, with no
+  state file made; after Erase All Études Data on Device A alone, the
+  restore card brought the journal back in 5 min 39 s (355 records, 96
+  files) and both devices held the same 357 records, nothing queued, no
+  conflicts; a Thought with a photo went to the iPad, and the iPad's edit
+  and deletion came back in about 3 s each; two relaunches on each
+  changed no counter. The photo took about a minute to arrive, all of it
+  the 2.7 MB upload.
+  *The finding:* after the restore Device A created and sent two
+  instrument rows the journal in iCloud had never held (C-198).
+  Evidence: `…/testflight-2026-11-12/` in the notes folder.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.

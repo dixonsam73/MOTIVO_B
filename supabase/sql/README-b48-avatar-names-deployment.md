@@ -2,8 +2,10 @@
 
 **Applied to production on 2026-11-12** by Samuel, after Codex's review of the
 SQL (the files were unchanged since `4c8a4c1`; only the apply file's header
-comment has been corrected since). Steps 1 to 4 below are done; step 5, the
-app build, is not.
+comment has been corrected since). All five steps below are done: the app
+went to TestFlight (Internal Only) as build 1937 on 2026-11-13, and a
+published photo left exactly one `avatar-<32 hex>.jpg` with the reference
+naming it.
 
 | Step | Result |
 |---|---|

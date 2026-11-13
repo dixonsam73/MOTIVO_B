@@ -680,7 +680,7 @@ other one. This is accepted for v1.
   (`AvatarWorkLedger`, a file in `Profiles/`). The server lets a member's
   reference name only an image in that member's own folder (B-48). **The
   server half was applied to production on 2026-11-12; the app half is in
-  no distributed build yet.**
+  TestFlight build 1937 (Internal Only) since 2026-11-13.**
 - **Signing in to Connected** no longer re-owns journal entries. Publication
   identifiers stay in the Connected domain.
 - **A device not signed in to Connected** can't update a shared post. Its
