@@ -156,14 +156,19 @@ enum JournalSavedListSync {
     }
 
     @discardableResult
+    /// `keepUnsent` (C-197, the first merge only): a list this device has not
+    /// sent is kept under `keptName` before the deletion removes it.
     static func applyDeletions(_ names: [String], store: JournalSyncStateStore, defaults: UserDefaults = .standard,
-                               scope: String? = nil) -> Int {
+                               scope: String? = nil, keepUnsent: Bool = false) -> Int {
         guard !names.isEmpty else { return 0 }
         let scope = scope ?? currentScope()
         guard case .lists(let current) = SavedListLibrary.load(ownerScope: scope, defaults: defaults) else { return 0 }
         let gone = Set(names)
+        let unsent = keepUnsent ? Set(store.state.outbox.filter { $0.op == .save }.map(\.recordName)) : []
+        let removed = current.filter { gone.contains($0.id.uuidString) }
         let updated = current.filter { !gone.contains($0.id.uuidString) }
-        if updated.count != current.count {
+            + removed.filter { unsent.contains($0.id.uuidString) }.map { SavedList(id: UUID(), name: keptName($0.name), items: $0.items) }
+        if !removed.isEmpty {
             do { try SavedListLibrary.commit(snapshot: current, updated: updated, ownerScope: scope, defaults: defaults) }
             catch { store.log("Lists: delete failed (\(error.localizedDescription))"); return 0 }
         }
@@ -174,6 +179,6 @@ enum JournalSavedListSync {
                 st.outbox.removeAll { $0.recordName == name }
             }
         }
-        return current.count - updated.count
+        return removed.count
     }
 }

@@ -1131,7 +1131,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
         Self.testBeforeFamily?("journal")
         guard let journalOK = applyFamily(generation, { !importModifications(records).saveFailed }) else { return abandoned("journal") }
-        let importOK = journalOK
+        var importOK = journalOK
         Self.testBeforeFamily?("profile")
         guard applyFamily(generation, { importProfileRecords(modified.filter { JournalSyncRecordType.profileTypes.contains($0.recordType) }) }) != nil else { return abandoned("profile") }
         Self.testBeforeFamily?("lists")
@@ -1152,12 +1152,15 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         Self.testBeforeFamily?("settings")
         guard await importSettingsRecords(modified.filter { JournalSyncRecordType.settingsTypes.contains($0.recordType) }, generation: generation) else { return abandoned("settings") }
         Self.testBeforeFamily?("deletions")
-        guard applyFamily(generation, { importDeletions(deleted) }) != nil else { return abandoned("deletions") }
+        // C-197: a deletion held back because this device's copy could not be
+        // kept first leaves the batch incomplete, like a failed save.
+        guard let deletionsOK = applyFamily(generation, { importDeletions(deleted) }) else { return abandoned("deletions") }
+        importOK = importOK && deletionsOK
         let listDeletions = deleted.filter { $0.1 == JournalSyncRecordType.savedList }.map(\.0.recordName)
         if !listDeletions.isEmpty {
             let ran = await MainActor.run { () -> Bool in
                 guard self.mayStillImport(generation) else { return false }
-                _ = JournalSavedListSync.applyDeletions(listDeletions, store: self.store); return true
+                _ = JournalSavedListSync.applyDeletions(listDeletions, store: self.store, keepUnsent: !self.store.state.initialFetchComplete); return true
             }
             guard ran else { return abandoned("list deletions") }
         }
@@ -1985,10 +1988,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         return summary
     }
 
-    private func importDeletions(_ deletions: [(CKRecord.ID, CKRecord.RecordType)]) {
-        guard !deletions.isEmpty else { return }
+    @discardableResult
+    private func importDeletions(_ deletions: [(CKRecord.ID, CKRecord.RecordType)]) -> Bool {
+        guard !deletions.isEmpty else { return true }
+        var applied = true
         let journal = deletions.filter { !JournalSyncRecordType.scoreTypes.contains($0.1) }
-        if !journal.isEmpty { importContext.performAndWait { importer.importDeletions(journal) } }
+        if !journal.isEmpty { importContext.performAndWait { applied = importer.importDeletions(journal) } }
         // Stage H: a deleted profile record (a reset elsewhere) is forgotten,
         // never applied; the next scan sends this device's profile afresh.
         let profileNames = deletions.map(\.0.recordName).filter(JournalSyncRecordType.isProfileRecordName)
@@ -2001,7 +2006,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 }
             }
         }
-        log("Applied \(deletions.count) remote deletion(s)")
+        log("Applied \(deletions.count) remote deletion(s)" + (applied ? "" : "; not all: see above"))
+        return applied
     }
 
     /// Stage H: Profile and ProfileAvatar records, after the batch's

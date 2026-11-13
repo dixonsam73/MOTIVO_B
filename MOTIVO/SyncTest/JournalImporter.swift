@@ -687,10 +687,27 @@ final class JournalImporter {
 
     // MARK: Deletions
 
-    func importDeletions(_ deletions: [(CKRecord.ID, CKRecord.RecordType)]) {
-        for (recordID, type) in deletions where type != JournalSyncRecordType.savedList {
+    /// Returns false when a deletion was NOT applied because the content it
+    /// would destroy could not be kept first (C-197); the caller then leaves
+    /// the batch incomplete, so it is fetched again.
+    @discardableResult
+    func importDeletions(_ deletions: [(CKRecord.ID, CKRecord.RecordType)]) -> Bool {
+        // C-197 (2026-11-13): in the FIRST merge only (no complete fetch yet),
+        // a deletion that reaches a row this device has not sent would destroy
+        // the only copy of it. The entry, its attachments' details and their
+        // files are kept first, listed on Displaced by sync with Restore; if
+        // that fails, the row is not deleted. Afterwards a deletion is an
+        // ordinary synced deletion, as before. Sessions first, so an entry
+        // deleted with its attachments is kept as one.
+        let initialMerge = !store.state.initialFetchComplete
+        var complete = true
+        var notDeleted = Set<UUID>()
+        let ordered = deletions.filter { $0.1 == JournalSyncRecordType.session } + deletions.filter { $0.1 != JournalSyncRecordType.session }
+        for (recordID, type) in ordered where type != JournalSyncRecordType.savedList {
             if type == JournalSyncRecordType.attachmentMeta {
                 // The attachment's own deletion removes the row; its meta just stops being known.
+                if let attachmentName = JournalSyncRecordType.attachmentName(fromMeta: recordID.recordName), let aid = UUID(uuidString: attachmentName),
+                   notDeleted.contains(aid) { continue }
                 store.update {
                     $0.lastKnownRecords.removeValue(forKey: recordID.recordName)
                     $0.awaitingMeta.removeValue(forKey: recordID.recordName)
@@ -700,6 +717,20 @@ final class JournalImporter {
             }
             guard let id = UUID(uuidString: recordID.recordName) else { continue }
             if let object = fetch(entity: type, id: id) {
+                if initialMerge, type == JournalSyncRecordType.session || type == JournalSyncRecordType.attachment {
+                    let parent = (type == JournalSyncRecordType.attachment ? object.value(forKey: "session") as? NSManagedObject : nil)?.value(forKey: "id") as? UUID
+                    if parent.map(notDeleted.contains) ?? false || (hasUnsentContent(object, type: type) && !keepBeforeDeletion(object, type: type)) {
+                        log("Deletion of \(recordID.recordName.prefix(8))… not applied: this device's copy could not be kept first; fetched again")
+                        notDeleted.insert(id)
+                        if type == JournalSyncRecordType.session {
+                            for case let att as NSManagedObject in (object.value(forKey: "attachments") as? Set<NSManagedObject>) ?? [] {
+                                if let aid = att.value(forKey: "id") as? UUID { notDeleted.insert(aid) }
+                            }
+                        }
+                        complete = false
+                        continue
+                    }
+                }
                 if type == JournalSyncRecordType.session {
                     for case let att as NSManagedObject in (object.value(forKey: "attachments") as? Set<NSManagedObject>) ?? [] {
                         removeFile(of: att)
@@ -713,6 +744,8 @@ final class JournalImporter {
                 let uri = object.objectID.uriRepresentation().absoluteString
                 context.delete(object)
                 store.update { $0.customRecordNames.removeValue(forKey: uri) }
+            } else if notDeleted.contains(id) {
+                continue
             }
             store.update {
                 $0.lastKnownRecords.removeValue(forKey: recordID.recordName)
@@ -729,7 +762,79 @@ final class JournalImporter {
                 $0.fileStampCache.removeValue(forKey: recordID.recordName)
             }
         }
-        save()
+        return save() && complete
+    }
+
+    // MARK: Kept before a first-merge deletion (C-197)
+
+    /// The row, or for an entry any of its attachments, has a save this device has not sent.
+    private func hasUnsentContent(_ object: NSManagedObject, type: String) -> Bool {
+        func pending(_ row: NSManagedObject) -> Bool {
+            guard let name = (row.value(forKey: "id") as? UUID)?.uuidString else { return false }
+            return pendingSave(name) != nil || (row.entity.name == JournalSyncRecordType.attachment && pendingSave(JournalSyncRecordType.metaName(for: name)) != nil)
+        }
+        if pending(object) { return true }
+        guard type == JournalSyncRecordType.session else { return false }
+        return ((object.value(forKey: "attachments") as? Set<NSManagedObject>) ?? []).contains(where: pending)
+    }
+
+    /// An attachment as it can be put back: both records, and its file copied aside.
+    private func keptAttachment(_ attachment: NSManagedObject) -> JournalKeptAttachment? {
+        guard let id = attachment.value(forKey: "id") as? UUID,
+              let record = JournalRecordMapping.record(for: attachment, base: nil, includeAsset: false),
+              let data = JournalSyncStateStore.encodeWholeRecord(record) else { return nil }
+        let meta = JournalRecordMapping.metaRecord(for: attachment, base: nil).flatMap(JournalSyncStateStore.encodeWholeRecord)
+        let stored = attachment.value(forKey: "fileURL") as? String
+        guard let url = AttachmentPathResolver.resolve(stored), !AttachmentStore.isLibraryScoreFile(url) else {
+            return JournalKeptAttachment(record: data, meta: meta, keptFileName: nil, fileURL: stored)   // no file, or one a deletion never removes
+        }
+        let ext = url.pathExtension
+        let fileName = "\(id.uuidString)-deleted" + (ext.isEmpty ? "" : ".\(ext)")
+        let target = Self.displacedMediaDirectory().appendingPathComponent(fileName, isDirectory: false)
+        do {
+            if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
+            try FileManager.default.copyItem(at: url, to: target)
+        } catch {
+            log("Could not keep \(url.lastPathComponent) before its deletion: \(error.localizedDescription)")
+            return nil
+        }
+        return JournalKeptAttachment(record: data, meta: meta, keptFileName: fileName, fileURL: nil)
+    }
+
+    /// Keeps an entry with its attachments, or one attachment, and lists it.
+    /// False when a file or the entry could not be written.
+    private func keepBeforeDeletion(_ object: NSManagedObject, type: String) -> Bool {
+        guard let id = object.value(forKey: "id") as? UUID else { return false }
+        let isSession = type == JournalSyncRecordType.session
+        let rows = isSession ? Array((object.value(forKey: "attachments") as? Set<NSManagedObject>) ?? []) : [object]
+        var kept: [JournalKeptAttachment] = []
+        for row in rows {
+            guard let one = keptAttachment(row) else { return false }
+            kept.append(one)
+        }
+        let title = (Self.value(object, isSession ? "title" : "displayName") as? String) ?? ""
+        let notes = (Self.value(object, "notes") as? String) ?? ""
+        var conflict = JournalSyncConflict(at: Date(), recordName: id.uuidString, recordType: type, winner: "deleted",
+                                           localUserModifiedAt: Self.value(object, "userModifiedAt") as? Date, serverUserModifiedAt: nil,
+                                           losingTitle: title, losingNotes: isSession ? notes : nil)
+        if isSession {
+            guard let record = JournalRecordMapping.record(for: object, base: nil, viewerScope: viewerScope()),
+                  let whole = JournalSyncStateStore.encodeWholeRecord(record) else { return false }
+            conflict.losingRecord = whole
+            conflict.subject = JournalRecoverySubject.session(object)
+            if !title.isEmpty { conflict.displaced["Title (this device)"] = title }
+            if !notes.isEmpty { conflict.displaced["Notes (this device)"] = notes }
+            if !kept.isEmpty { conflict.displaced["Attachments (this device)"] = "\(kept.count) kept with \(kept.count == 1 ? "its file" : "their files")" }
+            conflict.restore = "deleted:\(id.uuidString)"
+        } else {
+            let sessionRow = object.value(forKey: "session") as? NSManagedObject
+            conflict.subject = "Attachment" + (sessionRow.map { " in " + JournalRecoverySubject.session($0) } ?? "")
+            if !title.isEmpty { conflict.displaced["Name (this device)"] = title }
+            conflict.displaced["File (this device)"] = "Kept. Restore puts the attachment back in its entry."
+            conflict.restore = "deleted-attachment:\(id.uuidString)"
+        }
+        conflict.keptAttachments = kept
+        return store.update { $0.conflicts.append(conflict) }
     }
 
     /// Through the guarded deletion: nothing outside Documents, and never a
@@ -940,9 +1045,11 @@ final class JournalImporter {
         // version kept beside it so a restore puts all of it back.
         var others: [String] = []
         for key in differing {
+            // An empty value is listed too: the losing edit cleared the text,
+            // and that version is as restorable as any other.
             let text = (loser[key] as? String) ?? ""
-            if key == titleKey { if !text.isEmpty { conflict.displaced["\(isSession ? "Title" : "Name") (\(side))"] = text } }
-            else if key == "notes" { if !text.isEmpty { conflict.displaced["Notes (\(side))"] = text } }
+            if key == titleKey { conflict.displaced["\(isSession ? "Title" : "Name") (\(side))"] = text }
+            else if key == "notes" { conflict.displaced["Notes (\(side))"] = text }
             else if !others.contains(JournalRecordMapping.fieldLabel(key)) { others.append(JournalRecordMapping.fieldLabel(key)) }
         }
         if !others.isEmpty { conflict.displaced["Other details (\(side))"] = others.joined(separator: ", ") }
@@ -956,7 +1063,9 @@ final class JournalImporter {
         } else {
             let sessionRow = local.value(forKey: "session") as? NSManagedObject
             conflict.subject = "Attachment" + (sessionRow.map { " in " + JournalRecoverySubject.session($0) } ?? "")
-            conflict.restore = "attachment:\(server.recordID.recordName)"
+            // The ATTACHMENT's id: a metadata record is named "<id>-meta".
+            let name = server.recordID.recordName
+            conflict.restore = "attachment:\(JournalSyncRecordType.attachmentName(fromMeta: name) ?? name)"
         }
         let saved = store.update { $0.conflicts.append(conflict) }
         if !saved { log("Recovery entry for \(server.recordID.recordName.prefix(8))… could not be saved; the \(winner == .server ? "server copy is not applied" : "entry is lost") this round") }

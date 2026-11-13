@@ -20,7 +20,7 @@ struct SyncRecoveryView: View {
         List {
             if entries.isEmpty {
                 Section {
-                    Text("Nothing has been displaced. When the same entry is edited on two devices before they sync, the later edit is kept and the other appears here.")
+                    Text("Nothing has been displaced. When the same entry differs on two devices, one version is kept in the journal (the later edit, or iCloud's when that cannot be told) and the other appears here, with Restore. An entry that was deleted on another device before this one first synced is kept here too.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -36,7 +36,9 @@ struct SyncRecoveryView: View {
                         ForEach(entry.displaced.keys.sorted(), id: \.self) { key in
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(key).font(.caption).foregroundStyle(.secondary)
-                                Text(entry.displaced[key] ?? "").font(.body).textSelection(.enabled)
+                                // An empty value is a cleared one: the losing edit removed the text.
+                                if (entry.displaced[key] ?? "").isEmpty { Text("Cleared").font(.body).italic().foregroundStyle(.secondary) }
+                                else { Text(entry.displaced[key] ?? "").font(.body).textSelection(.enabled) }
                             }
                         }
                         HStack {
@@ -84,7 +86,13 @@ struct SyncRecoveryView: View {
 
     private func describeWhen(_ entry: JournalSyncConflict) -> String {
         let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short
-        let side = entry.winner == "server" ? "the other device's edit was kept" : (entry.winner == "local" ? "this device's edit was kept" : "merged")
+        let side: String
+        switch entry.winner {
+        case "server": side = "the other device's version was kept"
+        case "local": side = "this device's version was kept"
+        case "deleted": side = "deleted on another device; this device's copy is kept here"
+        default: side = "merged"
+        }
         return "\(f.string(from: entry.at)) · \(side)"
     }
 }

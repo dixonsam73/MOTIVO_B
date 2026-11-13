@@ -92,6 +92,18 @@ struct JournalSyncPendingChange: Codable, Hashable {
     }
 }
 
+/// C-197: an attachment kept before a deletion in the first merge removed it.
+struct JournalKeptAttachment: Codable {
+    /// The content record (no file) and the metadata record, whole.
+    var record: Data
+    var meta: Data?
+    /// The kept copy's name in the displaced-media folder. nil when the row
+    /// had no file, or pointed at one a deletion leaves alone (a library
+    /// score); `fileURL` is then the path the row stored.
+    var keptFileName: String?
+    var fileURL: String?
+}
+
 struct JournalSyncConflict: Codable, Identifiable {
     var id = UUID()
     let at: Date
@@ -117,14 +129,21 @@ struct JournalSyncConflict: Codable, Identifiable {
     /// C-197: the whole losing version as a record (no file), so a restore
     /// puts back every field, not only the text shown.
     var losingRecord: Data? = nil
+    /// C-197: the attachments of an entry (or the one attachment) that a
+    /// deletion in the first merge removed, kept with their files.
+    var keptAttachments: [JournalKeptAttachment]? = nil
 
     var hasRecoverableText: Bool { !displaced.values.allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
+    /// Whether the entry belongs on the Displaced by sync list. Text to read
+    /// is one reason; a kept version is another, even when the edit that lost
+    /// CLEARED the text, so there is nothing to read (C-197).
+    var isRecoverable: Bool { hasRecoverableText || losingRecord != nil || !(keptAttachments ?? []).isEmpty }
 }
 
 extension JournalSyncConflict {
     private enum CodingKeys: String, CodingKey {
         case id, at, recordName, recordType, winner, localUserModifiedAt, serverUserModifiedAt, losingTitle, losingNotes
-        case displaced, subject, restore, resolvedAt, losingRecord
+        case displaced, subject, restore, resolvedAt, losingRecord, keptAttachments
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -142,6 +161,7 @@ extension JournalSyncConflict {
         restore = try c.decodeIfPresent(String.self, forKey: .restore)
         resolvedAt = try c.decodeIfPresent(Date.self, forKey: .resolvedAt)
         losingRecord = try c.decodeIfPresent(Data.self, forKey: .losingRecord)
+        keptAttachments = try c.decodeIfPresent([JournalKeptAttachment].self, forKey: .keptAttachments)
     }
 }
 

@@ -32,7 +32,7 @@ enum JournalRecovery {
             if let restore = entry.restore, restore.hasPrefix("media:"), let file = restore.split(separator: "|").last {
                 return FileManager.default.fileExists(atPath: JournalImporter.displacedMediaDirectory().appendingPathComponent(String(file)).path)
             }
-            return entry.hasRecoverableText
+            return entry.isRecoverable
         }.sorted { $0.at > $1.at }
     }
 
@@ -60,7 +60,11 @@ enum JournalRecovery {
         if restore.hasPrefix("session:") {
             outcome = restoreSession(entry, id: String(restore.dropFirst("session:".count)), context: context)
         } else if restore.hasPrefix("attachment:") {
-            outcome = restoreAttachmentName(entry, id: String(restore.dropFirst("attachment:".count)), context: context)
+            outcome = restoreAttachment(entry, id: String(restore.dropFirst("attachment:".count)), context: context)
+        } else if restore.hasPrefix("deleted-attachment:") {
+            outcome = restoreDeletedAttachment(entry, context: context)
+        } else if restore.hasPrefix("deleted:") {
+            outcome = restoreDeletedEntry(entry, context: context)
         } else if restore == "profile" {
             outcome = restoreProfile(entry, context: context, scope: scope ?? JournalSyncCoordinator.shared.engine?.profileScope ?? .local)
         } else if restore.hasPrefix("score:") {
@@ -114,20 +118,128 @@ enum JournalRecovery {
         return .restored("Restored \(applied.joined(separator: " and ")) as a new edit")
     }
 
-    private static func restoreAttachmentName(_ entry: JournalSyncConflict, id: String, context: NSManagedObjectContext) -> Outcome {
-        guard let uuid = UUID(uuidString: id), let attachment = fetch("Attachment", id: uuid, in: context) else {
+    /// C-197: everything the losing version of an attachment's details held:
+    /// the name and the star on the row, the privacy choice and the page
+    /// selection through their own stores, each as a new edit. An entry
+    /// written before the kept version existed restores the name alone.
+    private static func restoreAttachment(_ entry: JournalSyncConflict, id: String, context: NSManagedObjectContext) -> Outcome {
+        // Older entries named the metadata record ("<id>-meta"), which is not an attachment id.
+        guard let uuid = UUID(uuidString: JournalSyncRecordType.attachmentName(fromMeta: id) ?? id),
+              let attachment = fetch("Attachment", id: uuid, in: context) else {
             return .failed("That attachment is no longer in the journal.")
         }
-        guard let name = value(entry, field: "Name") else { return .failed("Nothing to restore.") }
-        let kind = attachment.value(forKey: "kind") as? String
-        if let titleKind = JournalMetadataCodec.titleKind(for: kind) {
-            // Audio and video: the app's own title writer (side store + displayName).
-            AttachmentTitlePersistenceKeys.writeLocalTitle(name, kind: titleKind, attachmentID: uuid)
-        } else {
-            attachment.setValue(name, forKey: "displayName")
-            do { try context.save() } catch { context.rollback(); return .failed(error.localizedDescription) }
+        var name = entry.displaced.contains { $0.key.hasPrefix("Name") } ? value(entry, field: "Name") : nil
+        var star: Bool?, isPrivate: Bool?, pages: [Int]?
+        if let data = entry.losingRecord, let record = JournalSyncStateStore.decodeWholeRecord(data) {
+            name = record["displayName"] as? String ?? name
+            star = (record["isThumbnail"] as? NSNumber)?.boolValue
+            isPrivate = (record[JournalMetadataKeys.isPrivate] as? NSNumber)?.boolValue
+            pages = JournalMetadataCodec.pages(from: record[JournalMetadataKeys.selectedPages] as? String)
         }
-        return .restored("Restored the name as a new edit")
+        var applied: [String] = []
+        let titleKind = JournalMetadataCodec.titleKind(for: attachment.value(forKey: "kind") as? String)
+        if let name {
+            if titleKind == nil { attachment.setValue(name, forKey: "displayName") }
+            applied.append("name")
+        }
+        if let star {
+            // One star per entry, as the entry screen keeps it.
+            let siblings = ((attachment.value(forKey: "session") as? NSManagedObject)?.value(forKey: "attachments") as? Set<NSManagedObject>) ?? [attachment]
+            for row in siblings where star || row == attachment { row.setValue(star && row == attachment, forKey: "isThumbnail") }
+            applied.append("star")
+        }
+        guard !applied.isEmpty || isPrivate != nil || pages != nil else { return .failed("Nothing to restore.") }
+        attachment.setValue(Date(), forKey: "userModifiedAt")
+        do { try context.save() } catch { context.rollback(); return .failed(error.localizedDescription) }
+        // Audio and video: the app's own title writer (side store + displayName).
+        if let name, let titleKind { AttachmentTitlePersistenceKeys.writeLocalTitle(name, kind: titleKind, attachmentID: uuid) }
+        if let isPrivate { AttachmentPrivacy.setPrivate(id: uuid, url: nil, isPrivate); applied.append("privacy") }
+        if let pages { PDFSelectedPagesStore.setPages(pages.isEmpty ? nil : pages, for: uuid); applied.append("pages") }
+        return .restored("Restored the attachment's \(applied.joined(separator: ", ")) as a new edit")
+    }
+
+    // MARK: Kept before a first-merge deletion (C-197)
+
+    /// Makes an attachment again from what was kept, in `session`. The file
+    /// is copied back into the journal before the row is saved.
+    private static func recreate(_ kept: JournalKeptAttachment, in session: NSManagedObject, context: NSManagedObjectContext, copied: inout [URL]) throws {
+        guard let record = JournalSyncStateStore.decodeWholeRecord(kept.record), let uuid = UUID(uuidString: record.recordID.recordName),
+              fetch("Attachment", id: uuid, in: context) == nil else { return }
+        let row = NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.attachment, into: context)
+        _ = JournalRecordMapping.apply(record, to: row)
+        if let fileName = kept.keptFileName {
+            let source = JournalImporter.displacedMediaDirectory().appendingPathComponent(fileName, isDirectory: false)
+            let target = JournalRecordMapping.materialisedURL(recordName: uuid.uuidString, ext: source.pathExtension)
+            if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
+            try FileManager.default.copyItem(at: source, to: target)
+            copied.append(target)
+            row.setValue(target.path, forKey: "fileURL")
+        } else if let fileURL = kept.fileURL {
+            row.setValue(fileURL, forKey: "fileURL")
+        }
+        if let meta = kept.meta.flatMap(JournalSyncStateStore.decodeWholeRecord) {
+            JournalRecordMapping.applyMeta(meta, to: row)
+            JournalMetadataFields.applyAttachment(isPrivate: meta[JournalMetadataKeys.isPrivate] as? NSNumber, pages: meta[JournalMetadataKeys.selectedPages] as? String,
+                                                  displayName: meta["displayName"] as? String, kind: row.value(forKey: "kind") as? String, id: uuid)
+        }
+        row.setValue(session, forKey: "session")
+        row.setValue(session.value(forKey: "ownerUserID"), forKey: "ownerUserID")
+        row.setValue(Date(), forKey: "userModifiedAt")
+    }
+
+    private static func removeKeptFiles(_ kept: [JournalKeptAttachment]) {
+        for name in kept.compactMap(\.keptFileName) {
+            try? FileManager.default.removeItem(at: JournalImporter.displacedMediaDirectory().appendingPathComponent(name, isDirectory: false))
+        }
+    }
+
+    /// An entry a deletion removed in the first merge comes back whole, with
+    /// its attachments and their files, as a NEW entry that goes up.
+    private static func restoreDeletedEntry(_ entry: JournalSyncConflict, context: NSManagedObjectContext) -> Outcome {
+        guard let record = entry.losingRecord.flatMap(JournalSyncStateStore.decodeWholeRecord), let uuid = UUID(uuidString: record.recordID.recordName) else {
+            return .failed("The kept entry could not be read.")
+        }
+        guard fetch("Session", id: uuid, in: context) == nil else { return .failed("That entry is already in the journal.") }
+        let session = NSEntityDescription.insertNewObject(forEntityName: JournalSyncRecordType.session, into: context)
+        _ = JournalRecordMapping.apply(record, to: session)
+        session.setValue(Date(), forKey: "userModifiedAt")
+        let request = NSFetchRequest<NSManagedObject>(entityName: JournalSyncRecordType.instrument)
+        request.predicate = NSPredicate(format: "name ==[cd] %@", JournalRecordMapping.instrumentLink(of: record).name ?? "")
+        session.setValue((try? context.fetch(request))?.first, forKey: "instrument")
+        let kept = entry.keptAttachments ?? []
+        var copied: [URL] = []
+        do {
+            for one in kept { try recreate(one, in: session, context: context, copied: &copied) }
+            try context.save()
+        } catch {
+            context.rollback()
+            for url in copied { try? FileManager.default.removeItem(at: url) }
+            return .failed(error.localizedDescription)
+        }
+        JournalMetadataFields.applySession(isSaved: record[JournalMetadataKeys.isSaved] as? NSNumber, id: uuid,
+                                           viewerScope: JournalMetadataCodec.viewerScope(currentUserID: PersistenceController.shared.currentUserID))
+        removeKeptFiles(kept)
+        return .restored(kept.isEmpty ? "Restored the entry as a new entry" : "Restored the entry and \(kept.count) attachment\(kept.count == 1 ? "" : "s") as a new entry")
+    }
+
+    private static func restoreDeletedAttachment(_ entry: JournalSyncConflict, context: NSManagedObjectContext) -> Outcome {
+        guard let kept = entry.keptAttachments?.first, let record = JournalSyncStateStore.decodeWholeRecord(kept.record) else {
+            return .failed("The kept attachment could not be read.")
+        }
+        guard let sid = JournalRecordMapping.sessionRecordName(of: record).flatMap(UUID.init(uuidString:)), let session = fetch("Session", id: sid, in: context) else {
+            return .failed("The entry this attachment belonged to is no longer in the journal.")
+        }
+        var copied: [URL] = []
+        do {
+            try recreate(kept, in: session, context: context, copied: &copied)
+            try context.save()
+        } catch {
+            context.rollback()
+            for url in copied { try? FileManager.default.removeItem(at: url) }
+            return .failed(error.localizedDescription)
+        }
+        removeKeptFiles([kept])
+        return .restored("Restored the attachment to its entry")
     }
 
     /// C-197: puts a kept file back as the attachment's file. It goes in under

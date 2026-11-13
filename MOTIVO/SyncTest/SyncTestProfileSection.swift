@@ -28,7 +28,7 @@ struct SyncTestProfileSection: View {
             Toggle(isOn: $syncOn) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Sync this journal with iCloud").font(Theme.Text.body)
-                    Text("Optional. On: your journal, scores, profile and settings are kept the same on every device signed in to the same iCloud account. Off: this device keeps everything it has and stops sending and receiving; what was already uploaded stays in iCloud. Turning it on combines what is on this device with what is already in iCloud: nothing here is erased, and something deleted on only one of them before sync was on can come back. Ensembles and other Connected features are not part of this sync.")
+                    Text("Optional. On: your journal, scores, profile and settings are kept the same on every device signed in to the same iCloud account. Off: this device keeps everything it has and stops sending and receiving; what was already uploaded stays in iCloud. Turning it on combines this device's journal with the one already in iCloud. Where both hold the same entry and they differ, one version is used (the later edit, or iCloud's when that cannot be told) and the other is kept under Displaced by sync; a list is kept as a second list. An entry deleted on only one of them before sync was on usually comes back; if iCloud still records the deletion, the entry is removed here and kept under Displaced by sync. Ensembles and other Connected features are not part of this sync.")
                         .font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
                 }
             }

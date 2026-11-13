@@ -667,5 +667,232 @@ final class SyncTestPopulatedEnableTests: XCTestCase {
         XCTAssertEqual(after.map { $0.items.map(\.text) }, [["long tones, then scales"]], "the later edit stands and no copy is made")
         XCTAssertNotNil(pendingSave(id.uuidString), "and still goes up")
     }
+
+    // MARK: 8. Recovery: the whole losing version, through Restore
+
+    /// A conflict on an attachment's METADATA record ("<id>-meta") restores to
+    /// the attachment it belongs to, and puts back all four things the record
+    /// carries: the name and the star on the row, the privacy choice and the
+    /// page selection through their stores.
+    @MainActor
+    func testRestoringAMetadataConflictFindsItsAttachmentAndPutsBackNameStarPrivacyAndPages() throws {
+        let sid = try seedSession(title: "Lesson", notes: "", clock: nil)
+        let aid = try seedAttachment(session: sid, file: try file("score.jpg", "page images"), name: "bars 1 to 8 (mine)", clock: nil)
+        let other = try seedAttachment(session: sid, file: try file("other.jpg", "jpeg bytes"), name: "other", clock: nil)
+        let meta = JournalSyncRecordType.metaName(for: aid.uuidString)
+        try setUnclocked("Attachment", aid, ["isThumbnail": true])
+        AttachmentPrivacy.setPrivate(id: aid, url: nil, false, mirror: false)
+        PDFSelectedPagesStore.setPages([2, 3], for: aid, mirror: false)
+        defer { PDFSelectedPagesStore.setPages(nil, for: aid, mirror: false) }
+        // What the other device made of the same attachment.
+        let cloud = try cloudCopy(.meta, aid, tag: "m1")
+        cloud["displayName"] = "theirs" as CKRecordValue; cloud["isThumbnail"] = 0 as CKRecordValue
+        cloud[JournalMetadataKeys.isPrivate] = 1 as CKRecordValue; cloud[JournalMetadataKeys.selectedPages] = "[1]" as CKRecordValue
+        tracker.bootstrapIfNeeded()
+        let (imp, ictx) = importer()
+        ictx.performAndWait { _ = imp.importModifications([cloud]) }
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "theirs", "no order can be told: the cloud's metadata stands")
+        XCTAssertEqual(value("Attachment", aid, "isThumbnail") as? Bool, false)
+        XCTAssertTrue(AttachmentPrivacy.isPrivate(id: aid, url: nil)); XCTAssertEqual(PDFSelectedPagesStore.pages(for: aid), [1])
+        try setUnclocked("Attachment", other, ["isThumbnail": true])   // meanwhile the star sits on the other attachment
+
+        let entry = try XCTUnwrap(JournalRecovery.entries(store: store).first { $0.recordName == meta })
+        let outcome = JournalRecovery.restore(entry, store: store, context: container.viewContext)
+        guard case .restored = outcome else { return XCTFail("restore failed: \(outcome)") }
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "bars 1 to 8 (mine)")
+        XCTAssertEqual(value("Attachment", aid, "isThumbnail") as? Bool, true, "the star comes back")
+        XCTAssertEqual(value("Attachment", other, "isThumbnail") as? Bool, false, "and stays the entry's only one")
+        XCTAssertFalse(AttachmentPrivacy.isPrivate(id: aid, url: nil), "the privacy choice comes back")
+        XCTAssertEqual(PDFSelectedPagesStore.pages(for: aid), [2, 3], "and the page selection")
+        XCTAssertTrue(JournalRecovery.entries(store: store).isEmpty)
+    }
+
+    /// The losing edit CLEARED text. Nothing to read is not nothing to
+    /// recover: the entry is listed, and Restore clears the text again.
+    @MainActor
+    func testAnEditThatClearedNotesOrANameIsStillListedAndRestoresAsCleared() throws {
+        let sid = try seedSession(title: "Scales", notes: "notes the person then deleted", clock: nil)
+        let aid = try seedAttachment(session: sid, file: try file("photo.jpg", "jpeg bytes"), name: "a name the person then removed", clock: nil)
+        let meta = JournalSyncRecordType.metaName(for: aid.uuidString)
+        let cloud = [try cloudCopy(.session, sid, tag: "s1"), try cloudCopy(.meta, aid, tag: "m1")]
+        try setUnclocked("Session", sid, ["notes": ""])
+        try setUnclocked("Attachment", aid, ["displayName": ""])
+        tracker.bootstrapIfNeeded()
+        let (imp, ictx) = importer()
+        ictx.performAndWait { _ = imp.importModifications(cloud) }
+        XCTAssertEqual(value("Session", sid, "notes") as? String, "notes the person then deleted", "the cloud copy stands")
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "a name the person then removed")
+
+        let shown = JournalRecovery.entries(store: store)
+        XCTAssertEqual(Set(shown.map(\.recordName)), [sid.uuidString, meta], "both are listed although the losing text is empty")
+        XCTAssertEqual(shown.first { $0.recordName == sid.uuidString }?.displaced, ["Notes (this device)": ""])
+        for entry in shown {
+            let outcome = JournalRecovery.restore(entry, store: store, context: container.viewContext)
+            guard case .restored = outcome else { return XCTFail("restore failed: \(outcome)") }
+        }
+        XCTAssertEqual(value("Session", sid, "notes") as? String ?? "", "", "the notes are cleared again")
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String ?? "", "", "and so is the name")
+        XCTAssertEqual(value("Session", sid, "title") as? String, "Scales")
+    }
+
+    // MARK: 9. A deletion the first fetch carries, against content only this device holds
+
+    /// An entry with a recording, in the host's Documents so a deletion really removes the file.
+    private func seedEntryWithARecording() throws -> (session: UUID, attachment: UUID, file: URL, tombstones: [(CKRecord.ID, CKRecord.RecordType)]) {
+        let sid = try seedSession(title: "Lesson with Anna", notes: "worked on bowing", duration: 2700, clock: nil)
+        let recording = JournalRecordMapping.materialisedURL(recordName: "c197-test-\(UUID().uuidString)", ext: "jpg")
+        try Data("the only copy of this recording".utf8).write(to: recording)
+        cleanup.append(recording)
+        let aid = try seedAttachment(session: sid, file: recording, name: "bowing exercise", clock: nil)
+        try setUnclocked("Attachment", aid, ["isThumbnail": true])
+        cleanup.append(JournalRecordMapping.materialisedURL(recordName: aid.uuidString, ext: "jpg"))
+        let tombstones: [(CKRecord.ID, CKRecord.RecordType)] = [
+            (JournalRecordMapping.recordID(for: aid), "Attachment"),   // the attachment first, as a batch may order it
+            (CKRecord.ID(recordName: JournalSyncRecordType.metaName(for: aid.uuidString), zoneID: JournalRecordMapping.zoneID), JournalSyncRecordType.attachmentMeta),
+            (JournalRecordMapping.recordID(for: sid), "Session")]
+        return (sid, aid, recording, tombstones)
+    }
+
+    private func keptFiles(for attachment: UUID) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(at: JournalImporter.displacedMediaDirectory(), includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.lastPathComponent.hasPrefix(attachment.uuidString) }
+    }
+
+    /// The other device deleted an entry; this device still holds it, with a
+    /// recording, and has sent none of it. The deletion is applied, but only
+    /// after the entry, its attachment's details and the file's bytes are
+    /// kept; Restore brings all of it back as a new entry that goes up.
+    @MainActor
+    func testADeletionInTheFirstFetchKeepsTheEntryAndItsRecordingAndRestoreBringsBothBack() async throws {
+        let (sid, aid, recording, tombstones) = try seedEntryWithARecording()
+        tracker.bootstrapIfNeeded()
+        let engine = makeEngine()
+        let complete = await firstFetch(engine, [], deleted: tombstones)
+        defer { for url in keptFiles(for: aid) { try? FileManager.default.removeItem(at: url) } }
+        XCTAssertTrue(complete)
+        XCTAssertFalse(exists("Session", sid)); XCTAssertFalse(exists("Attachment", aid))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recording.path), "the deletion removed the file from the journal")
+        XCTAssertTrue(store.state.outbox.isEmpty, "and nothing of the entry is uploaded")
+
+        let shown = JournalRecovery.entries(store: store)
+        XCTAssertEqual(shown.count, 1, "one entry for the deleted entry and its recording together")
+        let entry = try XCTUnwrap(shown.first)
+        XCTAssertEqual(entry.displaced["Notes (this device)"], "worked on bowing")
+        XCTAssertEqual(keptFiles(for: aid).count, 1)
+        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(keptFiles(for: aid).first)), Data("the only copy of this recording".utf8), "the bytes are kept")
+
+        let outcome = JournalRecovery.restore(entry, store: store, context: container.viewContext)
+        guard case .restored = outcome else { return XCTFail("restore failed: \(outcome)") }
+        XCTAssertEqual(value("Session", sid, "title") as? String, "Lesson with Anna")
+        XCTAssertEqual(value("Session", sid, "notes") as? String, "worked on bowing")
+        XCTAssertEqual(value("Session", sid, "durationSeconds") as? Int64, 2700)
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "bowing exercise")
+        XCTAssertEqual(value("Attachment", aid, "isThumbnail") as? Bool, true)
+        let restored = try XCTUnwrap(AttachmentPathResolver.resolve(value("Attachment", aid, "fileURL") as? String), "the attachment has its file again")
+        cleanup.append(restored)
+        XCTAssertEqual(try Data(contentsOf: restored), Data("the only copy of this recording".utf8), "with the same bytes")
+        let queued = tracker.processHistory()
+        XCTAssertTrue(queued.contains { $0.recordName == sid.uuidString && $0.op == .save })
+        XCTAssertTrue(queued.contains { $0.recordName == aid.uuidString && $0.op == .save && !$0.assetFree }, "the recording goes up with its file")
+        XCTAssertTrue(JournalRecovery.entries(store: store).isEmpty)
+    }
+
+    /// The other device deleted one recording from an entry both still hold.
+    /// The attachment is kept on its own and Restore puts it back in its entry.
+    @MainActor
+    func testAnAttachmentDeletedOnItsOwnInTheFirstFetchIsKeptAndRestoredToItsEntry() async throws {
+        let (sid, aid, recording, tombstones) = try seedEntryWithARecording()
+        let cloudSession = try cloudCopy(.session, sid, tag: "s1")
+        tracker.bootstrapIfNeeded()
+        let engine = makeEngine()
+        let complete = await firstFetch(engine, [cloudSession], deleted: tombstones.filter { $0.1 != "Session" })
+        defer { for url in keptFiles(for: aid) { try? FileManager.default.removeItem(at: url) } }
+        XCTAssertTrue(complete)
+        XCTAssertTrue(exists("Session", sid)); XCTAssertFalse(exists("Attachment", aid))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recording.path))
+        let entry = try XCTUnwrap(JournalRecovery.entries(store: store).first)
+        XCTAssertEqual(entry.displaced["Name (this device)"], "bowing exercise")
+        let outcome = JournalRecovery.restore(entry, store: store, context: container.viewContext)
+        guard case .restored = outcome else { return XCTFail("restore failed: \(outcome)") }
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "bowing exercise")
+        XCTAssertEqual(value("Attachment", aid, "isThumbnail") as? Bool, true)
+        let ctx = container.newBackgroundContext()
+        var parent: UUID?
+        ctx.performAndWait {
+            let r = NSFetchRequest<NSManagedObject>(entityName: "Attachment"); r.predicate = NSPredicate(format: "id == %@", aid as CVarArg)
+            parent = ((try? ctx.fetch(r))?.first?.value(forKey: "session") as? NSManagedObject)?.value(forKey: "id") as? UUID
+        }
+        XCTAssertEqual(parent, sid, "back in the entry it belonged to")
+        let restored = try XCTUnwrap(AttachmentPathResolver.resolve(value("Attachment", aid, "fileURL") as? String))
+        cleanup.append(restored)
+        XCTAssertEqual(try Data(contentsOf: restored), Data("the only copy of this recording".utf8))
+        XCTAssertTrue(keptFiles(for: aid).isEmpty, "the kept copy is used up")
+    }
+
+    /// If the content cannot be kept, it is not deleted and the first fetch
+    /// is not complete: the file that cannot be copied, and the recovery
+    /// entry that cannot be written. The next attempt keeps it, then deletes.
+    @MainActor
+    func testAnEntryThatCannotBeKeptIsNotDeletedAndTheFirstFetchStaysIncomplete() async throws {
+        let (sid, aid, recording, tombstones) = try seedEntryWithARecording()
+        tracker.bootstrapIfNeeded()
+        let engine = makeEngine()
+        let keptDir = JournalImporter.displacedMediaDirectory().path, stateDir = tempDir.appendingPathComponent("state").path
+        defer { for url in keptFiles(for: aid) { try? FileManager.default.removeItem(at: url) } }
+        for (label, dir) in [("the file cannot be copied", keptDir), ("the recovery entry cannot be written", stateDir)] {
+            try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir)
+            let complete = await firstFetch(engine, [], deleted: tombstones)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir)
+            XCTAssertFalse(complete, "\(label): the batch is not complete")
+            XCTAssertTrue(exists("Session", sid), "\(label): the entry is still in the journal")
+            XCTAssertTrue(exists("Attachment", aid), "\(label): and its attachment")
+            XCTAssertEqual(try Data(contentsOf: recording), Data("the only copy of this recording".utf8), "\(label): and its file")
+            XCTAssertFalse(store.state.initialFetchComplete, "\(label): the merge is not marked complete")
+            XCTAssertEqual(engine.sendDecision(), .heldForFirstFetch)
+        }
+        let complete = await firstFetch(engine, [], deleted: tombstones)
+        XCTAssertTrue(complete, "once it can be kept, it is kept and then deleted")
+        XCTAssertFalse(exists("Session", sid))
+        XCTAssertEqual(JournalRecovery.entries(store: store).count, 1)
+        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(keptFiles(for: aid).first)), Data("the only copy of this recording".utf8))
+    }
+
+    /// Outside the first merge nothing changes: a deletion from the other
+    /// device is an ordinary synced deletion and keeps no copy.
+    @MainActor
+    func testADeletionAfterTheFirstFetchIsAnOrdinaryDeletionAndKeepsNothing() async throws {
+        let (sid, aid, _, tombstones) = try seedEntryWithARecording()
+        tracker.bootstrapIfNeeded()
+        store.update { $0.initialFetchComplete = true }
+        let engine = makeEngine()
+        let complete = await firstFetch(engine, [], deleted: tombstones)
+        XCTAssertTrue(complete)
+        XCTAssertFalse(exists("Session", sid)); XCTAssertFalse(exists("Attachment", aid))
+        XCTAssertTrue(store.state.conflicts.isEmpty); XCTAssertTrue(keptFiles(for: aid).isEmpty)
+    }
+
+    /// The same for a list: deleted on the other device, changed or made here
+    /// and never sent. In the first merge its lines are kept as a list.
+    @MainActor
+    func testAListDeletedElsewhereInTheFirstFetchKeepsThisDevicesLinesAsAList() async throws {
+        let scope = JournalSavedListSync.currentScope()
+        let engine = makeEngine()
+        defer {
+            if let current = try? SavedListLibrary.read(ownerScope: scope) {
+                try? SavedListLibrary.commit(snapshot: current, updated: current.filter { !$0.name.hasPrefix("C197 ") }, ownerScope: scope)
+            }
+        }
+        let id = UUID(), name = "C197 deleted \(id.uuidString.prefix(6))"
+        let before = try SavedListLibrary.read(ownerScope: scope)
+        try SavedListLibrary.commit(snapshot: before, updated: before + [SavedList(id: id, name: name, items: [SavedListLine(text: "only on this device")])], ownerScope: scope)
+        store.update { JournalChangeTracker.merge([.init(recordName: id.uuidString, recordType: JournalSyncRecordType.savedList, op: .save)], into: &$0) }
+        let complete = await firstFetch(engine, [], deleted: [(JournalRecordMapping.recordID(for: id), JournalSyncRecordType.savedList)])
+        XCTAssertTrue(complete)
+        let lists = try SavedListLibrary.read(ownerScope: scope).filter { $0.name.hasPrefix(name) }
+        XCTAssertEqual(lists.map(\.name), [JournalSavedListSync.keptName(name)], "the deleted list is gone and its lines are kept beside it")
+        XCTAssertEqual(lists.first?.items.map(\.text), ["only on this device"])
+        XCTAssertNotEqual(lists.first?.id, id)
+        XCTAssertNil(pendingSave(id.uuidString))
+    }
 }
 #endif
