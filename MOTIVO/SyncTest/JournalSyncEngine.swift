@@ -111,7 +111,6 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     private var engineInstance: CKSyncEngine?
     private let importContext: NSManagedObjectContext
     private var saveObserver: NSObjectProtocol?
-    private var stampObserver: NSObjectProtocol?
     private var accountObserver: NSObjectProtocol?
     private let stateLock = NSLock()
     private var currentUserRecordName: String?
@@ -229,7 +228,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
 
     deinit {
         heldPollTask?.cancel()
-        for o in [saveObserver, stampObserver, accountObserver, listObserver, backgroundObserver, preferenceObserver, foregroundObserver].compactMap({ $0 }) {
+        for o in [saveObserver, accountObserver, listObserver, backgroundObserver, preferenceObserver, foregroundObserver].compactMap({ $0 }) {
             NotificationCenter.default.removeObserver(o)
         }
         pathMonitor?.cancel()
@@ -238,7 +237,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     // MARK: Lifecycle
 
     func start() async {
-        if stampObserver == nil { stampObserver = JournalUserEditStamp.install() }
+        JournalUserEditStamp.installOnce()
         if accountObserver == nil {
             // The system's account notification, independent of any engine
             // instance: while dormant there is no engine to tell us.
@@ -568,6 +567,23 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
     }
 
+    /// Whether a send may leave now. C-197 (2026-11-13): nothing is sent
+    /// before the first complete fetch has been applied on this device
+    /// (`initialFetchComplete`), so a journal that already exists in iCloud
+    /// is merged with this one before any of this one's records reach the
+    /// server. A fetch that failed, was abandoned or was applied in part
+    /// leaves the flag unset and the hold in place; it is tried again by the
+    /// poll, a push and the foreground. An absent zone is a complete answer
+    /// (`catchUpFailed`). Internal so tests read the decision `performSend`
+    /// and the batch builder act on.
+    enum SendDecision: Equatable { case go, noEngine, refused, heldForFirstFetch }
+    func sendDecision() -> SendDecision {
+        guard currentDecision().allowed else { return .refused }
+        guard store.state.initialFetchComplete else { return .heldForFirstFetch }
+        return engine == nil ? .noEngine : .go
+    }
+    private var firstFetchHoldLogged = false
+
     /// THE send. While iCloud storage is full the attempt waits for its
     /// cadence (`JournalStorageFull.retryDue`: 2, 4, 8, then 15 minutes after
     /// each refusal, the floor for a user-driven trigger), then re-adds the
@@ -575,7 +591,12 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
     /// Returns whether a send was attempted.
     @discardableResult
     func performSend(userDriven: Bool, bypassCadence: Bool = false, trigger: String = "unspecified") async -> Bool {
-        guard let engine, currentDecision().allowed else { return false }
+        let decision = sendDecision()
+        if decision == .heldForFirstFetch {
+            stateLock.lock(); let first = !firstFetchHoldLogged; firstFetchHoldLogged = true; stateLock.unlock()
+            if first { log("Nothing is sent until iCloud has been read once and applied here; what waits goes up after that") }
+        }
+        guard let engine, decision == .go else { return false }
         let asked = Date()
         stateLock.lock()
         let mayRun = sendGate.enter(now: asked)
@@ -929,21 +950,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             container.privateCloudDatabase.add(op)
         }
         if let failure {
-            let text = "Delta catch-up failed: \(failure.localizedDescription)"
-            store.update { $0.lastCatchUp = text }
-            if restoring { publishRestore(nil) }
-            log(text)
-            refreshCounts()   // the status says "Last check failed" (C-183)
-            switch JournalCatchUp.recovery(for: failure.code) {
-            case .retryLater:
-                return true
-            case .rereadZone:
-                // The one unavoidable full fetch: records only, files by need.
-                store.update { $0.catchUpZoneToken = nil }
-                log("Zone token expired; the whole zone is read again, records only")
-                return previous == nil ? true : await deltaCatchUpBody(reason: "\(reason), whole zone")
-            case .zoneGone:
-                return false
+            switch await catchUpFailed(code: failure.code, description: failure.localizedDescription, hadZoneToken: previous != nil,
+                                       generation: generation, reason: reason, writeFailuresBefore: writeFailuresBefore) {
+            case .settled(let ok): return ok
+            case .rereadZone: return await deltaCatchUpBody(reason: "\(reason), whole zone")
             }
         }
 
@@ -1053,6 +1063,41 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         return true
     }
 
+    enum CatchUpFailureNext: Equatable { case settled(Bool), rereadZone }
+
+    /// What a zone read that failed means. Internal so tests drive it without
+    /// CloudKit. C-197: with no zone token of ours and no Journal zone, iCloud
+    /// holds no journal yet (the first device to turn sync on). That is the
+    /// first fetch's complete answer, an empty one: it is applied as such, so
+    /// the hold on sends lifts and this device's send creates the zone. Any
+    /// other failure leaves `initialFetchComplete` as it was.
+    func catchUpFailed(code: CKError.Code, description: String, hadZoneToken: Bool, generation: Int, reason: String,
+                       writeFailuresBefore: Int) async -> CatchUpFailureNext {
+        let recovery = JournalCatchUp.recovery(for: code)
+        if recovery == .zoneGone, !hadZoneToken {
+            log("iCloud holds no journal yet: nothing to fetch; this device's journal goes up and creates it")
+            let applied = await applyFetchedBatch(modified: [], deleted: [], newToken: nil, assetsFetched: 0, generation: generation,
+                                                  reason: reason, writeFailuresBefore: writeFailuresBefore)
+            publishRestore(nil)
+            return .settled(applied)
+        }
+        let text = "Delta catch-up failed: \(description)"
+        store.update { $0.lastCatchUp = text }
+        publishRestore(nil)   // also refreshes the status: "Last check failed" (C-183)
+        log(text)
+        switch recovery {
+        case .retryLater:
+            return .settled(true)
+        case .rereadZone:
+            // The one unavoidable full fetch: records only, files by need.
+            store.update { $0.catchUpZoneToken = nil }
+            log("Zone token expired; the whole zone is read again, records only")
+            return hadZoneToken ? .rereadZone : .settled(true)
+        case .zoneGone:
+            return .settled(false)
+        }
+    }
+
     /// Status only: where the first complete fetch is (nil = not running).
     private func publishRestore(_ progress: JournalRestoreProgress?) {
         stateLock.lock(); restoreValue = progress; stateLock.unlock()
@@ -1096,6 +1141,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
                 _ = JournalSavedListSync.apply(lists, store: self.store); return true
             }
             guard ran else { return abandoned("lists") }
+            // A pending save the cloud copy settled leaves the engine's own list too.
+            let stillPending = Set(store.state.outbox.filter { $0.op == .save }.map(\.recordName))
+            for record in lists where !stillPending.contains(record.recordID.recordName) {
+                engine?.state.remove(pendingRecordZoneChanges: [.saveRecord(record.recordID)])
+            }
         }
         Self.testBeforeFamily?("scores")
         guard await importScoreRecords(modified.filter { JournalSyncRecordType.scoreTypes.contains($0.recordType) }, generation: generation) else { return abandoned("scores") }
@@ -1140,7 +1190,10 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         }
         guard committed != nil else { return abandoned("the token commit") }
         log(summary + (complete ? "" : " — incomplete (a write failed); zone token kept, fetched again"))
-        if first, complete { log("First complete fetch finished" + (provisionalStands ? "; no cloud profile, so the profile typed here keeps its clock" : "")) }
+        if first, complete {
+            log("First complete fetch finished" + (provisionalStands ? "; no cloud profile, so the profile typed here keeps its clock" : ""))
+            scheduleManualSend(userDriven: true)   // C-197: what was held for this fetch may go now
+        }
         if complete, let fetchCycleCompleted { await MainActor.run { fetchCycleCompleted() } }
         // B6: files that could not be fetched (this round or earlier) are
         // tried again now that the link may be back.
@@ -1713,6 +1766,8 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
             log("Send refused: \(decision.reason ?? "")")
             return nil
         }
+        // C-197: the same hold, where the records are built.
+        guard store.state.initialFetchComplete else { return nil }
         let scope = context.options.scope
         var pending = syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }
         // Sessions before their attachments, deletes last.
@@ -2202,7 +2257,7 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         if server.recordType == JournalSyncRecordType.savedList {
             let applied = await MainActor.run { () -> Bool in
                 guard self.mayStillImport(generation) else { return false }
-                JournalSavedListSync.apply([server], store: self.store, overridePending: true)
+                JournalSavedListSync.apply([server], store: self.store)
                 self.dropPendingSave(name)
                 return true
             }
@@ -2440,6 +2495,7 @@ final class JournalSyncCoordinator {
     func startIfNeeded(persistence: NSPersistentContainer) -> Bool {
         if engine != nil { return true }
         self.persistence = persistence
+        Self.keepEditClocks(in: persistence)
         guard supportsSync,
               FileManager.default.fileExists(atPath: stateFileURL.path) else { return false }
         start(persistence: persistence, store: JournalSyncStateStore(fileURL: stateFileURL))
@@ -2457,6 +2513,7 @@ final class JournalSyncCoordinator {
     func enable(persistence: NSPersistentContainer) -> Bool {
         guard supportsSync else { return false }
         self.persistence = persistence
+        Self.keepEditClocks(in: persistence)
         if let store {
             if store.state.unlinked { reenable() }
             return true
@@ -2472,14 +2529,23 @@ final class JournalSyncCoordinator {
         return true
     }
 
+    /// C-197: the one thing that runs with sync off. Every local edit keeps
+    /// its clock (`userModifiedAt`): rows saved through Core Data by the
+    /// stamp observer, side-store edits (title, privacy, pages, favourite)
+    /// by the metadata mirror touching their row. Nothing is queued, sent
+    /// or fetched, and no state file is made.
+    static func keepEditClocks(in persistence: NSPersistentContainer) {
+        JournalUserEditStamp.installOnce()
+        JournalMetadataMirror.container = persistence
+    }
+
     /// The person turns sync off: the journal and pending work are kept and
     /// edits go on being tracked; nothing is sent or fetched until enabled again.
     func disable() async { await engine?.unlink() }
 
     private func start(persistence: NSPersistentContainer, store: JournalSyncStateStore) {
         self.store = store
-        // The metadata write points stamp their rows only once sync is in use.
-        JournalMetadataMirror.container = persistence
+        Self.keepEditClocks(in: persistence)
         // Before any engine exists: a local removal the previous run did not
         // finish is completed here, so nothing it deleted can be queued.
         _ = JournalLocalRemoval.recoverIfInterrupted(store: store, container: persistence) {

@@ -114,6 +114,9 @@ struct JournalSyncConflict: Codable, Identifiable {
     var restore: String? = nil
     /// Set when the person restored or dismissed the entry.
     var resolvedAt: Date? = nil
+    /// C-197: the whole losing version as a record (no file), so a restore
+    /// puts back every field, not only the text shown.
+    var losingRecord: Data? = nil
 
     var hasRecoverableText: Bool { !displaced.values.allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
 }
@@ -121,7 +124,7 @@ struct JournalSyncConflict: Codable, Identifiable {
 extension JournalSyncConflict {
     private enum CodingKeys: String, CodingKey {
         case id, at, recordName, recordType, winner, localUserModifiedAt, serverUserModifiedAt, losingTitle, losingNotes
-        case displaced, subject, restore, resolvedAt
+        case displaced, subject, restore, resolvedAt, losingRecord
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -138,6 +141,7 @@ extension JournalSyncConflict {
         subject = try c.decodeIfPresent(String.self, forKey: .subject) ?? ""
         restore = try c.decodeIfPresent(String.self, forKey: .restore)
         resolvedAt = try c.decodeIfPresent(Date.self, forKey: .resolvedAt)
+        losingRecord = try c.decodeIfPresent(Data.self, forKey: .losingRecord)
     }
 }
 

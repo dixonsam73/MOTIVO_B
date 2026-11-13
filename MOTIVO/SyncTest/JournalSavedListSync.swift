@@ -88,31 +88,52 @@ enum JournalSavedListSync {
         return out
     }
 
-    /// Writes server lists into the library: replaces by id or appends. A list
-    /// with a pending local change keeps the local version (it will be sent).
+    /// The name a list's losing version is kept under.
+    static func keptName(_ name: String) -> String { "\(name) (kept from this device)" }
+
+    /// Writes server lists into the library: replaces by id or appends.
+    /// C-197 (2026-11-13): ONE rule whether the server copy arrives by a fetch
+    /// while this device's save is pending or as the answer to that save being
+    /// rejected. Lists carry no clock, so the server copy takes the list's id
+    /// (ties go to the server, as everywhere), and when the pending local
+    /// version differs it is kept as a list of its own, which the next scan
+    /// sends to every device. Nothing is lost and the result does not depend
+    /// on which arrived first. This device's own accepted write, coming back
+    /// with the change tag it already holds, is not a server edit: the pending
+    /// local version stands.
     @discardableResult
     static func apply(_ records: [CKRecord], store: JournalSyncStateStore, defaults: UserDefaults = .standard,
-                      scope: String? = nil, overridePending: Bool = false) -> Int {
-        let incoming = records.compactMap(JournalRecordMapping.savedList(from:))
+                      scope: String? = nil, changeTag: (CKRecord) -> String? = { $0.recordChangeTag }) -> Int {
+        let incoming = records.compactMap { record in JournalRecordMapping.savedList(from: record).map { (record, $0) } }
         guard !incoming.isEmpty else { return 0 }
         let scope = scope ?? currentScope()
         guard case .lists(let current) = SavedListLibrary.load(ownerScope: scope, defaults: defaults) else {
             store.log("Lists: library unreadable; \(incoming.count) incoming list(s) not written")
             return 0
         }
-        let pending = Set(store.state.outbox.filter { $0.op == .save }.map(\.recordName))
+        let st = store.state
+        let pending = Set(st.outbox.filter { $0.op == .save }.map(\.recordName))
         var updated = current
         var applied: [String: String] = [:]
-        for var list in incoming {
+        var tags: [String: String] = [:]
+        var kept: [String] = []
+        for (record, var list) in incoming {
             let name = list.id.uuidString
-            if !overridePending, pending.contains(name) { continue }
+            let tag = changeTag(record)
+            if pending.contains(name), let tag,
+               st.knownChangeTags[name] == tag || JournalEcho.isKnown(changeTag: tag, storedSystemFields: st.lastKnownRecords[name]) { continue }
             if let i = updated.firstIndex(where: { $0.id == list.id }) {
+                if pending.contains(name), fingerprint(updated[i]) != fingerprint(list) {
+                    updated.append(SavedList(id: UUID(), name: keptName(updated[i].name), items: updated[i].items))
+                    kept.append(updated[i].name)
+                }
                 list.sourceSendID = updated[i].sourceSendID
                 updated[i] = list
             } else {
                 updated.append(list)
             }
             applied[name] = fingerprint(list)
+            if let tag { tags[name] = tag }
         }
         do {
             try SavedListLibrary.commit(snapshot: current, updated: updated, ownerScope: scope, defaults: defaults)
@@ -122,8 +143,14 @@ enum JournalSavedListSync {
         }
         store.update { st in
             st.listFingerprints.merge(applied) { _, new in new }
-            for r in records { st.lastKnownRecords[r.recordID.recordName] = JournalSyncStateStore.encodeSystemFields(r) }
-            if overridePending { st.outbox.removeAll { applied[$0.recordName] != nil && $0.op == .save } }
+            for (record, _) in incoming where applied[record.recordID.recordName] != nil {
+                st.lastKnownRecords[record.recordID.recordName] = JournalSyncStateStore.encodeSystemFields(record)
+            }
+            st.knownChangeTags.merge(tags) { _, new in new }
+            st.outbox.removeAll { applied[$0.recordName] != nil && $0.op == .save }
+            for name in kept {
+                st.log.append(.init(at: Date(), text: "List “\(name)” was changed here and in iCloud: iCloud's is kept, this device's is kept beside it as “\(keptName(name))”"))
+            }
         }
         return applied.count
     }

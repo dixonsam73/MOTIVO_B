@@ -309,6 +309,59 @@ enum JournalRecordMapping {
     }
 
     static func userModifiedAt(of record: CKRecord) -> Date? { record["userModifiedAt"] as? Date }
+
+    // MARK: Content comparison (C-197)
+
+    /// The fields whose difference is a difference in content, for the type of
+    /// `server`. Never the owner or the clock. A Session carries all of its
+    /// Core Data fields, so an absent one is a cleared one. The side-store
+    /// choices (a session's favourite; an attachment's privacy and pages) and
+    /// an attachment's legacy name and star count only when BOTH records
+    /// carry them: absent there means "no information".
+    static func differingContentKeys(local: CKRecord, server: CKRecord) -> [String] {
+        let always: [String], whenBothCarry: [String]
+        switch server.recordType {
+        case JournalSyncRecordType.session:
+            always = sessionKeys.filter { $0 != "ownerUserID" && $0 != "userModifiedAt" } + [instrumentNameKey]
+            whenBothCarry = [JournalMetadataKeys.isSaved]
+        case JournalSyncRecordType.attachment:
+            always = ["kind", "createdAt"]; whenBothCarry = legacyAttachmentMetaKeys
+        case JournalSyncRecordType.attachmentMeta:
+            always = ["displayName", "isThumbnail"]; whenBothCarry = [JournalMetadataKeys.isPrivate, JournalMetadataKeys.selectedPages]
+        default:
+            return []
+        }
+        func same(_ a: NSObject?, _ b: NSObject?) -> Bool {
+            switch (a, b) {
+            case (nil, nil): return true
+            case (let x as NSString, nil), (nil, let x as NSString): return x.length == 0      // "" and absent are both "none"
+            case (let x as NSDate, let y as NSDate): return abs(x.timeIntervalSince(y as Date)) < 0.001
+            case (let x?, let y?): return x.isEqual(y)
+            default: return false
+            }
+        }
+        return always.filter { !same(local[$0] as? NSObject, server[$0] as? NSObject) }
+            + whenBothCarry.filter { local[$0] != nil && server[$0] != nil && !same(local[$0] as? NSObject, server[$0] as? NSObject) }
+    }
+
+    /// A field's name for people ("Duration"), for the Displaced by sync list.
+    static func fieldLabel(_ key: String) -> String {
+        switch key {
+        case "durationSeconds": return "Duration"
+        case "timestamp", "createdAt": return "Date"
+        case "activityType", "activityDetail", "userActivityLabel": return "Activity"
+        case "userInstrumentLabel", instrumentNameKey: return "Instrument"
+        case "threadLabel": return "Thread"
+        case "areNotesPrivate": return "Notes privacy"
+        case "isPublic": return "Sharing"
+        case "isThumbnail": return "Star"
+        case JournalMetadataKeys.isSaved: return "Favourite"
+        case JournalMetadataKeys.isPrivate: return "Privacy"
+        case JournalMetadataKeys.selectedPages: return "Pages"
+        case "kind": return "Kind"
+        default: return key.prefix(1).uppercased() + key.dropFirst()
+        }
+    }
     static func sessionRecordName(of attachment: CKRecord) -> String? {
         (attachment[sessionRefKey] as? CKRecord.Reference)?.recordID.recordName
     }

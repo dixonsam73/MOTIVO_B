@@ -396,6 +396,16 @@ enum JournalUserEditStamp {
         }
     }
 
+    /// C-197 (2026-11-13): the clock is kept whether sync is on or off. An
+    /// edit made while sync was off used to carry no clock, so when sync was
+    /// turned on it lost to any cloud copy, however old. One observer for the
+    /// process, installed at launch by `JournalSyncCoordinator.startIfNeeded`;
+    /// it writes one attribute on a row the person is saving anyway and makes
+    /// no engine, state file or CloudKit call. It cannot give a clock to an
+    /// edit made before this build ran.
+    private static let processObserver: NSObjectProtocol = install()
+    static func installOnce() { _ = processObserver }
+
     static func install() -> NSObjectProtocol {
         NotificationCenter.default.addObserver(forName: .NSManagedObjectContextWillSave, object: nil, queue: nil) { note in
             guard let ctx = note.object as? NSManagedObjectContext,

@@ -29,6 +29,9 @@ enum JournalRecovery {
             if let restore = entry.restore, restore.hasPrefix("avatar:") {
                 return FileManager.default.fileExists(atPath: String(restore.dropFirst("avatar:".count)))
             }
+            if let restore = entry.restore, restore.hasPrefix("media:"), let file = restore.split(separator: "|").last {
+                return FileManager.default.fileExists(atPath: JournalImporter.displacedMediaDirectory().appendingPathComponent(String(file)).path)
+            }
             return entry.hasRecoverableText
         }.sorted { $0.at > $1.at }
     }
@@ -62,6 +65,8 @@ enum JournalRecovery {
             outcome = restoreProfile(entry, context: context, scope: scope ?? JournalSyncCoordinator.shared.engine?.profileScope ?? .local)
         } else if restore.hasPrefix("score:") {
             outcome = restoreScoreTitle(entry, id: String(restore.dropFirst("score:".count)))
+        } else if restore.hasPrefix("media:") {
+            outcome = restoreMedia(spec: String(restore.dropFirst("media:".count)), context: context)
         } else if restore.hasPrefix("avatar:") {
             let url = URL(fileURLWithPath: String(restore.dropFirst("avatar:".count)))
             let ok = JournalProfileSync.restoreDisplacedAvatar(url, scope: scope ?? JournalSyncCoordinator.shared.engine?.profileScope ?? .local)
@@ -86,6 +91,21 @@ enum JournalRecovery {
         guard let uuid = UUID(uuidString: id), let session = fetch("Session", id: uuid, in: context) else {
             return .failed("That entry is no longer in the journal.")
         }
+        // C-197: the whole losing version, when the entry holds it. The owner
+        // stays this journal's, and the clock is now: a restore is a new edit.
+        if let data = entry.losingRecord, let record = JournalSyncStateStore.decodeWholeRecord(data), record.recordType == JournalSyncRecordType.session {
+            let owner = session.value(forKey: "ownerUserID")
+            _ = JournalRecordMapping.apply(record, to: session)
+            session.setValue(owner, forKey: "ownerUserID")
+            session.setValue(Date(), forKey: "userModifiedAt")
+            JournalMetadataFields.applySession(isSaved: record[JournalMetadataKeys.isSaved] as? NSNumber, id: uuid,
+                                               viewerScope: JournalMetadataCodec.viewerScope(currentUserID: PersistenceController.shared.currentUserID))
+            let request = NSFetchRequest<NSManagedObject>(entityName: JournalSyncRecordType.instrument)
+            request.predicate = NSPredicate(format: "name ==[cd] %@", JournalRecordMapping.instrumentLink(of: record).name ?? "")
+            session.setValue((try? context.fetch(request))?.first, forKey: "instrument")
+            do { try context.save() } catch { context.rollback(); return .failed(error.localizedDescription) }
+            return .restored("Restored the whole entry as a new edit")
+        }
         var applied: [String] = []
         if let title = value(entry, field: "Title") { session.setValue(title, forKey: "title"); applied.append("title") }
         if let notes = value(entry, field: "Notes") { session.setValue(notes, forKey: "notes"); applied.append("notes") }
@@ -108,6 +128,34 @@ enum JournalRecovery {
             do { try context.save() } catch { context.rollback(); return .failed(error.localizedDescription) }
         }
         return .restored("Restored the name as a new edit")
+    }
+
+    /// C-197: puts a kept file back as the attachment's file. It goes in under
+    /// a new name, so the change is a content edit that carries the file to
+    /// the other devices; the file it replaces was the cloud's and goes.
+    private static func restoreMedia(spec: String, context: NSManagedObjectContext) -> Outcome {
+        let parts = spec.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let uuid = UUID(uuidString: parts[0]), let attachment = fetch("Attachment", id: uuid, in: context) else {
+            return .failed("That attachment is no longer in the journal.")
+        }
+        let kept = JournalImporter.displacedMediaDirectory().appendingPathComponent(parts[1], isDirectory: false)
+        guard FileManager.default.fileExists(atPath: kept.path) else { return .failed("The kept file is no longer on this device.") }
+        let ext = kept.pathExtension
+        let target = JournalRecordMapping.materialisedURL(recordName: "\(uuid.uuidString)-restored-\(Int(Date().timeIntervalSince1970))", ext: ext)
+        let previous = AttachmentPathResolver.resolve(attachment.value(forKey: "fileURL") as? String)
+        do {
+            try FileManager.default.copyItem(at: kept, to: target)
+            attachment.setValue(target.path, forKey: "fileURL")
+            attachment.setValue(Date(), forKey: "userModifiedAt")
+            try context.save()
+        } catch {
+            context.rollback()
+            try? FileManager.default.removeItem(at: target)
+            return .failed(error.localizedDescription)
+        }
+        if let previous, previous.path != target.path { AttachmentStore.deleteAttachmentFile(at: previous) }
+        try? FileManager.default.removeItem(at: kept)
+        return .restored("Restored the file as a new edit")
     }
 
     private static func restoreProfile(_ entry: JournalSyncConflict, context: NSManagedObjectContext, scope: JournalProfileScope) -> Outcome {

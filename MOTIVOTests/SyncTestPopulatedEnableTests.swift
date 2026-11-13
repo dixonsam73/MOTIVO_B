@@ -2,24 +2,31 @@
 //  SyncTestPopulatedEnableTests.swift
 //  MOTIVOTests — compiled only in the SyncTest configuration (SYNCTEST).
 //
-//  C-197, assessed 2026-11-13: turning sync on on a device that already holds
-//  the journal iCloud holds (two devices restored from one backup, sync then
-//  turned on on both). Nothing here changes production code. EVERY TEST PINS
-//  WHAT THE CODE DOES TODAY; a test whose name starts `testFAULT_` asserts a
-//  behaviour that is wrong or doubtful, so the suite stays green while the
-//  fault is on record. Fix the fault and that test must be rewritten.
+//  C-197: turning sync on on a device that already holds the journal iCloud
+//  holds (two devices restored from one backup, sync then turned on on both).
+//  Assessed 2026-11-13 (`91cd021`, where these tests pinned the faults) and
+//  corrected the same day; the tests now assert the corrected behaviour.
 //
-//  The device is played by a temporary store filled with synthetic rows and a
-//  bootstrap (`JournalChangeTracker.bootstrapIfNeeded`, what `activate` runs
-//  first). iCloud is played by records built from those rows. The two orders
-//  the first activation can take are driven through the paths the engine uses:
+//  The rule (Samuel, 2026-11-13): the two journals are COMBINED. Entries only
+//  one side holds are kept. Where both hold an entry and no trustworthy edit
+//  order exists, the cloud copy stands and this device's version is kept
+//  whole, to read back and restore. Nothing is erased to turn sync on. An
+//  entry deleted on only one side before sync was on can come back, because
+//  no record of the deletion survives.
+//
+//  The device is a temporary store with synthetic rows and a bootstrap
+//  (`JournalChangeTracker.bootstrapIfNeeded`, what `activate` runs first).
+//  iCloud is records built from those rows. Both orders a conflict can be met
+//  in are driven through the engine's own paths:
+//    fetch first → the zone arrives while the save is pending
+//                  (`applyFetchedBatch`); the order the hold now enforces at
+//                  the first activation;
 //    send first  → the save is rejected (serverRecordChanged) and the engine
-//                  calls `JournalImporter.resolveSendConflict`;
-//    fetch first → the whole zone arrives while the saves are still pending
-//                  and the engine calls `applyFetchedBatch`.
-//  Which order a real activation takes cannot be reached without a seam
-//  (`activate` is private and needs CloudKit); that part of the assessment is
-//  read from the code, not tested here.
+//                  calls `JournalImporter.resolveSendConflict` or
+//                  `applyDeferredSendConflict`; still the order of an
+//                  ordinary conflict later on.
+//  The CloudKit calls themselves (`activate`, `sendChanges`, the zone read)
+//  are not reachable in a test; the decisions they act on are.
 //
 
 #if SYNCTEST
@@ -37,6 +44,8 @@ final class SyncTestPopulatedEnableTests: XCTestCase {
     private var queues: [Step0Queue] = []
     private var defaults: UserDefaults!
     private var suiteName: String!
+    /// Files a test put in the host's Documents or Application Support.
+    private var cleanup: [URL] = []
     /// The clock both copies of an untouched row carry (one backup, two devices).
     private let backupClock = Date(timeIntervalSince1970: 1_760_000_000)
 
@@ -54,16 +63,17 @@ final class SyncTestPopulatedEnableTests: XCTestCase {
         container.viewContext.transactionAuthor = JournalSyncAuthor.app
         container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         container.viewContext.automaticallyMergesChangesFromParent = true
-        store = JournalSyncStateStore(fileURL: tempDir.appendingPathComponent("state.json"))
+        try FileManager.default.createDirectory(at: tempDir.appendingPathComponent("state"), withIntermediateDirectories: true)
+        store = JournalSyncStateStore(fileURL: tempDir.appendingPathComponent("state/state.json"))
         tracker = JournalChangeTracker(container: container, store: store)
         suiteName = "synctest-c197-\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
-        // No `JournalUserEditStamp.install()` here, on purpose: the observer is
-        // installed by `JournalSyncEngine.start` (JournalSyncEngine.swift:241),
-        // so a device whose sync was never on saves without it.
+        JournalUserEditStamp.installOnce()   // as every launch does, sync on or off
     }
 
     override func tearDownWithError() throws {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tempDir.appendingPathComponent("state").path)
+        for url in cleanup { try? FileManager.default.removeItem(at: url) }
         defaults.removePersistentDomain(forName: suiteName)
         queues.removeAll()
         container = nil
@@ -181,8 +191,26 @@ final class SyncTestPopulatedEnableTests: XCTestCase {
     private func exists(_ entity: String, _ id: UUID) -> Bool { value(entity, id, "id") != nil }
     private func pendingSave(_ name: String) -> JournalSyncPendingChange? { store.state.outbox.first { $0.recordName == name && $0.op == .save } }
 
-    /// The person edits a row in the app while sync is off: an ordinary save
-    /// in the view context.
+    /// A value as a build before this one left it: changed with no clock moved.
+    private func setUnclocked(_ entity: String, _ id: UUID, _ values: [String: Any?]) throws {
+        let ctx = container.newBackgroundContext(); ctx.transactionAuthor = JournalSyncAuthor.sync
+        var failure: Error?
+        ctx.performAndWait {
+            let r = NSFetchRequest<NSManagedObject>(entityName: entity); r.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            guard let row = (try? ctx.fetch(r))?.first else { failure = NSError(domain: "test", code: 1); return }
+            for (key, value) in values { row.setValue(value, forKey: key) }
+            do { try ctx.save() } catch { failure = error }
+        }
+        if let failure { throw failure }
+    }
+
+    @MainActor
+    private func firstFetch(_ engine: JournalSyncEngine, _ zone: [CKRecord], deleted: [(CKRecord.ID, CKRecord.RecordType)] = []) async -> Bool {
+        await engine.applyFetchedBatch(modified: zone, deleted: deleted, newToken: nil, assetsFetched: zone.filter { $0[JournalRecordMapping.assetKey] != nil }.count,
+                                       generation: engine.generationForTesting(), reason: "first fetch", writeFailuresBefore: store.writeFailures)
+    }
+
+    /// The person edits a row in the app: an ordinary save in the view context.
     private func editInApp(_ id: UUID, _ body: (NSManagedObject) -> Void) throws {
         let ctx = container.viewContext
         let r = NSFetchRequest<NSManagedObject>(entityName: "Session"); r.predicate = NSPredicate(format: "id == %@", id as CVarArg)
@@ -191,41 +219,143 @@ final class SyncTestPopulatedEnableTests: XCTestCase {
         try ctx.save()
     }
 
-    // MARK: 1. What the first activation queues, and what it knows
+    // MARK: 1. Every local edit has a clock, sync on or off
+
+    /// The clock that decides a conflict is now kept from launch, with no
+    /// state file and no engine. An edit made with sync off therefore beats an
+    /// older cloud copy when sync is turned on, and the cloud's text is kept.
+    @MainActor
+    func testAnEditMadeWithSyncOffIsClockedSoItIsKeptOverAnOlderCloudCopy() throws {
+        let stateURL = tempDir.appendingPathComponent("never-on/JournalSyncState.json")
+        let coordinator = JournalSyncCoordinator(stateFileURL: stateURL)
+        XCTAssertFalse(coordinator.startIfNeeded(persistence: container), "sync is off: nothing is started")
+        defer { JournalMetadataMirror.container = nil }
+        XCTAssertNil(coordinator.engine); XCTAssertFalse(FileManager.default.fileExists(atPath: stateURL.path))
+
+        let sid = try seedSession(title: "Scales", notes: "as in the backup", duration: 600, clock: backupClock)
+        let cloud = try cloudCopy(.session, sid, tag: "s1")
+        try editInApp(sid) { $0.setValue("rewritten here, sync off", forKey: "notes"); $0.setValue(Int64(1800), forKey: "durationSeconds") }
+        let clock = try XCTUnwrap(value("Session", sid, "userModifiedAt") as? Date, "the edit is clocked although sync is off")
+        XCTAssertGreaterThan(clock, backupClock)
+
+        tracker.bootstrapIfNeeded()   // sync is turned on
+        let (imp, ictx) = importer()
+        var imported = JournalImporter.Summary()
+        ictx.performAndWait { imported = imp.importModifications([cloud]) }
+        XCTAssertEqual(imported.received, 0, "the older cloud copy is not applied")
+        XCTAssertEqual(value("Session", sid, "notes") as? String, "rewritten here, sync off")
+        XCTAssertEqual(value("Session", sid, "durationSeconds") as? Int64, 1800)
+        XCTAssertNotNil(pendingSave(sid.uuidString), "and the edit goes up")
+        XCTAssertEqual(JournalRecovery.entries(store: store).first?.displaced["Notes (other device)"], "as in the backup")
+    }
+
+    // MARK: 2. Nothing is sent before the first fetch is applied
+
+    /// The hold, and the first device ever: with no zone token of ours and no
+    /// Journal zone, iCloud holds no journal. That is a complete answer, so
+    /// the hold lifts and this device's send can create the zone.
+    @MainActor
+    func testNothingIsSentBeforeTheFirstFetchIsAppliedAndAnAbsentZoneCountsAsFetched() async throws {
+        try seedSession(title: "Scales", notes: "slow", clock: backupClock)
+        tracker.bootstrapIfNeeded()
+        let engine = makeEngine()
+        XCTAssertEqual(engine.sendDecision(), .heldForFirstFetch)
+        let sent = await engine.performSend(userDriven: true, trigger: "test")
+        XCTAssertFalse(sent, "a send asked for now does not run")
+        XCTAssertTrue(store.state.log.contains { $0.text.hasPrefix("Nothing is sent until iCloud has been read once") })
+
+        let next = await engine.catchUpFailed(code: .zoneNotFound, description: "Zone does not exist", hadZoneToken: false,
+                                              generation: engine.generationForTesting(), reason: "first fetch", writeFailuresBefore: store.writeFailures)
+        XCTAssertEqual(next, .settled(true))
+        XCTAssertTrue(store.state.initialFetchComplete, "iCloud holds no journal: the first fetch is complete, with nothing in it")
+        XCTAssertEqual(engine.sendDecision(), .noEngine, "the hold has lifted (this test has no CloudKit engine to send with)")
+        XCTAssertEqual(store.state.outbox.count, 1, "and the journal still waits to go up")
+        XCTAssertFalse(store.state.lastCatchUp?.contains("failed") ?? true, "an absent zone is not shown as a failed check")
+    }
+
+    /// A read that failed, a batch applied in part, and a zone that vanished
+    /// after this device had a token all leave the hold in place.
+    @MainActor
+    func testAFailedOrIncompleteFirstFetchDoesNotReleaseTheHold() async throws {
+        let sid = try seedSession(title: "Scales", notes: "slow", clock: backupClock)
+        let cloud = try cloudCopy(.session, sid, tag: "s1")
+        tracker.bootstrapIfNeeded()
+        let engine = makeEngine()
+        let generation = engine.generationForTesting()
+
+        var next = await engine.catchUpFailed(code: .networkFailure, description: "offline", hadZoneToken: false,
+                                              generation: generation, reason: "first fetch", writeFailuresBefore: store.writeFailures)
+        XCTAssertEqual(next, .settled(true), "tried again later")
+        XCTAssertEqual(engine.sendDecision(), .heldForFirstFetch)
+        XCTAssertEqual(store.state.lastCatchUp, "Delta catch-up failed: offline")
+
+        next = await engine.catchUpFailed(code: .changeTokenExpired, description: "expired", hadZoneToken: false,
+                                          generation: generation, reason: "first fetch", writeFailuresBefore: store.writeFailures)
+        XCTAssertEqual(engine.sendDecision(), .heldForFirstFetch)
+        next = await engine.catchUpFailed(code: .zoneNotFound, description: "Zone does not exist", hadZoneToken: true,
+                                          generation: generation, reason: "poll", writeFailuresBefore: store.writeFailures)
+        XCTAssertEqual(next, .settled(false), "a zone this device had read before and no longer finds is not an empty first fetch")
+        XCTAssertEqual(engine.sendDecision(), .heldForFirstFetch)
+
+        // The zone is read but the batch cannot be recorded: applied in part.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: tempDir.appendingPathComponent("state").path)
+        var complete = await firstFetch(engine, [cloud])
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tempDir.appendingPathComponent("state").path)
+        XCTAssertFalse(complete)
+        XCTAssertEqual(engine.sendDecision(), .heldForFirstFetch, "an incomplete fetch releases nothing")
+
+        complete = await firstFetch(engine, [cloud])
+        XCTAssertTrue(complete)
+        XCTAssertEqual(engine.sendDecision(), .noEngine, "the complete one does")
+    }
 
     /// Everything the device holds is queued before anything is fetched, and
-    /// the device knows no server copy and no server file hash. With those
-    /// inputs the asset rule says "carry the file" for every attachment
-    /// (the engine asks it at JournalSyncEngine.swift:1898).
-    func testTheFirstBootstrapQueuesEveryRowAndKnowsNothingOfTheServerSoEveryFileIsDueToGoUp() throws {
+    /// the device knows no server copy and no server file hash, so a save
+    /// built at that moment would carry every file (the engine asks the rule
+    /// at JournalSyncEngine.swift, `record(for:)`). The hold is what stops it.
+    @MainActor
+    func testTheFirstBootstrapQueuesEveryRowAndKnowsNothingOfTheServerWhichIsWhyTheSendWaits() throws {
         let photo = try file("photo.jpg", "jpeg bytes")
         let sid = try seedSession(title: "Scales", notes: "slow", clock: backupClock)
         let aid = try seedAttachment(session: sid, file: photo, name: "take 1", clock: backupClock)
         XCTAssertEqual(tracker.bootstrapIfNeeded(), 3, "the session, the attachment and its metadata record")
         let st = store.state
-        XCTAssertNotNil(pendingSave(sid.uuidString)); XCTAssertNotNil(pendingSave(aid.uuidString))
         XCTAssertTrue(st.lastKnownRecords.isEmpty, "no server copy is known")
         XCTAssertTrue(st.assetHashes.isEmpty, "no server file is known")
-        XCTAssertFalse(st.initialFetchComplete); XCTAssertNil(st.catchUpZoneToken)
         let localHash = try XCTUnwrap(JournalAssetHash.hash(of: photo))
         XCTAssertTrue(JournalAssetPolicy.includeAsset(hasServerCopy: st.lastKnownRecords[aid.uuidString] != nil,
                                                       serverHash: st.assetHashes[aid.uuidString], localHash: localHash,
                                                       assetFree: pendingSave(aid.uuidString)?.assetFree ?? false),
-                      "a save built now carries the file, although iCloud already holds the same bytes")
+                      "a save built now would carry the file, although iCloud may hold the same bytes")
+        XCTAssertEqual(makeEngine().sendDecision(), .heldForFirstFetch)
     }
 
-    // MARK: 2. Identical records
+    // MARK: 3. Identical records
 
-    /// Send first: three rejected saves, three entries in the state file's
-    /// conflicts list, although nothing differed. The journal is unchanged and
-    /// nothing is sent again. The attachment's entry is worse than noise: the
-    /// content record carries no name (the name lives on the metadata record),
-    /// so the comparison reads the local name against "" and lists it as
-    /// displaced (JournalImporter.swift:902-908). The person's Displaced by
-    /// sync list then shows one entry per NAMED attachment, offering to
-    /// restore a name that never changed.
+    /// The journal iCloud holds is the journal here. The first fetch settles
+    /// every pending save, learns each file's hash without the file, uploads
+    /// nothing and writes no conflict entry.
     @MainActor
-    func testFAULT_IdenticalRecordsSendFirstLeaveAConflictEntryEachAndANamedAttachmentIsListedAsDisplaced() throws {
+    func testIdenticalRecordsAreSettledByTheFirstFetchWithNoUploadAndNoConflictEntry() async throws {
+        let photo = try file("photo.jpg", "jpeg bytes")
+        let hash = try XCTUnwrap(JournalAssetHash.hash(of: photo))
+        let sid = try seedSession(title: "Scales", notes: "slow", clock: backupClock)
+        let aid = try seedAttachment(session: sid, file: photo, name: "take 1", clock: backupClock)
+        let cloud = [try cloudCopy(.session, sid, tag: "s1"), try cloudCopy(.attachment(hash: hash), aid, tag: "a1"), try cloudCopy(.meta, aid, tag: "m1")]
+        tracker.bootstrapIfNeeded()
+        let engine = makeEngine()
+        let complete = await firstFetch(engine, cloud)
+        XCTAssertTrue(complete); XCTAssertTrue(store.state.initialFetchComplete)
+        XCTAssertTrue(store.state.outbox.isEmpty, "every pending save was settled by the cloud copy, so nothing is uploaded")
+        XCTAssertEqual(store.state.assetHashes[aid.uuidString], hash, "the same bytes: the server's hash is recorded for the file here")
+        XCTAssertEqual(value("Attachment", aid, "fileURL") as? String, photo.path)
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "take 1")
+        XCTAssertTrue(store.state.conflicts.isEmpty, "nothing differed, so nothing is recorded as displaced")
+    }
+
+    /// The same by the other path (a save rejected because the server already
+    /// holds the record): no entry, nothing sent again.
+    func testIdenticalRecordsMetByARejectedSaveLeaveNoConflictEntryEither() throws {
         let photo = try file("photo.jpg", "jpeg bytes")
         let hash = try XCTUnwrap(JournalAssetHash.hash(of: photo))
         let sid = try seedSession(title: "Scales", notes: "slow", clock: backupClock)
@@ -240,95 +370,57 @@ final class SyncTestPopulatedEnableTests: XCTestCase {
             resends.append(imp.resolveSendConflict(recordType: "Attachment", recordName: aid.uuidString, server: cloud[1]))
             resends.append(imp.resolveSendConflict(recordType: JournalSyncRecordType.attachmentMeta, recordName: meta, server: cloud[2]))
         }
-        XCTAssertEqual(resends, [false, false, false], "equal clocks: the server copy stands and nothing is sent again")
+        XCTAssertEqual(resends, [false, false, false])
         XCTAssertTrue(store.state.outbox.isEmpty)
-        XCTAssertEqual(value("Session", sid, "notes") as? String, "slow"); XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "take 1")
-        XCTAssertEqual(try Data(contentsOf: photo), Data("jpeg bytes".utf8))
-        // The fault: a "conflict" is written for content that is the same.
-        assertIdenticalRecordsLeftThreeEntries(session: sid, attachment: aid)
+        XCTAssertTrue(store.state.conflicts.isEmpty, "an attachment's name is not compared with a record that carries no name")
+        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "take 1")
     }
 
-    /// Fetch first: the same three entries, by the import path. No file is
-    /// asked for and the device's own file stays in place.
+    // MARK: 4. Divergent edits with no trustworthy order
+
+    /// An edit made before this build has no clock, and a new clock cannot
+    /// say which of two old edits came first. The cloud copy stands (ties go
+    /// to the server), and this device's version is kept WHOLE: the text to
+    /// read, the other fields by name, and a Restore that puts all of it back
+    /// as a new edit. The same whichever path meets the conflict.
     @MainActor
-    func testFAULT_IdenticalRecordsFetchFirstLeaveTheSameEntriesAndTheLocalFileStays() async throws {
-        let photo = try file("photo.jpg", "jpeg bytes")
-        let hash = try XCTUnwrap(JournalAssetHash.hash(of: photo))
-        let sid = try seedSession(title: "Scales", notes: "slow", clock: backupClock)
-        let aid = try seedAttachment(session: sid, file: photo, name: "take 1", clock: backupClock)
-        let cloud = [try cloudCopy(.session, sid, tag: "s1"), try cloudCopy(.attachment(hash: hash), aid, tag: "a1"), try cloudCopy(.meta, aid, tag: "m1")]
+    func testAnUnclockedEditThatLosesToTheCloudCopyIsKeptWholeAndCanBeRestored() async throws {
+        let byFetch = try seedSession(title: "Scales", notes: "as in the backup", duration: 600, clock: nil)
+        let byRejectedSave = try seedSession(title: "Arpeggios", notes: "as in the backup", duration: 600, clock: nil)
+        let cloud = [try cloudCopy(.session, byFetch, tag: "s1"), try cloudCopy(.session, byRejectedSave, tag: "s2")]
+        for id in [byFetch, byRejectedSave] {
+            try setUnclocked("Session", id, ["notes": "rewritten here after the backup", "durationSeconds": Int64(1800), "mood": Int16(9)])
+        }
         tracker.bootstrapIfNeeded()
         let engine = makeEngine()
-        let complete = await engine.applyFetchedBatch(modified: cloud, deleted: [], newToken: nil, assetsFetched: 0,
-                                                      generation: engine.generationForTesting(), reason: "first fetch", writeFailuresBefore: store.writeFailures)
-        XCTAssertTrue(complete); XCTAssertTrue(store.state.initialFetchComplete)
-        XCTAssertTrue(store.state.outbox.isEmpty, "every pending save was settled by the cloud copy, so nothing is uploaded")
-        XCTAssertEqual(store.state.assetHashes[aid.uuidString], hash, "the server's hash is learned without the file")
-        XCTAssertEqual(value("Attachment", aid, "fileURL") as? String, photo.path)
-        XCTAssertEqual(value("Attachment", aid, "displayName") as? String, "take 1")
-        assertIdenticalRecordsLeftThreeEntries(session: sid, attachment: aid)
-    }
-
-    /// What both orders leave for one session and one named attachment whose
-    /// cloud copies are identical to the device's.
-    @MainActor
-    private func assertIdenticalRecordsLeftThreeEntries(session sid: UUID, attachment aid: UUID, line: UInt = #line) {
-        let entries = store.state.conflicts
-        XCTAssertEqual(entries.count, 3, "one per session, attachment and attachment-metadata record", line: line)
-        XCTAssertTrue(entries.allSatisfy { $0.winner == "server" }, line: line)
-        let displaced = Dictionary(entries.map { ($0.recordName, $0.displaced) }, uniquingKeysWith: { a, _ in a })
-        XCTAssertEqual(displaced[sid.uuidString], [:], "the session's entry has nothing in it", line: line)
-        XCTAssertEqual(displaced[JournalSyncRecordType.metaName(for: aid.uuidString)], [:], "nor has the metadata record's", line: line)
-        XCTAssertEqual(displaced[aid.uuidString], ["Name (this device)": "take 1"],
-                       "the attachment's claims its name was displaced, although the name is unchanged", line: line)
-        XCTAssertEqual(JournalRecovery.entries(store: store).map(\.recordName), [aid.uuidString],
-                       "and that one is shown to the person on the Displaced by sync list", line: line)
-    }
-
-    // MARK: 3. Divergent edits
-
-    /// The clock that decides a conflict (`userModifiedAt`) is written only by
-    /// an observer the engine installs (JournalSyncEngine.swift:241). An edit
-    /// made while sync was never on therefore has no clock, and at the first
-    /// activation it loses to the cloud copy even when that copy is the OLDER
-    /// text. Title and notes are kept for recovery; no other field is.
-    @MainActor
-    func testFAULT_AnEditMadeBeforeSyncWasTurnedOnHasNoClockSoTheOlderCloudCopyWinsAndOnlyTitleAndNotesAreKept() throws {
-        try XCTSkipIf(JournalSyncCoordinator.shared.isInUse, "the host app has sync in use, so its edit-stamp observer is installed")
-        // Two sessions as the backup held them; iCloud has them as the other device uploaded them.
-        let sendFirst = try seedSession(title: "Scales", notes: "as in the backup", duration: 600, clock: nil)
-        let fetchFirst = try seedSession(title: "Arpeggios", notes: "as in the backup", duration: 600, clock: nil)
-        let cloud = [try cloudCopy(.session, sendFirst, tag: "s1"), try cloudCopy(.session, fetchFirst, tag: "s2")]
-        // The person then edits both on this device, sync still off.
-        for id in [sendFirst, fetchFirst] {
-            try editInApp(id) { $0.setValue("rewritten here after the backup", forKey: "notes"); $0.setValue(Int64(1800), forKey: "durationSeconds") }
-        }
-        try XCTSkipIf(value("Session", sendFirst, "userModifiedAt") != nil, "an edit-stamp observer from another test is still installed")
-        XCTAssertNil(value("Session", fetchFirst, "userModifiedAt"), "with sync off nothing stamps the edit")
-        // Sync is turned on.
-        tracker.bootstrapIfNeeded()
+        let complete = await firstFetch(engine, [cloud[0]])
+        XCTAssertTrue(complete)
         let (imp, ictx) = importer()
         var resend = true
-        var imported = JournalImporter.Summary()
-        ictx.performAndWait {
-            resend = imp.resolveSendConflict(recordType: "Session", recordName: sendFirst.uuidString, server: cloud[0])   // send first
-            imported = imp.importModifications([cloud[1]])                                                             // fetch first
-        }
-        XCTAssertFalse(resend); XCTAssertEqual(imported.received, 1)
-        for id in [sendFirst, fetchFirst] {
-            XCTAssertEqual(value("Session", id, "notes") as? String, "as in the backup", "the edit is gone from the journal")
-            XCTAssertEqual(value("Session", id, "durationSeconds") as? Int64, 600, "and so is the duration it set")
-            XCTAssertNil(pendingSave(id.uuidString), "nothing is sent, so the other device never sees the edit")
-        }
+        ictx.performAndWait { resend = imp.resolveSendConflict(recordType: "Session", recordName: byRejectedSave.uuidString, server: cloud[1]) }
+        XCTAssertFalse(resend)
+
         let shown = JournalRecovery.entries(store: store)
-        XCTAssertEqual(shown.count, 2, "both are on the Displaced by sync list")
-        XCTAssertTrue(shown.allSatisfy { $0.displaced == ["Notes (this device)": "rewritten here after the backup"] },
-                      "the notes can be restored by hand; the duration is recorded nowhere")
+        XCTAssertEqual(shown.count, 2)
+        for id in [byFetch, byRejectedSave] {
+            XCTAssertEqual(value("Session", id, "notes") as? String, "as in the backup", "the cloud copy stands")
+            XCTAssertEqual(value("Session", id, "durationSeconds") as? Int64, 600)
+            let entry = try XCTUnwrap(shown.first { $0.recordName == id.uuidString })
+            XCTAssertEqual(entry.displaced, ["Notes (this device)": "rewritten here after the backup", "Other details (this device)": "Duration, Mood"],
+                           "every field that lost is named, not only the text")
+            XCTAssertEqual(JournalRecovery.restore(entry, store: store, context: container.viewContext), .restored("Restored the whole entry as a new edit"))
+            container.viewContext.refreshAllObjects()
+            XCTAssertEqual(value("Session", id, "notes") as? String, "rewritten here after the backup")
+            XCTAssertEqual(value("Session", id, "durationSeconds") as? Int64, 1800, "the duration comes back with the text")
+            XCTAssertEqual(value("Session", id, "mood") as? Int16, 9)
+            XCTAssertNotNil(value("Session", id, "userModifiedAt"), "and the restore is a clocked edit")
+        }
+        XCTAssertTrue(JournalRecovery.entries(store: store).isEmpty, "a restored entry leaves the list")
+        XCTAssertEqual(Set(tracker.processHistory().map(\.recordName)), [byFetch.uuidString, byRejectedSave.uuidString], "both restores are queued to go up")
     }
 
-    /// With a clock on both sides the rule works as designed whichever side is
-    /// newer, and the losing text is readable. This is the case of a device
-    /// that had sync on before (unlinked, then turned on again).
+    /// With a clock on both sides the newer edit is kept whichever side made
+    /// it, and the losing text is readable.
     @MainActor
     func testDivergentEditsThatBothCarryAClockKeepTheNewerAndTheLosingTextIsReadable() throws {
         let localNewer = try seedSession(title: "Scales", notes: "written here", clock: backupClock.addingTimeInterval(600))
@@ -352,96 +444,157 @@ final class SyncTestPopulatedEnableTests: XCTestCase {
         XCTAssertEqual(Set(shown.flatMap { $0.displaced.keys }), ["Notes (other device)", "Notes (this device)"])
     }
 
-    // MARK: 4. Media
-
-    /// The other device replaced a recording (a trim) after the backup and
-    /// uploaded it. This device holds the old file under the same attachment
-    /// id and has never exchanged a hash. The cloud record wins, but the file
-    /// is put in place only when a KNOWN hash differs (JournalImporter.swift:397),
-    /// and with no known hash the server's is adopted for the file already
-    /// here (:441). The device keeps the old bytes and believes they are the
-    /// cloud's, so no later catch-up fetches the new file.
-    func testFAULT_AStaleLocalFileIsKeptAndRecordedAsTheCloudsWhenTheCloudHoldsADifferentFileForTheSameAttachment() throws {
-        let old = try file("recording.jpg", "the take as the backup held it")
-        let trimmed = try file("trimmed.jpg", "the trimmed take")
-        let trimmedHash = try XCTUnwrap(JournalAssetHash.hash(of: trimmed))
-        let sid = try seedSession(title: "Recording", notes: "", clock: backupClock)
-        let aid = try seedAttachment(session: sid, file: old, name: "take 1", clock: backupClock)
-        let cloud = try cloudCopy(.attachment(hash: trimmedHash), aid, tag: "a2")
-        cloud[JournalRecordMapping.assetKey] = CKAsset(fileURL: trimmed)          // the catch-up fetched it: the hash is new here
-        cloud["userModifiedAt"] = backupClock.addingTimeInterval(600) as CKRecordValue
-        tracker.bootstrapIfNeeded()
-        XCTAssertTrue(JournalCatchUp.needsAsset(serverHash: trimmedHash, knownHash: store.state.assetHashes[aid.uuidString], fileExists: true,
-                                                localHash: JournalAssetHash.hash(of: old)), "precondition: the first fetch does ask for the file")
-        let (imp, ictx) = importer()
-        var summary = JournalImporter.Summary()
-        ictx.performAndWait { summary = imp.importModifications([cloud]) }
-        XCTAssertEqual(summary.received, 1, "the cloud record is applied")
-        XCTAssertNil(pendingSave(aid.uuidString))
-        XCTAssertEqual(value("Attachment", aid, "fileURL") as? String, old.path, "the row still points at the old file")
-        XCTAssertEqual(try Data(contentsOf: old), Data("the take as the backup held it".utf8), "whose bytes are unchanged")
-        XCTAssertEqual(store.state.assetHashes[aid.uuidString], trimmedHash, "yet the state file says this device holds the trimmed file")
-        XCTAssertFalse(JournalCatchUp.needsAsset(serverHash: trimmedHash, knownHash: store.state.assetHashes[aid.uuidString], fileExists: true,
-                                                 localHash: JournalAssetHash.hash(of: old)),
-                       "so no later catch-up fetches it, although the file here still hashes differently")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: JournalRecordMapping.materialisedURL(recordName: aid.uuidString, ext: "jpg").path))
+    /// What counts as a difference: only fields the record type carries, and
+    /// a side-store choice only when both records state it.
+    func testOnlyFieldsBothRecordsCanStateAreComparedAndIdenticalOnesAreNoDifference() {
+        func session(_ fill: (CKRecord) -> Void) -> CKRecord {
+            let r = CKRecord(recordType: "Session", recordID: JournalRecordMapping.recordID(for: UUID()))
+            r["title"] = "Scales" as CKRecordValue; r["timestamp"] = backupClock as CKRecordValue; r["durationSeconds"] = 600 as CKRecordValue
+            fill(r); return r
+        }
+        let plain = session { _ in }
+        XCTAssertEqual(JournalRecordMapping.differingContentKeys(local: plain, server: session { $0["notes"] = "" as CKRecordValue; $0["userModifiedAt"] = Date() as CKRecordValue; $0["ownerUserID"] = "owner" as CKRecordValue }), [],
+                       "an empty text, the clock and the owner are not content")
+        XCTAssertEqual(JournalRecordMapping.differingContentKeys(local: plain, server: session { $0["timestamp"] = backupClock.addingTimeInterval(0.0004) as CKRecordValue }), [],
+                       "a date that differs by less than a millisecond is the same date")
+        XCTAssertEqual(JournalRecordMapping.differingContentKeys(local: plain, server: session { $0[JournalMetadataKeys.isSaved] = 1 as CKRecordValue }), [],
+                       "a favourite only one record states is no information")
+        XCTAssertEqual(JournalRecordMapping.differingContentKeys(local: session { $0[JournalMetadataKeys.isSaved] = 0 as CKRecordValue },
+                                                                 server: session { $0[JournalMetadataKeys.isSaved] = 1 as CKRecordValue; $0["durationSeconds"] = 1800 as CKRecordValue }).map(JournalRecordMapping.fieldLabel),
+                       ["Duration", "Favourite"])
+        let content = CKRecord(recordType: "Attachment", recordID: JournalRecordMapping.recordID(for: UUID()))
+        content["kind"] = "audio" as CKRecordValue
+        let named = CKRecord(recordType: "Attachment", recordID: content.recordID)
+        named["kind"] = "audio" as CKRecordValue; named["displayName"] = "take 1" as CKRecordValue
+        XCTAssertEqual(JournalRecordMapping.differingContentKeys(local: named, server: content), [], "a name is not compared with a record that carries none")
     }
 
-    // MARK: 5. Entries deleted on the other device
-
-    /// A whole-zone read is "what the zone holds now". With no tombstone for
-    /// an entry deleted on the other device, the completed first fetch leaves
-    /// that entry on this device AND still queued, and its outgoing record is
-    /// a new one (no server change tag), which the server accepts. Fetching
-    /// before sending does not change that. The merge is a union the other way
-    /// too: an entry only iCloud holds arrives here.
+    /// A custom activity has no clock: iCloud's name stands, and the name it
+    /// replaces here is listed instead of vanishing.
     @MainActor
-    func testFAULT_AnEntryDeletedOnTheOtherDeviceStaysQueuedAfterACompleteFirstFetchThatBringsNoTombstone() async throws {
+    func testACustomRowRenamedOnBothSidesKeepsTheCloudNameAndListsTheOneItReplaced() throws {
+        let id = UUID()
+        let ctx = container.newBackgroundContext(); ctx.transactionAuthor = JournalSyncAuthor.sync
+        ctx.performAndWait {
+            let row = NSEntityDescription.insertNewObject(forEntityName: "UserActivity", into: ctx)
+            row.setValue(id, forKey: "id"); row.setValue("Sight-reading (mine)", forKey: "displayName")
+            row.setValue(PersistenceController.normalized("Sight-reading (mine)"), forKey: "normalizedName"); row.setValue("k2-test", forKey: "ownerUserID")
+            row.setValue(Int16(0), forKey: "coreActivityCode")
+            do { try ctx.save() } catch { XCTFail("seed failed: \(error)") }
+        }
+        XCTAssertEqual(value("UserActivity", id, "displayName") as? String, "Sight-reading (mine)", "precondition: the row is here")
+        store.update { JournalChangeTracker.merge([.init(recordName: id.uuidString, recordType: JournalSyncRecordType.userActivity, op: .save)], into: &$0) }
+        let cloud = CKRecord(recordType: JournalSyncRecordType.userActivity, recordID: JournalRecordMapping.recordID(for: id))
+        cloud["displayName"] = "Sight reading" as CKRecordValue; cloud["normalizedName"] = PersistenceController.normalized("Sight reading") as CKRecordValue
+        let ictx = container.newBackgroundContext(); ictx.transactionAuthor = JournalSyncAuthor.sync
+        let q = Step0Queue(store: store); queues.append(q)
+        let imp = JournalImporter(context: ictx, store: store, customOwner: "k2-test"); imp.queue = q
+        ictx.performAndWait { _ = imp.importModifications([cloud]) }
+        XCTAssertEqual(value("UserActivity", id, "displayName") as? String, "Sight reading")
+        let entry = try XCTUnwrap(JournalRecovery.entries(store: store).first, "conflicts: \(store.state.conflicts.map(\.displaced)) log: \(store.state.log.suffix(4).map(\.text))")
+        XCTAssertEqual(entry.subject, "Activity"); XCTAssertEqual(entry.displaced, ["Name (this device)": "Sight-reading (mine)"])
+    }
+
+    // MARK: 5. A different file for the same attachment
+
+    /// The other device replaced a recording after the backup. This device
+    /// holds the old bytes and has never exchanged a hash. The cloud's file is
+    /// put in place and its hash recorded for THOSE bytes; the old bytes are
+    /// kept and listed, and Restore puts them back as a new edit.
+    @MainActor
+    func testADifferentCloudFileReplacesTheLocalOneWhoseBytesAreKeptAndCanBeRestored() async throws {
+        let old = try file("recording.jpg", "the take as the backup held it")
+        let trimmed = try file("trimmed.jpg", "the trimmed take")
+        let oldHash = try XCTUnwrap(JournalAssetHash.hash(of: old)), trimmedHash = try XCTUnwrap(JournalAssetHash.hash(of: trimmed))
+        let sid = try seedSession(title: "Recording", notes: "", clock: backupClock)
+        let aid = try seedAttachment(session: sid, file: old, name: "take 1", clock: backupClock)
+        let destination = JournalRecordMapping.materialisedURL(recordName: aid.uuidString, ext: "jpg")
+        let kept = JournalImporter.displacedMediaDirectory().appendingPathComponent("\(aid.uuidString)-\(oldHash.prefix(12)).jpg")
+        cleanup += [destination, kept]
+        let recordsOnly = try cloudCopy(.attachment(hash: trimmedHash), aid, tag: "a2")
+        recordsOnly["userModifiedAt"] = backupClock.addingTimeInterval(600) as CKRecordValue
+        tracker.bootstrapIfNeeded()
+        let engine = makeEngine()
+
+        // The record without its file: nothing is applied and nothing is relabelled.
+        let complete = await firstFetch(engine, [try cloudCopy(.session, sid, tag: "s1"), recordsOnly])
+        XCTAssertTrue(complete, "the batch is complete: the record waits by name")
+        XCTAssertEqual(store.state.awaitingMedia, [aid.uuidString])
+        XCTAssertNil(store.state.assetHashes[aid.uuidString], "old bytes are never recorded under the cloud file's hash")
+        XCTAssertEqual(value("Attachment", aid, "fileURL") as? String, old.path)
+        XCTAssertNotNil(pendingSave(aid.uuidString), "and this device's copy is still pending, not dropped")
+
+        // With its file (the release, or a catch-up that fetched it).
+        let withFile = try cloudCopy(.attachment(hash: trimmedHash), aid, tag: "a2")
+        withFile["userModifiedAt"] = backupClock.addingTimeInterval(600) as CKRecordValue
+        withFile[JournalRecordMapping.assetKey] = CKAsset(fileURL: trimmed)
+        let released = await engine.applyReleasedMedia(full: [withFile], gone: [], generation: engine.generationForTesting())
+        XCTAssertEqual(released, [aid.uuidString])
+        XCTAssertEqual(value("Attachment", aid, "fileURL") as? String, destination.path)
+        XCTAssertEqual(try Data(contentsOf: destination), Data("the trimmed take".utf8), "the cloud's file is in place")
+        XCTAssertEqual(store.state.assetHashes[aid.uuidString], JournalAssetHash.hash(of: destination), "and the recorded hash is the hash of the bytes here")
+        XCTAssertEqual(try Data(contentsOf: kept), Data("the take as the backup held it".utf8), "this device's bytes are kept")
+        XCTAssertNil(pendingSave(aid.uuidString))
+
+        let entry = try XCTUnwrap(JournalRecovery.entries(store: store).first { $0.restore?.hasPrefix("media:") == true })
+        XCTAssertEqual(entry.recordName, aid.uuidString)
+        XCTAssertEqual(JournalRecovery.restore(entry, store: store, context: container.viewContext), .restored("Restored the file as a new edit"))
+        let restoredPath = try XCTUnwrap(value("Attachment", aid, "fileURL") as? String)
+        cleanup.append(URL(fileURLWithPath: restoredPath))
+        XCTAssertNotEqual(restoredPath, destination.path, "a new file name, so the change travels with its file")
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: restoredPath)), Data("the take as the backup held it".utf8))
+        XCTAssertTrue(tracker.processHistory().contains { $0.recordName == aid.uuidString && $0.op == .save && !$0.assetFree },
+                      "queued as a content change, which carries the file")
+    }
+
+    // MARK: 6. Entries only one side holds
+
+    /// The journals are combined. An entry only iCloud holds arrives here; an
+    /// entry only this device holds stays and goes up. That includes an entry
+    /// deleted on the other device before sync was on, when the zone read
+    /// brings no record of the deletion: nothing can tell it from an entry
+    /// that was simply never uploaded, so it returns on every device. The
+    /// person is told so where sync is turned on.
+    @MainActor
+    func testEntriesOnlyOneSideHoldsAreKeptSoADeletionThatLeftNoRecordComesBack() async throws {
         let kept = try seedSession(title: "Kept on both", notes: "", clock: backupClock)
         let deletedElsewhere = try seedSession(title: "Deleted on the other device", notes: "", clock: backupClock)
         let cloudOnly = UUID()
         let fromCloud = CKRecord(recordType: "Session", recordID: JournalRecordMapping.recordID(for: cloudOnly))
         fromCloud["title"] = "Only in iCloud" as CKRecordValue; fromCloud["timestamp"] = backupClock as CKRecordValue
         fromCloud["userModifiedAt"] = backupClock as CKRecordValue; fromCloud["testTag"] = "s9" as CKRecordValue
-        let zone = [try cloudCopy(.session, kept, tag: "s1"), fromCloud]
         tracker.bootstrapIfNeeded()
         let engine = makeEngine()
-        let complete = await engine.applyFetchedBatch(modified: zone, deleted: [], newToken: nil, assetsFetched: 0,
-                                                      generation: engine.generationForTesting(), reason: "first fetch", writeFailuresBefore: store.writeFailures)
-        XCTAssertTrue(complete); XCTAssertTrue(store.state.initialFetchComplete, "the first fetch is complete")
+        let complete = await firstFetch(engine, [try cloudCopy(.session, kept, tag: "s1"), fromCloud])
+        XCTAssertTrue(complete)
         XCTAssertNil(pendingSave(kept.uuidString), "the entry both hold is settled")
         XCTAssertTrue(exists("Session", cloudOnly), "an entry only iCloud holds arrives here")
-        XCTAssertTrue(exists("Session", deletedElsewhere), "the entry deleted elsewhere is still in this journal")
-        XCTAssertNotNil(pendingSave(deletedElsewhere.uuidString), "and still waits to be uploaded")
-        XCTAssertNil(store.state.lastKnownRecords[deletedElsewhere.uuidString], "as a record the server has never seen")
-        let ctx = container.newBackgroundContext()
-        var outgoing: CKRecord?
-        ctx.performAndWait {
-            let r = NSFetchRequest<NSManagedObject>(entityName: "Session"); r.predicate = NSPredicate(format: "id == %@", deletedElsewhere as CVarArg)
-            outgoing = (try? ctx.fetch(r))?.first.flatMap { JournalRecordMapping.record(for: $0, base: nil) }
-        }
-        XCTAssertNil(try XCTUnwrap(outgoing).recordChangeTag, "a save without a change tag creates the record again for every device")
+        XCTAssertTrue(exists("Session", deletedElsewhere), "an entry only this device holds stays")
+        XCTAssertNotNil(pendingSave(deletedElsewhere.uuidString), "and goes up once the fetch is applied")
+        XCTAssertNil(store.state.lastKnownRecords[deletedElsewhere.uuidString])
+        XCTAssertEqual(engine.sendDecision(), .noEngine, "the hold has lifted")
+        XCTAssertTrue(store.state.conflicts.isEmpty)
     }
 
-    /// When the read does carry tombstones (the Production zone returned three
-    /// to a fresh read on 2026-11-13), and they are applied before the send,
-    /// the entry is removed from this device and from the outbox.
+    /// Where the read does carry a deletion (the Production zone returned
+    /// three to a fresh read on 2026-11-13), the hold guarantees it is applied
+    /// before anything is sent: the entry goes from this device and nothing of
+    /// it is uploaded.
     @MainActor
-    func testATombstoneAppliedBeforeTheSendRemovesTheLocalEntryAndItsPendingSaves() async throws {
+    func testADeletionTheFirstFetchCarriesIsAppliedBeforeAnythingIsSent() async throws {
         let photo = try file("photo.jpg", "jpeg bytes")
         let kept = try seedSession(title: "Kept on both", notes: "", clock: backupClock)
         let deletedElsewhere = try seedSession(title: "Deleted on the other device", notes: "", clock: backupClock)
         let aid = try seedAttachment(session: deletedElsewhere, file: photo, name: "take 1", clock: backupClock)
         let meta = JournalSyncRecordType.metaName(for: aid.uuidString)
-        let zone = [try cloudCopy(.session, kept, tag: "s1")]
         tracker.bootstrapIfNeeded()
         XCTAssertEqual(store.state.outbox.count, 4)
         let engine = makeEngine()
+        XCTAssertEqual(engine.sendDecision(), .heldForFirstFetch, "nothing has left this device yet")
         let tombstones: [(CKRecord.ID, CKRecord.RecordType)] = [
             (JournalRecordMapping.recordID(for: deletedElsewhere), "Session"), (JournalRecordMapping.recordID(for: aid), "Attachment"),
             (CKRecord.ID(recordName: meta, zoneID: JournalRecordMapping.zoneID), JournalSyncRecordType.attachmentMeta)]
-        let complete = await engine.applyFetchedBatch(modified: zone, deleted: tombstones, newToken: nil, assetsFetched: 0,
-                                                      generation: engine.generationForTesting(), reason: "first fetch", writeFailuresBefore: store.writeFailures)
+        let complete = await firstFetch(engine, [try cloudCopy(.session, kept, tag: "s1")], deleted: tombstones)
         XCTAssertTrue(complete)
         XCTAssertFalse(exists("Session", deletedElsewhere)); XCTAssertFalse(exists("Attachment", aid))
         XCTAssertTrue(exists("Session", kept))
@@ -449,42 +602,70 @@ final class SyncTestPopulatedEnableTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: photo.path), "a file outside Documents is never removed by a remote deletion")
     }
 
-    // MARK: 6. Saved Lists (no clock): the winner depends on the order
+    // MARK: 7. Saved Lists: one result whichever arrives first
 
-    /// A list both devices hold (same id), edited differently on each. If the
-    /// zone is fetched while this device's save is pending, the local version
-    /// is kept and then replaces the cloud's (JournalSavedListSync.swift:108,
-    /// :125). If the save is sent first and rejected, the cloud's replaces the
-    /// local one (JournalSyncEngine.swift:2205). Neither loser is kept.
+    /// A list both devices hold, changed on each, with no clock to order
+    /// them. Whether the cloud copy arrives by the fetch or as the answer to
+    /// this device's rejected save, the cloud's lines take the list and this
+    /// device's are kept as a list of their own, which is then sent.
     @MainActor
-    func testFAULT_ForAListBothDevicesEditedTheWinnerDependsOnWhetherTheFetchOrTheSendCameFirstAndTheLoserIsKeptNowhere() throws {
+    func testAListChangedOnBothSidesEndsTheSameWhicheverArrivesFirstAndTheLocalLinesAreKeptAsTheirOwnList() async throws {
+        let scope = JournalSavedListSync.currentScope()
+        let engine = makeEngine()
+        defer {
+            if let current = try? SavedListLibrary.read(ownerScope: scope) {
+                try? SavedListLibrary.commit(snapshot: current, updated: current.filter { !$0.name.hasPrefix("C197 ") }, ownerScope: scope)
+            }
+        }
+        func outcome(_ label: String, meet: (CKRecord, UUID) async -> Void) async throws -> [String: [String]] {
+            let id = UUID()
+            let name = "C197 \(label) \(id.uuidString.prefix(6))"
+            let before = try SavedListLibrary.read(ownerScope: scope)
+            try SavedListLibrary.commit(snapshot: before, updated: before + [SavedList(id: id, name: name, items: [SavedListLine(text: "edited on this device")])], ownerScope: scope)
+            store.update { JournalChangeTracker.merge([.init(recordName: id.uuidString, recordType: JournalSyncRecordType.savedList, op: .save)], into: &$0) }
+            let cloud = try XCTUnwrap(JournalRecordMapping.record(for: SavedList(id: id, name: name, items: [SavedListLine(text: "edited on the other device")]), base: nil))
+            await meet(cloud, id)
+            XCTAssertNil(pendingSave(id.uuidString), "\(label): the save of the list itself is settled")
+            let lists = try SavedListLibrary.read(ownerScope: scope).filter { $0.name.hasPrefix(name) }
+            XCTAssertEqual(lists.first { $0.id == id }?.items.map(\.text), ["edited on the other device"], "\(label): iCloud's lines take the list")
+            return Dictionary(uniqueKeysWithValues: lists.map { ($0.name.replacingOccurrences(of: name, with: "list"), $0.items.map(\.text)) })
+        }
+        let fetchFirst = try await outcome("fetch") { cloud, _ in _ = await self.firstFetch(engine, [cloud]) }
+        let sendFirst = try await outcome("send") { cloud, id in
+            await engine.applyDeferredSendConflict(server: cloud, recordID: JournalRecordMapping.recordID(for: id), generation: engine.generationForTesting())
+        }
+        XCTAssertEqual(fetchFirst, sendFirst, "the same result by either order")
+        XCTAssertEqual(fetchFirst, ["list": ["edited on the other device"], "list (kept from this device)": ["edited on this device"]],
+                       "and this device's lines are kept as a list of their own")
+        let keptIDs = try SavedListLibrary.read(ownerScope: scope).filter { $0.name.hasPrefix("C197 ") && $0.name.hasSuffix("(kept from this device)") }.map(\.id.uuidString)
+        XCTAssertEqual(keptIDs.count, 2)
+        let queued = Set(JournalSavedListSync.scan(store: store).filter { $0.op == .save }.map(\.recordName))
+        XCTAssertTrue(queued.isSuperset(of: keptIDs), "the kept lists are new lists, sent to every device")
+    }
+
+    /// Two things that are not a conflict: the same lines on both sides, and
+    /// this device's own accepted write coming back while a later edit waits.
+    @MainActor
+    func testAnIdenticalListOrThisDevicesOwnWriteComingBackKeepsNoCopy() throws {
         let scope = "device"
         let id = UUID()
-        let local = SavedList(id: id, name: "Warm-up", items: [SavedListLine(text: "edited on this device")])
-        let cloud = try XCTUnwrap(JournalRecordMapping.record(for: SavedList(id: id, name: "Warm-up", items: [SavedListLine(text: "edited on the other device")]), base: nil))
-
-        // Fetch first.
+        let local = SavedList(id: id, name: "Warm-up", items: [SavedListLine(text: "long tones")])
         try SavedListLibrary.commit(snapshot: [], updated: [local], ownerScope: scope, defaults: defaults)
-        XCTAssertEqual(JournalSavedListSync.scan(store: store, defaults: defaults, scope: scope).map(\.recordName), [id.uuidString], "the first scan queues every list")
-        XCTAssertEqual(JournalSavedListSync.apply([cloud], store: store, defaults: defaults, scope: scope), 0, "a pending list is not replaced")
-        XCTAssertEqual(try SavedListLibrary.read(ownerScope: scope, defaults: defaults).first?.items.map(\.text), ["edited on this device"])
-        XCTAssertNotNil(pendingSave(id.uuidString))
-        let next = JournalSavedListSync.records(for: [id.uuidString], bases: store.state.lastKnownRecords, defaults: defaults, scope: scope)
-        XCTAssertEqual(JournalRecordMapping.savedList(from: try XCTUnwrap(next[id.uuidString]))?.items.map(\.text), ["edited on this device"],
-                       "and the save that follows carries the local lines on top of the cloud copy")
-        XCTAssertTrue(store.state.conflicts.isEmpty, "the other device's lines are kept nowhere")
+        XCTAssertEqual(JournalSavedListSync.scan(store: store, defaults: defaults, scope: scope).count, 1)
+        let same = try XCTUnwrap(JournalRecordMapping.record(for: local, base: nil))
+        XCTAssertEqual(JournalSavedListSync.apply([same], store: store, defaults: defaults, scope: scope), 1)
+        XCTAssertEqual(try SavedListLibrary.read(ownerScope: scope, defaults: defaults).count, 1, "the same lines: no copy")
+        XCTAssertNil(pendingSave(id.uuidString), "and nothing is sent")
 
-        // Send first: the same list on a second device state.
-        let otherSuite = "synctest-c197-other-\(UUID().uuidString)"
-        let other = try XCTUnwrap(UserDefaults(suiteName: otherSuite))
-        defer { other.removePersistentDomain(forName: otherSuite) }
-        let otherStore = JournalSyncStateStore(fileURL: tempDir.appendingPathComponent("other.json"))
-        try SavedListLibrary.commit(snapshot: [], updated: [local], ownerScope: scope, defaults: other)
-        XCTAssertEqual(JournalSavedListSync.scan(store: otherStore, defaults: other, scope: scope).count, 1)
-        XCTAssertEqual(JournalSavedListSync.apply([cloud], store: otherStore, defaults: other, scope: scope, overridePending: true), 1)
-        XCTAssertEqual(try SavedListLibrary.read(ownerScope: scope, defaults: other).first?.items.map(\.text), ["edited on the other device"])
-        XCTAssertTrue(otherStore.state.outbox.isEmpty)
-        XCTAssertTrue(otherStore.state.conflicts.isEmpty, "this device's lines are kept nowhere")
+        // This device's write was accepted with tag "t1"; the person edits again; the catch-up hands "t1" back.
+        store.update { $0.knownChangeTags[id.uuidString] = "t1" }
+        var edited = local; edited.items = [SavedListLine(text: "long tones, then scales")]
+        try SavedListLibrary.commit(snapshot: [local], updated: [edited], ownerScope: scope, defaults: defaults)
+        XCTAssertEqual(JournalSavedListSync.scan(store: store, defaults: defaults, scope: scope).count, 1)
+        XCTAssertEqual(JournalSavedListSync.apply([same], store: store, defaults: defaults, scope: scope, changeTag: { _ in "t1" }), 0)
+        let after = try SavedListLibrary.read(ownerScope: scope, defaults: defaults)
+        XCTAssertEqual(after.map { $0.items.map(\.text) }, [["long tones, then scales"]], "the later edit stands and no copy is made")
+        XCTAssertNotNil(pendingSave(id.uuidString), "and still goes up")
     }
 }
 #endif

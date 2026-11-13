@@ -163,7 +163,10 @@ xcodebuild test -project MOTIVO.xcodeproj -scheme MOTIVO -only-testing:MOTIVOTes
   2026-11-10, **Release** (`iCloud.com.sdsongs.etudes`, its own
   `MOTIVO-Release.entitlements`). **Debug never syncs** and carries no
   iCloud or push. With sync off no build makes an engine or touches
-  CloudKit or push; `SyncOffByDefaultTests` guards all of this. A new
+  CloudKit or push; the one thing that runs is the edit clock
+  (`userModifiedAt` on a saved entry or attachment, C-197), so an edit made
+  before sync is turned on is not lost to an older cloud copy.
+  `SyncOffByDefaultTests` guards all of this. A new
   synced field must be added to the Production schema first
   (`docs/sync-trial/check_schema.py`). On TestFlight as an internal build since 2026-11-10
   (build 1937 since 2026-11-13); not distributed more widely.

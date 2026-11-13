@@ -75,9 +75,10 @@ enum JournalMetadataMirror {
     /// Set by the sync import while it writes side stores, so the hooks that
     /// the public setters fire do not queue the import back out.
     nonisolated(unsafe) static var suppressed = false
-    /// The container to stamp rows in. Set by `JournalSyncCoordinator` once
-    /// sync is in use on this install (tests point it at their own); nil
-    /// before, so with sync off the write points change nothing in Core Data.
+    /// The container to stamp rows in. Set by `JournalSyncCoordinator` at
+    /// every launch, sync on or off (C-197: a side-store edit keeps its
+    /// clock, so it is not lost to an older cloud copy when sync is turned on
+    /// later); tests point it at their own.
     nonisolated(unsafe) static var container: NSPersistentContainer? = nil
 
     static func attachmentChanged(_ id: UUID) { touch(entity: JournalSyncRecordType.attachment, id: id) }
@@ -99,8 +100,7 @@ enum JournalMetadataMirror {
     }
 
     private static func write(entity: String, id: UUID, _ body: @escaping (NSManagedObject) -> Void) {
-        // Sync off (never turned on here): the side store was written and
-        // nothing else happens, exactly as before the sync existed.
+        // Before the coordinator has started (and in tests that set none).
         guard let container else { return }
         let ctx = container.newBackgroundContext()
         ctx.name = "metadataMirror"

@@ -394,7 +394,42 @@ final class JournalImporter {
         if heldFile == nil, let sourceURL, let size = JournalAssetHash.stamp(of: sourceURL)?.size {
             store.update { $0.assetBytesDownloaded += size }
         }
-        let replaced = existingFile != nil && serverHash != nil && knownHash != nil && serverHash != knownHash
+        // C-197 (2026-11-13): the bytes actually here. Where no hash was ever
+        // exchanged (sync turned on over a journal iCloud already holds) the
+        // file here is compared by its own hash: equal, the server's hash is
+        // recorded for it; different, it is REPLACED like any other, never
+        // recorded under the server's hash while the old bytes stay.
+        var localHash: String?
+        if let existingFile, let cached = JournalAssetHash.cachedHash(of: existingFile, cache: store.state.fileStampCache[name]) {
+            localHash = cached.hash
+            store.update { $0.fileStampCache[name] = cached.entry }
+        }
+        let replaced = existingFile != nil && serverHash != nil
+            && (knownHash == nil ? (localHash != nil && serverHash != localHash) : serverHash != knownHash)
+        let sourceReady = sourceURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+        func holdByName(_ why: String) -> (imported: Bool, bytes: Int64) {
+            if heldFile == nil {
+                store.update { st in
+                    let before = st.awaitingMedia.count
+                    st.awaitingMedia = JournalMediaHold.adding([name], to: st.awaitingMedia)
+                    st.mediaDownloadsHeld += st.awaitingMedia.count - before
+                }
+            }
+            log("Attachment \(name) not imported: \(why); held by name and fetched again")
+            return (false, 0)
+        }
+        if replaced, !sourceReady {
+            // The server holds a different file and it is not here yet: nothing
+            // is applied, and the row keeps the file and the hash it has.
+            return holdByName("the server's file differs and did not come with the record")
+        }
+        // Bytes the server never held (never exchanged, or changed here and
+        // not sent) are kept before the server's replace them.
+        if replaced, let existingFile, let localHash, localHash != knownHash, !AttachmentStore.isLibraryScoreFile(existingFile) {
+            guard keepDisplacedMedia(existingFile, hash: localHash, record: record, local: existing) else {
+                return holdByName("this device's own file could not be kept first")
+            }
+        }
         var fileURLAfterCopy: String?
         var hashAfterSave: String?
         var previousFile: URL?
@@ -413,15 +448,7 @@ final class JournalImporter {
                         // not be fetched, and is fetched again with the next
                         // catch-up or release; a hold that cannot be written
                         // leaves the batch incomplete (H1), so the token is kept.
-                        if heldFile == nil {
-                            store.update { st in
-                                let before = st.awaitingMedia.count
-                                st.awaitingMedia = JournalMediaHold.adding([name], to: st.awaitingMedia)
-                                st.mediaDownloadsHeld += st.awaitingMedia.count - before
-                            }
-                        }
-                        log("Attachment \(name) not imported: \(replaced ? "the previous file is kept" : "no file in place"); held by name and fetched again")
-                        return (false, 0)
+                        return holdByName(replaced ? "the previous file is kept" : "no file in place")
                     }
                     keptInPlace = previous
                     bytes = incoming
@@ -438,8 +465,8 @@ final class JournalImporter {
             // Point at the materialised path even without a file, so the
             // resolver's filename match finds it once a later fetch supplies it.
             fileURLAfterCopy = destination.path
-        } else if knownHash == nil, let serverHash {
-            // Our own file, sent before hashes existed: adopt the server's.
+        } else if knownHash == nil, let serverHash, localHash == serverHash {
+            // The same bytes, never exchanged before: the server's hash is this file's.
             store.update { $0.assetHashes[name] = serverHash }
         }
 
@@ -536,7 +563,8 @@ final class JournalImporter {
         let name = record.recordID.recordName
         guard let id = UUID(uuidString: name), let owner = customOwner else { return nil }
         let existing = fetch(entity: record.recordType, id: id)
-        if existing != nil, localChangePending(name) {
+        if let existing, localChangePending(name) {
+            keepDisplacedName(of: existing, against: record)
             log("Custom \(record.recordType) \(name): server copy applied over a pending local change")
             queue?.removePendingSave(name)
         }
@@ -755,6 +783,7 @@ final class JournalImporter {
             // R13 (2026-11-03): the pending send goes only once the server copy
             // is committed, and the copy is known only then, so a send that is
             // tried again meanwhile is rejected and resolved again.
+            keepDisplacedName(of: local, against: server)
             _ = JournalRecordMapping.apply(server, to: local)
             if JournalSyncRecordType.customs.contains(recordType), let owner = customOwner { local.setValue(owner, forKey: "ownerUserID") }
             noteKnownAfterSave(server)
@@ -881,32 +910,46 @@ final class JournalImporter {
     /// before it is overwritten.
     @discardableResult
     private func recordConflict(_ server: CKRecord, winner: JournalConflictWinner, local: NSManagedObject) -> Bool {
-        let loserTitle: String?
-        let loserNotes: String?
-        if winner == .server {
-            loserTitle = Self.value(local, "title") as? String ?? Self.value(local, "displayName") as? String
-            loserNotes = Self.value(local, "notes") as? String
-        } else {
-            loserTitle = server["title"] as? String ?? server["displayName"] as? String
-            loserNotes = server["notes"] as? String
+        // C-197 (2026-11-13): a conflict is a difference in CONTENT, read over
+        // the fields this record type carries. The local row is compared as
+        // the record it would send, so a field the record does not carry (an
+        // attachment's name lives on its metadata record) is never compared
+        // with nothing. Identical content writes no entry: on a device whose
+        // journal iCloud already holds, that was one entry per record.
+        let isSession = server.recordType == JournalSyncRecordType.session
+        let isMeta = server.recordType == JournalSyncRecordType.attachmentMeta
+        guard let mine = isMeta ? JournalRecordMapping.metaRecord(for: local, base: nil)
+                                : JournalRecordMapping.record(for: local, base: nil, includeAsset: false, viewerScope: viewerScope()) else { return true }
+        if !isSession, !isMeta {
+            // An older build's content record still carried the name and star.
+            for key in JournalRecordMapping.legacyAttachmentMetaKeys { mine[key] = Self.value(local, key) as? CKRecordValue }
         }
+        let differing = JournalRecordMapping.differingContentKeys(local: mine, server: server)
+        guard !differing.isEmpty else { return true }
+        let loser = winner == .server ? mine : server
+        let side = winner == .server ? "this device" : "other device"
+        let titleKey = isSession ? "title" : "displayName"
+        let loserTitle = loser[titleKey] as? String
         var conflict = JournalSyncConflict(at: Date(), recordName: server.recordID.recordName, recordType: server.recordType,
                                            winner: winner == .server ? "server" : "local",
                                            localUserModifiedAt: Self.value(local, "userModifiedAt") as? Date,
                                            serverUserModifiedAt: JournalRecordMapping.userModifiedAt(of: server),
-                                           losingTitle: loserTitle, losingNotes: loserNotes)
-        // Stage J: what the person can read back and restore. Only fields that
-        // actually differ are listed, so a restore puts back exactly what lost.
-        let side = winner == .server ? "this device" : "other device"
-        let isSession = server.recordType == JournalSyncRecordType.session
-        let localTitle = Self.value(local, isSession ? "title" : "displayName") as? String ?? ""
-        let serverTitle = server[isSession ? "title" : "displayName"] as? String ?? ""
-        let localNotes = Self.value(local, "notes") as? String ?? ""
-        let serverNotes = server["notes"] as? String ?? ""
-        let losingT = winner == .server ? localTitle : serverTitle
-        let losingN = winner == .server ? localNotes : serverNotes
-        if localTitle != serverTitle, !losingT.isEmpty { conflict.displaced["\(isSession ? "Title" : "Name") (\(side))"] = losingT }
-        if isSession, localNotes != serverNotes, !losingN.isEmpty { conflict.displaced["Notes (\(side))"] = losingN }
+                                           losingTitle: loserTitle, losingNotes: loser["notes"] as? String)
+        // What the person can read back and restore. Title and notes as text;
+        // every other field that differs by name, with the whole losing
+        // version kept beside it so a restore puts all of it back.
+        var others: [String] = []
+        for key in differing {
+            let text = (loser[key] as? String) ?? ""
+            if key == titleKey { if !text.isEmpty { conflict.displaced["\(isSession ? "Title" : "Name") (\(side))"] = text } }
+            else if key == "notes" { if !text.isEmpty { conflict.displaced["Notes (\(side))"] = text } }
+            else if !others.contains(JournalRecordMapping.fieldLabel(key)) { others.append(JournalRecordMapping.fieldLabel(key)) }
+        }
+        if !others.isEmpty { conflict.displaced["Other details (\(side))"] = others.joined(separator: ", ") }
+        if let whole = loser.copy() as? CKRecord {
+            whole[JournalRecordMapping.assetKey] = nil
+            conflict.losingRecord = JournalSyncStateStore.encodeWholeRecord(whole)
+        }
         if isSession {
             conflict.subject = JournalRecoverySubject.session(local)
             conflict.restore = "session:\(server.recordID.recordName)"
@@ -918,6 +961,63 @@ final class JournalImporter {
         let saved = store.update { $0.conflicts.append(conflict) }
         if !saved { log("Recovery entry for \(server.recordID.recordName.prefix(8))… could not be saved; the \(winner == .server ? "server copy is not applied" : "entry is lost") this round") }
         return saved
+    }
+
+    /// C-197: a custom instrument, activity or profile instrument has no clock,
+    /// so the server's row stands; the name it replaces here is kept to read back.
+    private func keepDisplacedName(of local: NSManagedObject, against server: CKRecord) {
+        let key = server.recordType == JournalSyncRecordType.instrument ? "name" : "displayName"
+        let mine = (Self.value(local, key) as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let theirs = (server[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !mine.isEmpty, mine != theirs else { return }
+        let name = server.recordID.recordName
+        // A resolution tried again (its save failed the first time) lists the name once.
+        if store.state.conflicts.contains(where: { $0.recordName == name && $0.resolvedAt == nil && $0.losingTitle == mine }) { return }
+        var conflict = JournalSyncConflict(at: Date(), recordName: name, recordType: server.recordType, winner: "server",
+                                           localUserModifiedAt: nil, serverUserModifiedAt: nil, losingTitle: mine, losingNotes: nil)
+        conflict.subject = server.recordType == JournalSyncRecordType.userActivity ? "Activity" : "Instrument"
+        conflict.displaced["Name (this device)"] = mine
+        store.update { $0.conflicts.append(conflict) }
+    }
+
+    // MARK: Displaced media (C-197)
+
+    static func displacedMediaDirectory() -> URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("SyncTest/DisplacedMedia", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func clearDisplacedMedia() {
+        try? FileManager.default.removeItem(at: displacedMediaDirectory())
+    }
+
+    /// Copies this device's file aside and lists it on Displaced by sync,
+    /// BEFORE the server's file takes its place. False when either the copy
+    /// or the entry could not be written; the caller then replaces nothing.
+    private func keepDisplacedMedia(_ url: URL, hash: String, record: CKRecord, local: NSManagedObject?) -> Bool {
+        let name = record.recordID.recordName
+        let ext = url.pathExtension
+        let fileName = "\(name)-\(hash.prefix(12))" + (ext.isEmpty ? "" : ".\(ext)")
+        let target = Self.displacedMediaDirectory().appendingPathComponent(fileName, isDirectory: false)
+        if !FileManager.default.fileExists(atPath: target.path) {
+            do { try FileManager.default.copyItem(at: url, to: target) } catch {
+                log("Could not keep \(url.lastPathComponent) before replacing it: \(error.localizedDescription)")
+                return false
+            }
+        }
+        let restore = "media:\(name)|\(fileName)"
+        if store.state.conflicts.contains(where: { $0.restore == restore && $0.resolvedAt == nil }) { return true }
+        var conflict = JournalSyncConflict(at: Date(), recordName: name, recordType: record.recordType, winner: "server",
+                                           localUserModifiedAt: local.flatMap { Self.value($0, "userModifiedAt") as? Date },
+                                           serverUserModifiedAt: JournalRecordMapping.userModifiedAt(of: record),
+                                           losingTitle: "displaced file kept: \(fileName)", losingNotes: nil)
+        let sessionRow = local?.value(forKey: "session") as? NSManagedObject
+        conflict.subject = "Attachment" + (sessionRow.map { " in " + JournalRecoverySubject.session($0) } ?? "")
+        conflict.displaced["File (this device)"] = "A different file was on this device. It is kept, and Restore puts it back."
+        conflict.restore = restore
+        return store.update { $0.conflicts.append(conflict) }
     }
 
     /// `value(forKey:)` raises for a key the entity lacks (Attachment has no

@@ -255,6 +255,7 @@ enum JournalLocalRemoval {
         clearHeldFiles()
         JournalProfileSync.clearDisplacedAvatars()
         JournalScoreSync.clearDisplacedScores()
+        JournalImporter.clearDisplacedMedia()
         return store.update { st in
             st.historyToken = JournalSyncStateStore.encode(token: token)
             st.outbox.removeAll()

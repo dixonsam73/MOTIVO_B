@@ -7,10 +7,13 @@
 //  The sync code compiles into every build since the main-build integration
 //  (2026-11-04). The switch is the state file: with no file the coordinator
 //  builds nothing — no state store, no `JournalSyncEngine` (the only place a
-//  `CKContainer` is made), no push registration — and the mirrors at the
-//  app's write points are inert, so a person who never turns sync on, and
-//  App Review, see exactly the app as it was. Normal local use (insert, edit,
-//  delete, the metadata, profile and score hooks, the erase bracket) runs
+//  `CKContainer` is made), no push registration — and the profile and score
+//  mirrors at the app's write points are inert. ONE thing runs with sync off
+//  (C-197, 2026-11-13): every local edit keeps its clock, `userModifiedAt`,
+//  written by the edit-stamp observer and by the metadata mirror, so an edit
+//  made before sync is turned on is not lost to an older cloud copy. Nothing
+//  is queued, sent or fetched. Normal local use (insert, edit, delete, the
+//  metadata, profile and score hooks, the erase bracket) otherwise runs
 //  unchanged. Two source guards keep the "only the engine touches CloudKit,
 //  only the coordinator builds the engine" shape, and a configuration guard
 //  keeps Debug and Release without the CloudKit container or push, so no
@@ -135,10 +138,11 @@ final class SyncOffByDefaultTests: XCTestCase {
         try ctx.save()
         session.setValue("edited", forKey: "title")
         try ctx.save()
-        XCTAssertNil(session.value(forKey: "userModifiedAt"), "no edit stamp without sync (the observer belongs to the engine)")
+        let edited = try XCTUnwrap(session.value(forKey: "userModifiedAt") as? Date, "C-197: an edit is clocked with sync off, by the launch alone")
         let id = try XCTUnwrap(session.value(forKey: "id") as? UUID)
 
-        // Every hook the app's write points call, with sync off: inert.
+        // Every hook the app's write points call, with sync off: the metadata
+        // mirror moves its row's clock and nothing else; the others are inert.
         JournalMetadataMirror.sessionChanged(id)                 // favourite toggled
         JournalMetadataMirror.attachmentChanged(UUID())          // privacy / pages
         JournalMetadataMirror.titleChanged(UUID(), title: "x")   // audio/video title
@@ -153,9 +157,10 @@ final class SyncOffByDefaultTests: XCTestCase {
         JournalScoreMirror.viewerClosed(UUID())
         settle()
         ctx.refreshAllObjects()
-        XCTAssertNil(session.value(forKey: "userModifiedAt"), "the metadata mirror must not touch the row while sync is off")
-        XCTAssertEqual(Set(historyAuthors().map { $0 ?? "nil" }), [JournalSyncAuthor.app],
-                       "history holds the app's own transactions only: no metadata or sync author")
+        XCTAssertGreaterThan(try XCTUnwrap(session.value(forKey: "userModifiedAt") as? Date), edited, "a favourite toggled with sync off moves the entry's clock")
+        XCTAssertEqual(session.value(forKey: "title") as? String, "edited", "and changes nothing else on the row")
+        XCTAssertEqual(Set(historyAuthors().map { $0 ?? "nil" }), [JournalSyncAuthor.app, JournalSyncAuthor.metadata],
+                       "history holds the app's own transactions and the clock touch: no sync author")
 
         ctx.delete(session)
         try ctx.save()
