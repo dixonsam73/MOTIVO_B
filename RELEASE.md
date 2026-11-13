@@ -2782,10 +2782,14 @@ the join.
   nothing in iCloud was deleted). The join behaved as predicted in every
   case; the record is in the C-197 row. It found one defect, C-199 (a
   starred attachment both devices hold is listed as displaced), corrected
-  the same evening with tests and not yet seen on a device. Still to do
-  before distribution goes beyond Internal Only: Samuel and Codex read the
-  device record; a fresh join on the next build shows C-199 gone. Not in a
-  TestFlight build. C-198's backfill is left as it is.
+  the same evening with tests and confirmed gone on a fresh join (build
+  1946). The bounded C-197 review is closed (Codex, 2026-11-13). That
+  fresh join then crashed 4 s after sync was turned on: C-174's trap
+  again, this time with no overlapping send, and CloudKit's own assertion
+  text names the cause (a CKSyncEngine call made from a task that started
+  inside a delegate callback). **C-174 is open again and is the one thing
+  between this work and the next internal build.** Not in a TestFlight
+  build. C-198's backfill is left as it is.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
