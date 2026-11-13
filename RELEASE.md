@@ -2787,9 +2787,10 @@ the join.
   fresh join then crashed 4 s after sync was turned on: C-174's trap
   again, this time with no overlapping send, and CloudKit's own assertion
   text names the cause (a CKSyncEngine call made from a task that started
-  inside a delegate callback). **C-174 is open again and is the one thing
-  between this work and the next internal build.** Not in a TestFlight
-  build. C-198's backfill is left as it is.
+  inside a delegate callback). Corrected the same evening (`f7d7eff`: those
+  tasks are detached); the same join on build 1948 ran the same sequence
+  and stayed up. Not in a TestFlight build yet. C-198's backfill is left
+  as it is.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
