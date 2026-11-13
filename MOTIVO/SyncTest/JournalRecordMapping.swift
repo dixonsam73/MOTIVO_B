@@ -256,9 +256,13 @@ enum JournalRecordMapping {
         for key in keys {
             guard let attribute = attributes[key] else { continue }
             let raw = record[key]
-            // An attachment record without displayName was written before
-            // names synced: no information, so the local value stays.
-            if key == "displayName", record.recordType == JournalSyncRecordType.attachment, raw == nil { continue }
+            // An attachment's content record carries its name and star only
+            // when an older build wrote it; since stage G they live on the
+            // metadata record. Absent here is no information, so the local
+            // value stays. C-199 (2026-11-13): the star used to fall through
+            // to the Boolean default below and was reset on every first
+            // merge, until the metadata record in the same batch set it back.
+            if record.recordType == JournalSyncRecordType.attachment, legacyAttachmentMetaKeys.contains(key), raw == nil { continue }
             switch attribute.attributeType {
             case .booleanAttributeType:
                 if let n = raw as? NSNumber { object.setValue(n.boolValue, forKey: key) }

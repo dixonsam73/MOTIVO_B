@@ -2781,10 +2781,11 @@ the join.
   Sync Test 1944 on Device A and the iPad, trial container, a new zone, so
   nothing in iCloud was deleted). The join behaved as predicted in every
   case; the record is in the C-197 row. It found one defect, C-199 (a
-  starred attachment both devices hold is listed as displaced). Still to do
-  before distribution goes beyond Internal Only: correct C-199, and Samuel
-  and Codex read the device record. Not in a TestFlight build. C-198's
-  backfill is left as it is.
+  starred attachment both devices hold is listed as displaced), corrected
+  the same evening with tests and not yet seen on a device. Still to do
+  before distribution goes beyond Internal Only: Samuel and Codex read the
+  device record; a fresh join on the next build shows C-199 gone. Not in a
+  TestFlight build. C-198's backfill is left as it is.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.

@@ -353,6 +353,73 @@ final class SyncTestPopulatedEnableTests: XCTestCase {
         XCTAssertTrue(store.state.conflicts.isEmpty, "nothing differed, so nothing is recorded as displaced")
     }
 
+    /// C-199 (found on the device run, 2026-11-13): the same, for a STARRED
+    /// attachment. The content record carries no star, so applying it must
+    /// leave the star alone; it used to reset it, and the metadata record that
+    /// follows in the same batch then read as a difference and was listed as
+    /// "Star" displaced, although both devices held the star throughout.
+    @MainActor
+    func testAStarredAttachmentBothDevicesHoldLeavesNoEntryAndKeepsItsStar() async throws {
+        let photo = try file("photo.jpg", "jpeg bytes")
+        let hash = try XCTUnwrap(JournalAssetHash.hash(of: photo))
+        let sid = try seedSession(title: "Scales", notes: "slow", clock: backupClock)
+        let aid = try seedAttachment(session: sid, file: photo, name: "take 1", clock: backupClock)
+        try setUnclocked("Attachment", aid, ["isThumbnail": true])
+        let cloud = [try cloudCopy(.session, sid, tag: "s1"), try cloudCopy(.attachment(hash: hash), aid, tag: "a1"), try cloudCopy(.meta, aid, tag: "m1")]
+        XCTAssertNil(cloud[1]["isThumbnail"], "precondition: the content record does not carry the star")
+        XCTAssertEqual((cloud[2]["isThumbnail"] as? NSNumber)?.boolValue, true, "precondition: the metadata record does")
+        tracker.bootstrapIfNeeded()
+        let engine = makeEngine()
+        let complete = await firstFetch(engine, cloud)
+        XCTAssertTrue(complete)
+        XCTAssertEqual(value("Attachment", aid, "isThumbnail") as? Bool, true, "the star is still there")
+        XCTAssertTrue(store.state.conflicts.isEmpty, "and nothing is listed: \(store.state.conflicts.map(\.displaced))")
+        XCTAssertTrue(store.state.outbox.isEmpty)
+    }
+
+    /// The content record alone, as the mapping applies it: the star and the
+    /// name stay when the record does not carry them, and are taken when an
+    /// older build's record does.
+    func testALegacyApplyOfAContentRecordLeavesTheStarAndNameItDoesNotCarry() throws {
+        let sid = try seedSession(title: "Scales", notes: "", clock: backupClock)
+        let aid = try seedAttachment(session: sid, file: try file("photo.jpg", "jpeg bytes"), name: "take 1", clock: backupClock)
+        try setUnclocked("Attachment", aid, ["isThumbnail": true])
+        let ctx = container.newBackgroundContext(); ctx.transactionAuthor = JournalSyncAuthor.sync
+        let request = NSFetchRequest<NSManagedObject>(entityName: "Attachment"); request.predicate = NSPredicate(format: "id == %@", aid as CVarArg)
+        try ctx.performAndWait {
+            let row = try XCTUnwrap(try ctx.fetch(request).first)
+            let content = try XCTUnwrap(JournalRecordMapping.record(for: row, base: nil, includeAsset: false))
+            XCTAssertTrue(JournalRecordMapping.apply(content, to: row, legacyMetadata: true))
+            XCTAssertEqual(row.value(forKey: "isThumbnail") as? Bool, true, "a record without a star says nothing about it")
+            XCTAssertEqual(row.value(forKey: "displayName") as? String, "take 1")
+            content["isThumbnail"] = 0 as CKRecordValue; content["displayName"] = "from an older build" as CKRecordValue
+            XCTAssertTrue(JournalRecordMapping.apply(content, to: row, legacyMetadata: true))
+            XCTAssertEqual(row.value(forKey: "isThumbnail") as? Bool, false, "an older build's record that carries the star is still applied")
+            XCTAssertEqual(row.value(forKey: "displayName") as? String, "from an older build")
+            ctx.rollback()
+        }
+    }
+
+    /// A star that really differs is still a difference: the cloud's stands
+    /// and this device's is listed.
+    @MainActor
+    func testAStarThatReallyDiffersIsStillListed() async throws {
+        let photo = try file("photo.jpg", "jpeg bytes")
+        let hash = try XCTUnwrap(JournalAssetHash.hash(of: photo))
+        let sid = try seedSession(title: "Scales", notes: "slow", clock: backupClock)
+        let aid = try seedAttachment(session: sid, file: photo, name: "take 1", clock: backupClock)
+        let meta = JournalSyncRecordType.metaName(for: aid.uuidString)
+        let cloud = [try cloudCopy(.session, sid, tag: "s1"), try cloudCopy(.attachment(hash: hash), aid, tag: "a1"), try cloudCopy(.meta, aid, tag: "m1")]   // unstarred in iCloud
+        try setUnclocked("Attachment", aid, ["isThumbnail": true])                                                                                    // starred here since
+        tracker.bootstrapIfNeeded()
+        let engine = makeEngine()
+        let complete = await firstFetch(engine, cloud)
+        XCTAssertTrue(complete)
+        XCTAssertEqual(value("Attachment", aid, "isThumbnail") as? Bool, false, "no order can be told: the cloud's stands")
+        XCTAssertEqual(store.state.conflicts.map(\.recordName), [meta])
+        XCTAssertEqual(store.state.conflicts.first?.displaced, ["Other details (this device)": "Star"])
+    }
+
     /// The same by the other path (a save rejected because the server already
     /// holds the record): no entry, nothing sent again.
     func testIdenticalRecordsMetByARejectedSaveLeaveNoConflictEntryEither() throws {
