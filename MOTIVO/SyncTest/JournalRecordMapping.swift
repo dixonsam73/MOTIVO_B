@@ -86,7 +86,8 @@ extension CKRecord: CKRecordLike {
 }
 
 enum JournalRecordMapping {
-    static let zoneID = CKRecordZone.ID(zoneName: "Journal", ownerName: CKCurrentUserDefaultName)
+    /// "Journal" in every build; see `JournalSyncCapability.zoneName` for the trial build's one exception.
+    static let zoneID = CKRecordZone.ID(zoneName: JournalSyncCapability.zoneName, ownerName: CKCurrentUserDefaultName)
 
     static let sessionKeys = ["title", "notes", "timestamp", "durationSeconds", "activityType", "activityDetail",
                               "mood", "effort", "threadLabel", "userInstrumentLabel", "userActivityLabel",

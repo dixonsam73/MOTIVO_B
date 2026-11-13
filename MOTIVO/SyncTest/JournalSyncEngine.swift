@@ -471,7 +471,11 @@ final class JournalSyncEngine: NSObject, CKSyncEngineDelegate, JournalSendQueue,
         retryAttempts = 0
         lastRefusal = nil
         stateLock.unlock()
-        if wasDormant { log("Engine \(store.state.engineState == nil ? "built fresh" : "built from saved state") (\(trigger)); app-driven fetch\(gated ? ", \(hold.reason ?? "")" : "")") }
+        if wasDormant {
+            let zone = JournalRecordMapping.zoneID.zoneName
+            log("Engine \(store.state.engineState == nil ? "built fresh" : "built from saved state") (\(trigger)); app-driven fetch\(gated ? ", \(hold.reason ?? "")" : "")"
+                + (zone == JournalSyncCapability.defaultZoneName ? "" : "; trial zone \(zone)"))
+        }
         await publish { $0.pausedReason = nil }
 
         let bootstrapped = tracker.bootstrapIfNeeded()
@@ -2445,6 +2449,26 @@ enum JournalSyncCapability {
         return trimmed.hasPrefix("iCloud.") ? trimmed : ""
     }()
     static var buildSupportsSync: Bool { !containerIdentifier.isEmpty }
+
+    // MARK: The record zone
+
+    /// The zone every build syncs through.
+    static let defaultZoneName = "Journal"
+    /// Present in `Info-SyncTest.plist` only, as `$(ETUDES_CLOUDKIT_TRIAL_ZONE)`:
+    /// a build setting no configuration sets, given on the command line for
+    /// one device trial so it can start from a zone that does not exist yet
+    /// without deleting anything in iCloud (C-197, 2026-11-13).
+    static let trialZoneInfoKey = "EtudesCloudKitTrialZone"
+    /// PURE. Another zone only for the trial build, on the trial container,
+    /// and only for a plain name; anything else is "Journal". Release and
+    /// Debug cannot name a zone: their Info.plist has no such key, and a key
+    /// would be ignored here because their container is not the trial one.
+    static func zoneName(container: String, trialZone: String?) -> String {
+        guard container == trialContainerIdentifier, let raw = trialZone?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty, raw.count <= 64, raw.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) || $0 == "-" }) else { return defaultZoneName }
+        return raw
+    }
+    static let zoneName: String = zoneName(container: containerIdentifier, trialZone: Bundle.main.object(forInfoDictionaryKey: trialZoneInfoKey) as? String)
 }
 
 /// Owns the private sync for the app. OFF BY DEFAULT: nothing here runs until

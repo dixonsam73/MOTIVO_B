@@ -26,6 +26,7 @@
 
 import XCTest
 import CoreData
+import CloudKit
 @testable import Etudes
 
 @MainActor
@@ -373,6 +374,37 @@ final class SyncOffByDefaultTests: XCTestCase {
             XCTAssertEqual(JournalSyncCapability.buildSupportsSync, release != nil)
         default:
             XCTFail("unexpected test host \(Bundle.main.bundleIdentifier ?? "nil")")
+        }
+    }
+
+    /// C-197: the record zone is "Journal". Only the trial build, on the trial
+    /// container, can be given another name, for a device trial that must
+    /// start from a zone that does not exist; Release and Debug cannot.
+    func testTheZoneIsJournalAndOnlyTheTrialBuildCanBeGivenAnother() throws {
+        let trial = JournalSyncCapability.trialContainerIdentifier
+        XCTAssertEqual(JournalSyncCapability.zoneName(container: trial, trialZone: "JournalC197"), "JournalC197")
+        for container in [JournalSyncCapability.productionContainerIdentifier, "", "iCloud.com.example.other"] {
+            XCTAssertEqual(JournalSyncCapability.zoneName(container: container, trialZone: "JournalC197"), "Journal", "\(container): never another zone")
+        }
+        for unset in [nil, "", "  ", "$(ETUDES_CLOUDKIT_TRIAL_ZONE)", "two words", "a/b"] as [String?] {
+            XCTAssertEqual(JournalSyncCapability.zoneName(container: trial, trialZone: unset), "Journal", "\(unset ?? "nil"): the default")
+        }
+        // The key is in the trial build's Info plist alone, and no configuration sets the build setting.
+        let key = JournalSyncCapability.trialZoneInfoKey
+        let plist = try String(contentsOf: repoRoot.appendingPathComponent("MOTIVO/Info.plist"), encoding: .utf8)
+        XCTAssertFalse(plist.contains(key), "Release and Debug share Info.plist: it must not carry the trial zone key")
+        let trialPlist = try String(contentsOf: repoRoot.appendingPathComponent("MOTIVO/Info-SyncTest.plist"), encoding: .utf8)
+        XCTAssertTrue(trialPlist.contains("<key>\(key)</key>"))
+        let project = try String(contentsOf: repoRoot.appendingPathComponent("MOTIVO.xcodeproj/project.pbxproj"), encoding: .utf8)
+        XCTAssertFalse(project.contains("ETUDES_CLOUDKIT_TRIAL_ZONE"), "the trial zone is given on the command line for one run, never committed to a configuration")
+        let schemes = try FileManager.default.contentsOfDirectory(at: repoRoot.appendingPathComponent("MOTIVO.xcodeproj/xcshareddata/xcschemes"), includingPropertiesForKeys: nil)
+        for scheme in schemes { XCTAssertFalse(try String(contentsOf: scheme, encoding: .utf8).contains("ETUDES_CLOUDKIT_TRIAL_ZONE"), scheme.lastPathComponent) }
+        // What THIS build resolved: "Journal", whichever configuration is running the tests.
+        XCTAssertNil(Bundle.main.object(forInfoDictionaryKey: key).flatMap { ($0 as? String).flatMap { $0.isEmpty ? nil : $0 } }, "no trial zone in an ordinary build")
+        XCTAssertEqual(JournalSyncCapability.zoneName, "Journal")
+        XCTAssertEqual(JournalRecordMapping.zoneID.zoneName, "Journal")
+        if Bundle.main.bundleIdentifier != "com.samueldixon.motivo.synctest" {
+            XCTAssertNotEqual(JournalSyncCapability.containerIdentifier, trial, "only the trial build is on the trial container")
         }
     }
 
