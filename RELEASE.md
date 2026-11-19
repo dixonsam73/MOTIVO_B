@@ -2810,6 +2810,11 @@ the join.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
+- **Move to Xcode 27 before April 2027.** App Store Connect warned at the
+  build 1949 upload (2026-11-19): it was built with the iOS 26.5 SDK, and
+  from April 2027 an upload must be built with the iOS 27 SDK or later.
+  Nothing changes until then. Do it as its own step, with the full test
+  run on both schemes; the deployment target need not move.
 - **Sampled cello drone** (agreed 2026-10-09; a good first update). A second
   drone sound beside the synth tone, driven by the same pitch, A4 reference
   and volume controls: a looped, crossfaded sampler in place of
