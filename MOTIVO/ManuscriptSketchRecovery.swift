@@ -159,6 +159,22 @@ enum ManuscriptSketchRecovery {
         keep(sketch, key: opening.key, attachment: opening.attachment, handedOver: true)
     }
 
+    enum HandOverError: Error, Equatable {
+        /// The recovery copy could not be written, so the sketch was not
+        /// given to the editor: it would have had nothing protecting it.
+        case copyNotKept
+    }
+
+    /// The pad's Save, in its one order: the recovery copy first, and only
+    /// if that was written is the finished sketch given to the editor. If
+    /// the copy cannot be kept this throws and `editor` is not called, so
+    /// the pad stays open with the drawing in it.
+    static func handOver(_ sketch: ManuscriptSketch, data: Data, opening: Opening,
+                         to editor: (Data, String) throws -> Void) throws {
+        guard handOver(sketch, opening: opening) else { throw HandOverError.copyNotKept }
+        try editor(data, opening.key)
+    }
+
     /// The pad was left on purpose without saving. A sketch the editor is
     /// holding goes back to what the editor holds; anything else is dropped.
     static func leftWithoutSaving(opening: Opening, heldSketch: ManuscriptSketch?) {

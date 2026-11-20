@@ -398,11 +398,12 @@ struct ManuscriptPadView: View {
             // sketch only in memory until the entry is saved, so the copy
             // stays, marked as handed over, and the editor removes it once
             // that save is durable (or the person discards the work).
-            ManuscriptSketchRecovery.handOver(sketch, opening: opening)
-            try onSave(data, opening.key)
+            // The copy comes first: if it cannot be written the editor is
+            // not given the sketch and the pad stays open.
+            try ManuscriptSketchRecovery.handOver(sketch, data: data, opening: opening, to: onSave)
             dismiss()
         } catch {
-            // The recovery copy stays: the drawing is not lost with the failed save.
+            // The pad stays open with the drawing in it; nothing is lost.
             saveFailed = true
         }
     }

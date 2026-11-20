@@ -519,6 +519,51 @@ final class ManuscriptSketchFileTests: XCTestCase {
         XCTAssertTrue(Recovery.unattached().isEmpty)
     }
 
+    /// The pad's Save needs its recovery copy before the editor gets the
+    /// sketch. If the copy cannot be written, the editor is not called (so
+    /// the pad stays open); if it can, the editor receives the sketch and
+    /// the copy's key.
+    func testTheEditorIsNotGivenASketchWhoseRecoveryCopyCouldNotBeKept() throws {
+        clearRecoveryFolder(); addTeardownBlock { Recovery.wipeForFactoryReset() }
+        let drawn = sketch(strokes: 6)
+        let bytes = try data(drawn)
+
+        // Nowhere to write: the recovery folder's place is taken by a file.
+        let folder = Recovery.directory()
+        try FileManager.default.removeItem(at: folder)
+        try Data("in the way".utf8).write(to: folder)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+
+        let refused = Recovery.Opening.new()
+        var editorCalls = 0
+        XCTAssertFalse(Recovery.handOver(drawn, opening: refused))
+        XCTAssertThrowsError(try Recovery.handOver(drawn, data: bytes, opening: refused) { _, _ in editorCalls += 1 }) {
+            XCTAssertEqual($0 as? Recovery.HandOverError, .copyNotKept)
+        }
+        XCTAssertEqual(editorCalls, 0, "the sketch is not handed over without its copy")
+
+        // With somewhere to write, the same Save goes through, copy first.
+        try FileManager.default.removeItem(at: folder)
+        let accepted = Recovery.Opening.new()
+        var received: (data: Data, key: String)?
+        try Recovery.handOver(drawn, data: bytes, opening: accepted) { data, key in
+            // The copy is already there when the editor is given the sketch.
+            XCTAssertNotNil(Recovery.copy(key: key))
+            received = (data, key)
+        }
+        XCTAssertEqual(received?.key, accepted.key)
+        XCTAssertEqual(received?.data, bytes)
+        let copy = try XCTUnwrap(Recovery.copy(key: accepted.key))
+        XCTAssertTrue(copy.handedOver)
+        assertSame(copy.sketch, drawn)
+
+        // If the editor itself refuses the sketch, the copy stays.
+        struct EditorRefused: Error {}
+        let third = Recovery.Opening.new()
+        XCTAssertThrowsError(try Recovery.handOver(drawn, data: bytes, opening: third) { _, _ in throw EditorRefused() })
+        XCTAssertNotNil(Recovery.copy(key: third.key))
+    }
+
     /// Case 5. The entry's save fails: nothing is cleared, in the editor or
     /// after the app stops.
     func testAFailedEntrySaveKeepsTheWorkRecoverable() throws {
