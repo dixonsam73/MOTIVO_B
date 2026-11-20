@@ -4,9 +4,10 @@
 //  here runs until the person turns sync on (see JournalSyncCoordinator).
 //
 //  The person-facing Sync rows on the Profile screen: the on/off control
-//  (off by default; on creates the state file, off is the stage E unlink),
-//  status, the per-device "media over mobile data" option, what waits for
-//  Wi-Fi, the recovery view for displaced text, scores without a file, and
+//  (off by default; on asks once, then creates the state file; off is the
+//  stage E unlink), status, the per-device mobile-data option, what waits for
+//  Wi-Fi, the recovery view when something was displaced, scores without a
+//  file, and
 //  (DEBUG) the diagnostics screen. Shown only by a build that can sync
 //  (`JournalSyncCapability`). The Status row is `JournalSyncStatusSummary`:
 //  restoring with progress, what still waits to upload, offline and paused in
@@ -20,25 +21,39 @@ struct SyncTestProfileSection: View {
     @ObservedObject private var status = JournalSyncCoordinator.shared.status
     @ObservedObject private var library = ScoreLibraryStore.shared
     @State private var syncOn = JournalSyncCoordinator.shared.isEnabled
+    @State private var switchOn = JournalSyncCoordinator.shared.isEnabled
     @State private var allowMobileData = JournalMediaPreference.allowsMobileData()
     @State private var recoverable = 0
+    @State private var confirmingTurnOn = false
 
     var body: some View {
         Section(header: Text("iCloud sync (trial)").sectionHeader()) {
-            Toggle(isOn: $syncOn) {
+            // The switch moves to on only once the person has confirmed: what
+            // turning sync on does to a journal already here (C-197) is said at
+            // that moment, not in permanent small print (Samuel, 2026-11-20).
+            // `switchOn` is what the switch shows and `syncOn` is what is true:
+            // the switch is on behind the question and goes back on Cancel.
+            Toggle(isOn: $switchOn) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Sync this journal with iCloud").font(Theme.Text.body)
-                    Text("Optional. On: your journal, scores, profile and settings are kept the same on every device signed in to the same iCloud account. Off: this device keeps everything it has and stops sending and receiving; what was already uploaded stays in iCloud. Turning it on combines this device's journal with the one already in iCloud. Where both hold the same entry and they differ, one version is used (the later edit, or iCloud's when that cannot be told) and the other is kept under Displaced by sync; a list is kept as a second list. An entry deleted on only one of them before sync was on usually comes back; if iCloud still records the deletion, the entry is removed here and kept under Displaced by sync. Ensembles and other Connected features are not part of this sync.")
+                    Text("Sync with iCloud").font(Theme.Text.body)
+                    Text("Keeps your journal, scores, profile and settings the same on all your devices.")
                         .font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
                 }
             }
-            .onChange(of: syncOn) { was, now in
-                guard was != now else { return }
-                if now {
-                    if !JournalSyncCoordinator.shared.enable(persistence: PersistenceController.shared.container) { syncOn = false }
-                } else if JournalSyncCoordinator.shared.isEnabled {
-                    Task { await JournalSyncCoordinator.shared.disable(); reload() }
+            .onChange(of: switchOn) { _, wanted in
+                guard wanted != syncOn else { return }
+                if wanted { confirmingTurnOn = true; return }
+                syncOn = false
+                if JournalSyncCoordinator.shared.isEnabled { Task { await JournalSyncCoordinator.shared.disable(); reload() } }
+            }
+            .alert("Turn on iCloud sync?", isPresented: $confirmingTurnOn) {
+                Button("Turn On") {
+                    syncOn = JournalSyncCoordinator.shared.enable(persistence: PersistenceController.shared.container)
+                    switchOn = syncOn
                 }
+                Button("Cancel", role: .cancel) { switchOn = false }
+            } message: {
+                Text("This device’s journal will be combined with the one in iCloud. Where an entry differs, the other version is kept under Displaced by sync. Something deleted on only one device may come back.")
             }
             if syncOn { syncRows }
             #if DEBUG
@@ -68,8 +83,8 @@ struct SyncTestProfileSection: View {
             }
             Toggle(isOn: $allowMobileData) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Media over mobile data").font(Theme.Text.body)
-                    Text("Photos, recordings, scores and your profile photo are sent and received over Wi-Fi only, unless this is on; on also allows a personal hotspot. Low Data Mode always pauses media. Text and settings sync on any connection. This device only.")
+                    Text("Use mobile data for media").font(Theme.Text.body)
+                    Text("When off, photos, recordings and scores sync on Wi-Fi only.")
                         .font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
                 }
             }
@@ -86,13 +101,16 @@ struct SyncTestProfileSection: View {
                 Text("\(library.missingFileIDs.count) score\(library.missingFileIDs.count == 1 ? "" : "s") unavailable on this device (file missing; not synced from here)")
                     .font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
             }
-            NavigationLink {
-                SyncRecoveryView()
-            } label: {
-                HStack {
-                    Text("Displaced by sync").font(Theme.Text.body)
-                    Spacer()
-                    Text(recoverable == 0 ? "none" : "\(recoverable)").font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
+            // Shown only when there is something to look at (Samuel, 2026-11-20).
+            if recoverable > 0 {
+                NavigationLink {
+                    SyncRecoveryView()
+                } label: {
+                    HStack {
+                        Text("Displaced by sync").font(Theme.Text.body)
+                        Spacer()
+                        Text("\(recoverable)").font(Theme.Text.meta).foregroundStyle(Theme.Colors.secondaryText)
+                    }
                 }
             }
     }
@@ -100,6 +118,8 @@ struct SyncTestProfileSection: View {
     private func reload() {
         let enabled = JournalSyncCoordinator.shared.isEnabled
         if syncOn != enabled { syncOn = enabled }
+        // Not while the question is up: the switch is on there, sync is not yet.
+        if !confirmingTurnOn, switchOn != enabled { switchOn = enabled }
         allowMobileData = JournalMediaPreference.allowsMobileData()
         if let store = JournalSyncCoordinator.shared.store { recoverable = JournalRecovery.entries(store: store).count }
     }

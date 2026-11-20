@@ -263,7 +263,7 @@ final class SyncTestStatusSummaryTests: XCTestCase {
         XCTAssertEqual(wifi.kind, .mediaHeld)
         XCTAssertEqual(wifi.headline, "Waiting for Wi-Fi")
         XCTAssertEqual(wifi.detail, "1 file (35 MB) to send, 1 to receive. Text and settings still sync.")
-        XCTAssertEqual(wifi.action, "Turn on Media over mobile data below to send and receive them now.")
+        XCTAssertEqual(wifi.action, "To send and receive them now, turn on mobile data for media below.")
 
         facts.mediaHold = .lowDataMode
         let low = JournalSyncStatusSummary.derive(facts)

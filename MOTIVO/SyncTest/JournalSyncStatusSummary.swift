@@ -199,7 +199,7 @@ struct JournalSyncStatusSummary: Equatable {
             default:
                 return .init(kind: .mediaHeld, headline: "Waiting for Wi-Fi",
                              detail: "\(waiting.joined(separator: ", ")). Text and settings still sync.",
-                             action: "Turn on Media over mobile data below to send and receive them now.")
+                             action: "To send and receive them now, turn on mobile data for media below.")
             }
         }
         if !pending.isEmpty {
