@@ -308,6 +308,8 @@ struct AddEditSessionView: View {
     @State var sketchEdit_AESV: AESVSketchEditRequest? = nil
     /// Saved sketches edited in this editor and not yet saved with the entry.
     @State var sketchEdits_AESV = ManuscriptSketchEdits()
+    /// Recovery copies of sketches the pad has handed to this editor and the entry has not saved yet.
+    @State var sketchRecovery_AESV = ManuscriptSketchRecoveryLedger()
     @State var attachedScoreIDs_AESV: [UUID] = []
     @State var scorePageSelections_AESV: [UUID: AESVScorePageSelection] = [:]
     @State var existingScoreAttachmentIDsByScoreID_AESV: [UUID: UUID] = [:]
@@ -821,13 +823,17 @@ struct AddEditSessionView: View {
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: AttachmentImportPolicy.importerContentTypes, allowsMultipleSelection: true, onCompletion: handleFileImport)
         .fullScreenCover(isPresented: $showSketchPad) {
             // A finished sketch is staged like an imported PDF; it carries its own drawing.
-            ManuscriptPadView { data in
-                stageData(data, kind: .pdf, displayName: "Sketch")
+            // Until this entry is saved the sketch exists only here in memory,
+            // so its recovery copy is kept and noted against the staged item.
+            ManuscriptPadView(recovery: .new(excluding: sketchRecovery_AESV.held)) { data, recoveryKey in
+                let stagedID = stageData(data, kind: .pdf, displayName: "Sketch")
+                sketchRecovery_AESV.handedOver(key: recoveryKey, for: stagedID)
             }
         }
         .fullScreenCover(item: $sketchEdit_AESV) { request in
-            ManuscriptPadView(existing: request.sketch, recoveryKey: request.id.uuidString) { data in
+            ManuscriptPadView(existing: request.sketch, recovery: request.recovery) { data, recoveryKey in
                 try applyEditedSketch_AESV(data, id: request.id)
+                sketchRecovery_AESV.handedOver(key: recoveryKey, for: request.id)
             }
         }
         .sheet(isPresented: $showScoreAttachLibrary) {
@@ -2388,6 +2394,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 // Likewise a sketch edited here: its previous file goes only now
                 // that the saved record names the new one.
                 settleReplacedSketches_AESV(saved: true)
+                // And the sketches the pad handed over are part of the saved
+                // entry now: their recovery copies have done their job.
+                sketchRecovery_AESV.entrySaved()
                 didCommitLocally = true
                 // Save thought: the timer consumes exactly these — here, after the
                 // durable local save and before the sharing choice is queued or

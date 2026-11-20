@@ -73,20 +73,36 @@ final class ManuscriptSketchFileTests: XCTestCase {
         return path
     }
 
-    /// Stroke for stroke: the same ink and the same points. (A drawing that has
-    /// been stored and read encodes a few bytes differently from one made in
-    /// memory, so the encoded bytes are not the comparison.)
+    /// What this compares, and no more: the paper; the number of strokes; and
+    /// for each stroke its ink type and colour, its transform, the number of
+    /// points, and each point's position, size, opacity, force, azimuth,
+    /// altitude and time offset (to 0.01). It does NOT compare a stroke's
+    /// mask or random seed, nor anything PencilKit keeps beside the strokes.
+    ///
+    /// It is the tests' way of saying "the same drawing came back"; the
+    /// app's own save check is stricter and separate: `writeVerified` reads
+    /// the file back and requires the stored drawing bytes to be exactly the
+    /// bytes it was given. (The encoded bytes are not compared here because a
+    /// drawing that has been stored and read encodes a few bytes differently
+    /// from one made in memory.)
     private func assertSame(_ a: ManuscriptSketch, _ b: ManuscriptSketch, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(a.paper, b.paper, file: file, line: line)
         XCTAssertEqual(a.drawing.strokes.count, b.drawing.strokes.count, file: file, line: line)
         for (x, y) in zip(a.drawing.strokes, b.drawing.strokes) {
             XCTAssertEqual(x.ink.inkType, y.ink.inkType, file: file, line: line)
             XCTAssertEqual(x.ink.color, y.ink.color, file: file, line: line)
+            XCTAssertEqual(x.transform, y.transform, file: file, line: line)
             XCTAssertEqual(x.path.count, y.path.count, file: file, line: line)
             for (p, q) in zip(x.path, y.path) {
                 XCTAssertEqual(p.location.x, q.location.x, accuracy: 0.01, file: file, line: line)
                 XCTAssertEqual(p.location.y, q.location.y, accuracy: 0.01, file: file, line: line)
                 XCTAssertEqual(p.size.width, q.size.width, accuracy: 0.01, file: file, line: line)
+                XCTAssertEqual(p.size.height, q.size.height, accuracy: 0.01, file: file, line: line)
+                XCTAssertEqual(p.opacity, q.opacity, accuracy: 0.01, file: file, line: line)
+                XCTAssertEqual(p.force, q.force, accuracy: 0.01, file: file, line: line)
+                XCTAssertEqual(p.azimuth, q.azimuth, accuracy: 0.01, file: file, line: line)
+                XCTAssertEqual(p.altitude, q.altitude, accuracy: 0.01, file: file, line: line)
+                XCTAssertEqual(p.timeOffset, q.timeOffset, accuracy: 0.01, file: file, line: line)
             }
         }
     }
@@ -338,25 +354,200 @@ final class ManuscriptSketchFileTests: XCTestCase {
         assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: old)), first)
     }
 
-    // MARK: Unfinished work
+    // MARK: Unfinished work, and the hand-off from the pad to the entry
+    //
+    // The pad's Save does not make a sketch durable: the entry's save does.
+    // In between, the finished sketch is only in the editor's memory, so its
+    // recovery copy must still be there. "The app stops" is modelled as the
+    // editor's state (its ledger, its `ManuscriptSketchEdits`) being thrown
+    // away while the files stay, which is what a termination leaves.
 
-    func testAnUnfinishedDrawingIsKeptAndOfferedBackUntilSavedOrDiscarded() throws {
-        let key = "test-\(UUID().uuidString)"
-        addTeardownBlock { ManuscriptSketchRecovery.clear(key: key) }
-        XCTAssertNil(ManuscriptSketchRecovery.draft(key: key))
+    private typealias Recovery = ManuscriptSketchRecovery
+
+    private func clearRecoveryFolder() { Recovery.wipeForFactoryReset() }
+
+    /// The pad's Save, as the pad does it: the copy is handed over, not removed.
+    private func padSaves(_ sketch: ManuscriptSketch, _ opening: Recovery.Opening) {
+        XCTAssertTrue(Recovery.handOver(sketch, opening: opening))
+    }
+
+    func testWhileDrawingTheSketchIsKeptAndADiscardRemovesIt() throws {
+        clearRecoveryFolder(); addTeardownBlock { Recovery.wipeForFactoryReset() }
+        let opening = Recovery.Opening.new()
+        XCTAssertNil(Recovery.offer(for: opening))
         let unfinished = sketch(strokes: 5, kind: .piano, clef: .none)
-        XCTAssertTrue(ManuscriptSketchRecovery.keep(unfinished, key: key))
-        assertSame(try XCTUnwrap(ManuscriptSketchRecovery.draft(key: key)), unfinished)
-        // A later stroke replaces the copy; another sketch's copy is its own.
-        let more = sketch(strokes: 6, kind: .piano, clef: .none)
-        ManuscriptSketchRecovery.keep(more, key: key)
-        assertSame(try XCTUnwrap(ManuscriptSketchRecovery.draft(key: key)), more)
-        XCTAssertNil(ManuscriptSketchRecovery.draft(key: "test-\(UUID().uuidString)"))
-        ManuscriptSketchRecovery.clear(key: key)
-        XCTAssertNil(ManuscriptSketchRecovery.draft(key: key))
+        XCTAssertTrue(Recovery.keep(unfinished, key: opening.key))
+        // The app stops. The next new sketch is offered it.
+        let offered = try XCTUnwrap(Recovery.offer(for: .new()))
+        XCTAssertEqual(offered.key, opening.key)
+        XCTAssertFalse(offered.handedOver)
+        assertSame(offered.sketch, unfinished)
+        // Left on purpose without saving: nothing to offer back.
+        Recovery.leftWithoutSaving(opening: opening, heldSketch: nil)
+        XCTAssertNil(Recovery.offer(for: .new()))
         // Device-only: the folder is kept out of backups.
-        let values = try ManuscriptSketchRecovery.directory().resourceValues(forKeys: [.isExcludedFromBackupKey])
-        XCTAssertEqual(values.isExcludedFromBackup, true)
+        XCTAssertEqual(try Recovery.directory().resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+    }
+
+    /// Codex's finding, case 1. Pad Save, then the app stops before the
+    /// entry is saved: the new sketch is still there to recover.
+    func testANewSketchSavedInThePadSurvivesUntilTheEntryIsSaved() throws {
+        clearRecoveryFolder(); addTeardownBlock { Recovery.wipeForFactoryReset() }
+        var ledger = ManuscriptSketchRecoveryLedger()
+        let opening = Recovery.Opening.new(excluding: ledger.held)
+        let drawn = sketch(strokes: 6)
+        padSaves(drawn, opening)
+        ledger.handedOver(key: opening.key, for: UUID())
+        // The editor holds it, so another new sketch in the same editor is not offered it.
+        XCTAssertNil(Recovery.offer(for: .new(excluding: ledger.held)))
+        // The app stops before Save Thought. Nothing of the editor is left.
+        ledger = ManuscriptSketchRecoveryLedger()
+        let offered = try XCTUnwrap(Recovery.offer(for: .new(excluding: ledger.held)))
+        XCTAssertTrue(offered.handedOver)
+        assertSame(offered.sketch, drawn)
+        // Restored, saved in the pad again, and this time the entry is saved.
+        let again = Recovery.Opening(key: offered.key, attachment: nil, held: false, excluding: [], isNew: true)
+        padSaves(offered.sketch, again)
+        ledger.handedOver(key: again.key, for: UUID())
+        ledger.entrySaved()
+        XCTAssertNil(Recovery.offer(for: .new()))
+        XCTAssertTrue(ledger.held.isEmpty)
+    }
+
+    /// Case 2. An edit of a SAVED sketch, pad Save, the app stops before
+    /// the entry is saved: the original is whole and the edit is recoverable.
+    func testAnEditSavedInThePadSurvivesAndTheOriginalStands() throws {
+        clearRecoveryFolder(); addTeardownBlock { Recovery.wipeForFactoryReset() }
+        let original = sketch(strokes: 4), edit = sketch(strokes: 9, seed: 40)
+        let savedPath = try savedInDocuments(original, name: "Sketch \(UUID().uuidString)")
+        let attachment = UUID()
+        var edits = ManuscriptSketchEdits()
+        var ledger = ManuscriptSketchRecoveryLedger()
+        let opening = Recovery.Opening.reopening(key: Recovery.key(forSaved: attachment), attachment: attachment, held: false)
+        XCTAssertNil(Recovery.offer(for: opening))
+        padSaves(edit, opening)
+        documentsMade.append(try edits.place(try data(edit), for: attachment, currentPath: savedPath))
+        ledger.handedOver(key: opening.key, for: attachment)
+        // The app stops before the entry is saved.
+        edits = ManuscriptSketchEdits(); ledger = ManuscriptSketchRecoveryLedger()
+        // The saved record still names the original, and it is whole.
+        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: savedPath)), original)
+        // Opening that sketch again offers the edit.
+        let reopened = Recovery.Opening.reopening(key: Recovery.key(forSaved: attachment), attachment: attachment, held: ledger.key(for: attachment) != nil)
+        let offered = try XCTUnwrap(Recovery.offer(for: reopened))
+        XCTAssertEqual(offered.attachment, attachment)
+        assertSame(offered.sketch, edit)
+        // An edit of a saved sketch is never offered to a brand-new sketch.
+        XCTAssertNil(Recovery.offer(for: .new()))
+    }
+
+    /// Case 3. Several unsaved sketches: each has its own copy, and each is
+    /// recovered or discarded without touching the others.
+    func testSeveralUnsavedSketchesAreRecoverableIndependently() throws {
+        clearRecoveryFolder(); addTeardownBlock { Recovery.wipeForFactoryReset() }
+        var ledger = ManuscriptSketchRecoveryLedger()
+        let first = sketch(strokes: 3), second = sketch(strokes: 5, seed: 30), third = sketch(strokes: 7, seed: 60)
+        var keys: [String] = []
+        for drawn in [first, second, third] {
+            let opening = Recovery.Opening.new(excluding: ledger.held)
+            XCTAssertNil(Recovery.offer(for: opening), "a sketch the editor holds is not offered to the next new one")
+            padSaves(drawn, opening)
+            ledger.handedOver(key: opening.key, for: UUID())
+            keys.append(opening.key)
+        }
+        XCTAssertEqual(Set(keys).count, 3, "no shared slot")
+        // The app stops with all three unsaved.
+        ledger = ManuscriptSketchRecoveryLedger()
+        let waiting = Recovery.unattached()
+        XCTAssertEqual(Set(waiting.map(\.key)), Set(keys))
+        for (key, drawn) in zip(keys, [first, second, third]) { assertSame(try XCTUnwrap(Recovery.copy(key: key)).sketch, drawn) }
+        // One is restored and held again; the next new sketch is offered another, not that one.
+        let restored = try XCTUnwrap(Recovery.offer(for: .new()))
+        ledger.handedOver(key: restored.key, for: UUID())
+        let next = try XCTUnwrap(Recovery.offer(for: .new(excluding: ledger.held)))
+        XCTAssertNotEqual(next.key, restored.key)
+        // That one is discarded at the offer: the third is still there, the restored one untouched.
+        Recovery.clear(key: next.key)
+        let last = try XCTUnwrap(Recovery.offer(for: .new(excluding: ledger.held)))
+        XCTAssertFalse([restored.key, next.key].contains(last.key))
+        XCTAssertNotNil(Recovery.copy(key: restored.key))
+    }
+
+    /// Case 4. A durable entry save, and each explicit discard, remove the
+    /// copies they should and no others.
+    func testSavingTheEntryOrDiscardingClearsTheRightCopies() throws {
+        clearRecoveryFolder(); addTeardownBlock { Recovery.wipeForFactoryReset() }
+        // Someone else's unsaved sketch, from an earlier stop: not this editor's to clear.
+        let stranger = Recovery.Opening.new()
+        Recovery.keep(sketch(strokes: 2), key: stranger.key)
+
+        var ledger = ManuscriptSketchRecoveryLedger()
+        let keptID = UUID(), removedID = UUID()
+        let kept = Recovery.Opening.new(excluding: ledger.held)
+        padSaves(sketch(strokes: 4), kept); ledger.handedOver(key: kept.key, for: keptID)
+        let removed = Recovery.Opening.new(excluding: ledger.held)
+        padSaves(sketch(strokes: 5, seed: 30), removed); ledger.handedOver(key: removed.key, for: removedID)
+
+        // The tile is removed in the editor: that sketch's copy goes, the other stays.
+        ledger.discarded(removedID)
+        XCTAssertNil(Recovery.copy(key: removed.key))
+        XCTAssertNotNil(Recovery.copy(key: kept.key))
+
+        // A held sketch is reopened, drawn on, and the changes discarded in the
+        // pad: the copy goes back to what the editor holds, it is not removed.
+        let heldSketch = sketch(strokes: 4)
+        let reopened = Recovery.Opening.reopening(key: kept.key, attachment: nil, held: true)
+        XCTAssertNil(Recovery.offer(for: reopened), "what the editor holds is not offered back to it")
+        Recovery.keep(sketch(strokes: 12, seed: 70), key: reopened.key)
+        Recovery.leftWithoutSaving(opening: reopened, heldSketch: heldSketch)
+        let after = try XCTUnwrap(Recovery.copy(key: kept.key))
+        assertSame(after.sketch, heldSketch)
+        XCTAssertTrue(after.handedOver)
+
+        // The entry is saved: this editor's copies go, the stranger's stays.
+        ledger.entrySaved()
+        XCTAssertNil(Recovery.copy(key: kept.key))
+        XCTAssertNotNil(Recovery.copy(key: stranger.key))
+
+        // Leaving an editor without saving discards what it held.
+        var other = ManuscriptSketchRecoveryLedger()
+        let abandoned = Recovery.Opening.new(excluding: other.held)
+        Recovery.clear(key: stranger.key)
+        padSaves(sketch(strokes: 6), abandoned); other.handedOver(key: abandoned.key, for: UUID())
+        other.editorCancelled()
+        XCTAssertNil(Recovery.copy(key: abandoned.key))
+        XCTAssertTrue(Recovery.unattached().isEmpty)
+    }
+
+    /// Case 5. The entry's save fails: nothing is cleared, in the editor or
+    /// after the app stops.
+    func testAFailedEntrySaveKeepsTheWorkRecoverable() throws {
+        clearRecoveryFolder(); addTeardownBlock { Recovery.wipeForFactoryReset() }
+        var ledger = ManuscriptSketchRecoveryLedger()
+        let newOne = sketch(strokes: 6), edit = sketch(strokes: 9, seed: 40)
+        let original = sketch(strokes: 4)
+        let savedPath = try savedInDocuments(original, name: "Sketch \(UUID().uuidString)")
+        let attachment = UUID()
+        var edits = ManuscriptSketchEdits()
+
+        let a = Recovery.Opening.new(excluding: ledger.held)
+        padSaves(newOne, a); ledger.handedOver(key: a.key, for: UUID())
+        let b = Recovery.Opening.reopening(key: Recovery.key(forSaved: attachment), attachment: attachment, held: false)
+        padSaves(edit, b); ledger.handedOver(key: b.key, for: attachment)
+        let placed = try edits.place(try data(edit), for: attachment, currentPath: savedPath)
+        documentsMade.append(placed)
+
+        // The save throws. The editor's "after a durable save" steps do not run:
+        // neither `entrySaved` nor `settleAfterSave` is called.
+        XCTAssertEqual(ledger.held, [a.key, b.key])
+        assertSame(try XCTUnwrap(Recovery.copy(key: a.key)).sketch, newOne)
+        assertSame(try XCTUnwrap(Recovery.copy(key: b.key)).sketch, edit)
+        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: savedPath)), original)
+        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: placed)), edit)
+        // And if the app then stops, both are still offered.
+        ledger = ManuscriptSketchRecoveryLedger()
+        assertSame(try XCTUnwrap(Recovery.offer(for: .new())).sketch, newOne)
+        assertSame(try XCTUnwrap(Recovery.offer(for: .reopening(key: Recovery.key(forSaved: attachment), attachment: attachment, held: false))).sketch, edit)
     }
 
     func testASketchHeldInMemoryReadsLikeOneOnDisk() throws {

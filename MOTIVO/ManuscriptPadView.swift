@@ -190,11 +190,10 @@ struct ManuscriptCanvas: UIViewRepresentable {
 struct ManuscriptPadView: View {
     /// A sketch being reopened; nil for a new one, which starts by choosing its paper.
     let existing: ManuscriptSketch?
-    /// Names this sketch's recovery copy: `ManuscriptSketchRecovery.newSketchKey`
-    /// for a new sketch, the attachment's id for one being reopened.
-    let recoveryKey: String
-    /// Receives the finished sketch as PDF data. Throwing keeps the pad open.
-    let onSave: (Data) throws -> Void
+    /// Receives the finished sketch as PDF data, with the key of the recovery
+    /// copy that goes on protecting it until the entry is saved. Throwing
+    /// keeps the pad open.
+    let onSave: (Data, String) throws -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -204,22 +203,26 @@ struct ManuscriptPadView: View {
     @State private var paper: ManuscriptPaper?
     @State private var drawing: PKDrawing
     @State private var revision = 0
-    /// An unfinished drawing found for this sketch; the pad waits for the
-    /// answer before showing anything to draw on.
-    @State private var offeredDraft: ManuscriptSketch?
+    /// How this pad was opened, for recovery. Restoring a copy adopts its key.
+    @State private var opening: ManuscriptSketchRecovery.Opening
+    /// A sketch left unsaved earlier; the pad waits for the answer before
+    /// showing anything to draw on.
+    @State private var offered: ManuscriptSketchRecovery.Copy?
     @State private var restoredFromDraft = false
     @State private var tool: ManuscriptPadTool = .pen(width: ManuscriptPadTool.penWidths[1])
     @State private var confirmDiscard = false
     @State private var saveFailed = false
     @State private var keepTask: Task<Void, Never>?
 
-    init(existing: ManuscriptSketch? = nil, recoveryKey: String = ManuscriptSketchRecovery.newSketchKey, onSave: @escaping (Data) throws -> Void) {
+    init(existing: ManuscriptSketch? = nil,
+         recovery: ManuscriptSketchRecovery.Opening = .new(),
+         onSave: @escaping (Data, String) throws -> Void) {
         self.existing = existing
-        self.recoveryKey = recoveryKey
         self.onSave = onSave
         _paper = State(initialValue: existing?.paper)
         _drawing = State(initialValue: existing?.drawing ?? PKDrawing())
-        _offeredDraft = State(initialValue: ManuscriptSketchRecovery.draft(key: recoveryKey))
+        _opening = State(initialValue: recovery)
+        _offered = State(initialValue: ManuscriptSketchRecovery.offer(for: recovery))
     }
 
     private var hasChanges: Bool { revision > 0 || restoredFromDraft }
@@ -227,7 +230,7 @@ struct ManuscriptPadView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            if offeredDraft != nil {
+            if offered != nil {
                 Color.clear
             } else if let paper {
                 ManuscriptCanvas(paper: paper, drawing: $drawing, revision: $revision, tool: tool, controller: controller)
@@ -241,26 +244,29 @@ struct ManuscriptPadView: View {
         .onChange(of: revision) { _, _ in keepSoon() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { keepNow() } }
         .onDisappear { keepTask?.cancel() }
-        .alert("Restore your unfinished sketch?", isPresented: Binding(get: { offeredDraft != nil }, set: { _ in })) {
+        .alert("Restore your unfinished sketch?", isPresented: Binding(get: { offered != nil }, set: { _ in })) {
             Button("Restore") {
-                if let draft = offeredDraft {
-                    paper = draft.paper
-                    drawing = draft.drawing
+                if let copy = offered {
+                    paper = copy.sketch.paper
+                    drawing = copy.sketch.drawing
                     restoredFromDraft = true
+                    // It goes on being that sketch's one copy.
+                    opening.key = copy.key
                 }
-                offeredDraft = nil
+                offered = nil
             }
             Button("Discard", role: .destructive) {
-                ManuscriptSketchRecovery.clear(key: recoveryKey)
-                offeredDraft = nil
+                if let copy = offered { ManuscriptSketchRecovery.clear(key: copy.key) }
+                // A new sketch may have more than one left behind: one at a time.
+                offered = ManuscriptSketchRecovery.offer(for: opening)
             }
-            // Decide later: the pad closes and the unfinished drawing is kept.
+            // Decide later: the pad closes and the unsaved sketch is kept.
             Button("Cancel", role: .cancel) { dismiss() }
         } message: {
-            Text("It was left open last time.")
+            Text("It wasn't saved last time.")
         }
         .confirmationDialog("Discard this sketch?", isPresented: $confirmDiscard, titleVisibility: .visible) {
-            Button(existing == nil ? "Discard Sketch" : "Discard Changes", role: .destructive) { close() }
+            Button(existing == nil ? "Discard Sketch" : "Discard Changes", role: .destructive) { leaveWithoutSaving() }
             Button("Keep Drawing", role: .cancel) { }
         }
         .alert("The sketch couldn't be saved.", isPresented: $saveFailed) {
@@ -283,14 +289,15 @@ struct ManuscriptPadView: View {
     }
 
     private func keepNow() {
-        guard let paper, hasChanges, offeredDraft == nil else { return }
-        ManuscriptSketchRecovery.keep(ManuscriptSketch(paper: paper, drawing: drawing), key: recoveryKey)
+        guard let paper, hasChanges, offered == nil else { return }
+        ManuscriptSketchRecovery.keep(ManuscriptSketch(paper: paper, drawing: drawing), key: opening.key, attachment: opening.attachment)
     }
 
-    /// Leaving on purpose (saved, or discarded): nothing is left to offer back.
-    private func close() {
+    /// Cancel, or a confirmed discard: the work drawn in this pad is dropped.
+    /// A sketch the editor already holds keeps the copy of what it holds.
+    private func leaveWithoutSaving() {
         keepTask?.cancel()
-        ManuscriptSketchRecovery.clear(key: recoveryKey)
+        if hasChanges { ManuscriptSketchRecovery.leftWithoutSaving(opening: opening, heldSketch: existing) }
         dismiss()
     }
 
@@ -299,7 +306,7 @@ struct ManuscriptPadView: View {
     private var topBar: some View {
         HStack {
             Button("Cancel") {
-                if hasChanges { confirmDiscard = true } else { close() }
+                if hasChanges { confirmDiscard = true } else { leaveWithoutSaving() }
             }
             .foregroundStyle(.primary)
             Spacer()
@@ -310,7 +317,7 @@ struct ManuscriptPadView: View {
             Button("Save") { save() }
                 .fontWeight(.semibold)
                 .tint(Theme.Colors.primaryAction)
-                .disabled(paper == nil || !hasChanges || offeredDraft != nil)
+                .disabled(paper == nil || !hasChanges || offered != nil)
         }
         .font(Theme.Text.body)
         .padding(.horizontal, Theme.Spacing.l)
@@ -381,11 +388,19 @@ struct ManuscriptPadView: View {
 
     private func save() {
         guard let paper else { return }
+        let sketch = ManuscriptSketch(paper: paper, drawing: drawing)
         do {
-            let file = try ManuscriptSketchFile.writeVerified(ManuscriptSketch(paper: paper, drawing: drawing))
+            let file = try ManuscriptSketchFile.writeVerified(sketch)
             defer { try? FileManager.default.removeItem(at: file) }
-            try onSave(try Data(contentsOf: file))
-            close()
+            let data = try Data(contentsOf: file)
+            keepTask?.cancel()
+            // The copy is NOT removed here. The editor holds the finished
+            // sketch only in memory until the entry is saved, so the copy
+            // stays, marked as handed over, and the editor removes it once
+            // that save is durable (or the person discards the work).
+            ManuscriptSketchRecovery.handOver(sketch, opening: opening)
+            try onSave(data, opening.key)
+            dismiss()
         } catch {
             // The recovery copy stays: the drawing is not lost with the failed save.
             saveFailed = true

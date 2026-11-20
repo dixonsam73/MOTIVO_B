@@ -53,6 +53,7 @@ struct AESVSketchEditRequest: Identifiable {
     /// The attachment's id.
     let id: UUID
     let sketch: ManuscriptSketch
+    let recovery: ManuscriptSketchRecovery.Opening
 }
 
 struct AESVScorePageSelection {
@@ -358,7 +359,8 @@ extension AddEditSessionView {
         return try? Data(contentsOf: url)
     }
 
-    func stageData(_ data: Data, kind: AttachmentKind, displayName: String? = nil, sourceFormat: MediaFormat? = nil) {
+    @discardableResult
+    func stageData(_ data: Data, kind: AttachmentKind, displayName: String? = nil, sourceFormat: MediaFormat? = nil) -> UUID {
         let id = UUID()
         // For staged videos (e.g. imported from the photo library), write a temporary
         // surrogate file so that VideoPosterView can resolve a real URL and generate
@@ -390,17 +392,29 @@ extension AddEditSessionView {
         }
 
         // No auto-thumbnail: thumbnail is set only via explicit user intent (⭐).
+        return id
     }
 
     // MARK: Manuscript sketches
 
     func openSketchForEditing_AESV(_ att: StagedAttachment) {
+        let saved = existingAttachmentIDs.contains(att.id)
+        // A sketch this editor already holds from the pad keeps its copy. A
+        // saved one has one copy per attachment, so an edit lost when the app
+        // stopped is found again here. Anything else starts a copy of its own.
+        let heldKey = sketchRecovery_AESV.key(for: att.id)
+        let recovery = ManuscriptSketchRecovery.Opening.reopening(
+            key: heldKey ?? (saved ? ManuscriptSketchRecovery.key(forSaved: att.id) : ManuscriptSketchRecovery.newKey()),
+            attachment: saved ? att.id : nil,
+            held: heldKey != nil)
         do {
-            if existingAttachmentIDs.contains(att.id), let url = existingAttachmentURLMap[att.id] {
-                sketchEdit_AESV = AESVSketchEditRequest(id: att.id, sketch: try ManuscriptSketchFile.read(url))
+            let sketch: ManuscriptSketch
+            if saved, let url = existingAttachmentURLMap[att.id] {
+                sketch = try ManuscriptSketchFile.read(url)
             } else {
-                sketchEdit_AESV = AESVSketchEditRequest(id: att.id, sketch: try ManuscriptSketchFile.read(data: att.data))
+                sketch = try ManuscriptSketchFile.read(data: att.data)
             }
+            sketchEdit_AESV = AESVSketchEditRequest(id: att.id, sketch: sketch, recovery: recovery)
         } catch {
             consentState.present(notice: "This sketch can't be opened for editing.")
         }
@@ -436,6 +450,8 @@ extension AddEditSessionView {
     }
 
     func removeStagedAttachment(_ a: StagedAttachment) {
+        // A sketch removed here is discarded on purpose: no copy is kept to offer back.
+        sketchRecovery_AESV.discarded(a.id)
         PDFSelectedPagesStore.setPages(nil, for: a.id)
         // If this staged item corresponds to an existing Core Data Attachment, mark it for deletion on save.
         if existingAttachmentIDs.contains(a.id) {
@@ -879,6 +895,8 @@ extension AddEditSessionView {
         cleanupAllTempArtifacts_AESV_bestEffort()
         // A saved sketch edited here and not saved: its previous file stands.
         settleReplacedSketches_AESV(saved: false)
+        // Leaving without saving discards this editor's unsaved sketches.
+        sketchRecovery_AESV.editorCancelled()
         dismiss()
     }
 
