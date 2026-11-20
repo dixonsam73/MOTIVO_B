@@ -441,21 +441,30 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      edit is placed beside it, the entry's save repoints the record, and
      only then does the old file go; Cancel removes the new file instead
      (`ManuscriptSketchEdits`).
-     *Unfinished work:* the drawing is kept on the device while the pad is
-     open and offered back if the pad was not left on purpose
-     (`ManuscriptSketchRecovery`; never synced or backed up, removed by
-     Erase).
+     *Unfinished work:* each sketch has its own copy on the device, written
+     while the pad is open and kept after the pad's Save until the entry
+     itself is saved (the finished sketch is only in the editor's memory
+     until then; Codex's finding, corrected 2026-11-20). It goes when the
+     entry's save is durable or the work is discarded (in the pad, by
+     removing the tile, or by leaving the editor without saving), and is
+     offered back otherwise (`ManuscriptSketchRecovery`; never synced or
+     backed up, removed by Erase). Known leftover: if the app stops after
+     an edit of a saved sketch is saved in the pad and before the entry is
+     saved, the edit is recovered but the file placed before the stop
+     stays in Documents, named by no record.
      *Checked:* on the iPad and iPhone simulators by finger, a new sketch,
      reopening and editing a saved one (the files and the saved record
      read on disk at each step), and recovery after the app was killed,
-     for a saved sketch and for a new one; `ManuscriptSketchFileTests`
-     (22); the full unit run shows the seven known order-dependent
+     for a saved sketch and for a new one, and after it was killed between
+     the pad's Save and the entry's; `ManuscriptSketchFileTests` (27); the full unit run shows the seven known order-dependent
      failures and no other. **Not checked: a device, a Pencil, or writing a few bars to
      judge staff spacing and pen widths; the layout approval does not cover
      these.** On an iPhone the whole page shows at first and the staves are
      small until zoomed.
-     *Next:* one focused Codex review of the clean sharing copy, the save
-     order above and the preservation tests; then the Journal and editor
+     *Review:* Codex's focused review (2026-11-20) found no blocker in the
+     clean sharing routes or the save order, and the recovery gap above.
+     *Next:* a check of that correction; Samuel's first device session
+     with a Pencil on the iPad (Études Dev); then the Journal and editor
      iPad adaptations.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
