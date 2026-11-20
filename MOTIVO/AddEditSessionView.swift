@@ -302,6 +302,7 @@ struct AddEditSessionView: View {
     @State var scorePageSelectionRequest_AESV: PDFPageSelectionRequest? = nil
     @State var attachmentTitlesRefreshTick: Int = 0
     @State var showScoreAttachLibrary: Bool = false
+    @State var showSketchPad: Bool = false
     @State var attachedScoreIDs_AESV: [UUID] = []
     @State var scorePageSelections_AESV: [UUID: AESVScorePageSelection] = [:]
     @State var existingScoreAttachmentIDsByScoreID_AESV: [UUID: UUID] = [:]
@@ -813,6 +814,12 @@ struct AddEditSessionView: View {
             }
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: AttachmentImportPolicy.importerContentTypes, allowsMultipleSelection: true, onCompletion: handleFileImport)
+        .fullScreenCover(isPresented: $showSketchPad) {
+            // A finished sketch is staged like an imported PDF; it carries its own drawing.
+            ManuscriptPadView { data in
+                stageData(data, kind: .pdf, displayName: "Sketch")
+            }
+        }
         .sheet(isPresented: $showScoreAttachLibrary) {
             ScoresLibraryView(
                 mode: .attach,
@@ -1805,6 +1812,24 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                             }
                         }
                         .accessibilityLabel("Attach score")
+                        .contentShape(Circle())
+                        .buttonStyle(.plain)
+                        .tint(.accentColor)
+
+                        Button(action: { showSketchPad = true }) {
+                            ZStack {
+                                Image(systemName: "pencil.and.scribble")
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .foregroundColor(Color(red: 0.38, green: 0.48, blue: 0.62))
+                                    .frame(width: 56, height: 56)
+                                    .background(
+                                        Circle()
+                                            .fill(Color.secondary.opacity(0.18))
+                                            .frame(width: 64, height: 64)
+                                    )
+                            }
+                        }
+                        .accessibilityLabel("Add manuscript sketch")
                         .contentShape(Circle())
                         .buttonStyle(.plain)
                         .tint(.accentColor)

@@ -24,6 +24,7 @@
 
 import Foundation
 import CoreGraphics
+import CoreText
 import PencilKit
 #if canImport(UIKit)
 import UIKit
@@ -111,18 +112,10 @@ enum ManuscriptSketchFile {
     private static func drawPage(paper: ManuscriptPaper, drawing: PKDrawing, in context: CGContext) {
         let size = ManuscriptPaper.pageSize
         context.saveGState()
-        // PDF space starts bottom-left; the pad and the staves count from the top.
+        // PDF space starts bottom-left; the pad and the paper count from the top.
         context.translateBy(x: 0, y: size.height)
         context.scaleBy(x: 1, y: -1)
-        context.setFillColor(CGColor(gray: 1, alpha: 1))
-        context.fill(CGRect(origin: .zero, size: size))
-        context.setStrokeColor(CGColor(gray: 0.25, alpha: 1))
-        context.setLineWidth(0.6)
-        for y in staffLineOffsets(for: paper) {
-            context.move(to: CGPoint(x: 48, y: y))
-            context.addLine(to: CGPoint(x: size.width - 48, y: y))
-        }
-        context.strokePath()
+        ManuscriptPaperRenderer.draw(paper, in: context)
         #if canImport(UIKit)
         if !drawing.strokes.isEmpty {
             var image: UIImage?
@@ -142,22 +135,6 @@ enum ManuscriptSketchFile {
 
     /// Pixels per point for the ink in the PDF.
     static let inkScale: CGFloat = 2
-
-    /// Distances from the top of the page to each staff line. Printed clefs
-    /// and braces are part of the paper and are drawn with it once their
-    /// source is settled; the positions here do not move when they arrive.
-    static func staffLineOffsets(for paper: ManuscriptPaper) -> [CGFloat] {
-        let lineGap: CGFloat = 7
-        func staff(top: CGFloat) -> [CGFloat] { (0..<5).map { top + CGFloat($0) * lineGap } }
-        switch paper.kind {
-        case .plain:
-            return []
-        case .singleStaff:
-            return stride(from: CGFloat(72), through: 842 - 72 - 4 * lineGap, by: 70).flatMap(staff)
-        case .piano:
-            return stride(from: CGFloat(72), through: 842 - 72 - 90, by: 130).flatMap { staff(top: $0) + staff(top: $0 + 62) }
-        }
-    }
 
     // MARK: Read
 
@@ -297,5 +274,112 @@ enum ManuscriptSketchFile {
         do { text = try metadata(of: url) } catch { return false }
         if let text, text.contains(openTag) || text.contains(namespace) { return false }
         return bytes.range(of: Data(namespace.utf8)) == nil && bytes.range(of: Data(openTag.utf8)) == nil
+    }
+}
+
+/// The printed paper: staff lines, clefs and the piano brace. One drawing
+/// routine for the pad and for the PDF, so what is drawn on is what is saved.
+/// Fixed positions: the screen changes the view, never the staves.
+enum ManuscriptPaperRenderer {
+    static let inset: CGFloat = 48
+    static let lineGap: CGFloat = 7
+    private static var staffHeight: CGFloat { lineGap * 4 }
+
+    struct Staff: Equatable {
+        let top: CGFloat
+        let clef: ManuscriptPaper.Clef
+    }
+
+    /// Every staff on the page, from the top, with the clef printed on it.
+    static func staves(for paper: ManuscriptPaper) -> [Staff] {
+        let height = ManuscriptPaper.pageSize.height
+        switch paper.kind {
+        case .plain:
+            return []
+        case .singleStaff:
+            return stride(from: CGFloat(72), through: height - 72 - staffHeight, by: 70).map { Staff(top: $0, clef: paper.clef) }
+        case .piano:
+            return stride(from: CGFloat(72), through: height - 72 - 62 - staffHeight, by: 130).flatMap {
+                [Staff(top: $0, clef: .treble), Staff(top: $0 + 62, clef: .bass)]
+            }
+        }
+    }
+
+    /// Draws into a context whose origin is the page's top-left corner, y down.
+    static func draw(_ paper: ManuscriptPaper, in context: CGContext) {
+        let size = ManuscriptPaper.pageSize
+        let all = staves(for: paper)
+        context.saveGState()
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(origin: .zero, size: size))
+        context.setStrokeColor(CGColor(gray: 0.25, alpha: 1))
+        context.setLineWidth(0.6)
+        for staff in all {
+            for line in 0..<5 {
+                let y = staff.top + CGFloat(line) * lineGap
+                context.move(to: CGPoint(x: inset, y: y))
+                context.addLine(to: CGPoint(x: size.width - inset, y: y))
+            }
+        }
+        if paper.kind == .piano {
+            // Each pair is one system: joined at the left, with a brace.
+            for index in stride(from: 0, to: all.count - 1, by: 2) {
+                let top = all[index].top, bottom = all[index + 1].top + staffHeight
+                context.move(to: CGPoint(x: inset, y: top))
+                context.addLine(to: CGPoint(x: inset, y: bottom))
+                context.addPath(bracePath(top: top, bottom: bottom))
+            }
+        }
+        context.strokePath()
+        context.setFillColor(CGColor(gray: 0.2, alpha: 1))
+        for staff in all {
+            if let clef = clefPath(staff.clef, staffTop: staff.top) {
+                context.addPath(clef)
+                context.fillPath()
+            }
+        }
+        context.restoreGState()
+    }
+
+    private static func bracePath(top: CGFloat, bottom: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        let x = inset - 4, half = x - 4, tip = x - 8
+        let middle = (top + bottom) / 2, bend = (bottom - top) * 0.1
+        path.move(to: CGPoint(x: x, y: top))
+        path.addQuadCurve(to: CGPoint(x: half, y: top + bend), control: CGPoint(x: half, y: top))
+        path.addLine(to: CGPoint(x: half, y: middle - bend))
+        path.addQuadCurve(to: CGPoint(x: tip, y: middle), control: CGPoint(x: half, y: middle))
+        path.addQuadCurve(to: CGPoint(x: half, y: middle + bend), control: CGPoint(x: half, y: middle))
+        path.addLine(to: CGPoint(x: half, y: bottom - bend))
+        path.addQuadCurve(to: CGPoint(x: x, y: bottom), control: CGPoint(x: half, y: bottom))
+        return path
+    }
+
+    /// The clef's outline from the system's own music symbols, placed on its
+    /// staff. Nil for "no clef", or if the system has no such symbol.
+    static func clefPath(_ clef: ManuscriptPaper.Clef, staffTop: CGFloat) -> CGPath? {
+        let scalar: UInt32, height: CGFloat, above: CGFloat
+        switch clef {
+        case .none: return nil
+        case .treble: scalar = 0x1D11E; height = lineGap * 7.4; above = lineGap * 1.7
+        case .bass: scalar = 0x1D122; height = lineGap * 3.3; above = 0
+        case .alto: scalar = 0x1D121; height = staffHeight; above = 0
+        }
+        guard let unicode = UnicodeScalar(scalar) else { return nil }
+        let text = String(unicode) as NSString
+        let base = CTFontCreateWithName("AppleSymbols" as CFString, 40, nil)
+        let font = CTFontCreateForString(base, text, CFRange(location: 0, length: text.length))
+        guard (CTFontCopyPostScriptName(font) as String) != "LastResort" else { return nil }
+        var characters = Array((text as String).utf16)
+        var glyphs = [CGGlyph](repeating: 0, count: characters.count)
+        guard CTFontGetGlyphsForCharacters(font, &characters, &glyphs, characters.count),
+              let outline = CTFontCreatePathForGlyph(font, glyphs[0], nil) else { return nil }
+        let box = outline.boundingBoxOfPath
+        guard box.height > 0 else { return nil }
+        let scale = height / box.height
+        // A glyph's outline counts upwards; the page counts down.
+        var place = CGAffineTransform(translationX: inset + 6 - box.minX * scale, y: staffTop - above + box.maxY * scale)
+            .scaledBy(x: scale, y: -scale)
+        return outline.copy(using: &place)
     }
 }

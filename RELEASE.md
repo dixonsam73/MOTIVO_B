@@ -426,7 +426,17 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      unfinished work, and the clef glyph source (paths, or a bundled OFL
      font).
   4. Manuscript completed in the entry editor, alongside the Journal and
-     editor iPad adaptations.
+     editor iPad adaptations. **In progress.** Built 2026-11-20: the pad
+     (`ManuscriptPadView.swift`: paper chooser, pen in three widths,
+     eraser, undo and redo, two fingers to move and zoom, Save and a
+     confirmed discard) and a fourth button in the editor's attachments
+     that opens it; a finished sketch is staged like an imported PDF.
+     The clefs come from the system's own music symbols, so no font is
+     bundled. Seen on the iPad simulator by finger; **the pad's look
+     awaits Samuel's sign-off**. Still to do here: reopening a saved
+     sketch to edit it ("Edit sketch" in the viewer, through `saveEdit`),
+     recovery of unfinished work, a Pencil on a device, and the Journal
+     and editor iPad adaptations.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode

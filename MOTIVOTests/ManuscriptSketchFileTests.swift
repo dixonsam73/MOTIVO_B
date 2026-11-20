@@ -197,6 +197,32 @@ final class ManuscriptSketchFileTests: XCTestCase {
         XCTAssertTrue(ManuscriptSketchFile.isClean(shareable.url))
     }
 
+    // MARK: The printed paper
+
+    func testEachPaperHasItsStavesAndClefs() {
+        let page = ManuscriptPaper.pageSize
+        XCTAssertTrue(ManuscriptPaperRenderer.staves(for: ManuscriptPaper(kind: .plain, clef: .none)).isEmpty)
+        let single = ManuscriptPaperRenderer.staves(for: ManuscriptPaper(kind: .singleStaff, clef: .alto))
+        XCTAssertEqual(single.count, 10)
+        XCTAssertTrue(single.allSatisfy { $0.clef == .alto })
+        let piano = ManuscriptPaperRenderer.staves(for: ManuscriptPaper(kind: .piano, clef: .none))
+        XCTAssertEqual(piano.count, 10, "five systems of two staves")
+        XCTAssertEqual(piano.map(\.clef), Array(repeating: [ManuscriptPaper.Clef.treble, .bass], count: 5).flatMap { $0 })
+        XCTAssertTrue((single + piano).allSatisfy { $0.top > 40 && $0.top + 28 < page.height - 40 }, "every staff is on the page")
+        // The clefs come from the system's music symbols and sit on their staff.
+        for clef in [ManuscriptPaper.Clef.treble, .bass, .alto] {
+            let box = ManuscriptPaperRenderer.clefPath(clef, staffTop: 200)?.boundingBoxOfPath
+            XCTAssertNotNil(box, "\(clef)")
+            if let box {
+                XCTAssertGreaterThan(box.minX, ManuscriptPaperRenderer.inset)
+                XCTAssertLessThan(box.maxX, ManuscriptPaperRenderer.inset + 40)
+                XCTAssertGreaterThan(box.minY, 200 - 20)
+                XCTAssertLessThan(box.maxY, 228 + 20)
+            }
+        }
+        XCTAssertNil(ManuscriptPaperRenderer.clefPath(.none, staffTop: 200))
+    }
+
     // MARK: 2. A failed or interrupted save keeps the previous sketch
 
     func testAnEditReplacesTheSketchAndTheOldFileGoes() throws {
