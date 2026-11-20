@@ -348,5 +348,30 @@ final class SyncTestStatusSummaryTests: XCTestCase {
         XCTAssertEqual(JournalSyncStatusSummary.derive(facts, now: now).detail,
                        "Everything on this device is in iCloud. Last checked \(f.string(from: facts.lastFetchAt!)).")
     }
+
+    // MARK: the set-up screen's card while sync is refused
+
+    /// The engine's reason is never shown on the set-up screen. These are the
+    /// reasons `JournalAccountGuard` really gives, so a reworded reason that
+    /// no longer matches its marker fails here.
+    func testThePausedSetUpCardSaysEachCaseInPlainWords() {
+        func reason(bound: String?, current: String?) -> String {
+            JournalAccountGuard.decide(bound: bound, current: current, unlinked: false,
+                                       localRemovalInProgress: false, localCopyRemoved: false).reason ?? ""
+        }
+        let checking = reason(bound: nil, current: nil)
+        let signedOut = reason(bound: "_a", current: nil)
+        let otherAccount = reason(bound: "_a", current: "_b")
+        XCTAssertEqual(SyncTestRestoreCard.pausedCopy(reason: checking).title, "Checking iCloud…")
+        XCTAssertEqual(SyncTestRestoreCard.pausedCopy(reason: signedOut).title, "Signed out of iCloud")
+        XCTAssertEqual(SyncTestRestoreCard.pausedCopy(reason: otherAccount).title, "Different iCloud account")
+        XCTAssertEqual(SyncTestRestoreCard.pausedCopy(reason: "Server zone deleted for a trial reset; uninstall this app next").title, "iCloud not available")
+        for r in [checking, signedOut, otherAccount, "Anything else the engine says"] {
+            XCTAssertFalse(r.isEmpty)
+            let copy = SyncTestRestoreCard.pausedCopy(reason: r)
+            XCTAssertFalse(copy.text.contains(r), "the engine's wording must not reach the set-up screen")
+            XCTAssertTrue(copy.text.contains("set up now"), "every version says set-up can go ahead")
+        }
+    }
 }
 #endif

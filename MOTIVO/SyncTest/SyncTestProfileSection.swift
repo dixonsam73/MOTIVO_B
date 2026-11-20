@@ -195,9 +195,8 @@ struct SyncTestRestoreCard: View {
                     Task { await JournalSyncCoordinator.shared.engine?.fetchNow(); acted() }
                 }
             case (.waiting(let reason), .aboveName):
-                card("iCloud not available",
-                     "Sync is paused: \(reason). You can set up now; your journal comes back when sync resumes.",
-                     button: nil) {}
+                let copy = Self.pausedCopy(reason: reason)
+                card(copy.title, copy.text, button: nil) {}
             case (.nothingFound, .aboveName):
                 card("Nothing to restore", "iCloud holds no profile for this journal yet. Set up below.", button: nil) {}
             }
@@ -226,6 +225,23 @@ struct SyncTestRestoreCard: View {
         .background(Theme.Colors.surface(scheme))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
         .padding(.horizontal, Theme.Spacing.l)
+    }
+
+    /// What the card says while sync is refused. The engine's reason is its
+    /// own wording and is not shown here (the Profile status row and the
+    /// diagnostics keep it); it is sorted the way `JournalSyncStatusSummary`
+    /// sorts it, with the same markers.
+    static func pausedCopy(reason: String) -> (title: String, text: String) {
+        if reason.contains(JournalSyncStatusSummary.differentAccountMarker) {
+            return ("Different iCloud account", "Your journal is in another iCloud account. Sign in to that account in Settings, or set up now.")
+        }
+        if reason.hasPrefix(JournalSyncStatusSummary.signedOutMarker) {
+            return ("Signed out of iCloud", "Sign in to iCloud in Settings to bring your journal here, or set up now.")
+        }
+        if reason.hasPrefix(JournalSyncStatusSummary.waitingMarker) {
+            return ("Checking iCloud…", "You can set up now. Your journal comes back when iCloud is ready.")
+        }
+        return ("iCloud not available", "You can set up now. Your journal comes back when sync resumes.")
     }
 
     private func reloadSoon() { DispatchQueue.main.async(execute: reload) }
