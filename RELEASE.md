@@ -98,13 +98,35 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   server-verifiable form, so the server must trust the app's report.
 - [ ] **S — Fallback.** If the legal answer stalls, would you ship Solo first and
   add Connected in an update? (Solo has no user-to-user content.)
+- [ ] **S — Private sync available to the public at launch?** A separate
+  release decision, not implied by the iPad work or by the closure of the
+  sync implementation phase (section E, which lists the four
+  qualifications to weigh). Until it is taken, sync stays off by default
+  and TestFlight stays Internal Only. Without public sync a buyer has a
+  separate journal on each device, which the listing and first run would
+  have to say; with it, the policy text in
+  `docs/sync-trial/policy-drafts-icloud-sync.md` goes in.
+- [ ] **S — Manuscript: edit your own sketch on your other device at
+  launch?** Settle before the sketch's storage is built. A sketch is a
+  PDF plus the drawing data that lets the pad reopen it. The PDF is an
+  ordinary attachment, so with sync on it reaches your other devices and
+  can be viewed and shared there. Proposed launch default: the drawing
+  stays on the device that drew it, in the ordinary device backup. Then a
+  sketch drawn on the iPad can be seen on the iPhone but only continued on
+  the iPad, and a device restored through sync without a device backup
+  keeps the PDF but can no longer reopen it as ink. The alternative, the
+  drawing travelling with sync, needs a new synced field in the Production
+  schema and a rule for two devices editing one sketch; not built ahead
+  of this decision. Separate from sharing with another person, which
+  sends the PDF only and is not in question.
 - [x] **S — Pricing: decided 2026-10-09.** Études is a **paid download at
   £4.99** (pay once for what runs on the device; subscribe for what runs on
   the servers). Connected stays a subscription, and only works if you own the
   app, which a paid download guarantees with no code. Founding 500 is
-  unchanged. App upgrades (iPad, Pencil sketching) are included for owners,
-  but launch marketing doesn't mention them (decided 2026-10-09): announce it
-  when an upgrade ships, and never say "free forever". No
+  unchanged. iPad and the manuscript sketch are now part of the launch
+  (2026-11-20). Later app upgrades (score markup, say) are included for
+  owners, but launch marketing doesn't mention them (decided 2026-10-09):
+  announce it when an upgrade ships, and never say "free forever". No
   "first N downloads free": give promo codes deliberately instead (beta
   testers, teachers, a few reviewers). Fallback if paid downloads look weak:
   free download, trial, then a one-time unlock (£6.99 considered), which is a
@@ -333,18 +355,119 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   the unfolded screen (capped width, centred, nothing stretched) and check
   the vertical tab and tool bars the 27.1 SDK brings. Test folding and
   unfolding with the timer running and during a recording. This is iPhone
-  compatibility, not iPad work; the iPad adaptation (section E, under
-  consideration) would share it. Apple: [prepare](https://developer.apple.com/iphone-duo/prepare/),
+  compatibility, not iPad work; the iPad adaptation ("iPad and the
+  manuscript sketch at launch", below) shares it. Apple: [prepare](https://developer.apple.com/iphone-duo/prepare/),
   [submission news, 5 Oct 2026](https://developer.apple.com/news/?id=kkphp5qo).
   **Progress 2026-10-18:** the flagged patterns are fixed without Xcode 27.1:
   sizing now follows the app's window (`WindowMetrics`), not the screen, and
   `MediaTrimView` uses the compact height size class instead of the device
   kind. The capture orientation reads only set recording rotation, so they
   stay. On iPhone the window is the screen (checked on the simulator by
-  `WindowMetricsTests`), so the iPhone layout is unchanged. **Left:** install
-  Xcode 27.1 (beta since 18 September; Samuel downloads it), build with the
-  27.1 SDK, run Apple's Duo check and the Duo simulator, then the unfolded
-  layout and fold/unfold tests above.
+  `WindowMetricsTests`), so the iPhone layout is unchanged. **Left:** the
+  SDK baseline (next item), then Apple's Duo check and the Duo simulator,
+  then the unfolded layout and fold/unfold tests above.
+- [ ] **A + S — SDK baseline** (early, and its own change; 2026-11-20).
+  From April 2027 an upload must be built with the iOS 27 SDK or later
+  (App Store Connect warned at the build 1949 upload, built with the iOS
+  26.5 SDK), and the iPad and Duo layouts should be judged on the SDK that
+  ships. Move the project to a stable Xcode 27 release whose SDK covers
+  the devices we must support. The Duo simulator came with 27.1, which is
+  the only reason to prefer that version; 27.0 is installed as
+  `Xcode-27.app` and its trial build was clean (2026-09-26, below). Full
+  test run on both schemes; the deployment target stays iOS 26.4. One sync
+  check, because C-174's trap is an assertion inside CloudKit: a fresh
+  join on Sync Test installs (Device A and the iPad, trial container).
+  The iPad survey and the manuscript spike do not wait for this.
+- [ ] **A + S — iPad and the manuscript sketch at launch** (decided
+  2026-11-20; replaces "iPad before launch: under consideration" of
+  2026-10-16). Today the app target is iPhone-only in every configuration
+  (`TARGETED_DEVICE_FAMILY = 1`) and an iPad runs it in compatibility
+  mode, which is how the sync trial used one.
+  **Scope, settled.** Preserve the existing appearance, navigation,
+  controls and behaviour: the work is spacing, sizing and adapting the
+  layout as sections open and close. Lists, attachments and the audio
+  recorder keep their buttons (tap to open, tap again to close). Pages are
+  adapted one at a time: agree the adaptations, implement, test the window
+  sizes and open/closed states, Samuel signs off, then the next page.
+  Every step keeps the iPhone experience unchanged. One app window. One
+  manuscript page. No sidebar, no new selector or replacement navigation,
+  no Journal list/detail redesign, no separate sketchbook, no ink revision
+  or history system, no prerequisite controller refactor. Timer in
+  landscape: the workspace direction is preferred, the arrangement worked
+  out in the app. Size in points, not by device: the unfolded Duo is the
+  wide case and the folded Duo the narrow one, so the Duo shares this
+  work; ink works by finger (no Pencil on Duo). The Scores library and
+  manuscript mock-ups (reviewed with Codex, 2026-10-16) are design
+  references, not specifications. Score markup and additional manuscript
+  pages are after launch (section E).
+  **Order.**
+  1. Native iPad in Debug only (`TARGETED_DEVICE_FAMILY` is per
+     configuration; Release and Sync Test stay `1`), and a short survey of
+     every page at full and narrow window sizes, written here as a short
+     per-page list.
+  2. The SDK baseline (previous item), separately. Steps 1 and 3 do not
+     wait for it.
+  3. Manuscript spike: a feasibility check, not an architecture project.
+     The paper drawn, the pad, PDF export, and one small save → reopen →
+     edit → recover flow carrying the paper settings, the editable
+     drawing, the PDF and the staged-to-final attachment id migration. It
+     also settles the clef glyph source (paths, or a bundled OFL font).
+  4. Manuscript completed in the entry editor, alongside the Journal and
+     editor iPad adaptations.
+  5. Once the native shell and the sketch's save and re-edit path work:
+     native iPad in Sync Test, with two device checks that are not left
+     until every page is done. The install over a compatibility-mode
+     install keeps the journal and the sync state; and a sketch's PDF made
+     on one device arrives on the other, and its replacement after an edit
+     arrives once, with no duplicate.
+  6. Timer: consider the landscape arrangement early; build the sketch's
+     place in it once persistence works, reusing the existing
+     Thought/session hand-off (`TimerThoughtHandoff.swift`).
+  7. The remaining pages; native iPad in Release when ready; then the
+     release decisions (section A) and the final Internal Only TestFlight
+     QA (section D).
+  **Manuscript scope** (idea 2026-10-11; scope agreed 2026-10-16). Digital
+  manuscript paper with freehand drawing, finger or Pencil; no
+  recognition, engraving, playback or symbol editing. Paper, chosen before
+  drawing: single staff with printed treble, bass, alto or no clef; piano
+  (paired staves, clefs and braces printed); plain. Printed clefs are part
+  of the paper, not a symbol palette. Controls: pen with a few
+  thicknesses, eraser, undo/redo, zoom/pan, save/discard, recovery of
+  unfinished work. Fixed page size and staff positions; screen size and
+  orientation change the view, never the staves. A sketch button on the
+  timer page opens the pad without starting the timer; a sketch is a
+  **fourth staged kind** (`StagingStore` knows audio, video and image) in
+  the existing hand-off: Save Thought before the timer starts, absorbed
+  into the session if the timer is started, a normal session attachment
+  during a session. Saved Thoughts are never absorbed by a later Start
+  (true today; pin with a test). Output is a PDF (`AttachmentKind.pdf`
+  already flows through editor, viewer, journal rows, sharing and sync)
+  with the editable `PKDrawing` kept beside it, keyed by attachment id,
+  which must follow the editor's staged-to-final id migration; reopening
+  and editing regenerates the PDF and thumbnail. Sharing a viewable PDF
+  with other people is enough; exchanging editable sketches is out of
+  scope. Where the editable drawing lives is the open decision in section
+  A, to settle before the storage is built; no editable-drawing sync or
+  new CloudKit schema is added ahead of it.
+  **Design consideration, not an approved layout (2026-10-11):** when
+  manuscript capture arrives, reassess PTV's capture controls together
+  rather than adding another row. Consider a stave/pen or treble-clef
+  launch icon, clearly distinct from the musical-note session-setup
+  control, and direct access to written thoughts alongside audio, video
+  and manuscript.
+  **Checks.** Regression checks are chosen by the behaviour changed;
+  touching the project file or a sync screen does not by itself call for a
+  sync trial. Sync implementation is closed after build 1949 (section E):
+  no new audit and no repeated full trial without a concrete new defect
+  that this work causes or exposes. The Profile and set-up changes made
+  after 1949 (the confirmation and Cancel when sync is turned on, the
+  set-up action moved to the foot, the shortened copy) get a short device
+  check at the next Profile or set-up checkpoint, not at final QA. iPad
+  work does not make sync public: it stays off by default and Internal
+  Only, and public availability is a separate decision (section A).
+  **Estimates** from 2026-10-16 (9.5–13.5 agent-weeks for iPad with markup
+  and manuscript and no sync; manuscript about 3–4 of them) are
+  provisional. Reassess after steps 1 and 3.
 - [x] **A + S — iOS 27 compatibility check** (iOS 27 public 2026-09-26).
   S: update one test device to iOS 27 and run the practice tools, a
   recording, playback, and a Connected purchase and sign-in on the current
@@ -451,6 +574,9 @@ the join.
 - [ ] Erase All on a disposable install (never Device B).
 - [ ] Backup and restore on one device: journal, Scores and media survive.
 - [ ] Smoke test: recording, tuner, metronome, Lists, playback speed.
+- [ ] iPad (native TestFlight build): the rows above that differ by
+  device (join and purchase, recorders, the smoke test at a narrow
+  window), and a manuscript sketch by Pencil and by finger.
 - [ ] Adult-only gate: `docs/qa-plan.md` Group AG on Device A (Release,
   Sandbox Apple Account), including AG0's cache-trap probe and the refusal
   count arithmetic.
@@ -516,44 +642,7 @@ the join.
 - G7: first real expiry cleanup, earliest 2026-11-01, happens on its own.
 - Gate 6 part 3: production grant at the first real subscription.
 - B-34 (shadow telemetry blind to denied writes). Observability only.
-- Invitations, iPad (with Pencil markup and sketchpad, plus private iCloud sync; agreed plan in `docs/architecture.md`, "iPad and private sync"), recorder R1 diagnostics.
-- **iPad before launch: under consideration, not decided (2026-10-16).** The
-  option being weighed is independent iPhone and iPad versions at launch
-  (markup and manuscript sketches on both, no sync, the separation disclosed
-  before purchase and on first run), estimated at 9.5–13.5 agent-weeks and
-  about 3½–5 months elapsed against 3–6 weeks for iPhone first. No
-  implementation is authorised. Decisions already taken for the iPad work,
-  whenever it happens:
-  - **Preserve the existing appearance, navigation, controls and behaviour.**
-    The work is spacing, sizing and adapting the layout as sections open and
-    close. Lists, attachments and the audio recorder keep their buttons (tap
-    to open, tap again to close). No sidebar, no new selector, no replacement
-    navigation. **The Journal list/detail redesign is not approved.**
-  - **Timer in landscape: workspace direction preferred**, exact arrangement
-    to be worked out in the app.
-  - **One page at a time:** agree its adaptations, implement, test the
-    relevant window sizes and open/closed states, refine, Samuel signs off,
-    then the next page. Every step keeps the iPhone experience unchanged.
-    Build setting to make this safe: the app target's
-    `TARGETED_DEVICE_FAMILY` is per configuration, so Debug can be `1,2`
-    while pages are adapted and Release stays `1` until the last page is
-    signed off.
-  - **The Duo shares this work.** The unfolded Duo is the wide case and the
-    folded Duo the narrow one; both are near-square or small, so size in
-    points, not by device. Ink works by finger (no Pencil on Duo).
-  - The Scores library and manuscript mock-ups (reviewed with Codex,
-    2026-10-16) are design references, not specifications.
-  - **Minimal preparation for a future merge of two journals:** a persisted
-    install id; sketch and ink records carry their UUID, install id, created
-    and modified dates, and (for ink) the score UUID, page and a SHA-256 of
-    the PDF at first save. Merge policy, if it comes: union, de-duplicate
-    only by normalised name or identical hash, **keep both** of anything
-    ambiguous (two ink layers named by device and date), never infer
-    deletions. No Core Data or sync work before launch.
-  - **If option 2 is chosen, revise:** the "one journal from the first iPad
-    release" requirement and "iPhone shows ink read-only" in
-    `docs/architecture.md`; the privacy policy's "stays on the iPhone"; the
-    App Store description; an iPad first-run notice; M13/M14 in `CLAUDE.md`.
+- Invitations, recorder R1 diagnostics.
 - **Private sync trial, Checkpoint 1: passed 2026-10-18.** Separate "Études
   Sync Test" installs (`SyncTest` configuration, bundle id
   `com.samueldixon.motivo.synctest`, development container
@@ -2826,9 +2915,14 @@ the join.
   full trial). Completed reviews stay closed. **Closure is not approval to
   distribute more widely:** sync stays off by default and TestFlight stays
   Internal Only until Samuel decides otherwise. Kept for that decision:
-  (1) *Wording.* Four commits after 1949 changed only sync copy and layout
-  (`16e297d`, `151859b`, `9570d7d`, `7257914`): approved by Samuel, seen on
-  the simulator only, in no build. The Displaced by sync screen's wording
+  (1) *Profile and set-up changes after 1949.* Four commits (`16e297d`,
+  `151859b`, `9570d7d`, `7257914`) shortened the sync copy, added a
+  one-time confirmation with Cancel when sync is turned on, show
+  "Displaced by sync" only when it has items, and moved the first-time
+  sync offer to a link at the foot of set-up: approved by Samuel, seen on
+  the simulator only, in no build. They get a short device check at the
+  next Profile or set-up checkpoint (section B, the iPad item's
+  "Checks"). The Displaced by sync screen's wording
   was left as it is. The app no longer says sync is optional or what stays
   in iCloud after it is turned off; only the policy draft does
   (`docs/sync-trial/policy-drafts-icloud-sync.md`).
@@ -2850,11 +2944,6 @@ the join.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
-- **Move to Xcode 27 before April 2027.** App Store Connect warned at the
-  build 1949 upload (2026-11-19): it was built with the iOS 26.5 SDK, and
-  from April 2027 an upload must be built with the iOS 27 SDK or later.
-  Nothing changes until then. Do it as its own step, with the full test
-  run on both schemes; the deployment target need not move.
 - **Sampled cello drone** (agreed 2026-10-09; a good first update). A second
   drone sound beside the synth tone, driven by the same pitch, A4 reference
   and volume controls: a looped, crossfaded sampler in place of
@@ -2867,29 +2956,10 @@ the join.
   harmonics, or the option stops at the cello's range). Adds about 2–5 MB.
   New audio engine, so write a one-page scope first. Loop quality needs
   listening on a device. Copy mentions it only once it ships.
-- **Manuscript sketch as a Thought** (idea 2026-10-11; scope agreed
-  2026-10-16, about 3–4 agent-weeks for a single page, about 1 more for
-  additional pages). Digital manuscript paper with freehand drawing, finger
-  or Pencil; no recognition, engraving, playback or symbol editing. Paper,
-  chosen before drawing: single staff with printed treble, bass, alto or no
-  clef; piano (paired staves, clefs and braces printed); plain. Printed
-  clefs are part of the paper, not a symbol palette. Controls: pen with a few
-  thicknesses, eraser, undo/redo, zoom/pan, save/discard, recovery of
-  unfinished work. Fixed page size and staff positions; screen size and
-  orientation change the view, never the staves. A sketch button on the
-  timer page opens the pad without starting the timer; a sketch is a
-  **fourth staged kind** (`StagingStore` knows audio, video and image) in
-  the existing hand-off (`TimerThoughtHandoff.swift`): Save Thought before
-  the timer starts, absorbed into the session if the timer is started, a
-  normal session attachment during a session. Saved Thoughts are never
-  absorbed by a later Start (true today; pin with a test). Output is a PDF
-  (`AttachmentKind.pdf` already flows through editor, viewer, journal rows
-  and sharing) with the editable `PKDrawing` kept as a sidecar keyed by
-  attachment id, which must follow the editor's staged-to-final id
-  migration; reopening and editing regenerates the PDF and thumbnail.
-  Sharing a viewable PDF is enough; exchanging editable sketches is out of
-  scope. No separate sketchbook screen.
-- **Score markup** (scope agreed 2026-10-16, about 2.5–3.5 agent-weeks).
+- **Additional manuscript pages** (after launch, decided 2026-11-20; about
+  1 agent-week in the 2026-10-16 estimate). Launch has one page per sketch.
+- **Score markup** (after launch, decided 2026-11-20; scope agreed
+  2026-10-16, about 2.5–3.5 agent-weeks).
   Draw and erase over PDFs in the Scores library through PDFKit's
   `PDFPageOverlayViewProvider` with a `PKCanvasView` per page on the
   existing single-page viewer; read-only until Markup is entered; Pencil
@@ -2899,13 +2969,7 @@ the join.
   source PDF is never altered. No revision history, per-session snapshots,
   score-first Practice or page turners. Open questions: the overlay's
   behaviour under single-page mode and autoscaling (a 2–3 day spike settles
-  it); clef glyph source for the sketch paper (paths, or a bundled OFL
-  font); exported ink is raster at a chosen scale.
-  **Design consideration, not an approved layout (2026-10-11):** when
-  manuscript capture arrives, reassess PTV's capture controls together rather
-  than adding another row. Consider a stave/pen or treble-clef launch icon,
-  clearly distinct from the musical-note session-setup control, and direct
-  access to written thoughts alongside audio, video and manuscript.
+  it); exported ink is raster at a chosen scale.
 - A suspended member lands in Solo with no explanation. Optional: a short
   "account suspended, contact support" message.
 - Block is per device. "Reply to all commenters" still fans out server-side to

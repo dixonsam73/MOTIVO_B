@@ -1,7 +1,8 @@
 # Études — Working Context
 
-iPhone app: a local-first journal for musicians, with an optional paid
-**Études Connected** social layer (Supabase + StoreKit 2 + Sign in with Apple).
+iPhone app, with native iPad planned for launch: a local-first journal for
+musicians, with an optional paid **Études Connected** social layer (Supabase +
+StoreKit 2 + Sign in with Apple).
 **Not yet publicly released.** Production holds only beta/test identities.
 
 - Branch `feature/solo-connected`. "MOTIVO" is the legacy name of the project,
@@ -103,7 +104,17 @@ in place; don't add a "CORRECTED" paragraph on top of it.
   whose sync is off is followed.
 - Founding 500 = Apple's one-year introductory offer on both products, withdrawn
   manually around 500. There is no custom grant mechanism.
-- M13 (iPad) and M14 (iCloud sync) are deliberately deferred.
+- **iPad and the manuscript sketch ship at launch** (decided 2026-11-20;
+  plan in `RELEASE.md` section B). The existing appearance, navigation and
+  behaviour are preserved; pages are adapted one at a time with Samuel's
+  sign-off. One app window, one manuscript page. No sidebar, separate
+  sketchbook, ink revision or history system, or prerequisite controller
+  refactor. Score markup and additional manuscript pages are after launch.
+- **Private iCloud sync is built; its implementation phase closed after
+  build 1949** (2026-11-20). Completed reviews stay closed: no new audit or
+  repeated full trial without a concrete new defect. It stays off by
+  default and Internal Only. Public availability is a separate release
+  decision, and iPad work does not imply it.
 
 ## Backend facts
 
@@ -142,7 +153,11 @@ xcodebuild -project MOTIVO.xcodeproj -scheme MOTIVO -configuration {Debug|Releas
 xcodebuild test -project MOTIVO.xcodeproj -scheme MOTIVO -only-testing:MOTIVOTests -destination '<simulator>'
 ```
 
-- iPhone only, deployment target **iOS 26.4**, for the whole app.
+- Deployment target **iOS 26.4**, for the whole app. The app target is
+  iPhone-only today (`TARGETED_DEVICE_FAMILY = 1` in every configuration);
+  an iPad runs it in compatibility mode. Native iPad is turned on one
+  configuration at a time: Debug first, then Sync Test, Release last
+  (`RELEASE.md` section B).
 - **Only Release can make purchases.** Debug's bundle id
   (`com.samueldixon.motivo.dev`) is unknown to App Store Connect, so products
   come back empty. The shared scheme's Run action **must stay Release with no
@@ -169,7 +184,7 @@ xcodebuild test -project MOTIVO.xcodeproj -scheme MOTIVO -only-testing:MOTIVOTes
   `SyncOffByDefaultTests` guards all of this. A new
   synced field must be added to the Production schema first
   (`docs/sync-trial/check_schema.py`). On TestFlight as an internal build since 2026-11-10
-  (build 1937 since 2026-11-13); not distributed more widely.
+  (build 1949 since 2026-11-19); not distributed more widely.
 
 ## Devices and Sandbox
 
@@ -177,6 +192,7 @@ xcodebuild test -project MOTIVO.xcodeproj -scheme MOTIVO -only-testing:MOTIVOTes
 |---|---|---|
 | Device A | iPhone 16e ("SD beta burner") | Release only |
 | Device B | iPhone 17 Pro ("SD iPhone") | Release **and** "Études Dev" (Debug) |
+| iPad | iPad Pro 11" M4 | Release (TestFlight) **and** "Études Sync Test" |
 
 - Any device QA step must name the device **and** the install.
 - **Never use Samuel's own Études Dev account/history for destructive tests.

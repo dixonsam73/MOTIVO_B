@@ -14,8 +14,9 @@ the details as revisable.
 
 ---
 
-Four domains. The boundaries are permanent; the engine for Domain 2 is deferred
-to M14, which ships with the iPad release (M13).
+Four domains. The boundaries are permanent. The engine for Domain 2 (private
+iCloud sync, `MOTIVO/SyncTest/`) is built, off by default and Internal Only;
+its status is in `RELEASE.md`.
 
 Governing test: **if nobody else can see it, it does not belong on Supabase.**
 
@@ -34,10 +35,10 @@ account, no network and no membership.
 
 **On membership expiry:** untouched. Permanently. The strongest invariant.
 
-**Roadmap:** M14 will sync this domain. The foundation it needs (Scores and
-the other UserDefaults-held library data in Core Data, stable asset identity
-instead of absolute paths, visibility independent of identity) ships first as an
-iPhone update. See *iPad and private sync* below.
+**Sync:** private iCloud sync mirrors this domain when the person turns it
+on. It was built in October and November 2026 with `CKSyncEngine` over the
+existing model, not on the Stage 1 foundation described under *iPad and
+private sync* below.
 
 **Visibility is not identity.** Which records appear in the journal must not
 depend on Connected sign-in, the Apple subject, subscription state or install
@@ -48,10 +49,10 @@ owner filtering from the local library and stops the re-owning.
 
 ---
 
-## Domain 2 — Personal cloud (future optional iCloud sync, M14)
+## Domain 2 — Personal cloud (optional private iCloud sync)
 
-**Contains:** a mirror of Domain 1 in the user's private iCloud database, on
-by default, media included. Device-local state stays out of it (see
+**Contains:** a mirror of Domain 1 in the user's private iCloud database, off
+until the person turns it on, media included. Device-local state stays out of it (see
 *iPad and private sync*, below).
 
 **Why:** continuity across the user's own devices. Not a sharing mechanism.
@@ -62,9 +63,12 @@ by default, media included. Device-local state stays out of it (see
 **On membership expiry:** entirely unaffected. No relationship to Connected. A
 user who never pays can use it. Durability is never gated on monetisation.
 
-**Roadmap:** M14 is released together with M13 (iPad). iPhone and iPad must
-present one coherent journal from the first public iPad release; a
-separate-device journal is not an acceptable product.
+**Status (2026-11-20):** built; the implementation phase closed after build
+1949. Off by default, TestFlight Internal Only. iPad ships at launch, and
+whether sync is available to the public at launch is a separate release
+decision, not taken (`RELEASE.md`, section A). The earlier requirement that
+iPhone and iPad present one coherent journal from the first public iPad
+release waits on that decision.
 
 **Durability model — three layers, not one. Settled in Phase 2.**
 
@@ -247,9 +251,9 @@ Apple's backup daemon copies** — only QA F1/F2 settle that.
 
 ---
 
-# Threads — future model (M13 foundation)
+# Threads — future model
 
-**Status: designed and agreed, parked until M13. Not M11 work.**
+**Status: designed and agreed, parked. Not part of the launch iPad work.**
 
 ## Today
 
@@ -257,8 +261,9 @@ Apple's backup daemon copies** — only QA F1/F2 settle that.
 some session carries that string; `ThreadPickerView` offers previously-used
 labels as suggestions. There is no Thread record, no identity, no lifecycle.
 Thoughts are Sessions, so they already carry `threadLabel` structurally.
-Handwritten pages do **not** land as Thoughts: they are Sketches, a separate
-object (see *iPad and private sync*).
+A manuscript sketch is a PDF attachment on a Thought or session (`RELEASE.md`,
+section B); the separate Sketch object in *iPad and private sync* is not being
+built.
 
 **Not part of the iPad/sync release.** A thread string on a Session syncs
 without a reconciliation problem, because it is just an attribute of a synced
@@ -430,33 +435,35 @@ a relationship rather than reading one that already exists.
 ## Timing
 
 Originally bundled into M13 with manuscript-pages-as-Thoughts and the sync
-groundwork. That bundle is superseded: sync groundwork is Stage 1 of the
-iPad/sync plan, manuscript pages are Sketches, and the entity conversion is not
-needed for sync. Scores ↔ Threads can use a normalised thread string on the
+groundwork. That bundle is superseded: sync was built without it, manuscript
+pages are PDF attachments, and the entity conversion is not needed for sync. Scores ↔ Threads can use a normalised thread string on the
 Score, per *Sequencing* above.
 
 ---
 
-# iPad and private sync — agreed plan (M13 + M14)
+# iPad and private sync — the 2026-09-24 plan (M13 + M14)
 
-**Status: design agreed 2026-09-24 (Samuel, with Claude and Codex reviews).
-Not started.** The object model, sequencing and sync decisions below are
-settled for whenever sync is built. The CloudKit media route is preferred,
-but it's conditional on the Stage 0 proof.
+**Status (2026-11-20): superseded in part, kept for its reasoning.** The
+design below was agreed on 2026-09-24 (Samuel, with Claude and Codex
+reviews). What happened since:
 
-**Revisions under consideration, 2026-10-16** (recorded in `RELEASE.md`,
-section E; nothing here is implemented): an iPad version before the iPhone
-release, with **no sync and a separate journal per device, disclosed**,
-which would revise the "one coherent journal from the first iPad release"
-requirement in Domain 2 and the "iPhone shows ink read-only" rule below.
-Decided already, whichever way that goes: the iPad work preserves the
-existing appearance, navigation, controls and behaviour (spacing, sizing and
-sections opening and closing), so the *Navigation* sidebar, People from
-Feed and the Journal list/detail arrangement below are **not approved**;
-markup and sketches ship without `InkRevision`, `InkSnapshot`,
-`SessionSketch`, score-first Practice or page turners (an editable live layer
-per page, a sidecar per sketch); and the `PracticeSessionController`
-extraction is not a prerequisite for either.
+- **Sync was built differently:** with `CKSyncEngine` over the existing
+  model (`MOTIVO/SyncTest/`; the record is in `RELEASE.md`), not with the
+  object model, the `NSPersistentCloudKitContainer` route or the stages
+  below. Its implementation phase closed after build 1949. It is off by
+  default and Internal Only, and public availability is a separate decision.
+- **iPad and a one-page manuscript sketch ship at launch** (decided
+  2026-11-20), on the plan in `RELEASE.md` section B, which governs. The
+  existing appearance, navigation, controls and behaviour are preserved
+  (spacing, sizing, and sections opening and closing), with one app window.
+  A sketch is a PDF attachment with its editable drawing kept beside it.
+- **Not being built:** the *Navigation* sidebar, People from Feed, the
+  Journal list/detail arrangement, score-first Practice, page turners, a
+  separate Sketches section, the Sketch, InkPage, InkRevision, InkSnapshot
+  and SessionSketch entities, the `PracticeSessionController` extraction as
+  a prerequisite, and the *Sequencing* stages. Score markup is after launch.
+- *Connected isolation* below is current (updated 2026-11-12). Elsewhere,
+  where this section differs from `RELEASE.md` or the code, they win.
 
 ## Principle
 
@@ -900,6 +907,7 @@ priority order:
 session lifecycle callable from outside `PracticeTimerView`. Note that timer
 *state* is already externalised (`TimerDefaultsKey` in UserDefaults,
 `TimerStateRecovery`, `PracticeTimerStore`), so the extraction may be smaller
-than it appears — or unnecessary. **The iPad is now the first consumer:** Stage 2
-of the iPad/sync plan extracts a narrow `PracticeSessionController`, which these
-entry points should reuse rather than define their own.
+than it appears — or unnecessary. The launch iPad work does not extract one (no
+prerequisite controller refactor, decided 2026-11-20). If these entry points are
+built, extract a narrow `PracticeSessionController` then, and have them reuse it
+rather than define their own.
