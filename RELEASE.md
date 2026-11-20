@@ -399,8 +399,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   **Order.**
   1. Native iPad in Debug only (`TARGETED_DEVICE_FAMILY` is per
      configuration; Release and Sync Test stay `1`), and a short survey of
-     every page at full and narrow window sizes, written here as a short
-     per-page list.
+     every page at full and narrow window sizes. **Done 2026-11-20**
+     (`7b1e5fb`; the list is "Survey" below).
   2. The SDK baseline (previous item), separately. Steps 1 and 3 do not
      wait for it.
   3. Manuscript spike: a feasibility check, not an architecture project.
@@ -429,6 +429,47 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   7. The remaining pages; native iPad in Release when ready; then the
      release decisions (section A) and the final Internal Only TestFlight
      QA (section D).
+  **Survey, 2026-11-20** (Debug, iPad Pro 11-inch simulator, iOS 26.5:
+  full window in portrait, 834 pt wide, and landscape, 1210 pt; a narrow
+  window, about 375 pt). Nothing crashes or is unreachable. **The narrow
+  window is the iPhone layout, unchanged.** Three things recur at full
+  size:
+  - *Width.* Every page stretches to the window's edges.
+  - *Sheets.* iPad shows a sheet as a small centred panel, about 580 by
+    650 pt, whatever it holds.
+  - *Window controls.* In a resized window the system's close and resize
+    controls sit on top of the top-left button (the profile picture on
+    Timer and Journal).
+
+  Page by page:
+  - *Set-up:* the fields and Continue run edge to edge.
+  - *Timer:* the column of buttons stays centred and reads well. The
+    instrument and activity names, "+ Add session" and "+ Add thought",
+    and the list row ("+ Add line", "Save list", "+ Import list") are
+    pinned to the far edges, away from the buttons they belong to. An
+    opened section is a full-width card: the metronome's controls stretch
+    with it (touch and hold), the drone's stay small and centred (touch
+    and hold), the tuner's scale spans the whole width, the audio recorder
+    likewise. In landscape one open section pushes the capture, lists and
+    scores buttons off the bottom; two (drone and metronome) push Start
+    Timer down as well. This is the case for the landscape arrangement.
+  - *Entry editor (Add Session):* in the small panel; Save Session is
+    reached only by scrolling. The Duration picker opens as a half-height
+    sheet inside the panel and its wheels are cut off.
+  - *Scores library:* in the same small panel.
+  - *Journal:* cards run the full width; in landscape a line is 1200 pt
+    long.
+  - *Entry page:* correct, sparse, full width.
+  - *Insights:* already arranges its cards in three columns. Least work.
+  - *Profile:* correct; rows run the full width with the control at the
+    far right.
+  - *Explore Connected:* the photograph and the example screens scale up
+    with the width and look oversized.
+  - *Not seen:* camera, video and trim (no camera in the simulator); the
+    attachment and score viewers; the Thought editor; Instruments,
+    Activities and Lists; About; Connected after sign-in (feed, comments,
+    people, joining), which needs Release; the sync screens, which Debug
+    never shows; the 13-inch size; Pencil.
   **Manuscript scope** (idea 2026-10-11; scope agreed 2026-10-16). Digital
   manuscript paper with freehand drawing, finger or Pencil; no
   recognition, engraving, playback or symbol editing. Paper, chosen before
