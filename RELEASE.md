@@ -378,7 +378,10 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   deleting the app. The targets, the two routes that do delete the zone
   and the safeguards are proposed in `personal-icloud-cleanup-proposal.md`
   (session notes folder, beside the checkpoint script); nothing has been
-  cleaned up. Widening distribution waits for review.
+  cleaned up. The reviews are closed and the implementation phase with
+  them (2026-11-20, record under "Sync" in section E); widening
+  distribution beyond Internal Only is a separate decision of Samuel's,
+  not taken.
 
 - [x] Founding 500 introductory offer: free first year on both products, no end
   date (seen in ASC 2026-09-21). Remove manually at ~500.
@@ -451,7 +454,10 @@ the join.
 - [ ] Adult-only gate: `docs/qa-plan.md` Group AG on Device A (Release,
   Sandbox Apple Account), including AG0's cache-trap probe and the refusal
   count arithmetic.
-- [ ] **TestFlight checkpoint for the private sync** (script written
+- [x] **TestFlight checkpoint for the private sync** — run and passed;
+  last on build 1949, 2026-11-20, and the phase closed that day with four
+  qualifications (section E, "Sync implementation phase closed"). Still
+  Internal Only. (Script written
   2026-11-04: `testflight-checkpoint-device-script.md` in
   `~/Library/Application Support/Claude/side-session-notes/local_6d93116d-9187-4503-8840-a388a10459a9/`;
   after section C's sync item). **Run 2026-11-10 on build 1908: parts 1
@@ -2815,6 +2821,32 @@ the join.
   sync on, so the first-merge paths and C-174's path rest on the Sync Test
   runs of 2026-11-13 and the tests. Evidence in the shared notes
   (`testflight-1949-2026-11-13/RESULTS.md`).
+  **Sync implementation phase closed 2026-11-20** (Samuel, after Codex
+  checked the build 1949 evidence: nothing further to correct, no further
+  full trial). Completed reviews stay closed. **Closure is not approval to
+  distribute more widely:** sync stays off by default and TestFlight stays
+  Internal Only until Samuel decides otherwise. Kept for that decision:
+  (1) *Wording.* Four commits after 1949 changed only sync copy and layout
+  (`16e297d`, `151859b`, `9570d7d`, `7257914`): approved by Samuel, seen on
+  the simulator only, in no build. The Displaced by sync screen's wording
+  was left as it is. The app no longer says sync is optional or what stays
+  in iCloud after it is turned off; only the policy draft does
+  (`docs/sync-trial/policy-drafts-icloud-sync.md`).
+  (2) *First-merge deletions.* An entry or attachment deleted elsewhere is
+  kept, with Restore, when this device had not sent it. A score, a custom
+  instrument or activity, or a profile instrument deleted elsewhere is
+  removed with no copy (C-197).
+  (3) *Unit tests only:* in C-197, keeping an entry before a first-merge
+  deletion, two edits with no clock, the attachment-details Restore,
+  cleared text and a preservation failure. Turning sync on has not been
+  run on a TestFlight binary.
+  (4) *C-174:* one device repeat stayed up after the fix, which does not
+  prove a timing-dependent crash is gone.
+  Unchanged and known: C-198's backfill (by decision); C-186's status
+  wording; a never-synced device signed out of iCloud reads "Checking
+  iCloud…", not "Signed out". The trial zone `JournalC197`, its fixture
+  and Études Sync Test 1948 on Device A and the iPad belong to the
+  personal-iCloud cleanup (section C), which is separate.
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
