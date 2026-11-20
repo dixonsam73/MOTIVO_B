@@ -48,6 +48,13 @@ struct AESVAttachmentViewerRequest: Identifiable {
     let viewerAttachmentIDs: [UUID]
 }
 
+/// A manuscript sketch opened from the editor to be drawn on again.
+struct AESVSketchEditRequest: Identifiable {
+    /// The attachment's id.
+    let id: UUID
+    let sketch: ManuscriptSketch
+}
+
 struct AESVScorePageSelection {
     var pages: [Int]?
     var hasSelection: Bool
@@ -281,6 +288,7 @@ extension AddEditSessionView {
             if let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
                 if let url = resolveStoredFileURL(at: path) {
                     existingAttachmentURLMap[id] = url
+                    if kind == .pdf, ManuscriptSketchFile.carriesSketch(url) { sketchAttachmentIDs_AESV.insert(id) }
 
                     if kind == .pdf, let score = scoreLibraryItemMatchingURL_AESV(url) {
                         if !attachedScoreIDs_AESV.contains(score.id) {
@@ -369,6 +377,7 @@ extension AddEditSessionView {
         // Seeded before the append so the first render already sees it.
         AttachmentImportPolicy.seedImportedAudioTitle(stagedID: id, kind: kind, displayName: displayName)
         stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind, sourceFormat: sourceFormat))
+        if kind == .pdf, ManuscriptSketchFile.carriesSketch(data: data) { sketchAttachmentIDs_AESV.insert(id) }
 
         if kind == .file || kind == .pdf {
             let trimmed = (displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -381,6 +390,49 @@ extension AddEditSessionView {
         }
 
         // No auto-thumbnail: thumbnail is set only via explicit user intent (⭐).
+    }
+
+    // MARK: Manuscript sketches
+
+    func openSketchForEditing_AESV(_ att: StagedAttachment) {
+        do {
+            if existingAttachmentIDs.contains(att.id), let url = existingAttachmentURLMap[att.id] {
+                sketchEdit_AESV = AESVSketchEditRequest(id: att.id, sketch: try ManuscriptSketchFile.read(url))
+            } else {
+                sketchEdit_AESV = AESVSketchEditRequest(id: att.id, sketch: try ManuscriptSketchFile.read(data: att.data))
+            }
+        } catch {
+            consentState.present(notice: "This sketch can't be opened for editing.")
+        }
+    }
+
+    /// Takes the pad's finished PDF for a sketch already attached here. One
+    /// not yet saved with the entry is replaced in memory; a SAVED one goes
+    /// through `ManuscriptSketchEdits`, which never overwrites it.
+    func applyEditedSketch_AESV(_ data: Data, id: UUID) throws {
+        if existingAttachmentIDs.contains(id), let current = existingAttachmentURLMap[id] {
+            let newPath = try sketchEdits_AESV.place(data, for: id, currentPath: current.path)
+            existingAttachmentURLMap[id] = URL(fileURLWithPath: newPath)
+        } else if let index = stagedAttachments.firstIndex(where: { $0.id == id }) {
+            let old = stagedAttachments[index]
+            stagedAttachments[index] = StagedAttachment(id: old.id, data: data, kind: old.kind,
+                                                        selectedPages: old.selectedPages, sourceFormat: old.sourceFormat)
+            if let surrogate = existingSurrogateURL_edit(id: id, kind: .pdf) { try? data.write(to: surrogate, options: .atomic) }
+        }
+    }
+
+    /// After the entry's durable save, or on Cancel (`ManuscriptSketchEdits`).
+    func settleReplacedSketches_AESV(saved: Bool) {
+        guard saved else { return sketchEdits_AESV.settleAfterCancel() }
+        sketchEdits_AESV.settleAfterSave { id in
+            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+            req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            req.fetchLimit = 1
+            guard let rows = try? viewContext.fetch(req) else { return .unknown }
+            guard let row = rows.first else { return .gone }
+            guard let url = resolveStoredFileURL(at: row.fileURL ?? "") else { return .unknown }
+            return .names(url.path)
+        }
     }
 
     func removeStagedAttachment(_ a: StagedAttachment) {
@@ -825,6 +877,8 @@ extension AddEditSessionView {
 
     func cancelAndCleanup_AESV_bestEffort() {
         cleanupAllTempArtifacts_AESV_bestEffort()
+        // A saved sketch edited here and not saved: its previous file stands.
+        settleReplacedSketches_AESV(saved: false)
         dismiss()
     }
 
@@ -1486,7 +1540,9 @@ fileprivate struct PDFStagedThumbnailView: View {
     }
 
     private var thumbnailTaskID: String {
-        "\(att.id.uuidString)-page-\(selectedThumbnailPage ?? 1)"
+        // The file and the bytes are part of the identity: a manuscript sketch
+        // drawn on again keeps its id and page but is a different picture.
+        "\(att.id.uuidString)-page-\(selectedThumbnailPage ?? 1)-\(sourceURL?.lastPathComponent ?? "")-\(att.data.count)"
     }
 
     private func generateThumbnailIfNeeded() async {

@@ -303,6 +303,11 @@ struct AddEditSessionView: View {
     @State var attachmentTitlesRefreshTick: Int = 0
     @State var showScoreAttachLibrary: Bool = false
     @State var showSketchPad: Bool = false
+    /// Which of this entry's PDF attachments are manuscript sketches (they carry a drawing).
+    @State var sketchAttachmentIDs_AESV: Set<UUID> = []
+    @State var sketchEdit_AESV: AESVSketchEditRequest? = nil
+    /// Saved sketches edited in this editor and not yet saved with the entry.
+    @State var sketchEdits_AESV = ManuscriptSketchEdits()
     @State var attachedScoreIDs_AESV: [UUID] = []
     @State var scorePageSelections_AESV: [UUID: AESVScorePageSelection] = [:]
     @State var existingScoreAttachmentIDsByScoreID_AESV: [UUID: UUID] = [:]
@@ -818,6 +823,11 @@ struct AddEditSessionView: View {
             // A finished sketch is staged like an imported PDF; it carries its own drawing.
             ManuscriptPadView { data in
                 stageData(data, kind: .pdf, displayName: "Sketch")
+            }
+        }
+        .fullScreenCover(item: $sketchEdit_AESV) { request in
+            ManuscriptPadView(existing: request.sketch, recoveryKey: request.id.uuidString) { data in
+                try applyEditedSketch_AESV(data, id: request.id)
             }
         }
         .sheet(isPresented: $showScoreAttachLibrary) {
@@ -1593,6 +1603,12 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                             .truncationMode(.tail)
                                                                             .frame(width: 128, alignment: .leading)
 
+                                                                        if sketchAttachmentIDs_AESV.contains(att.id) {
+                                                                            // One page, and it can be drawn on again.
+                                                                            Button("Edit sketch") { openSketchForEditing_AESV(att) }
+                                                                                .font(.caption2)
+                                                                                .buttonStyle(.plain)
+                                                                        } else {
                                                                         Text(PDFSelectedPagesFormatter.summary(for: selectedPages(forPDFID: att.id)))
                                                                             .font(.caption2)
                                                                             .foregroundStyle(Theme.Colors.secondaryText)
@@ -1618,6 +1634,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                         }
                                                                         .font(.caption2)
                                                                         .buttonStyle(.plain)
+                                                                        }
                                                                     }
                                                                 }
                                                                 .frame(width: 128, alignment: .leading)
@@ -2368,6 +2385,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 // a failed save restores the rows, and they must not point at
                 // media that has already been destroyed.
                 for path in pendingFileDeletions { AttachmentStore.removeIfExists(path: path) }
+                // Likewise a sketch edited here: its previous file goes only now
+                // that the saved record names the new one.
+                settleReplacedSketches_AESV(saved: true)
                 didCommitLocally = true
                 // Save thought: the timer consumes exactly these — here, after the
                 // durable local save and before the sharing choice is queued or
