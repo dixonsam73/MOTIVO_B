@@ -2803,10 +2803,18 @@ the join.
   seven known failures only, with the off-by-default and scheme guards
   passing. **Codex closed the bounded C-174 and archive review 2026-11-13:
   no blocking issue; the qualification stands that one successful device
-  repeat does not prove every timing-dependent crash is gone.** Next:
-  Samuel uploads 1949 to TestFlight, Internal Only, and it is installed on
-  Device A and the iPad against the checklist and read-only evidence
-  scripts in the shared notes (`testflight-1949-2026-11-13/`).
+  repeat does not prove every timing-dependent crash is gone.**
+  **Build 1949 on TestFlight, Internal Only: uploaded by Samuel
+  2026-11-19, checked on Device A and the iPad 2026-11-20, passed.** The
+  update from 1937 kept both journals and sync states; an entry with a
+  photo made on Device A reached the iPad in 3 s, the iPad's edit and its
+  deletion of that entry reached Device A in 1 s each; force-quit and
+  reopen changed nothing; no crash report, nothing under Displaced by
+  sync, and the two journals equivalent in content afterwards (118
+  entries, 88 attachments each). Not exercised on this binary: turning
+  sync on, so the first-merge paths and C-174's path rest on the Sync Test
+  runs of 2026-11-13 and the tests. Evidence in the shared notes
+  (`testflight-1949-2026-11-13/RESULTS.md`).
 - Code slimming when next touched: unused `DirectoryWriteKind.generation` and
   `.creation`; the age-band code once the adult-only gate replaces it.
 - Deprecation and warning sweeps.
