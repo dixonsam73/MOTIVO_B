@@ -67,9 +67,8 @@ struct AppSetUpView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 header
 
-                // C-151: the restoration (or, on a build that can sync, turning
-                // sync on) is offered before a name is asked for. Nothing is
-                // shown by a build that cannot sync.
+                // C-151: a restoration is offered before a name is asked for.
+                // Nothing is shown by a build that cannot sync.
                 SyncTestRestoreCard(profileName: profile?.name ?? "")
 
                 nameCard
@@ -92,6 +91,10 @@ struct AppSetUpView: View {
                 .foregroundStyle(Theme.Colors.accent)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .buttonStyle(.plain)
+
+                // Turning sync on for the first time is a quiet link here, not
+                // a card above the name: most people setting up are new.
+                SyncTestRestoreCard(profileName: profile?.name ?? "", placement: .foot)
             }
             .padding(.vertical, Theme.Spacing.xl)
             .padding(.horizontal, Theme.Spacing.l)

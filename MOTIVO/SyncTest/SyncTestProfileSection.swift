@@ -131,56 +131,74 @@ struct SyncTestProfileSection: View {
 /// name typed meanwhile is provisional (kept on the Displaced by sync list if
 /// a cloud profile arrives). The decision is `JournalRestoreOffer.decide`.
 struct SyncTestRestoreCard: View {
+    /// Where on the set-up screen this copy sits. A restoration (offered,
+    /// running, waiting, nothing found) stays above the name field. The offer
+    /// to turn sync on for the first time is a quiet link at the foot, under
+    /// About Études: most people setting up are new and have no other device
+    /// (Samuel, 2026-11-20).
+    enum Placement { case aboveName, foot }
+
     @Environment(\.colorScheme) private var scheme
     @ObservedObject private var status = JournalSyncCoordinator.shared.status
     /// The Profile row's name as the set-up screen sees it.
     let profileName: String
+    let placement: Placement
     @State private var offer: JournalRestoreOffer
+
+    /// Each placement keeps its own copy of the decision, so an action in one
+    /// tells the other: the link at the foot turns sync on, and the card that
+    /// then says "Restoring…" is the copy above the name.
+    private static let didAct = Notification.Name("SyncTestRestoreCard.didAct")
 
     /// C-175: decided at creation. A `.none` start renders an empty view, and
     /// SwiftUI never calls `onAppear` for one, so a reload there never ran
     /// and a fresh install got no "turn on" card (seen on the iPad and the
     /// simulator, 2026-11-04). The trial never noticed because a running
     /// sync's status changes triggered the reload instead.
-    init(profileName: String) {
+    init(profileName: String, placement: Placement = .aboveName) {
         self.profileName = profileName
+        self.placement = placement
         _offer = State(initialValue: Self.currentOffer(profileName: profileName, pausedReason: JournalSyncCoordinator.shared.status.pausedReason))
     }
 
     var body: some View {
         Group {
-            switch offer {
-            case .none:
+            switch (offer, placement) {
+            case (.none, _), (.turnOn, .aboveName):
                 EmptyView()
-            case .turnOn:
-                card("Already using Études on another device?",
-                     "Turn on iCloud sync to bring your journal here.",
-                     button: "Turn on iCloud sync") {
+            case (.turnOn, .foot):
+                Button("Already using Études? Turn on iCloud sync") {
                     JournalSyncCoordinator.shared.enable(persistence: PersistenceController.shared.container)
-                    reloadSoon()
+                    acted()
                 }
-            case .offer(let removed):
+                .font(Theme.Text.body)
+                .foregroundStyle(Theme.Colors.accent)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .buttonStyle(.plain)
+            case (_, .foot):
+                EmptyView()
+            case (.offer(let removed), .aboveName):
                 card("Restore from iCloud",
                      removed
                      ? "Your journal is still in iCloud. Restore it here and skip set-up."
                      : "Sync is off on this device. Turn it on to bring your journal back.",
                      button: "Restore from iCloud") {
                     JournalSyncCoordinator.shared.reenable()
-                    reloadSoon()
+                    acted()
                 }
-            case .restoring(let failure):
+            case (.restoring(let failure), .aboveName):
                 card("Restoring from iCloud…",
                      "Looking for your journal. If you’re offline, you can set up now."
                      + (status.restoreProgress.map { "\n\n\($0.text)" } ?? "")
                      + (failure.map { "\n\n\($0)" } ?? ""),
                      button: failure == nil ? nil : "Try again") {
-                    Task { await JournalSyncCoordinator.shared.engine?.fetchNow(); reloadSoon() }
+                    Task { await JournalSyncCoordinator.shared.engine?.fetchNow(); acted() }
                 }
-            case .waiting(let reason):
+            case (.waiting(let reason), .aboveName):
                 card("iCloud not available",
                      "Sync is paused: \(reason). You can set up now; your journal comes back when sync resumes.",
                      button: nil) {}
-            case .nothingFound:
+            case (.nothingFound, .aboveName):
                 card("Nothing to restore", "iCloud holds no profile for this journal yet. Set up below.", button: nil) {}
             }
         }
@@ -189,6 +207,7 @@ struct SyncTestRestoreCard: View {
         // `objectWillChange` fires before the value moves: read after the turn.
         .onReceive(status.objectWillChange) { _ in reloadSoon() }
         .onReceive(NotificationCenter.default.publisher(for: JournalProfileSync.didApplyNotification).receive(on: RunLoop.main)) { _ in reloadSoon() }
+        .onReceive(NotificationCenter.default.publisher(for: Self.didAct).receive(on: RunLoop.main)) { _ in reload() }
     }
 
     private func card(_ title: String, _ text: String, button: String?, action: @escaping () -> Void) -> some View {
@@ -210,6 +229,8 @@ struct SyncTestRestoreCard: View {
     }
 
     private func reloadSoon() { DispatchQueue.main.async(execute: reload) }
+
+    private func acted() { NotificationCenter.default.post(name: Self.didAct, object: nil) }
 
     private func reload() { offer = Self.currentOffer(profileName: profileName, pausedReason: status.pausedReason) }
 
