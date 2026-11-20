@@ -192,7 +192,7 @@ xcodebuild test -project MOTIVO.xcodeproj -scheme MOTIVO -only-testing:MOTIVOTes
 |---|---|---|
 | Device A | iPhone 16e ("SD beta burner") | Release only |
 | Device B | iPhone 17 Pro ("SD iPhone") | Release **and** "Études Dev" (Debug) |
-| iPad | iPad Pro 11" M4 | Release (TestFlight) **and** "Études Sync Test" |
+| iPad | iPad Pro 11" M4 | Release (TestFlight), "Études Sync Test" **and** "Études Dev" (Debug, no sync) |
 
 - Any device QA step must name the device **and** the install.
 - **Never use Samuel's own Études Dev account/history for destructive tests.

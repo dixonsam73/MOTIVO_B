@@ -463,9 +463,17 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      small until zoomed.
      *Review:* Codex's focused review (2026-11-20) found no blocker in the
      clean sharing routes or the save order, and the recovery gap above.
-     *Next:* a check of that correction; Samuel's first device session
-     with a Pencil on the iPad (Études Dev); then the Journal and editor
-     iPad adaptations.
+     The correction and one follow-up (the pad's Save requires its copy
+     before the editor gets the sketch, `6244a6d`) were checked and the
+     review closed the same day.
+     *Device:* Études Dev build 1972 (`6244a6d`, Debug, no sync) installed
+     on the iPad 2026-11-20 for Samuel's first session with a Pencil. It
+     updated an old Études Dev (build 104, March 2026: a profile and five
+     instruments, no entries; its store copied to the shared notes first).
+     TestFlight 1949 and Sync Test 1948 untouched. The iPad was locked, so
+     the first launch was not seen.
+     *Next:* that session's findings; then the Journal and editor iPad
+     adaptations.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode
