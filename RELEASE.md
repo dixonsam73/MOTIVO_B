@@ -106,19 +106,15 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   separate journal on each device, which the listing and first run would
   have to say; with it, the policy text in
   `docs/sync-trial/policy-drafts-icloud-sync.md` goes in.
-- [ ] **S — Manuscript: edit your own sketch on your other device at
-  launch?** Settle before the sketch's storage is built. A sketch is a
-  PDF plus the drawing data that lets the pad reopen it. The PDF is an
-  ordinary attachment, so with sync on it reaches your other devices and
-  can be viewed and shared there. Proposed launch default: the drawing
-  stays on the device that drew it, in the ordinary device backup. Then a
-  sketch drawn on the iPad can be seen on the iPhone but only continued on
-  the iPad, and a device restored through sync without a device backup
-  keeps the PDF but can no longer reopen it as ink. The alternative, the
-  drawing travelling with sync, needs a new synced field in the Production
-  schema and a rule for two devices editing one sketch; not built ahead
-  of this decision. Separate from sharing with another person, which
-  sends the PDF only and is not in question.
+- [x] **S — Manuscript sketches stay editable across your own devices:
+  decided 2026-11-20.** A sketch synced to another of your devices, or
+  restored onto a replacement device, reopens as editable ink. Sharing
+  with other people stays a clean, viewable PDF. How: the PDF itself
+  carries the drawing and the paper settings, so a sketch is one file and
+  the existing attachment sync, conflict and Restore paths apply as they
+  are. No sync redesign, no schema change, no reopened review. Subject to
+  the spike (section B, step 3); if it fails, report the concrete failure
+  and the smallest alternative before building a fallback.
 - [x] **S — Pricing: decided 2026-10-09.** Études is a **paid download at
   £4.99** (pay once for what runs on the device; subscribe for what runs on
   the servers). Connected stays a subscription, and only works if you own the
@@ -409,17 +405,24 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      wait for it.
   3. Manuscript spike: a feasibility check, not an architecture project.
      The paper drawn, the pad, PDF export, and one small save → reopen →
-     edit → recover flow carrying the paper settings, the editable
-     drawing, the PDF and the staged-to-final attachment id migration. It
-     also settles the clef glyph source (paths, or a bundled OFL font).
+     edit → recover flow through the staged-to-final attachment id
+     migration. It must prove three things about the PDF that carries its
+     own drawing (section A): the drawing and paper settings survive save,
+     reopen and the app's own PDF handling; an interrupted or failed save
+     keeps the previous saved sketch; and both Connected sharing and
+     external share or export produce a PDF without the editable payload,
+     including when the whole document is shared. It also settles the clef
+     glyph source (paths, or a bundled OFL font).
   4. Manuscript completed in the entry editor, alongside the Journal and
      editor iPad adaptations.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode
-     install keeps the journal and the sync state; and a sketch's PDF made
-     on one device arrives on the other, and its replacement after an edit
-     arrives once, with no duplicate.
+     install keeps the journal and the sync state; and a sketch made on
+     one device arrives on the other and reopens as ink, its replacement
+     after an edit arrives once with no duplicate, and when both devices
+     edit it offline the later edit stands and the other is kept under
+     Displaced by sync and restores as ink.
   6. Timer: consider the landscape arrangement early; build the sketch's
      place in it once persistence works, reusing the existing
      Thought/session hand-off (`TimerThoughtHandoff.swift`).
@@ -442,13 +445,12 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   during a session. Saved Thoughts are never absorbed by a later Start
   (true today; pin with a test). Output is a PDF (`AttachmentKind.pdf`
   already flows through editor, viewer, journal rows, sharing and sync)
-  with the editable `PKDrawing` kept beside it, keyed by attachment id,
-  which must follow the editor's staged-to-final id migration; reopening
-  and editing regenerates the PDF and thumbnail. Sharing a viewable PDF
-  with other people is enough; exchanging editable sketches is out of
-  scope. Where the editable drawing lives is the open decision in section
-  A, to settle before the storage is built; no editable-drawing sync or
-  new CloudKit schema is added ahead of it.
+  that carries its own editable `PKDrawing` and paper settings as
+  document metadata (decided 2026-11-20, section A), so there is no
+  separate drawing file; reopening and editing regenerates the PDF and
+  thumbnail. "Edit sketch" is offered only for a PDF that carries a
+  drawing. Anything that leaves for another person is a clean copy
+  without the drawing; exchanging editable sketches is out of scope.
   **Design consideration, not an approved layout (2026-10-11):** when
   manuscript capture arrives, reassess PTV's capture controls together
   rather than adding another row. Consider a stave/pen or treble-clef
