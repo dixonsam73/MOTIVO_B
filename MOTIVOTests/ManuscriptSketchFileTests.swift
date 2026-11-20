@@ -224,16 +224,108 @@ final class ManuscriptSketchFileTests: XCTestCase {
     }
 
     // MARK: 2. A failed or interrupted save keeps the previous sketch
+    //
+    // `ManuscriptSketchEdits` is what the entry editor runs when a saved
+    // sketch is drawn on again. These follow its three steps: the new file
+    // placed beside the old, the record repointed and saved by the editor,
+    // the old file removed only after.
 
-    func testAnEditReplacesTheSketchAndTheOldFileGoes() throws {
+    private func data(_ sketch: ManuscriptSketch) throws -> Data {
+        let temp = try ManuscriptSketchFile.writeVerified(sketch, in: scratch)
+        return try Data(contentsOf: temp)
+    }
+
+    func testAnEditIsPlacedBesideTheSavedSketchWhichIsNotTouched() throws {
         let first = sketch(strokes: 4), second = sketch(strokes: 7, seed: 40)
         let old = try savedInDocuments(first, name: "Sketch \(UUID().uuidString)")
-        var pointer = old
-        let new = try ManuscriptSketchFile.saveEdit(second, replacing: old) { pointer = $0 }
+        let before = try hash(URL(fileURLWithPath: old))
+        var edits = ManuscriptSketchEdits()
+        let id = UUID()
+        let new = try edits.place(try data(second), for: id, currentPath: old)
         documentsMade.append(new)
-        XCTAssertEqual(pointer, new)
-        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: pointer)), second)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: old), "the replaced file is removed once the record points at the new one")
+        XCTAssertNotEqual(new, old)
+        XCTAssertEqual(edits.replaced[id], .init(original: old, edited: new))
+        // Until the entry is saved the record names the old file, and it is whole.
+        XCTAssertEqual(try hash(URL(fileURLWithPath: old)), before)
+        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: old)), first)
+        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: new)), second)
+    }
+
+    func testAfterTheEntryIsSavedThePreviousFileGoes() throws {
+        let old = try savedInDocuments(sketch(strokes: 4), name: "Sketch \(UUID().uuidString)")
+        var edits = ManuscriptSketchEdits()
+        let id = UUID(), second = sketch(strokes: 7, seed: 40)
+        let new = try edits.place(try data(second), for: id, currentPath: old)
+        documentsMade.append(new)
+        edits.settleAfterSave { _ in .names(new) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old))
+        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: new)), second)
+        XCTAssertTrue(edits.replaced.isEmpty)
+    }
+
+    /// The app stops, or the save fails, after the new file landed and before
+    /// the record was saved: the record names the old file, which is whole.
+    /// Then the editor is left without saving, and the unused file goes.
+    func testAnInterruptionOrCancelLeavesThePreviousSketch() throws {
+        let first = sketch(strokes: 4)
+        let old = try savedInDocuments(first, name: "Sketch \(UUID().uuidString)")
+        var edits = ManuscriptSketchEdits()
+        let new = try edits.place(try data(sketch(strokes: 9, seed: 40)), for: UUID(), currentPath: old)
+        documentsMade.append(new)
+        // Stopped here: nothing else has run.
+        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: old)), first)
+        // Left without saving.
+        edits.settleAfterCancel()
+        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: old)), first)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: new), "the unused new file is taken away")
+    }
+
+    /// The save reported success but the record still names the old file, or
+    /// what it names cannot be told: the old file is not removed.
+    func testThePreviousFileStaysUnlessTheSavedRecordNamesAnother() throws {
+        for stillNamesTheOldFile in [true, false] {
+            let first = sketch(strokes: 4)
+            let old = try savedInDocuments(first, name: "Sketch \(UUID().uuidString)")
+            var edits = ManuscriptSketchEdits()
+            let new = try edits.place(try data(sketch(strokes: 9, seed: 40)), for: UUID(), currentPath: old)
+            documentsMade.append(new)
+            edits.settleAfterSave { _ in stillNamesTheOldFile ? .names(old) : .unknown }
+            assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: old)), first)
+        }
+    }
+
+    func testASecondEditBeforeSavingReplacesTheFirstAndKeepsTheOriginal() throws {
+        let first = sketch(strokes: 4)
+        let old = try savedInDocuments(first, name: "Sketch \(UUID().uuidString)")
+        var edits = ManuscriptSketchEdits()
+        let id = UUID(), third = sketch(strokes: 11, seed: 80)
+        let second = try edits.place(try data(sketch(strokes: 7, seed: 40)), for: id, currentPath: old)
+        let newest = try edits.place(try data(third), for: id, currentPath: second)
+        documentsMade.append(contentsOf: [second, newest])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: second), "the earlier edit was never named by a saved record")
+        XCTAssertEqual(edits.replaced[id], .init(original: old, edited: newest))
+        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: old)), first)
+        edits.settleAfterSave { _ in .names(newest) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old))
+        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: newest)), third)
+    }
+
+    func testAnAttachmentRemovedInTheSameSaveLeavesNoPreviousFile() throws {
+        let old = try savedInDocuments(sketch(strokes: 4), name: "Sketch \(UUID().uuidString)")
+        var edits = ManuscriptSketchEdits()
+        let new = try edits.place(try data(sketch(strokes: 7, seed: 40)), for: UUID(), currentPath: old)
+        documentsMade.append(new)
+        edits.settleAfterSave { _ in .gone }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old))
+    }
+
+    func testSomethingThatIsNotASketchIsRefusedAndNothingChanges() throws {
+        let first = sketch(strokes: 4)
+        let old = try savedInDocuments(first, name: "Sketch \(UUID().uuidString)")
+        var edits = ManuscriptSketchEdits()
+        XCTAssertThrowsError(try edits.place(Data("not a sketch".utf8), for: UUID(), currentPath: old))
+        XCTAssertTrue(edits.replaced.isEmpty)
+        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: old)), first)
     }
 
     func testASketchThatCannotBeWrittenLeavesThePreviousOne() throws {
@@ -246,32 +338,33 @@ final class ManuscriptSketchFileTests: XCTestCase {
         assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: old)), first)
     }
 
-    func testARecordThatCannotBeSavedLeavesThePreviousSketchAndNoStray() throws {
-        struct RecordNotSaved: Error {}
-        let first = sketch(strokes: 4)
-        let old = try savedInDocuments(first, name: "Sketch \(UUID().uuidString)")
-        var offered: String?
-        XCTAssertThrowsError(try ManuscriptSketchFile.saveEdit(sketch(strokes: 9, seed: 40), replacing: old) { path in
-            offered = path
-            // The new file is whole and in place before the record is asked to move.
-            XCTAssertEqual(try ManuscriptSketchFile.read(URL(fileURLWithPath: path)).drawing.strokes.count, 9)
-            XCTAssertTrue(FileManager.default.fileExists(atPath: old))
-            throw RecordNotSaved()
-        })
-        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: old)), first)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(offered)), "the unused new file is taken away")
+    // MARK: Unfinished work
+
+    func testAnUnfinishedDrawingIsKeptAndOfferedBackUntilSavedOrDiscarded() throws {
+        let key = "test-\(UUID().uuidString)"
+        addTeardownBlock { ManuscriptSketchRecovery.clear(key: key) }
+        XCTAssertNil(ManuscriptSketchRecovery.draft(key: key))
+        let unfinished = sketch(strokes: 5, kind: .piano, clef: .none)
+        XCTAssertTrue(ManuscriptSketchRecovery.keep(unfinished, key: key))
+        assertSame(try XCTUnwrap(ManuscriptSketchRecovery.draft(key: key)), unfinished)
+        // A later stroke replaces the copy; another sketch's copy is its own.
+        let more = sketch(strokes: 6, kind: .piano, clef: .none)
+        ManuscriptSketchRecovery.keep(more, key: key)
+        assertSame(try XCTUnwrap(ManuscriptSketchRecovery.draft(key: key)), more)
+        XCTAssertNil(ManuscriptSketchRecovery.draft(key: "test-\(UUID().uuidString)"))
+        ManuscriptSketchRecovery.clear(key: key)
+        XCTAssertNil(ManuscriptSketchRecovery.draft(key: key))
+        // Device-only: the folder is kept out of backups.
+        let values = try ManuscriptSketchRecovery.directory().resourceValues(forKeys: [.isExcludedFromBackupKey])
+        XCTAssertEqual(values.isExcludedFromBackup, true)
     }
 
-    /// The app stops between the new file landing and the record being
-    /// saved: the record still names the old file, and the old file is whole.
-    func testAnInterruptionBeforeTheRecordMovesLeavesThePreviousSketch() throws {
-        let first = sketch(strokes: 4)
-        let old = try savedInDocuments(first, name: "Sketch \(UUID().uuidString)")
-        let temp = try ManuscriptSketchFile.writeVerified(sketch(strokes: 9, seed: 40))
-        let landed = try AttachmentStore.adoptTempExport(temp, suggestedName: "Sketch \(UUID().uuidString)", kind: .pdf)
-        documentsMade.append(landed)
-        // Nothing further runs. What the record names:
-        assertSame(try ManuscriptSketchFile.read(URL(fileURLWithPath: old)), first)
+    func testASketchHeldInMemoryReadsLikeOneOnDisk() throws {
+        let original = sketch(strokes: 8)
+        let bytes = try data(original)
+        XCTAssertTrue(ManuscriptSketchFile.carriesSketch(data: bytes))
+        assertSame(try ManuscriptSketchFile.read(data: bytes), original)
+        XCTAssertFalse(ManuscriptSketchFile.carriesSketch(data: Data("%PDF-1.4 nothing".utf8)))
     }
 
     // MARK: 3. What another person receives holds no drawing

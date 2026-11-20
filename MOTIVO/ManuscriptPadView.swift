@@ -85,6 +85,9 @@ enum ManuscriptPadTool: Equatable {
 struct ManuscriptCanvas: UIViewRepresentable {
     let paper: ManuscriptPaper
     @Binding var drawing: PKDrawing
+    /// Counts the changes made in the pad, so "has anything been drawn" and
+    /// the recovery copy do not depend on comparing drawings.
+    @Binding var revision: Int
     let tool: ManuscriptPadTool
     let controller: ManuscriptPadController
 
@@ -175,6 +178,7 @@ struct ManuscriptCanvas: UIViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.parent.drawing = drawing
+                self.parent.revision += 1
                 self.parent.controller.refresh()
             }
         }
@@ -186,35 +190,47 @@ struct ManuscriptCanvas: UIViewRepresentable {
 struct ManuscriptPadView: View {
     /// A sketch being reopened; nil for a new one, which starts by choosing its paper.
     let existing: ManuscriptSketch?
+    /// Names this sketch's recovery copy: `ManuscriptSketchRecovery.newSketchKey`
+    /// for a new sketch, the attachment's id for one being reopened.
+    let recoveryKey: String
     /// Receives the finished sketch as PDF data. Throwing keeps the pad open.
     let onSave: (Data) throws -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var controller = ManuscriptPadController()
     @State private var paper: ManuscriptPaper?
     @State private var drawing: PKDrawing
+    @State private var revision = 0
+    /// An unfinished drawing found for this sketch; the pad waits for the
+    /// answer before showing anything to draw on.
+    @State private var offeredDraft: ManuscriptSketch?
+    @State private var restoredFromDraft = false
     @State private var tool: ManuscriptPadTool = .pen(width: ManuscriptPadTool.penWidths[1])
     @State private var confirmDiscard = false
     @State private var saveFailed = false
+    @State private var keepTask: Task<Void, Never>?
 
-    init(existing: ManuscriptSketch? = nil, onSave: @escaping (Data) throws -> Void) {
+    init(existing: ManuscriptSketch? = nil, recoveryKey: String = ManuscriptSketchRecovery.newSketchKey, onSave: @escaping (Data) throws -> Void) {
         self.existing = existing
+        self.recoveryKey = recoveryKey
         self.onSave = onSave
         _paper = State(initialValue: existing?.paper)
         _drawing = State(initialValue: existing?.drawing ?? PKDrawing())
+        _offeredDraft = State(initialValue: ManuscriptSketchRecovery.draft(key: recoveryKey))
     }
 
-    private var hasChanges: Bool {
-        if let existing { return drawing.dataRepresentation() != existing.drawing.dataRepresentation() }
-        return !drawing.strokes.isEmpty
-    }
+    private var hasChanges: Bool { revision > 0 || restoredFromDraft }
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            if let paper {
-                ManuscriptCanvas(paper: paper, drawing: $drawing, tool: tool, controller: controller)
+            if offeredDraft != nil {
+                Color.clear
+            } else if let paper {
+                ManuscriptCanvas(paper: paper, drawing: $drawing, revision: $revision, tool: tool, controller: controller)
                     .background(Color(white: colorScheme == .dark ? 0.16 : 0.86))
                 toolBar
             } else {
@@ -222,8 +238,29 @@ struct ManuscriptPadView: View {
             }
         }
         .appBackground()
+        .onChange(of: revision) { _, _ in keepSoon() }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { keepNow() } }
+        .onDisappear { keepTask?.cancel() }
+        .alert("Restore your unfinished sketch?", isPresented: Binding(get: { offeredDraft != nil }, set: { _ in })) {
+            Button("Restore") {
+                if let draft = offeredDraft {
+                    paper = draft.paper
+                    drawing = draft.drawing
+                    restoredFromDraft = true
+                }
+                offeredDraft = nil
+            }
+            Button("Discard", role: .destructive) {
+                ManuscriptSketchRecovery.clear(key: recoveryKey)
+                offeredDraft = nil
+            }
+            // Decide later: the pad closes and the unfinished drawing is kept.
+            Button("Cancel", role: .cancel) { dismiss() }
+        } message: {
+            Text("It was left open last time.")
+        }
         .confirmationDialog("Discard this sketch?", isPresented: $confirmDiscard, titleVisibility: .visible) {
-            Button(existing == nil ? "Discard Sketch" : "Discard Changes", role: .destructive) { dismiss() }
+            Button(existing == nil ? "Discard Sketch" : "Discard Changes", role: .destructive) { close() }
             Button("Keep Drawing", role: .cancel) { }
         }
         .alert("The sketch couldn't be saved.", isPresented: $saveFailed) {
@@ -233,10 +270,36 @@ struct ManuscriptPadView: View {
         }
     }
 
+    // MARK: Recovery copy
+
+    /// Shortly after the last stroke, so a burst of drawing is one write.
+    private func keepSoon() {
+        keepTask?.cancel()
+        keepTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            keepNow()
+        }
+    }
+
+    private func keepNow() {
+        guard let paper, hasChanges, offeredDraft == nil else { return }
+        ManuscriptSketchRecovery.keep(ManuscriptSketch(paper: paper, drawing: drawing), key: recoveryKey)
+    }
+
+    /// Leaving on purpose (saved, or discarded): nothing is left to offer back.
+    private func close() {
+        keepTask?.cancel()
+        ManuscriptSketchRecovery.clear(key: recoveryKey)
+        dismiss()
+    }
+
+    // MARK: Bars
+
     private var topBar: some View {
         HStack {
             Button("Cancel") {
-                if hasChanges { confirmDiscard = true } else { dismiss() }
+                if hasChanges { confirmDiscard = true } else { close() }
             }
             .foregroundStyle(.primary)
             Spacer()
@@ -247,21 +310,26 @@ struct ManuscriptPadView: View {
             Button("Save") { save() }
                 .fontWeight(.semibold)
                 .tint(Theme.Colors.primaryAction)
-                .disabled(paper == nil || !hasChanges)
+                .disabled(paper == nil || !hasChanges || offeredDraft != nil)
         }
         .font(Theme.Text.body)
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.vertical, Theme.Spacing.m)
     }
 
+    private static let controlColor = Color(red: 0.38, green: 0.48, blue: 0.62)
+
     private var toolBar: some View {
-        HStack(spacing: Theme.Spacing.l) {
-            padButton("arrow.uturn.backward", label: "Undo", active: false) { controller.undo() }
+        // Six controls must fit an iPhone's width: close spacing, with the
+        // slack going between the three groups.
+        HStack(spacing: Theme.Spacing.s) {
+            padButton("arrow.uturn.backward", label: "Undo", selected: false) { controller.undo() }
                 .disabled(!controller.canUndo)
-            padButton("arrow.uturn.forward", label: "Redo", active: false) { controller.redo() }
+            padButton("arrow.uturn.forward", label: "Redo", selected: false) { controller.redo() }
                 .disabled(!controller.canRedo)
             Spacer(minLength: 0)
             ForEach(ManuscriptPadTool.penWidths, id: \.self) { width in
+                let selected = tool == .pen(width: width)
                 Button {
                     tool = .pen(width: width)
                 } label: {
@@ -269,17 +337,25 @@ struct ManuscriptPadView: View {
                         .fill(Color.primary.opacity(0.75))
                         .frame(width: 4 + width * 2.4, height: 4 + width * 2.4)
                         .frame(width: 44, height: 44)
-                        .background(Circle().fill(Color.secondary.opacity(tool == .pen(width: width) ? 0.32 : 0.14)))
+                        .background(toolBackground(selected: selected))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(penLabel(width))
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
             Spacer(minLength: 0)
-            padButton("eraser", label: "Eraser", active: tool == .eraser) { tool = .eraser }
+            padButton("eraser", label: "Eraser", selected: tool == .eraser) { tool = .eraser }
         }
-        // Clear of the corner an iPad window is resized from.
-        .padding(.horizontal, Theme.Spacing.xl)
+        // On a wide window, clear of the corner it is resized from.
+        .padding(.horizontal, horizontalSizeClass == .regular ? Theme.Spacing.xl : Theme.Spacing.l)
         .padding(.vertical, Theme.Spacing.s)
+    }
+
+    /// The tool in use carries a ring; the others sit on the plain disc.
+    private func toolBackground(selected: Bool) -> some View {
+        Circle()
+            .fill(selected ? Self.controlColor.opacity(0.16) : Color.secondary.opacity(0.14))
+            .overlay(Circle().stroke(Self.controlColor.opacity(selected ? 0.9 : 0), lineWidth: 2))
     }
 
     private func penLabel(_ width: CGFloat) -> String {
@@ -290,16 +366,17 @@ struct ManuscriptPadView: View {
         }
     }
 
-    private func padButton(_ systemImage: String, label: String, active: Bool, action: @escaping () -> Void) -> some View {
+    private func padButton(_ systemImage: String, label: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(Color(red: 0.38, green: 0.48, blue: 0.62))
+                .foregroundColor(Self.controlColor)
                 .frame(width: 44, height: 44)
-                .background(Circle().fill(Color.secondary.opacity(active ? 0.32 : 0.14)))
+                .background(toolBackground(selected: selected))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func save() {
@@ -308,8 +385,9 @@ struct ManuscriptPadView: View {
             let file = try ManuscriptSketchFile.writeVerified(ManuscriptSketch(paper: paper, drawing: drawing))
             defer { try? FileManager.default.removeItem(at: file) }
             try onSave(try Data(contentsOf: file))
-            dismiss()
+            close()
         } catch {
+            // The recovery copy stays: the drawing is not lost with the failed save.
             saveFailed = true
         }
     }
@@ -361,15 +439,19 @@ struct ManuscriptPaperChooser: View {
         }
     }
 
-    /// The top of the page, large enough to tell the papers apart.
+    /// Complete staves only: two single staves, or one piano system, with
+    /// nothing of the next one showing and the lines ending inside the frame.
     static func preview(of paper: ManuscriptPaper) -> UIImage {
-        let crop = CGRect(x: 30, y: 44, width: 240, height: 170)
+        let crop = CGRect(x: 30, y: 46, width: 240, height: 142)
         let format = UIGraphicsImageRendererFormat()
         format.opaque = true
         return UIGraphicsImageRenderer(size: crop.size, format: format).image { renderer in
             let context = renderer.cgContext
             context.translateBy(x: -crop.minX, y: -crop.minY)
             ManuscriptPaperRenderer.draw(paper, in: context)
+            // The page's lines run on to the right; the preview's stop short.
+            context.setFillColor(CGColor(gray: 1, alpha: 1))
+            context.fill(CGRect(x: crop.maxX - 18, y: crop.minY, width: 18, height: crop.height))
         }
     }
 }

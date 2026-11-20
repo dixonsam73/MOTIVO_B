@@ -121,6 +121,7 @@ enum LocalFactoryReset {
         // than under MOTIVO/, and was likewise never reached.
         let commentsFileExisted = CommentsStore.shared.wipeOnDiskAndCacheForFactoryReset()
         StagingStore.wipeOnDiskForFactoryReset()
+        ManuscriptSketchRecovery.wipeForFactoryReset()
         PracticeTimerStore.wipeOnDiskForFactoryReset()
         SessionSyncQueue.shared.wipeOnDiskForFactoryReset()
         AttachmentPrivacy.wipeOnDiskAndCacheForFactoryReset()

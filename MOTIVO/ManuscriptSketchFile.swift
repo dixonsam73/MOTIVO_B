@@ -79,7 +79,7 @@ enum ManuscriptSketchFile {
     // MARK: Write
 
     /// Draws the page and embeds the drawing. Overwrites `url`; callers that
-    /// are replacing a saved sketch go through `saveEdit`, never here.
+    /// are replacing a saved sketch go through `ManuscriptSketchEdits`, never here.
     static func write(_ sketch: ManuscriptSketch, to url: URL) throws {
         try write(paper: sketch.paper, drawingData: sketch.drawing.dataRepresentation(), drawing: sketch.drawing, to: url)
     }
@@ -140,9 +140,12 @@ enum ManuscriptSketchFile {
 
     /// The sketch a PDF carries. `noSketch` for anyone else's PDF.
     static func read(_ url: URL) throws -> ManuscriptSketch {
-        let payload = try payload(of: url)
-        guard let drawing = try? PKDrawing(data: payload.drawing) else { throw FileError.damagedSketch }
-        return ManuscriptSketch(paper: payload.paper, drawing: drawing)
+        try sketch(from: payload(in: try metadata(of: url)))
+    }
+
+    /// The same, for a PDF held in memory (an attachment not yet saved).
+    static func read(data: Data) throws -> ManuscriptSketch {
+        try sketch(from: payload(in: try metadata(of: data)))
     }
 
     /// Whether "Edit sketch" can be offered for this PDF.
@@ -150,8 +153,21 @@ enum ManuscriptSketchFile {
         (try? metadata(of: url))?.contains(openTag) ?? false
     }
 
+    static func carriesSketch(data: Data) -> Bool {
+        (try? metadata(of: data))?.contains(openTag) ?? false
+    }
+
+    private static func sketch(from payload: Payload) throws -> ManuscriptSketch {
+        guard let drawing = try? PKDrawing(data: payload.drawing) else { throw FileError.damagedSketch }
+        return ManuscriptSketch(paper: payload.paper, drawing: drawing)
+    }
+
     private static func payload(of url: URL) throws -> Payload {
-        guard let text = try metadata(of: url),
+        try payload(in: try metadata(of: url))
+    }
+
+    private static func payload(in metadata: String?) throws -> Payload {
+        guard let text = metadata,
               let open = text.range(of: openTag),
               let close = text.range(of: closeTag, range: open.upperBound..<text.endIndex) else { throw FileError.noSketch }
         let encoded = text[open.upperBound..<close.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -163,7 +179,17 @@ enum ManuscriptSketchFile {
 
     /// The document's metadata packet as text; nil when it has none.
     private static func metadata(of url: URL) throws -> String? {
-        guard let document = CGPDFDocument(url as CFURL), let catalog = document.catalog else { throw FileError.unreadable }
+        guard let document = CGPDFDocument(url as CFURL) else { throw FileError.unreadable }
+        return try metadata(of: document)
+    }
+
+    private static func metadata(of data: Data) throws -> String? {
+        guard let provider = CGDataProvider(data: data as CFData), let document = CGPDFDocument(provider) else { throw FileError.unreadable }
+        return try metadata(of: document)
+    }
+
+    private static func metadata(of document: CGPDFDocument) throws -> String? {
+        guard let catalog = document.catalog else { throw FileError.unreadable }
         var stream: CGPDFStreamRef?
         guard CGPDFDictionaryGetStream(catalog, "Metadata", &stream), let stream else { return nil }
         var format = CGPDFDataFormat.raw
@@ -189,33 +215,6 @@ enum ManuscriptSketchFile {
             try? FileManager.default.removeItem(at: temp)
             throw error
         }
-    }
-
-    /// Replaces a saved sketch so that an interruption at any point leaves
-    /// the journal pointing at a whole file: the new sketch is written and
-    /// checked, placed beside the old one, the caller repoints and saves its
-    /// record in `commit`, and only then is the old file removed. If `commit`
-    /// throws, the new file is taken away and the old sketch stands.
-    /// - Returns: the new file's path.
-    @discardableResult
-    static func saveEdit(_ sketch: ManuscriptSketch, replacing existingPath: String, commit: (String) throws -> Void) throws -> String {
-        let temp = try writeVerified(sketch)
-        let base = URL(fileURLWithPath: existingPath).deletingPathExtension().lastPathComponent
-        let newPath: String
-        do {
-            newPath = try AttachmentStore.adoptTempExport(temp, suggestedName: base.isEmpty ? "Sketch" : base, kind: .pdf)
-        } catch {
-            try? FileManager.default.removeItem(at: temp)
-            throw error
-        }
-        do {
-            try commit(newPath)
-        } catch {
-            AttachmentStore.deleteAttachmentFile(atPath: newPath)
-            throw error
-        }
-        AttachmentStore.deleteAttachmentFile(atPath: existingPath)
-        return newPath
     }
 
     // MARK: Sharing with other people
@@ -274,6 +273,89 @@ enum ManuscriptSketchFile {
         do { text = try metadata(of: url) } catch { return false }
         if let text, text.contains(openTag) || text.contains(namespace) { return false }
         return bytes.range(of: Data(namespace.utf8)) == nil && bytes.range(of: Data(openTag.utf8)) == nil
+    }
+}
+
+/// Saved sketches that have been drawn on again in the entry editor and not
+/// yet saved with the entry.
+///
+/// A saved sketch is never overwritten. The order, which is the whole point:
+///
+/// 1. `place` puts the edited sketch's file BESIDE the saved one and returns
+///    its path for the editor to point at. The saved file is untouched and
+///    the saved record still names it.
+/// 2. The entry's own save repoints the record and saves it.
+/// 3. `settleAfterSave` removes the previous file, and only where the saved
+///    record really names another file now. `settleAfterCancel` removes the
+///    unused new file instead.
+///
+/// So whenever the app stops, the saved record names a whole sketch: the
+/// previous one until step 2 is durable, the new one after.
+struct ManuscriptSketchEdits {
+    struct Replaced: Equatable {
+        /// The file the saved record named when editing began.
+        let original: String
+        /// The newest edit, beside it in Documents.
+        var edited: String
+    }
+
+    private(set) var replaced: [UUID: Replaced] = [:]
+
+    /// - Parameter currentPath: the file the editor points at for this
+    ///   attachment now (the saved one, or an earlier edit made here).
+    /// - Returns: the new file's path. Throws, changing nothing, if `data`
+    ///   is not a readable sketch or the file cannot be put in place.
+    mutating func place(_ data: Data, for id: UUID, currentPath: String) throws -> String {
+        _ = try ManuscriptSketchFile.read(data: data)
+        let pending = replaced[id]
+        let original = pending?.original ?? currentPath
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("sketch-\(UUID().uuidString).pdf", isDirectory: false)
+        try data.write(to: temp, options: .atomic)
+        let base = URL(fileURLWithPath: original).deletingPathExtension().lastPathComponent
+        let newPath: String
+        do {
+            newPath = try AttachmentStore.adoptTempExport(temp, suggestedName: base.isEmpty ? "Sketch" : base, kind: .pdf)
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            throw error
+        }
+        // An earlier edit made in this editor: no saved record ever named it.
+        if let pending { AttachmentStore.deleteAttachmentFile(atPath: pending.edited) }
+        replaced[id] = Replaced(original: original, edited: newPath)
+        return newPath
+    }
+
+    /// What the SAVED record for an attachment says after the entry's save.
+    enum SavedRecord: Equatable {
+        /// The attachment no longer exists.
+        case gone
+        /// It names this file.
+        case names(String)
+        /// It exists and what it names could not be worked out.
+        case unknown
+    }
+
+    /// Call once the entry's save is durable. The previous file of each
+    /// edited sketch is removed only when nothing saved names it any more.
+    mutating func settleAfterSave(record: (UUID) -> SavedRecord) {
+        for (id, entry) in replaced {
+            let original = URL(fileURLWithPath: entry.original).standardizedFileURL.path
+            switch record(id) {
+            case .gone:
+                AttachmentStore.deleteAttachmentFile(atPath: entry.original)
+            case .names(let path) where URL(fileURLWithPath: path).standardizedFileURL.path != original:
+                AttachmentStore.deleteAttachmentFile(atPath: entry.original)
+            case .names, .unknown:
+                break   // the record still names the previous sketch, or may: it stays
+            }
+        }
+        replaced = [:]
+    }
+
+    /// The editor was left without saving: the previous sketches stand.
+    mutating func settleAfterCancel() {
+        for (_, entry) in replaced { AttachmentStore.deleteAttachmentFile(atPath: entry.edited) }
+        replaced = [:]
     }
 }
 
@@ -361,7 +443,15 @@ enum ManuscriptPaperRenderer {
         let scalar: UInt32, height: CGFloat, above: CGFloat
         switch clef {
         case .none: return nil
-        case .treble: scalar = 0x1D11E; height = lineGap * 7.4; above = lineGap * 1.7
+        // Sized and placed against printed music, by what each clef points at,
+        // not by centring the symbol (staff spaces; checked 2026-11-20):
+        // - treble: its loop circles the G line (second from the bottom),
+        //   reaching the middle line above and the bottom line below; it
+        //   stands about 1.2 spaces above the staff and 1.4 below.
+        // - bass: its head sits on the F line (second from the top) under
+        //   the top line, with the two dots in the spaces either side of it.
+        // - alto: the height of the staff, its centre on the middle line.
+        case .treble: scalar = 0x1D11E; height = lineGap * 6.66; above = lineGap * 1.16
         case .bass: scalar = 0x1D122; height = lineGap * 3.3; above = 0
         case .alto: scalar = 0x1D121; height = staffHeight; above = 0
         }
