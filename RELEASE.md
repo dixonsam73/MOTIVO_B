@@ -413,7 +413,7 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      is one file with one hash. (b) A failed or interrupted save keeps the
      previous sketch: the new file is written and read back, placed beside
      the old one, the record repointed and saved, and only then the old
-     file removed (`saveEdit`, not `replaceAttachmentFile`). (c) The copy
+     file removed (now `ManuscriptSketchEdits`; not `replaceAttachmentFile`). (c) The copy
      for another person is the pages drawn again with no metadata
      (`shareableURL`). The selected-pages export already drops the
      drawing, and a shared entry never uploads a PDF at all (it sends a
@@ -426,17 +426,37 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      unfinished work, and the clef glyph source (paths, or a bundled OFL
      font).
   4. Manuscript completed in the entry editor, alongside the Journal and
-     editor iPad adaptations. **In progress.** Built 2026-11-20: the pad
-     (`ManuscriptPadView.swift`: paper chooser, pen in three widths,
-     eraser, undo and redo, two fingers to move and zoom, Save and a
-     confirmed discard) and a fourth button in the editor's attachments
-     that opens it; a finished sketch is staged like an imported PDF.
-     The clefs come from the system's own music symbols, so no font is
-     bundled. Seen on the iPad simulator by finger; **the pad's look
-     awaits Samuel's sign-off**. Still to do here: reopening a saved
-     sketch to edit it ("Edit sketch" in the viewer, through `saveEdit`),
-     recovery of unfinished work, a Pencil on a device, and the Journal
-     and editor iPad adaptations.
+     editor iPad adaptations. **In progress.**
+     *The pad* (`ManuscriptPadView.swift`; layout approved by Samuel
+     2026-11-20 with three refinements, all made): paper chooser, pen in
+     three widths, eraser, undo and redo, two fingers to move and zoom,
+     Save and a confirmed discard. The clefs are the system's own music
+     symbols, sized and placed against printed music: the treble's loop
+     circles the G line, the bass's dots sit either side of the F line, the
+     alto spans the staff. The paper thumbnails show complete staves (one
+     paired system for Piano). The tool in use carries a ring.
+     *In the editor:* a fourth attachments button opens a new sketch,
+     staged like an imported PDF. A sketch's tile offers "Edit sketch",
+     which reopens it in the pad. A saved sketch is never overwritten: the
+     edit is placed beside it, the entry's save repoints the record, and
+     only then does the old file go; Cancel removes the new file instead
+     (`ManuscriptSketchEdits`).
+     *Unfinished work:* the drawing is kept on the device while the pad is
+     open and offered back if the pad was not left on purpose
+     (`ManuscriptSketchRecovery`; never synced or backed up, removed by
+     Erase).
+     *Checked:* on the iPad and iPhone simulators by finger, a new sketch,
+     reopening and editing a saved one (the files and the saved record
+     read on disk at each step), and recovery after the app was killed,
+     for a saved sketch and for a new one; `ManuscriptSketchFileTests`
+     (22); the full unit run shows the seven known order-dependent
+     failures and no other. **Not checked: a device, a Pencil, or writing a few bars to
+     judge staff spacing and pen widths; the layout approval does not cover
+     these.** On an iPhone the whole page shows at first and the staves are
+     small until zoomed.
+     *Next:* one focused Codex review of the clean sharing copy, the save
+     order above and the preservation tests; then the Journal and editor
+     iPad adaptations.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode
