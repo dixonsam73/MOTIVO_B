@@ -404,15 +404,25 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   2. The SDK baseline (previous item), separately. Steps 1 and 3 do not
      wait for it.
   3. Manuscript spike: a feasibility check, not an architecture project.
-     The paper drawn, the pad, PDF export, and one small save → reopen →
-     edit → recover flow through the staged-to-final attachment id
-     migration. It must prove three things about the PDF that carries its
-     own drawing (section A): the drawing and paper settings survive save,
-     reopen and the app's own PDF handling; an interrupted or failed save
-     keeps the previous saved sketch; and both Connected sharing and
-     external share or export produce a PDF without the editable payload,
-     including when the whole document is shared. It also settles the clef
-     glyph source (paths, or a bundled OFL font).
+     **Done 2026-11-20: passed** (`ManuscriptSketchFile.swift`,
+     `ManuscriptSketchFileTests`, 14; no screen uses it yet). The three
+     proofs for the PDF that carries its own drawing (section A):
+     (a) the drawing and paper come back after save and reopen, a byte
+     copy (what sync or a restore delivers), the move into Documents and a
+     replacement; the thumbnail path does not rewrite the file; to sync it
+     is one file with one hash. (b) A failed or interrupted save keeps the
+     previous sketch: the new file is written and read back, placed beside
+     the old one, the record repointed and saved, and only then the old
+     file removed (`saveEdit`, not `replaceAttachmentFile`). (c) The copy
+     for another person is the pages drawn again with no metadata
+     (`shareableURL`). The selected-pages export already drops the
+     drawing; the three routes that hand out the whole file do not, and
+     take `shareableURL` in step 4: the viewer's share sheet, the
+     Connected attachment send and a shared entry's upload. Sizes: 126 KB
+     for 20 strokes, 229 KB for 200. Left for step 4, none a feasibility
+     doubt: the pad itself and a Pencil on a device, recovery of
+     unfinished work, and the clef glyph source (paths, or a bundled OFL
+     font).
   4. Manuscript completed in the entry editor, alongside the Journal and
      editor iPad adaptations.
   5. Once the native shell and the sketch's save and re-edit path work:
