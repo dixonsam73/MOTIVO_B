@@ -154,7 +154,7 @@ struct SyncTestRestoreCard: View {
                 EmptyView()
             case .turnOn:
                 card("Already using Études on another device?",
-                     "iCloud sync is optional. If this iPhone is signed in to the same iCloud account as your other device, turn it on to bring your profile, journal, scores and settings here before choosing a name. You can turn it on or off later in Profile; turning it off keeps everything on this device.",
+                     "Turn on iCloud sync to bring your journal here.",
                      button: "Turn on iCloud sync") {
                     JournalSyncCoordinator.shared.enable(persistence: PersistenceController.shared.container)
                     reloadSoon()
@@ -162,15 +162,15 @@ struct SyncTestRestoreCard: View {
             case .offer(let removed):
                 card("Restore from iCloud",
                      removed
-                     ? "Études data was removed from this device, but your private iCloud journal and your other devices are unchanged. Restore it here first: your profile, journal, scores and settings come back and the name step is skipped."
-                     : "Sync is off on this device. Turn it on to bring your iCloud profile and journal back here before choosing a name.",
+                     ? "Your journal is still in iCloud. Restore it here and skip set-up."
+                     : "Sync is off on this device. Turn it on to bring your journal back.",
                      button: "Restore from iCloud") {
                     JournalSyncCoordinator.shared.reenable()
                     reloadSoon()
                 }
             case .restoring(let failure):
                 card("Restoring from iCloud…",
-                     "Looking for your journal in iCloud. If this device is offline you can set up now: your iCloud profile is restored when it connects, and a name typed here is kept on the Displaced by sync list."
+                     "Looking for your journal. If you’re offline, you can set up now."
                      + (status.restoreProgress.map { "\n\n\($0.text)" } ?? "")
                      + (failure.map { "\n\n\($0)" } ?? ""),
                      button: failure == nil ? nil : "Try again") {
@@ -178,7 +178,7 @@ struct SyncTestRestoreCard: View {
                 }
             case .waiting(let reason):
                 card("iCloud not available",
-                     "Sync is paused: \(reason). You can set up now; your iCloud profile is restored once sync resumes, and a name typed here is kept on the Displaced by sync list.",
+                     "Sync is paused: \(reason). You can set up now; your journal comes back when sync resumes.",
                      button: nil) {}
             case .nothingFound:
                 card("Nothing to restore", "iCloud holds no profile for this journal yet. Set up below.", button: nil) {}

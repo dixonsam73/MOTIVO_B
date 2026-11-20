@@ -143,16 +143,15 @@ Replacement:
 
 ## In-app copy already in place (for consistency with the above)
 
-- Profile toggle: "Optional. On: your journal, scores, profile and settings
-  are kept the same on every device signed in to the same iCloud account.
-  Off: this device keeps everything it has and stops sending and receiving;
-  what was already uploaded stays in iCloud. Ensembles and other Connected
-  features are not part of this sync."
-- Set-up card: "iCloud sync is optional. If this iPhone is signed in to the
-  same iCloud account as your other device, turn it on to bring your
-  profile, journal, scores and settings here before choosing a name. You
-  can turn it on or off later in Profile; turning it off keeps everything
-  on this device."
+- Profile toggle (shortened 2026-11-20; the app no longer says "optional"
+  or what stays in iCloud when sync is turned off, so the policy text above
+  is where that is said): "Sync with iCloud. Keeps your journal, scores,
+  profile and settings the same on all your devices." Turning it on asks
+  once: "This device’s journal will be combined with the one in iCloud.
+  Where an entry differs, the other version is kept under Displaced by
+  sync. Something deleted on only one device may come back."
+- Set-up card: "Already using Études on another device? Turn on iCloud sync
+  to bring your journal here."
 - The removal and deletion sheets (`ProfileView`) already say it: "It does
   not erase your private iCloud journal or the copies on your other devices.
   Sync is turned off on this device; if you enable it again, your journal
