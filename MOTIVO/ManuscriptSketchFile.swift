@@ -246,9 +246,22 @@ enum ManuscriptSketchFile {
     /// What may be handed to another person: the file itself for an ordinary
     /// PDF, and for a sketch a copy without the drawing. Throws rather than
     /// return a sketch as it is.
+    ///
+    /// A file that cannot be read as a PDF at all (not a PDF, or one locked
+    /// with a password) is not one of ours, which are never locked, and is
+    /// returned as it is, so sharing such a file behaves as it always has.
     static func shareableURL(for url: URL) throws -> (url: URL, isTemporary: Bool) {
-        guard try metadata(of: url)?.contains(namespace) == true else { return (url, false) }
+        let text: String?
+        do { text = try metadata(of: url) } catch FileError.unreadable { return (url, false) }
+        guard let text, text.contains(namespace) || text.contains(openTag) else { return (url, false) }
         return (try cleanCopy(of: url), true)
+    }
+
+    /// The one call the sharing screens make, for any attachment: a PDF goes
+    /// through `shareableURL`; every other kind of file is returned as it is.
+    static func urlForAnotherPerson(_ url: URL) throws -> URL {
+        guard url.pathExtension.lowercased() == "pdf" else { return url }
+        return try shareableURL(for: url).url
     }
 
     /// The same pages, drawn again into a new PDF that has no metadata.

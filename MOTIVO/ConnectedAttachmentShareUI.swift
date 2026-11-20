@@ -231,8 +231,13 @@ private struct ConnectedAttachmentShareFlow: View {
                 if let url = request.url {
                     VStack(spacing: 0) {
                         destinationRow(title: "Outside Études", systemImage: "square.and.arrow.up") {
-                            onIOSShare(url)
-                            dismiss()
+                            // A manuscript sketch leaves without its editable drawing.
+                            do {
+                                onIOSShare(try ManuscriptSketchFile.urlForAnotherPerson(url))
+                                dismiss()
+                            } catch {
+                                errorMessage = "This sketch couldn't be prepared for sharing."
+                            }
                         }
                     }
                     .connectedShareCard()
@@ -500,11 +505,13 @@ private struct ConnectedAttachmentShareFlow: View {
         case .score(let score):
             let preparedURL: URL
             let preparedPageCount: Int
+            // Either way a manuscript sketch goes without its editable drawing.
             if let pages = selectedPages, !pages.isEmpty {
-                preparedURL = try PDFSubsetExporter.export(from: score.url, selectedPages: pages)
+                let exported = try PDFSubsetExporter.export(from: score.url, selectedPages: pages)
+                preparedURL = try ManuscriptSketchFile.urlForAnotherPerson(exported)
                 preparedPageCount = pages.count
             } else {
-                preparedURL = score.url
+                preparedURL = try ManuscriptSketchFile.urlForAnotherPerson(score.url)
                 preparedPageCount = pageCount
             }
             let filename = score.title.lowercased().hasSuffix(".pdf") ? score.title : score.title + ".pdf"
@@ -518,7 +525,7 @@ private struct ConnectedAttachmentShareFlow: View {
 
         case .sessionAttachment(let item):
             return ConnectedAttachmentUploadPayload(
-                localURL: item.url,
+                localURL: try ManuscriptSketchFile.urlForAnotherPerson(item.url),
                 filename: item.title,
                 attachmentName: sessionAttachmentName(for: item),
                 mimeType: item.mimeType,

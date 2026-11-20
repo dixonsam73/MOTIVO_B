@@ -285,6 +285,23 @@ final class ManuscriptSketchFileTests: XCTestCase {
         XCTAssertTrue(ManuscriptSketchFile.isClean(shareable.url))
     }
 
+    /// What the sharing screens call, for any attachment.
+    func testOnlyASketchIsCopiedForAnotherPerson() throws {
+        let sketchURL = file("Idea")
+        try ManuscriptSketchFile.write(sketch(), to: sketchURL)
+        let out = try ManuscriptSketchFile.urlForAnotherPerson(sketchURL)
+        addTeardownBlock { try? FileManager.default.removeItem(at: out.deletingLastPathComponent()) }
+        XCTAssertNotEqual(out, sketchURL)
+        XCTAssertTrue(ManuscriptSketchFile.isClean(out))
+        // A recording, and a file that is not a PDF whatever its name: untouched.
+        let audio = scratch.appendingPathComponent("take.m4a")
+        try Data("not audio either".utf8).write(to: audio)
+        XCTAssertEqual(try ManuscriptSketchFile.urlForAnotherPerson(audio), audio)
+        let notAPDF = file("scan")
+        try Data("%PDF-nothing readable".utf8).write(to: notAPDF)
+        XCTAssertEqual(try ManuscriptSketchFile.urlForAnotherPerson(notAPDF), notAPDF, "shared as it always was")
+    }
+
     // MARK: Measurements (printed, for the record)
 
     func testSizes() throws {

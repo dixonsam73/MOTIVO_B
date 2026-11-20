@@ -416,9 +416,11 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      file removed (`saveEdit`, not `replaceAttachmentFile`). (c) The copy
      for another person is the pages drawn again with no metadata
      (`shareableURL`). The selected-pages export already drops the
-     drawing; the three routes that hand out the whole file do not, and
-     take `shareableURL` in step 4: the viewer's share sheet, the
-     Connected attachment send and a shared entry's upload. Sizes: 126 KB
+     drawing, and a shared entry never uploads a PDF at all (it sends a
+     picture of a page). The two routes that hand out the whole file,
+     "Outside Études" and the Connected attachment send, both in the one
+     share screen, now go through it (`urlForAnotherPerson`; ordinary
+     PDFs and other files are passed as before). Sizes: 126 KB
      for 20 strokes, 229 KB for 200. Left for step 4, none a feasibility
      doubt: the pad itself and a Pencil on a device, recovery of
      unfinished work, and the clef glyph source (paths, or a bundled OFL
