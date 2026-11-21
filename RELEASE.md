@@ -489,13 +489,18 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      that text symbol, not a pencil. The three pen widths stay as they
      are for now (Samuel, 2026-11-21: live with them for a while; he uses
      the finest most and the broad for filling note heads; they were
-     chosen by eye, not against a standard). The star (the entry's picture) is on a sketch's thumbnail
-     in the editor, as for a photo, and in the pad's top bar; both added
-     at Samuel's request. A sketch is edited only after Edit has been
+     chosen by eye, not against a standard). The star (the entry's
+     picture) is on a sketch's thumbnail in the editor, as for a photo,
+     and in the viewer where a sketch is only looked at; it is not in the
+     pad (Samuel, 2026-11-21). **Printed bar lines** (same day): none, two
+     or four bars to a row, switched from the pad's top bar at any time,
+     since they are paper and not ink; even bars after the clef, a closing
+     line at the end of each row, through both staves on piano paper;
+     saved with the sketch. A sketch is edited only after Edit has been
      tapped for the whole entry; opening it from the entry page shows it,
      and that is settled (Samuel, 2026-11-21), not something to build.
-     The clear bubble Samuel saw at the
-     top right was the Pencil's own hover highlight, not a fault.
+     The clear bubble Samuel saw at the top right was the Pencil's own
+     hover highlight, not a fault.
      Études Dev on the iPad updated with this (2026-11-21); the other two
      installs untouched.
      *Next:* Samuel's check of the correction on the iPad; then the
