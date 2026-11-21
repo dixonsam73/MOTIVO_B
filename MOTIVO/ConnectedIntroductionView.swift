@@ -52,7 +52,7 @@ struct ConnectedIntroductionView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             // In a wide, tall window the page is a centred column, so the
-            // photograph and the example screens keep a sensible size.
+            // photograph keeps a sensible size.
             .wideWindowColumn()
         }
         .appBackground()
@@ -257,6 +257,16 @@ private struct ConnectedScreenshot: View {
     let description: String
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontal
+    @Environment(\.verticalSizeClass) private var vertical
+
+    /// These are pictures of a phone's screen. Where the window has room
+    /// (an iPad) they are shown about as wide as a phone, not as wide as
+    /// the page. In a phone-sized space they fill the width, as before.
+    private var widthLimit: CGFloat {
+        guard horizontal == .regular && vertical == .regular else { return .infinity }
+        return 300 * crop.width / sourceSize.width
+    }
 
     init(_ asset: String, sourceSize: CGSize, crop: CGRect, description: String) {
         self.asset = asset
@@ -281,6 +291,7 @@ private struct ConnectedScreenshot: View {
             RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
                 .strokeBorder(Theme.Colors.stroke(colorScheme), lineWidth: 1)
         }
+        .frame(maxWidth: widthLimit)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(description)
         .accessibilityAddTraits(.isImage)
