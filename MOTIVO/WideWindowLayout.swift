@@ -38,6 +38,49 @@ enum WideWindow {
     static var isRoomy: Bool { isRoomy(WindowMetrics.windowBounds.size) }
 }
 
+/// The Timer page in a roomy window. In landscape, an opened section (the
+/// metronome or drone controls, the tuner, the list, the attachments) used
+/// to push the clock and the buttons down the page; there it now sits
+/// beside the column of buttons instead.
+enum TimerPageArrangement {
+
+    /// The widest the Timer's column of buttons and cards grows in a roomy
+    /// window, so a label stays near the button it belongs to.
+    static let columnWidth: CGFloat = 560
+
+    /// The widest an opened section grows in the side panel.
+    static let panelWidth: CGFloat = 600
+
+    /// Narrower than this there is no room for two parts side by side.
+    static let sideBySideMinimumWidth: CGFloat = 1000
+
+    /// PURE. Two parts side by side: a roomy window that is wider than it
+    /// is tall. Never a phone-sized space, never portrait.
+    static func isSideBySide(_ size: CGSize, roomy: Bool) -> Bool {
+        roomy && size.width > size.height && size.width >= sideBySideMinimumWidth
+    }
+
+    /// PURE. The arrangement to show. While the audio recorder is open the
+    /// page keeps the arrangement the recorder opened in (`heldByRecorder`),
+    /// whatever the window now fits: moving the recorder would end the take.
+    static func sideBySide(fits: Bool, heldByRecorder: Bool?) -> Bool {
+        heldByRecorder ?? fits
+    }
+
+    /// PURE. The width the column of buttons keeps while the panel is open.
+    /// Never more than half the window, so a held arrangement in a window
+    /// that has since been made narrow still shows both parts.
+    static func columnRegionWidth(window: CGFloat) -> CGFloat {
+        min(max(440, (window * 0.42).rounded()), (window / 2).rounded())
+    }
+
+    /// PURE. Where the first opened section starts: level with the top of
+    /// the column's first button.
+    static func panelTopInset(windowHeight: CGFloat) -> CGFloat {
+        max(6, windowHeight * 0.024) + 95
+    }
+}
+
 private struct WideWindowColumn: ViewModifier {
     @Environment(\.horizontalSizeClass) private var horizontal
     @Environment(\.verticalSizeClass) private var vertical

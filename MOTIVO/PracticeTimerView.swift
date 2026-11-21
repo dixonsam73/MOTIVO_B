@@ -252,6 +252,11 @@ struct PracticeTimerView: View {
     @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
     private var allInstruments: FetchedResults<Instrument>
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    /// The arrangement the page was in when the audio recorder opened; nil
+    /// while it is closed. See `TimerPageArrangement.sideBySide`.
+    @State private var arrangementHeldByRecorder: Bool? = nil
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject var appRoute: AppRouteStore
     @EnvironmentObject private var appModeManager: AppModeManager
@@ -1475,43 +1480,85 @@ private func loadPracticeDefaultsIfNeeded() {
 
     // MARK: - Cards (split to help the type-checker)
 
+    /// ONE view tree for every window, so the buttons and the clock are never
+    /// rebuilt when the window changes shape. Only widths, and where an
+    /// opened section sits, change.
+    ///
+    /// - A phone-sized space: exactly the single scrolling column.
+    /// - A roomy window (iPad): the same column, held to a comfortable width.
+    /// - A roomy window in landscape: the same, until a section is opened.
+    ///   Then the column of buttons keeps to the left and stays put, and the
+    ///   opened sections stack on the right and scroll by themselves.
+    ///
+    /// The audio recorder holds the take being recorded, and moving it
+    /// between the column and the panel would end the take. So while the
+    /// recorder is open the page keeps the arrangement it opened in, even
+    /// if the iPad is turned, and changes only once the recorder is closed.
     @ViewBuilder
     private var mainScrollView: some View {
         GeometryReader { proxy in
-            ScrollView {
-                VStack(spacing: 0) {
-                    if isHomePresentation {
-                        homeTopBar
-                    }
+            let roomy = horizontalSizeClass == .regular && verticalSizeClass == .regular
+            let fitsSideBySide = TimerPageArrangement.isSideBySide(proxy.size, roomy: roomy)
+            let sideBySide = TimerPageArrangement.sideBySide(fits: fitsSideBySide, heldByRecorder: arrangementHeldByRecorder)
+            let panelOpen = sideBySide && hasOpenPanelSection
 
-                    VStack(spacing: 0) {
-                        Color.clear
+            VStack(spacing: 0) {
+                if isHomePresentation && sideBySide {
+                    homeTopBar
+                }
+
+                HStack(alignment: .top, spacing: 0) {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            if isHomePresentation && !sideBySide {
+                                homeTopBar
+                            }
+
+                            VStack(spacing: 0) {
+                                Color.clear
+                                    .frame(
+                                        height: max(
+                                            PracticeTimerCompositionUI.minimumViewportTopInset,
+                                            proxy.size.height * PracticeTimerCompositionUI.viewportTopInsetRatio
+                                        )
+                                    )
+
+                                mainContent(sideBySide: sideBySide)
+
+                                Spacer(minLength: PracticeTimerCompositionUI.viewportBottomBreathingRoom)
+                            }
                             .frame(
-                                height: max(
-                                    PracticeTimerCompositionUI.minimumViewportTopInset,
-                                    proxy.size.height * PracticeTimerCompositionUI.viewportTopInsetRatio
-                                )
+                                minHeight: max(
+                                    proxy.size.height - (isHomePresentation ? PracticeTimerCompositionUI.homeTopBarAllowance : 0),
+                                    0
+                                ),
+                                alignment: .top
                             )
-
-                        mainContent
-
-                        Spacer(minLength: PracticeTimerCompositionUI.viewportBottomBreathingRoom)
-                    }
-                    .frame(
-                        minHeight: max(
-                            proxy.size.height - (isHomePresentation ? PracticeTimerCompositionUI.homeTopBarAllowance : 0),
-                            0
-                        ),
-                        alignment: .top
-                    )
-                }
-                .background {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if showTasksPad { focusedTaskID = nil }
+                            .frame(maxWidth: roomy ? TimerPageArrangement.columnWidth : .infinity)
                         }
+                        .frame(maxWidth: .infinity)
+                        .background {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    if showTasksPad { focusedTaskID = nil }
+                                }
+                        }
+                    }
+                    .frame(maxWidth: panelOpen ? TimerPageArrangement.columnRegionWidth(window: proxy.size.width) : .infinity)
+
+                    if panelOpen {
+                        ScrollView {
+                            openSectionsPanel(topInset: TimerPageArrangement.panelTopInset(windowHeight: proxy.size.height))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .transition(.opacity)
+                    }
                 }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: panelOpen)
+            }
+            .onChange(of: showAudioRecorder, initial: true) { _, open in
+                arrangementHeldByRecorder = open ? fitsSideBySide : nil
             }
         }
         .navigationTitle("")
@@ -2130,21 +2177,25 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     @ViewBuilder
-    private var mainContent: some View {
+    /// `sideBySide`: the opened sections are shown in the panel beside the
+    /// column, not here.
+    private func mainContent(sideBySide: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             ambientThreadContinuitySection
             sessionMetaSection
-            compactToolsSection
-            if isTunerOpen {
+            compactToolsSection(stripsBelow: !sideBySide)
+            if isTunerOpen && !sideBySide {
                 tunerPanel
             }
             timerSection
             mediaRecorderSection
-            if showAudioRecorder {
+            if showAudioRecorder && !sideBySide {
                 audioRecorderPanel
             }
-            bottomActionSection
-            attachmentsSection
+            bottomActionSection(withTasksPad: !sideBySide)
+            if !sideBySide {
+                attachmentsSection
+            }
             // Save thought: the last thing on the page, beneath the attachments
             // card. It stays when that card is collapsed and moves no timer or
             // recorder control.
@@ -2156,6 +2207,54 @@ private func loadPracticeDefaultsIfNeeded() {
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.top, 0)
         .padding(.bottom, Theme.Spacing.xl)
+    }
+
+    // MARK: - Opened sections beside the column (roomy window, landscape)
+
+    /// The list is showing (the "+" actions take its place while they are open).
+    private var isTasksPadShowing: Bool {
+        showTasksButton && showTasksPad && !(showAddEntryActions && isIdleAddEntryAvailable)
+    }
+
+    /// Whether anything is open that the side panel would hold.
+    private var hasOpenPanelSection: Bool {
+        (showDroneStrip && showDroneControlsExpanded)
+            || (showMetronomeStrip && showMetronomeControlsExpanded)
+            || isTunerOpen
+            || showAudioRecorder
+            || isTasksPadShowing
+            || (hasAttachments && isAttachmentsVisible)
+    }
+
+    /// The opened sections, in the order they appear down the single column.
+    private func openSectionsPanel(topInset: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            droneControlStrip
+            metronomeControlStrip
+            if isTunerOpen {
+                tunerPanel
+            }
+            if showAudioRecorder {
+                audioRecorderPanel
+            }
+            if isTasksPadShowing {
+                tasksPadCard
+                    .transition(.opacity)
+            }
+            attachmentsSection
+        }
+        .frame(maxWidth: TimerPageArrangement.panelWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, Theme.Spacing.l)
+        .padding(.top, topInset)
+        .padding(.bottom, Theme.Spacing.xl)
+        .background {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if showTasksPad { focusedTaskID = nil }
+                }
+        }
     }
 
     @ViewBuilder
@@ -2414,7 +2513,7 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     @ViewBuilder
-    private var compactToolsSection: some View {
+    private func compactToolsSection(stripsBelow: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             HStack(spacing: Theme.Spacing.m) {
                 if showDroneStrip {
@@ -2494,37 +2593,48 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.bottom, longPressControlsHintBottomPadding)
+            .padding(.bottom, longPressControlsHintBottomPadding(stripsBelow: stripsBelow))
 
-            if showDroneStrip && showDroneControlsExpanded {
-                DroneControlStripCard(
-                    droneIsOn: $droneIsOn,
-                    droneVolume: $droneVolume,
-                    droneNoteIndex: $droneNoteIndex,
-                    droneFreq: $droneFreq,
-                    showDroneVolumePopover: $showDroneVolumePopover,
-                    droneNotes: droneNotes,
-                    droneEngine: audioServices.droneEngine,
-                    recorderIcon: recorderIcon
-                )
-                .frame(maxWidth: .infinity, alignment: .center)
-                .cardSurfaceNonClipping(padding: Theme.Spacing.m)
-                .zIndex(5)
-                .transition(.move(edge: .top).combined(with: .opacity))
+            if stripsBelow {
+                droneControlStrip
+                metronomeControlStrip
             }
+        }
+    }
 
-            if showMetronomeStrip && showMetronomeControlsExpanded {
-                MetronomeControlStripCard(
-                    metronomeIsOn: $metronomeIsOn,
-                    settings: $metronomeSettings,
-                    metronomeEngine: audioServices.metronomeEngine,
-                    recorderIcon: recorderIcon
-                )
-                .frame(maxWidth: .infinity, alignment: .center)
-                .cardSurfaceNonClipping(padding: Theme.Spacing.m)
-                .zIndex(5)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
+    @ViewBuilder
+    private var droneControlStrip: some View {
+        if showDroneStrip && showDroneControlsExpanded {
+            DroneControlStripCard(
+                droneIsOn: $droneIsOn,
+                droneVolume: $droneVolume,
+                droneNoteIndex: $droneNoteIndex,
+                droneFreq: $droneFreq,
+                showDroneVolumePopover: $showDroneVolumePopover,
+                droneNotes: droneNotes,
+                droneEngine: audioServices.droneEngine,
+                recorderIcon: recorderIcon
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
+            .cardSurfaceNonClipping(padding: Theme.Spacing.m)
+            .zIndex(5)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    @ViewBuilder
+    private var metronomeControlStrip: some View {
+        if showMetronomeStrip && showMetronomeControlsExpanded {
+            MetronomeControlStripCard(
+                metronomeIsOn: $metronomeIsOn,
+                settings: $metronomeSettings,
+                metronomeEngine: audioServices.metronomeEngine,
+                recorderIcon: recorderIcon
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
+            .cardSurfaceNonClipping(padding: Theme.Spacing.m)
+            .zIndex(5)
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -2554,16 +2664,18 @@ private func loadPracticeDefaultsIfNeeded() {
             .accessibilityHidden(true)
     }
 
-    private var longPressControlsHintBottomPadding: CGFloat {
+    /// `stripsBelow`: an opened strip or the tuner sits directly under the
+    /// buttons (the single column). Beside the column it does not.
+    private func longPressControlsHintBottomPadding(stripsBelow: Bool) -> CGFloat {
         guard showDroneStrip || showMetronomeStrip else { return Theme.Spacing.xs }
 
         // Reserve space independently of hint visibility, so discovery/fading never
         // moves the controls. The idle TimerCard already leaves room above Start.
         let availableCaptionSpace: CGFloat
-        if (showDroneStrip && showDroneControlsExpanded) ||
-            (showMetronomeStrip && showMetronomeControlsExpanded) {
+        if stripsBelow && ((showDroneStrip && showDroneControlsExpanded) ||
+            (showMetronomeStrip && showMetronomeControlsExpanded)) {
             availableCaptionSpace = Theme.Spacing.xs
-        } else if isTunerOpen {
+        } else if stripsBelow && isTunerOpen {
             availableCaptionSpace = Theme.Spacing.xs + Theme.Spacing.l - Theme.Spacing.s
         } else if !isRunning && elapsedSeconds == 0 {
             availableCaptionSpace = 44
@@ -2800,7 +2912,7 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     @ViewBuilder
-    private var bottomActionSection: some View {
+    private func bottomActionSection(withTasksPad: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             HStack(spacing: Theme.Spacing.m) {
                 if hasAttachments {
@@ -2976,38 +3088,8 @@ private func loadPracticeDefaultsIfNeeded() {
                 .padding(.top, 10)
                 .padding(.bottom, 12)
                 .transition(.opacity)
-            } else if showTasksButton && showTasksPad {
-                TasksPadCard(
-                    showTasksPad: $showTasksPad,
-                    taskLines: $taskLines,
-                    autoTaskTexts: $autoTaskTexts,
-                    focusedTaskID: $focusedTaskID,
-                    tasksAccent: tasksAccent,
-                    onToggleDone: { id in toggleDone(id) },
-                    onToggleLineType: { id in toggleTaskLineType(id) },
-                    onDeleteLine: { id in deleteLine(id) },
-                    onClearAll: { clearAllTasks() },
-                    onAddEmptyLine: { type in addEmptyTaskLine(type: type) },
-                    onHandleReturn: { id in handleTaskReturn(for: id) },
-                    onPersistSnapshot: { persistTasksSnapshot() },
-                    onMarkTaskSetDirty: { resetLink in
-                        markLinkedTaskSetDirty(resetLink: resetLink)
-                    },
-                    saveListButtonTitle: taskSetSaveButtonTitle,
-                    isSaveListDisabled: isTaskSetSaveButtonDisabled,
-                    onSaveList: {
-                        beginTaskSetSaveFlow()
-                    },
-                    onExpand: {
-                        loadPracticeDefaultsIfNeeded()
-                        loadDefaultTasksIfNeeded()
-                        persistTasksSnapshot()
-                    },
-                    onImportTasks: {
-                        unlinkTaskSetForLoadedOrImportedList()
-                        showTaskImportPasteSheet = true
-                    }
-                )
+            } else if withTasksPad && showTasksButton && showTasksPad {
+                tasksPadCard
                 .transition(.opacity)
             }
         }
@@ -3058,6 +3140,40 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
             }
         }
+    }
+
+    private var tasksPadCard: some View {
+        TasksPadCard(
+            showTasksPad: $showTasksPad,
+            taskLines: $taskLines,
+            autoTaskTexts: $autoTaskTexts,
+            focusedTaskID: $focusedTaskID,
+            tasksAccent: tasksAccent,
+            onToggleDone: { id in toggleDone(id) },
+            onToggleLineType: { id in toggleTaskLineType(id) },
+            onDeleteLine: { id in deleteLine(id) },
+            onClearAll: { clearAllTasks() },
+            onAddEmptyLine: { type in addEmptyTaskLine(type: type) },
+            onHandleReturn: { id in handleTaskReturn(for: id) },
+            onPersistSnapshot: { persistTasksSnapshot() },
+            onMarkTaskSetDirty: { resetLink in
+                markLinkedTaskSetDirty(resetLink: resetLink)
+            },
+            saveListButtonTitle: taskSetSaveButtonTitle,
+            isSaveListDisabled: isTaskSetSaveButtonDisabled,
+            onSaveList: {
+                beginTaskSetSaveFlow()
+            },
+            onExpand: {
+                loadPracticeDefaultsIfNeeded()
+                loadDefaultTasksIfNeeded()
+                persistTasksSnapshot()
+            },
+            onImportTasks: {
+                unlinkTaskSetForLoadedOrImportedList()
+                showTaskImportPasteSheet = true
+            }
+        )
     }
 
     @ViewBuilder
