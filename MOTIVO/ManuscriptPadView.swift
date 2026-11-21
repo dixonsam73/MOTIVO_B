@@ -549,9 +549,9 @@ struct ManuscriptPaperChooser: View {
         GeometryReader { proxy in
             let layout = ManuscriptPaperChooserLayout(space: proxy.size, count: Self.choices.count)
             ScrollView {
-                VStack(spacing: ManuscriptPaperChooserLayout.spacing) {
+                VStack(spacing: layout.rowSpacing) {
                     ForEach(0..<layout.rows, id: \.self) { row in
-                        HStack(alignment: .top, spacing: ManuscriptPaperChooserLayout.spacing) {
+                        HStack(alignment: .top, spacing: layout.columnSpacing) {
                             ForEach(layout.indices(inRow: row), id: \.self) { index in
                                 tile(Self.choices[index], sheet: layout.sheet)
                             }
@@ -585,33 +585,66 @@ struct ManuscriptPaperChooser: View {
 }
 
 /// How the six sheets share the space under the pad's top bar. PURE.
+///
+/// A sheet always has the same shape. Where the space's HEIGHT decides its
+/// size (a phone, an iPad in landscape) the sheets fill the page top to
+/// bottom, close together. Where its WIDTH decides (an iPad in portrait)
+/// the sheets are as large as fit three across with room between them,
+/// which is about the size they are in landscape, and the height left over
+/// is not filled: the rows are set a little further apart and the block is
+/// centred (Samuel, 2026-11-21: landscape is right; portrait should be the
+/// same size pages, spaced out, not stretched top to bottom).
 struct ManuscriptPaperChooserLayout: Equatable {
     static let margin: CGFloat = Theme.Spacing.l
     static let spacing: CGFloat = Theme.Spacing.l
+    /// Between sheets where the width decides their size, three across.
+    static let widerSpacing: CGFloat = 24
+    /// The most the rows are set apart where there is height to spare.
+    static let widestRowSpacing: CGFloat = 48
     /// The name under a sheet, with the gap above it.
     static let labelHeight: CGFloat = 30
     /// A space at least this wide takes three across.
     static let threeAcrossWidth: CGFloat = 600
-    /// A sheet is never wider than this share of its height, nor so narrow
-    /// that it stops looking like a sheet of paper.
-    static let widestAspect: CGFloat = 0.85
+    /// A sheet's width as a share of its height.
+    static let sheetAspect: CGFloat = 0.85
     /// Below this the sheets stop shrinking and the page scrolls instead.
     static let smallestSheetHeight: CGFloat = 120
 
     let columns: Int
     let rows: Int
     let sheet: CGSize
+    let columnSpacing: CGFloat
+    let rowSpacing: CGFloat
     private let count: Int
 
     init(space: CGSize, count: Int) {
         self.count = count
         columns = space.width >= Self.threeAcrossWidth ? 3 : 2
         rows = Int((Double(count) / Double(columns)).rounded(.up))
-        let widthEach = (space.width - 2 * Self.margin - CGFloat(columns - 1) * Self.spacing) / CGFloat(columns)
-        let heightEach = (space.height - 2 * Self.margin - CGFloat(rows - 1) * Self.spacing) / CGFloat(rows) - Self.labelHeight
-        let height = max(Self.smallestSheetHeight, heightEach)
-        let width = max(0, min(widthEach, height * Self.widestAspect))
-        sheet = CGSize(width: width.rounded(.down), height: height.rounded(.down))
+        let columns = CGFloat(self.columns), rows = CGFloat(self.rows)
+
+        // The tallest a sheet can be with the rows close together.
+        let heightFromHeight = (space.height - 2 * Self.margin - (rows - 1) * Self.spacing) / rows - Self.labelHeight
+        func heightFromWidth(gap: CGFloat) -> CGFloat {
+            ((space.width - 2 * gap - (columns - 1) * gap) / columns) / Self.sheetAspect
+        }
+
+        if heightFromWidth(gap: Self.spacing) >= heightFromHeight {
+            // The height decides: fill the page top to bottom.
+            let height = max(Self.smallestSheetHeight, heightFromHeight).rounded(.down)
+            sheet = CGSize(width: (height * Self.sheetAspect).rounded(.down), height: height)
+            columnSpacing = Self.spacing
+            rowSpacing = Self.spacing
+        } else {
+            // The width decides: as large as fit across with room between,
+            // and the spare height shared out, up to a limit.
+            let gap = self.columns >= 3 ? Self.widerSpacing : Self.spacing
+            let height = max(Self.smallestSheetHeight, min(heightFromHeight, heightFromWidth(gap: gap))).rounded(.down)
+            sheet = CGSize(width: (height * Self.sheetAspect).rounded(.down), height: height)
+            columnSpacing = gap
+            let spare = space.height - rows * (height + Self.labelHeight)
+            rowSpacing = min(Self.widestRowSpacing, max(Self.spacing, (spare / (rows + 1)).rounded(.down)))
+        }
     }
 
     func indices(inRow row: Int) -> [Int] {

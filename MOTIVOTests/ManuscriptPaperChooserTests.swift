@@ -40,19 +40,46 @@ final class ManuscriptPaperChooserTests: XCTestCase {
         }
     }
 
-    /// The sheets fill the space they are given and never run past it.
-    func testTheSheetsFillTheScreenWithoutRunningPastIt() {
-        for space in [CGSize(width: 402, height: 760), CGSize(width: 834, height: 1110), CGSize(width: 1210, height: 734)] {
+    /// Where the height decides (a phone, an iPad in landscape) the sheets
+    /// fill the page top to bottom, close together, and never run past it.
+    func testWhereTheHeightDecidesTheSheetsFillThePage() {
+        for space in [CGSize(width: 402, height: 760), CGSize(width: 390, height: 730), CGSize(width: 1210, height: 734)] {
             let layout = Layout(space: space, count: 6)
             let usedWidth = CGFloat(layout.columns) * layout.sheet.width
-                + CGFloat(layout.columns - 1) * Layout.spacing + 2 * Layout.margin
+                + CGFloat(layout.columns - 1) * layout.columnSpacing + 2 * Layout.margin
             let usedHeight = CGFloat(layout.rows) * (layout.sheet.height + Layout.labelHeight)
-                + CGFloat(layout.rows - 1) * Layout.spacing + 2 * Layout.margin
+                + CGFloat(layout.rows - 1) * layout.rowSpacing + 2 * Layout.margin
             XCTAssertLessThanOrEqual(usedWidth, space.width + 0.5, "\(space)")
             XCTAssertLessThanOrEqual(usedHeight, space.height + 0.5, "\(space)")
             XCTAssertGreaterThanOrEqual(usedHeight, space.height * 0.95, "the page is filled top to bottom at \(space)")
-            XCTAssertLessThanOrEqual(layout.sheet.width, layout.sheet.height * Layout.widestAspect + 0.5, "a sheet, not a slab")
+            XCTAssertEqual(layout.columnSpacing, Layout.spacing)
+            XCTAssertEqual(layout.rowSpacing, Layout.spacing)
         }
+    }
+
+    /// Samuel, 2026-11-21: landscape is right, and portrait should have the
+    /// same size pages, spaced out a bit more, not stretched top to bottom.
+    func testPortraitSheetsAreAboutTheLandscapeSizeAndSpacedOut() {
+        let landscape = Layout(space: CGSize(width: 1210, height: 734), count: 6)
+        let portrait = Layout(space: CGSize(width: 834, height: 1110), count: 6)
+
+        // The same shape, and nearly the same size: three landscape-sized
+        // sheets do not quite fit across the portrait width with room between.
+        XCTAssertEqual(portrait.sheet.width / portrait.sheet.height, landscape.sheet.width / landscape.sheet.height, accuracy: 0.01)
+        XCTAssertGreaterThanOrEqual(portrait.sheet.height, landscape.sheet.height * 0.9)
+        XCTAssertLessThanOrEqual(portrait.sheet.height, landscape.sheet.height)
+
+        // Spaced out more than landscape, both ways.
+        XCTAssertGreaterThan(portrait.columnSpacing, landscape.columnSpacing)
+        XCTAssertGreaterThan(portrait.rowSpacing, landscape.rowSpacing)
+        XCTAssertLessThanOrEqual(portrait.rowSpacing, Layout.widestRowSpacing)
+
+        // Three across still fit, with the same room at the sides as between.
+        let usedWidth = 3 * portrait.sheet.width + 4 * portrait.columnSpacing
+        XCTAssertLessThanOrEqual(usedWidth, 834 + 0.5)
+        // And the page is no longer filled top to bottom.
+        let usedHeight = 2 * (portrait.sheet.height + Layout.labelHeight) + portrait.rowSpacing
+        XCTAssertLessThan(usedHeight, 1110 * 0.75)
     }
 
     /// In a space too short for six sheets the sheets keep a usable size and
