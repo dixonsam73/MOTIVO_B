@@ -75,4 +75,27 @@ final class ManuscriptIconTests: XCTestCase {
         XCTAssertFalse(row.contains("pencil.and.scribble"))
         XCTAssertFalse(editor.contains("pencil.and.scribble"))
     }
+
+    // MARK: - First-use names on the Timer's buttons
+
+    /// Samuel, 2026-11-21: every icon button on the Timer is named until it
+    /// has been used once, then the name goes. The titles are his. The plus
+    /// has none: a tap shows "+ Add session" and "+ Add thought".
+    func testEveryTimerIconButtonHasItsFirstUseNameAndThePlusHasNone() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let timer = try String(contentsOf: root.appendingPathComponent("MOTIVO/PracticeTimerView.swift"), encoding: .utf8)
+        for (flag, title) in [("hasUsedSessionButton", "Session"), ("hasUsedDroneButton", "Drone"),
+                              ("hasUsedMetronomeButton", "Metronome"), ("hasUsedTunerButton", "Tuner"),
+                              ("hasUsedAttachmentsButton", "Attachments"), ("hasUsedListButton", "List"),
+                              ("hasUsedScoresButton", "Scores")] {
+            XCTAssertTrue(timer.contains("if !\(flag) { timerButtonCaption(\"\(title)\") }"), title)
+            XCTAssertTrue(timer.contains("\(flag) = true"), "\(title) is marked used when its button is used")
+        }
+        XCTAssertFalse(timer.contains("timerButtonCaption(\"Add\")"))
+
+        let row = try String(contentsOf: root.appendingPathComponent("MOTIVO/MediaRecorderRowCard.swift"), encoding: .utf8)
+        for title in ["Audio", "Photo", "Video", "Manuscript"] {
+            XCTAssertTrue(row.contains("captureCaption(\"\(title)\")"), title)
+        }
+    }
 }

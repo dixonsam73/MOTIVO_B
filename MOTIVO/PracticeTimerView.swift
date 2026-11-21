@@ -344,6 +344,17 @@ struct PracticeTimerView: View {
     @State private var showMetronomeControlsExpanded: Bool = false
     @AppStorage("ptv_hasSeenDroneLongPressHint_v1") private var hasSeenDroneLongPressHint: Bool = false
     @AppStorage("ptv_hasSeenMetronomeLongPressHint_v1") private var hasSeenMetronomeLongPressHint: Bool = false
+    // First-use names under the icon buttons (Samuel, 2026-11-21): each shows
+    // until its button has been used once, as Audio, Photo, Video and
+    // Manuscript do (`MediaRecorderRowCard`). The plus has none: a tap shows
+    // "+ Add session" and "+ Add thought", which name themselves.
+    @AppStorage("ptv_hasUsedSessionButton_v1") private var hasUsedSessionButton = false
+    @AppStorage("ptv_hasUsedDroneButton_v1") private var hasUsedDroneButton = false
+    @AppStorage("ptv_hasUsedMetronomeButton_v1") private var hasUsedMetronomeButton = false
+    @AppStorage("ptv_hasUsedTunerButton_v1") private var hasUsedTunerButton = false
+    @AppStorage("ptv_hasUsedAttachmentsButton_v1") private var hasUsedAttachmentsButton = false
+    @AppStorage("ptv_hasUsedListButton_v1") private var hasUsedListButton = false
+    @AppStorage("ptv_hasUsedScoresButton_v1") private var hasUsedScoresButton = false
     private enum LongPressControlsHintTarget {
         case drone, metronome
     }
@@ -2532,6 +2543,19 @@ private func loadPracticeDefaultsIfNeeded() {
         .accessibilityLabel("Thread \(thread)")
     }
 
+    /// A button's first-use name: the capture row's caption style exactly.
+    /// VoiceOver already reads each button's own label, so these are hidden
+    /// from it.
+    private func timerButtonCaption(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(Theme.Colors.secondaryText)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .accessibilityHidden(true)
+            .transition(.opacity)
+    }
+
     @ViewBuilder
     private var sessionMetaSection: some View {
         VStack(alignment: .center, spacing: Theme.Spacing.xs) {
@@ -2542,6 +2566,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 .animation(.easeInOut(duration: 0.18), value: showSessionMetaSetup)
 
             Button {
+                hasUsedSessionButton = true
                 withAnimation(.easeInOut(duration: 0.18)) {
                     showSessionMetaSetup.toggle()
                 }
@@ -2562,6 +2587,8 @@ private func loadPracticeDefaultsIfNeeded() {
             .frame(maxWidth: .infinity, alignment: .center)
             .accessibilityLabel(showSessionMetaSetup ? "Hide session setup" : "Show session setup")
             .padding(.bottom, 2)
+
+            if !hasUsedSessionButton { timerButtonCaption("Session") }
         }
         .frame(maxWidth: .infinity)
         .padding(.bottom, Theme.Spacing.xs)
@@ -2617,8 +2644,9 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private func compactToolsSection(stripsBelow: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack(spacing: Theme.Spacing.m) {
+            HStack(alignment: .top, spacing: Theme.Spacing.m) {
                 if showDroneStrip {
+                    VStack(spacing: 4) {
                     DroneCompactTrigger(
                         droneIsOn: $droneIsOn,
                         droneVolume: $droneVolume,
@@ -2628,9 +2656,11 @@ private func loadPracticeDefaultsIfNeeded() {
                         droneEngine: audioServices.droneEngine,
                         recorderIcon: recorderIcon,
                         onTapHintRequest: {
+                            hasUsedDroneButton = true
                             requestDroneLongPressHint()
                         },
                         onLongPressDiscovered: {
+                            hasUsedDroneButton = true
                             markDroneLongPressHintDiscovered()
                         },
                         onRevealControls: {
@@ -2644,9 +2674,12 @@ private func loadPracticeDefaultsIfNeeded() {
                     .overlay(alignment: .bottom) {
                         longPressControlsHint(for: .drone)
                     }
+                    if !hasUsedDroneButton { timerButtonCaption("Drone") }
+                    }
                 }
 
                 if showMetronomeStrip {
+                    VStack(spacing: 4) {
                     MetronomeCompactTrigger(
                         metronomeIsOn: $metronomeIsOn,
                         settings: $metronomeSettings,
@@ -2654,9 +2687,11 @@ private func loadPracticeDefaultsIfNeeded() {
                         recorderIcon: recorderIcon,
                         shouldAnimateCompactIcon: !showMetronomeControlsExpanded,
                         onTapHintRequest: {
+                            hasUsedMetronomeButton = true
                             requestMetronomeLongPressHint()
                         },
                         onLongPressDiscovered: {
+                            hasUsedMetronomeButton = true
                             markMetronomeLongPressHintDiscovered()
                         },
                         onRevealControls: {
@@ -2670,10 +2705,14 @@ private func loadPracticeDefaultsIfNeeded() {
                     .overlay(alignment: .bottom) {
                         longPressControlsHint(for: .metronome)
                     }
+                    if !hasUsedMetronomeButton { timerButtonCaption("Metronome") }
+                    }
                 }
 
                 if showTuner {
+                    VStack(spacing: 4) {
                     Button {
+                        hasUsedTunerButton = true
                         withAnimation(.easeInOut(duration: 0.18)) {
                             toggleTuner()
                         }
@@ -2692,6 +2731,8 @@ private func loadPracticeDefaultsIfNeeded() {
                     )
                     .clipShape(Capsule(style: .continuous))
                     .accessibilityLabel(isTunerOpen ? "Hide tuner" : "Show tuner")
+                    if !hasUsedTunerButton { timerButtonCaption("Tuner") }
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)
@@ -3020,9 +3061,11 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private func bottomActionSection(withTasksPad: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack(spacing: Theme.Spacing.m) {
+            HStack(alignment: .top, spacing: Theme.Spacing.m) {
                 if hasAttachments {
+                    VStack(spacing: 4) {
                     Button {
+                        hasUsedAttachmentsButton = true
                         isAttachmentsVisible.toggle()
                     } label: {
                         Image(systemName: "paperclip")
@@ -3039,10 +3082,14 @@ private func loadPracticeDefaultsIfNeeded() {
                     )
                     .clipShape(Capsule(style: .continuous))
                     .accessibilityLabel(isAttachmentsVisible ? "Hide attachments" : "Show attachments")
+                    if !hasUsedAttachmentsButton { timerButtonCaption("Attachments") }
+                    }
                 }
 
                 if showTasksButton {
+                    VStack(spacing: 4) {
                     Button {
+                        hasUsedListButton = true
                         if showTasksPad {
                             withAnimation(.easeInOut(duration: 0.18)) {
                                 showTasksPad = false
@@ -3072,12 +3119,16 @@ private func loadPracticeDefaultsIfNeeded() {
                     )
                     .clipShape(Capsule(style: .continuous))
                     .accessibilityLabel(showTasksPad ? "Hide list" : "Show list")
+                    if !hasUsedListButton { timerButtonCaption("List") }
+                    }
                 }
 
                 if showScoresButton {
                     let hasActiveScore = scoreLibraryStore.activeItem != nil
 
+                    VStack(spacing: 4) {
                     Button {
+                        hasUsedScoresButton = true
                         withAnimation(.easeInOut(duration: 0.18)) {
                             showTasksPad = false
                             showAddEntryActions = false
@@ -3111,6 +3162,8 @@ private func loadPracticeDefaultsIfNeeded() {
                     )
                     .clipShape(Capsule(style: .continuous))
                     .accessibilityLabel(hasActiveScore ? "Resume active score" : "Open scores")
+                    if !hasUsedScoresButton { timerButtonCaption("Scores") }
+                    }
                 }
 
                 if shouldPlaceIdleAddEntryInUtilityRow {
