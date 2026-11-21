@@ -554,14 +554,20 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      - Correction to the survey: the Duration wheels were not cut off at
        the top; nothing sits above the first value. The half-height panel
        crowded the wheel and cut its lower rows.
-     - Still to do: the sketch's place on the Timer (a fourth button
-       beside audio, photo and video); the system's window controls over the
+     - *The sketch on the Timer* (2026-11-21, `PracticeTimerView+Sketch.swift`):
+       a fourth button beside audio, photo and video, on iPhone and iPad.
+       It opens the pad without starting the timer. The sketch is a
+       fourth staged kind and follows the existing hand-offs: Save
+       Thought before Start, the review page after Finish. Its tile
+       reopens the pad. Checked on both simulators. **Awaiting Samuel on
+       the device, with the Pencil.**
+     - Still to do: the system's window controls over the
        top-left button in a resized window; the Thread picker and the
        other small sheets; the attachment and score viewers; Connected
        after sign-in. The review page after a timed session has no
        sketch button yet (only the entry editor has).
-     *Next:* Samuel's verdict on the Timer arrangement; then the sketch
-     button on the Timer, and the remaining pages.
+     *Next:* Samuel's look at the sketch on the Timer; then the
+     remaining pages, with the Connected feed among them.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode
