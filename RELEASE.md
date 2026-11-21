@@ -537,11 +537,12 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        ways, in portrait and landscape. When a section is opened (the
        metronome or drone controls, the tuner, the audio recorder, the
        list, the attachments) the group keeps to the left and stays put,
-       and the opened sections stack on the right and scroll by
-       themselves: in landscape level with the first button, in portrait
-       higher, the same distance under the top bar. This holds whichever
-       way up, in any roomy window at least 800 pt wide; narrower keeps
-       the single column. From the moment an audio take begins until it
+       and the opened sections stack on the right, level with the first
+       button, and scroll by themselves. This holds whichever way up, in
+       any roomy window at least 800 pt wide; narrower keeps the single
+       column. The list is treated as the session's page, not a tool: in
+       landscape it is beside the buttons with the tools; in portrait it
+       has its own area beneath both columns, centred, and scrolls there. From the moment an audio take begins until it
        is kept or deleted, the page keeps its arrangement if the window
        changes shape, because moving the recorder would end the take.
        Also fixed from his session: the recorder's card stretching in a
