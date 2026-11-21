@@ -24,6 +24,17 @@ private func postAudioRecorderRecordingState(_ isRecording: Bool) {
     )
 }
 
+/// True while a recorder holds a take: being recorded, paused, or recorded
+/// and not yet kept or deleted. The take lives in the recorder's own view,
+/// so a page that shows the recorder must not rebuild it somewhere else
+/// while this is true. The Timer page reads it for exactly that.
+struct AudioRecorderHoldsTakeKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
+    }
+}
+
 /// A lightweight, self-contained audio recorder view using AVAudioRecorder.
 /// Stores audio files in the app's temporary directory and returns the saved URL via `onSave`.
 struct AudioRecorderView: View {
@@ -176,6 +187,7 @@ struct AudioRecorderView: View {
 
             Spacer(minLength: 0)
         }
+        .preference(key: AudioRecorderHoldsTakeKey.self, value: recordingURL != nil)
         .onAppear {
             setupWaveformBuffer()
             installObserversIfNeeded()

@@ -254,9 +254,14 @@ struct PracticeTimerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
-    /// The arrangement the page was in when the audio recorder opened; nil
-    /// while it is closed. See `TimerPageArrangement.sideBySide`.
+    /// The arrangement the page was in when the audio recorder's take began;
+    /// nil while the recorder holds no take. See
+    /// `TimerPageArrangement.sideBySide`.
     @State private var arrangementHeldByRecorder: Bool? = nil
+    /// A window with room to spare (an iPad's), as opposed to a phone-sized space.
+    private var isRoomyWindow: Bool {
+        horizontalSizeClass == .regular && verticalSizeClass == .regular
+    }
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject var appRoute: AppRouteStore
     @EnvironmentObject private var appModeManager: AppModeManager
@@ -1490,14 +1495,15 @@ private func loadPracticeDefaultsIfNeeded() {
     ///   Then the column of buttons keeps to the left and stays put, and the
     ///   opened sections stack on the right and scroll by themselves.
     ///
-    /// The audio recorder holds the take being recorded, and moving it
-    /// between the column and the panel would end the take. So while the
-    /// recorder is open the page keeps the arrangement it opened in, even
-    /// if the iPad is turned, and changes only once the recorder is closed.
+    /// The audio recorder holds the take in its own view, and moving it
+    /// between the column and the panel would end the take. So from the
+    /// moment a take begins until it is kept or deleted, the page keeps the
+    /// arrangement it was in, even if the iPad is turned. A recorder that is
+    /// open with no take is simply rebuilt in its new place.
     @ViewBuilder
     private var mainScrollView: some View {
         GeometryReader { proxy in
-            let roomy = horizontalSizeClass == .regular && verticalSizeClass == .regular
+            let roomy = isRoomyWindow
             let fitsSideBySide = TimerPageArrangement.isSideBySide(proxy.size, roomy: roomy)
             let sideBySide = TimerPageArrangement.sideBySide(fits: fitsSideBySide, heldByRecorder: arrangementHeldByRecorder)
             let panelOpen = sideBySide && hasOpenPanelSection
@@ -1557,8 +1563,8 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: panelOpen)
             }
-            .onChange(of: showAudioRecorder, initial: true) { _, open in
-                arrangementHeldByRecorder = open ? fitsSideBySide : nil
+            .onPreferenceChange(AudioRecorderHoldsTakeKey.self) { holdsTake in
+                arrangementHeldByRecorder = holdsTake ? sideBySide : nil
             }
         }
         .navigationTitle("")
@@ -2190,7 +2196,10 @@ private func loadPracticeDefaultsIfNeeded() {
             timerSection
             mediaRecorderSection
             if showAudioRecorder && !sideBySide {
+                // In a roomy window the page has height to spare, and the
+                // recorder's card would stretch to fill it.
                 audioRecorderPanel
+                    .fixedSize(horizontal: false, vertical: isRoomyWindow)
             }
             bottomActionSection(withTasksPad: !sideBySide)
             if !sideBySide {
@@ -2235,7 +2244,10 @@ private func loadPracticeDefaultsIfNeeded() {
                 tunerPanel
             }
             if showAudioRecorder {
+                // In a roomy window the page has height to spare, and the
+                // recorder's card would stretch to fill it.
                 audioRecorderPanel
+                    .fixedSize(horizontal: false, vertical: isRoomyWindow)
             }
             if isTasksPadShowing {
                 tasksPadCard

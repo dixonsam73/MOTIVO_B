@@ -60,8 +60,8 @@ enum TimerPageArrangement {
         roomy && size.width > size.height && size.width >= sideBySideMinimumWidth
     }
 
-    /// PURE. The arrangement to show. While the audio recorder is open the
-    /// page keeps the arrangement the recorder opened in (`heldByRecorder`),
+    /// PURE. The arrangement to show. While the audio recorder holds a take
+    /// the page keeps the arrangement the take began in (`heldByRecorder`),
     /// whatever the window now fits: moving the recorder would end the take.
     static func sideBySide(fits: Bool, heldByRecorder: Bool?) -> Bool {
         heldByRecorder ?? fits

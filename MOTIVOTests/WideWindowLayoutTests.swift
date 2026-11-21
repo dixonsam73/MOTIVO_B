@@ -52,15 +52,15 @@ final class WideWindowLayoutTests: XCTestCase {
         XCTAssertFalse(TimerPageArrangement.isSideBySide(CGSize(width: 1210, height: 790), roomy: false))
     }
 
-    /// The audio recorder holds the take being recorded in its own view.
-    /// Moving it between the column and the side panel would end the take,
-    /// so while it is open the arrangement it opened in is the one shown.
-    func testAnOpenRecorderHoldsTheArrangementItOpenedIn() {
-        // Opened in landscape, iPad turned to portrait: still side by side.
+    /// The audio recorder holds the take in its own view. Moving it between
+    /// the column and the side panel would end the take, so while a take
+    /// exists the arrangement it began in is the one shown.
+    func testATakeHoldsTheArrangementItBeganIn() {
+        // Begun in landscape, iPad turned to portrait: still side by side.
         XCTAssertTrue(TimerPageArrangement.sideBySide(fits: false, heldByRecorder: true))
-        // Opened in portrait, iPad turned to landscape: still one column.
+        // Begun in portrait, iPad turned to landscape: still one column.
         XCTAssertFalse(TimerPageArrangement.sideBySide(fits: true, heldByRecorder: false))
-        // Recorder closed: whatever the window fits.
+        // No take: whatever the window fits.
         XCTAssertTrue(TimerPageArrangement.sideBySide(fits: true, heldByRecorder: nil))
         XCTAssertFalse(TimerPageArrangement.sideBySide(fits: false, heldByRecorder: nil))
     }
@@ -79,11 +79,14 @@ final class WideWindowLayoutTests: XCTestCase {
 
     /// Pins the one thing the arrangement must never do: build the recorder
     /// in a place that depends only on the window's shape.
-    func testTheTimerPageHoldsItsArrangementWhileTheRecorderIsOpen() throws {
+    func testTheTimerPageHoldsItsArrangementWhileTheRecorderHoldsATake() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent("MOTIVO/PracticeTimerView.swift"), encoding: .utf8)
         XCTAssertTrue(source.contains("TimerPageArrangement.sideBySide(fits: fitsSideBySide, heldByRecorder: arrangementHeldByRecorder)"))
-        XCTAssertTrue(source.contains("arrangementHeldByRecorder = open ? fitsSideBySide : nil"))
+        XCTAssertTrue(source.contains("arrangementHeldByRecorder = holdsTake ? sideBySide : nil"))
+        // The recorder says so itself, from the first moment a take has a file.
+        let recorder = try String(contentsOf: root.appendingPathComponent("MOTIVO/AudioRecorderView.swift"), encoding: .utf8)
+        XCTAssertTrue(recorder.contains(".preference(key: AudioRecorderHoldsTakeKey.self, value: recordingURL != nil)"))
         XCTAssertEqual(source.components(separatedBy: "TimerPageArrangement.isSideBySide(").count - 1, 1,
                        "the window's shape is read in one place, and only through the held arrangement")
     }
