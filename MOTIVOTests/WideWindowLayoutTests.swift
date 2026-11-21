@@ -94,21 +94,35 @@ final class WideWindowLayoutTests: XCTestCase {
                              TimerPageArrangement.centringInset(windowHeight: 1186))
     }
 
-    func testTheCardsStartLevelWithTheButtonsInLandscapeAndHigherInPortrait() {
-        // Landscape, 11-inch: nothing is added, the cards are level with
-        // the first button, as Samuel signed off.
-        let landscape11 = TimerPageArrangement.panelTopInset(pageHeight: 790, windowHeight: 810, landscape: true)
-        XCTAssertEqual(landscape11, 790 * 0.024 + 95, accuracy: 0.001)
-        // Landscape, 13-inch: the buttons sit lower, and the cards with them.
-        XCTAssertEqual(TimerPageArrangement.panelTopInset(pageHeight: 988, windowHeight: 1008, landscape: true),
+    func testTheCardsStartLevelWithTheButtonsWhicheverWayUp() {
+        // 11-inch landscape: nothing is added. Portrait and 13-inch
+        // landscape: the buttons sit lower, and the cards with them.
+        XCTAssertEqual(TimerPageArrangement.panelTopInset(pageHeight: 790, windowHeight: 810), 790 * 0.024 + 95, accuracy: 0.001)
+        XCTAssertEqual(TimerPageArrangement.panelTopInset(pageHeight: 1166, windowHeight: 1186),
+                       1166 * 0.024 + 95 + 173, accuracy: 0.001)
+        XCTAssertEqual(TimerPageArrangement.panelTopInset(pageHeight: 988, windowHeight: 1008),
                        988 * 0.024 + 95 + TimerPageArrangement.centringInset(windowHeight: 1008), accuracy: 0.001)
-        // Portrait: the buttons are in the middle of the page, the cards
-        // are not held down with them.
-        XCTAssertEqual(TimerPageArrangement.panelTopInset(pageHeight: 1166, windowHeight: 1186, landscape: false),
-                       1166 * 0.024 + 95, accuracy: 0.001)
         // The keyboard coming up in portrait is not a turn to landscape.
         XCTAssertFalse(TimerPageArrangement.isLandscape(width: 834, windowHeight: 1186))
         XCTAssertTrue(TimerPageArrangement.isLandscape(width: 1210, windowHeight: 810))
+    }
+
+    func testTheListGoesBesideTheButtonsInLandscapeAndBeneathBothColumnsInPortrait() {
+        XCTAssertEqual(TimerPageArrangement.listPlace(sideBySide: true, landscape: true), .panel)
+        XCTAssertEqual(TimerPageArrangement.listPlace(sideBySide: true, landscape: false), .beneath)
+        // A single column has no panel and no area beneath, whichever way up.
+        XCTAssertEqual(TimerPageArrangement.listPlace(sideBySide: false, landscape: true), .column)
+        XCTAssertEqual(TimerPageArrangement.listPlace(sideBySide: false, landscape: false), .column)
+    }
+
+    func testTheListStartsStraightUnderTheButtonsAndKeepsItsMinimumAboveTheKeyboard() {
+        // Portrait, no keyboard: the columns are as tall as the buttons need.
+        XCTAssertEqual(TimerPageArrangement.columnsHeight(columnContent: 800, pageHeight: 1102), 800)
+        // Keyboard up: the columns give way, the list keeps its minimum.
+        XCTAssertEqual(TimerPageArrangement.columnsHeight(columnContent: 800, pageHeight: 700),
+                       700 - TimerPageArrangement.minimumListHeight)
+        // Not measured yet: no height is imposed.
+        XCTAssertNil(TimerPageArrangement.columnsHeight(columnContent: 0, pageHeight: 1102))
     }
 
     /// The keyboard must not move the buttons: the centring is worked out
@@ -117,7 +131,8 @@ final class WideWindowLayoutTests: XCTestCase {
     func testTheCentringIsWorkedOutFromTheWindowNotTheSpaceAboveTheKeyboard() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent("MOTIVO/PracticeTimerView.swift"), encoding: .utf8)
-        XCTAssertTrue(source.contains("TimerPageArrangement.centringInset(windowHeight: proxy.size.height + proxy.safeAreaInsets.bottom)"))
+        XCTAssertTrue(source.contains("let windowHeight = proxy.size.height + proxy.safeAreaInsets.bottom"))
+        XCTAssertTrue(source.contains("TimerPageArrangement.centringInset(windowHeight: windowHeight)"))
         XCTAssertFalse(source.contains("centringInset(windowHeight: proxy.size.height)"))
     }
 

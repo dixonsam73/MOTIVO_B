@@ -258,6 +258,10 @@ struct PracticeTimerView: View {
     /// nil while the recorder holds no take. See
     /// `TimerPageArrangement.sideBySide`.
     @State private var arrangementHeldByRecorder: Bool? = nil
+    /// The height of the column of buttons as laid out, measured so that
+    /// the list can start straight beneath it when it has its own area
+    /// under both columns (a roomy window in portrait).
+    @State private var columnContentHeight: CGFloat = 0
     /// A window with room to spare (an iPad's), as opposed to a phone-sized space.
     private var isRoomyWindow: Bool {
         horizontalSizeClass == .regular && verticalSizeClass == .regular
@@ -1494,6 +1498,11 @@ private func loadPracticeDefaultsIfNeeded() {
     ///   to a comfortable width and centred, until a section is opened. Then
     ///   the column of buttons keeps to the left and stays put, and the
     ///   opened sections stack on the right and scroll by themselves.
+    /// - The list is the session's own page, not a tool. In landscape it
+    ///   goes beside the buttons with the tools. In portrait it has its own
+    ///   area beneath BOTH columns, centred on the page, so it neither
+    ///   moves nor narrows when a tool opens beside the buttons, and it
+    ///   scrolls there by itself while the buttons stay in view.
     /// - A roomy window too narrow for two parts: the single column.
     ///
     /// The audio recorder holds the take in its own view, and moving it
@@ -1507,7 +1516,12 @@ private func loadPracticeDefaultsIfNeeded() {
             let roomy = isRoomyWindow
             let fitsSideBySide = TimerPageArrangement.isSideBySide(proxy.size, roomy: roomy)
             let sideBySide = TimerPageArrangement.sideBySide(fits: fitsSideBySide, heldByRecorder: arrangementHeldByRecorder)
-            let panelOpen = sideBySide && hasOpenPanelSection
+            let windowHeight = proxy.size.height + proxy.safeAreaInsets.bottom
+            let landscape = TimerPageArrangement.isLandscape(width: proxy.size.width, windowHeight: windowHeight)
+            let listPlace = TimerPageArrangement.listPlace(sideBySide: sideBySide, landscape: landscape)
+            let panelOpen = sideBySide && hasOpenPanelSection(listInPanel: listPlace == .panel)
+            let listBeneath = listPlace == .beneath && isTasksPadShowing
+            let pageHeight = max(proxy.size.height - (isHomePresentation ? PracticeTimerCompositionUI.homeTopBarAllowance : 0), 0)
 
             VStack(spacing: 0) {
                 if isHomePresentation && sideBySide {
@@ -1522,25 +1536,26 @@ private func loadPracticeDefaultsIfNeeded() {
                             }
 
                             VStack(spacing: 0) {
-                                Color.clear
-                                    .frame(
-                                        height: max(
-                                            PracticeTimerCompositionUI.minimumViewportTopInset,
-                                            proxy.size.height * PracticeTimerCompositionUI.viewportTopInsetRatio
-                                        ) + (roomy ? TimerPageArrangement.centringInset(windowHeight: proxy.size.height + proxy.safeAreaInsets.bottom) : 0)
-                                    )
+                                VStack(spacing: 0) {
+                                    Color.clear
+                                        .frame(
+                                            height: max(
+                                                PracticeTimerCompositionUI.minimumViewportTopInset,
+                                                proxy.size.height * PracticeTimerCompositionUI.viewportTopInsetRatio
+                                            ) + (roomy ? TimerPageArrangement.centringInset(windowHeight: windowHeight) : 0)
+                                        )
 
-                                mainContent(sideBySide: sideBySide)
+                                    mainContent(sideBySide: sideBySide, listInColumn: listPlace == .column)
+                                }
+                                .onGeometryChange(for: CGFloat.self) { geometry in
+                                    geometry.size.height
+                                } action: { height in
+                                    columnContentHeight = height
+                                }
 
                                 Spacer(minLength: PracticeTimerCompositionUI.viewportBottomBreathingRoom)
                             }
-                            .frame(
-                                minHeight: max(
-                                    proxy.size.height - (isHomePresentation ? PracticeTimerCompositionUI.homeTopBarAllowance : 0),
-                                    0
-                                ),
-                                alignment: .top
-                            )
+                            .frame(minHeight: listBeneath ? 0 : pageHeight, alignment: .top)
                             .frame(maxWidth: roomy ? TimerPageArrangement.columnWidth : .infinity)
                         }
                         .frame(maxWidth: .infinity)
@@ -1556,20 +1571,31 @@ private func loadPracticeDefaultsIfNeeded() {
 
                     if panelOpen {
                         ScrollView {
-                            openSectionsPanel(topInset: TimerPageArrangement.panelTopInset(
-                                pageHeight: proxy.size.height,
-                                windowHeight: proxy.size.height + proxy.safeAreaInsets.bottom,
-                                landscape: TimerPageArrangement.isLandscape(
-                                    width: proxy.size.width,
-                                    windowHeight: proxy.size.height + proxy.safeAreaInsets.bottom
-                                )
-                            ))
+                            openSectionsPanel(
+                                topInset: TimerPageArrangement.panelTopInset(
+                                    pageHeight: proxy.size.height,
+                                    windowHeight: windowHeight
+                                ),
+                                withList: listPlace == .panel
+                            )
                         }
                         .frame(maxWidth: .infinity)
                         .transition(.opacity)
                     }
                 }
+                // With the list beneath, the two columns are only as tall as
+                // the buttons need, and the list has the rest of the page.
+                .frame(height: listBeneath
+                       ? TimerPageArrangement.columnsHeight(columnContent: columnContentHeight, pageHeight: pageHeight)
+                       : nil)
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: panelOpen)
+
+                if listBeneath {
+                    ScrollView {
+                        listBeneathColumns
+                    }
+                    .transition(.opacity)
+                }
             }
             .onPreferenceChange(AudioRecorderHoldsTakeKey.self) { holdsTake in
                 arrangementHeldByRecorder = holdsTake ? sideBySide : nil
@@ -2193,7 +2219,7 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     /// `sideBySide`: the opened sections are shown in the panel beside the
     /// column, not here.
-    private func mainContent(sideBySide: Bool) -> some View {
+    private func mainContent(sideBySide: Bool, listInColumn: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             ambientThreadContinuitySection
             sessionMetaSection
@@ -2209,7 +2235,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 audioRecorderPanel
                     .fixedSize(horizontal: false, vertical: isRoomyWindow)
             }
-            bottomActionSection(withTasksPad: !sideBySide)
+            bottomActionSection(withTasksPad: listInColumn)
             if !sideBySide {
                 attachmentsSection
             }
@@ -2234,17 +2260,34 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     /// Whether anything is open that the side panel would hold.
-    private var hasOpenPanelSection: Bool {
+    private func hasOpenPanelSection(listInPanel: Bool) -> Bool {
         (showDroneStrip && showDroneControlsExpanded)
             || (showMetronomeStrip && showMetronomeControlsExpanded)
             || isTunerOpen
             || showAudioRecorder
-            || isTasksPadShowing
+            || (listInPanel && isTasksPadShowing)
             || (hasAttachments && isAttachmentsVisible)
     }
 
+    /// The list in its own area beneath both columns: the width it has in
+    /// the single column, centred on the page.
+    private var listBeneathColumns: some View {
+        tasksPadCard
+            .padding(.horizontal, Theme.Spacing.l)
+            .frame(maxWidth: TimerPageArrangement.columnWidth)
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, Theme.Spacing.xl)
+            .background {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if showTasksPad { focusedTaskID = nil }
+                    }
+            }
+    }
+
     /// The opened sections, in the order they appear down the single column.
-    private func openSectionsPanel(topInset: CGFloat) -> some View {
+    private func openSectionsPanel(topInset: CGFloat, withList: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             droneControlStrip
             metronomeControlStrip
@@ -2257,7 +2300,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 audioRecorderPanel
                     .fixedSize(horizontal: false, vertical: isRoomyWindow)
             }
-            if isTasksPadShowing {
+            if withList && isTasksPadShowing {
                 tasksPadCard
                     .transition(.opacity)
             }

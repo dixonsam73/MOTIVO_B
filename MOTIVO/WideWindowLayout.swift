@@ -98,21 +98,49 @@ enum TimerPageArrangement {
         max(0, ((windowHeight - restingPageHeight) / 2).rounded())
     }
 
-    /// PURE. Where the first opened section starts.
-    ///
-    /// In landscape: level with the top of the column's first button
-    /// (Samuel, 2026-11-21: "works well", leave it). In portrait the
-    /// buttons sit in the middle of a tall page, and starting the cards
-    /// level with them left a tall empty band above the cards while they
-    /// ran to the bottom; there the cards start where they would on a page
-    /// with no height to spare, the same distance under the top bar as in
-    /// landscape on an 11-inch iPad.
-    ///
-    /// `pageHeight` is the height the page is laid out in (it shrinks above
-    /// the keyboard, as the column's own top space does); `windowHeight` is
-    /// as for `centringInset`.
-    static func panelTopInset(pageHeight: CGFloat, windowHeight: CGFloat, landscape: Bool) -> CGFloat {
-        max(6, pageHeight * 0.024) + 95 + (landscape ? centringInset(windowHeight: windowHeight) : 0)
+    /// PURE. Where the first opened section starts: level with the top of
+    /// the column's first button, whichever way up (Samuel, 2026-11-21:
+    /// starting the cards higher in portrait "feels weird"; level, as in
+    /// landscape). `pageHeight` is the height the page is laid out in (it
+    /// shrinks above the keyboard, as the column's own top space does);
+    /// `windowHeight` is as for `centringInset`.
+    static func panelTopInset(pageHeight: CGFloat, windowHeight: CGFloat) -> CGFloat {
+        max(6, pageHeight * 0.024) + 95 + centringInset(windowHeight: windowHeight)
+    }
+
+    /// Where the list is shown.
+    enum ListPlace: Equatable {
+        /// In the single column, under its button (a phone, a narrow window).
+        case column
+        /// Beside the buttons, with the tools.
+        case panel
+        /// In its own area beneath both columns, centred on the page.
+        case beneath
+    }
+
+    /// PURE. The tools (drone, metronome, tuner, audio recorder) go beside
+    /// the buttons whichever way up. The list is different: it is the
+    /// session's own page, not a tool (Samuel, 2026-11-21). In portrait
+    /// there is room for it beneath the buttons, where it opens on a phone;
+    /// it is centred beneath both columns, so a tool opening beside the
+    /// buttons neither moves nor narrows it. In landscape there is no room
+    /// beneath, and it goes beside with the rest.
+    static func listPlace(sideBySide: Bool, landscape: Bool) -> ListPlace {
+        guard sideBySide else { return .column }
+        return landscape ? .panel : .beneath
+    }
+
+    /// The least height the list keeps beneath the columns, so a line being
+    /// typed stays in view above the keyboard.
+    static let minimumListHeight: CGFloat = 160
+
+    /// PURE. The height of the two columns while the list is beneath them:
+    /// as tall as the buttons need, so the list starts straight under them,
+    /// but leaving the list its minimum. Nil until the buttons have been
+    /// measured (the columns then fill the page, as without a list).
+    static func columnsHeight(columnContent: CGFloat, pageHeight: CGFloat) -> CGFloat? {
+        guard columnContent > 0 else { return nil }
+        return min(columnContent, max(0, pageHeight - minimumListHeight))
     }
 
     /// PURE. Landscape, judged from the window (`windowHeight` as above),
