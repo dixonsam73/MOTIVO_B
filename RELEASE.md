@@ -480,15 +480,20 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      the width. **Failed: finding how to edit a saved sketch.** In the
      editor, tapping the thumbnail opens the viewer, as for every other
      attachment, and its pencil was Rename; the small "Edit sketch" under
-     the tile was missed. Corrected: on a sketch the viewer's pencil opens
-     the pad and Rename is the text symbol beside it; the tile's "Edit
-     sketch" is larger, with a pencil. Open: the three pen widths (Samuel
+     the tile was missed. **Settled by Samuel the same day:** in the
+     editor, tapping a sketch's thumbnail opens it straight in the pad
+     with its tools, as tapping any other thumbnail there edits that
+     attachment; there is no separate edit button, under the tile or in
+     the viewer. The sketch's title is set from a text button in the
+     pad's top bar. Where a sketch is shown in the viewer, its Rename is
+     that text symbol, not a pencil. Open: the three pen widths (Samuel
      uses the finest most, the broad for filling note heads, and is not
      sure the three differ enough; they were chosen by eye, not against a
      standard). Still not built: editing a sketch from the entry page
-     without opening the editor.
-     Études Dev on the iPad updated to build 1975 with the correction
-     (2026-11-21); the other two installs untouched.
+     without opening the editor; starring a sketch in the editor (the
+     viewer's star is no longer on that route).
+     Études Dev on the iPad updated with this (2026-11-21); the other two
+     installs untouched.
      *Next:* Samuel's check of the correction on the iPad; then the
      Journal and editor iPad adaptations.
   5. Once the native shell and the sketch's save and re-edit path work:
