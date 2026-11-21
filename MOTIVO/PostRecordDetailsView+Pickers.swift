@@ -142,7 +142,7 @@ extension PostRecordDetailsView {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { timestamp = tempDate; showStartPicker = false; maybeUpdateActivityDetailFromDefaults() } }
             }
         }
-        .presentationDetents([.medium])
+        .pickerSheetHeight(wheel: true)
     }
 
     var durationPicker: some View {
@@ -160,7 +160,7 @@ extension PostRecordDetailsView {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { durationSeconds = (tempHours * 3600) + (tempMinutes * 60); showDurationPicker = false } }
             }
         }
-        .presentationDetents([.medium])
+        .pickerSheetHeight(wheel: true)
     }
 
     func activityDisplayName(for choice: String) -> String {

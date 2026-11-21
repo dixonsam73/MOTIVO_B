@@ -51,6 +51,9 @@ struct ConnectedIntroductionView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            // In a wide, tall window the page is a centred column, so the
+            // photograph and the example screens keep a sensible size.
+            .wideWindowColumn()
         }
         .appBackground()
         .tint(Theme.Colors.accent)

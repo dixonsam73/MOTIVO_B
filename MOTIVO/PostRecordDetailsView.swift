@@ -1279,6 +1279,7 @@ var body: some View {
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
                 .padding(.bottom, Theme.Spacing.xl)
+                .wideWindowColumn()
             }
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom) {
@@ -1303,6 +1304,8 @@ var body: some View {
                 }
             )
             .navigationTitle("")
+            // In a roomy window: page-tall and column-wide, as the entry editor is.
+            .presentationSizing(ColumnPageSizing())
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {

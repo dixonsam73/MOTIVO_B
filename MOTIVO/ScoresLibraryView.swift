@@ -74,8 +74,11 @@ struct ScoresLibraryView: View {
                 .padding(.horizontal, Theme.Spacing.m)
                 .padding(.top, Theme.Spacing.xs)
                 .padding(.bottom, Theme.Spacing.xl)
+                .wideWindowColumn()
             }
             .appBackground()
+            // In a roomy window: page-tall and column-wide, not the small panel.
+            .presentationSizing(ColumnPageSizing())
             .navigationTitle(mode == .attach ? "Attach Score" : "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

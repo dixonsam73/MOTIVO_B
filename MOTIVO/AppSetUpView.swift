@@ -98,6 +98,7 @@ struct AppSetUpView: View {
             }
             .padding(.vertical, Theme.Spacing.xl)
             .padding(.horizontal, Theme.Spacing.l)
+            .wideWindowColumn()
         }
         .appBackground()
         .tint(Theme.Colors.accent)

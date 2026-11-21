@@ -793,6 +793,7 @@ return AttachmentViewerView(
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
                 .padding(.bottom, Theme.Spacing.xl)
+                .wideWindowColumn()
         }
         // Removed .navigationTitle("Session") as per instructions
         .toolbar {

@@ -699,6 +699,7 @@ struct ProfileNameDraftState: Equatable {
                         .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in
                             clearNameFieldFocus()
                         })
+                        .wideWindowColumn()
                     }
                 }
                 .font(.callout)
