@@ -189,6 +189,7 @@ extension PracticeTimerView {
                     stagedAudio.removeAll()
                     audioTitles.removeAll()
                     stagedImages.removeAll()
+                    clearStagedSketches()
                     stagedVideos.removeAll()
                     videoThumbnails.removeAll()
                     selectedThumbnailID = nil

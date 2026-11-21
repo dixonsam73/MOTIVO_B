@@ -2081,10 +2081,15 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
         let incoming = prefillAttachments.filter { !present.contains($0.id) }
         // A video needs its tmp surrogate so the poster and player resolve a URL,
         // exactly as `stageData` does for an import.
-        for att in incoming where att.kind == .video {
+        for att in incoming where att.kind == .video || att.kind == .pdf {
             if let url = surrogateURL(for: att), !FileManager.default.fileExists(atPath: url.path) {
                 try? att.data.write(to: url, options: .atomic)
             }
+        }
+        // A sketch drawn on the timer arrives as its PDF and is a sketch
+        // here too: tapping it reopens the pad, exactly as for one drawn here.
+        for att in incoming where att.kind == .pdf && ManuscriptSketchFile.carriesSketch(data: att.data) {
+            sketchAttachmentIDs_AESV.insert(att.id)
         }
         StagedTitleMigration.seedStagedTitles(audio: prefillAudioTitles, video: prefillVideoTitles)
         prefilledStagedIDs = Set(incoming.map(\.id))

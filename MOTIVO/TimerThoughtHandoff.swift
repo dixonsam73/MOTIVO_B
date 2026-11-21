@@ -75,6 +75,7 @@ enum TimerThoughtHandoffBuilder {
     static func make(audio: [StagedAttachment],
                      videos: [TimerStagedVideo],
                      images: [StagedAttachment],
+                     sketches: [StagedAttachment] = [],
                      audioTitles: [UUID: String],
                      videoTitles: [UUID: String],
                      thumbnailID: UUID?,
@@ -83,7 +84,7 @@ enum TimerThoughtHandoffBuilder {
                      ref: @MainActor (UUID) -> StagedAttachmentRef? = { StagingStore.ref(withId: $0) },
                      readVideo: (URL) throws -> Data = { try Data(contentsOf: $0) }) throws -> TimerThoughtHandoff {
         guard pendingStagingCount == 0 else { throw TimerThoughtHandoffError.stagingInProgress }
-        guard !(audio.isEmpty && videos.isEmpty && images.isEmpty) else { throw TimerThoughtHandoffError.nothingToSave }
+        guard !(audio.isEmpty && videos.isEmpty && images.isEmpty && sketches.isEmpty) else { throw TimerThoughtHandoffError.nothingToSave }
 
         var out: [StagedAttachment] = []
         var sourceIDs: [UUID] = []
@@ -91,6 +92,14 @@ enum TimerThoughtHandoffBuilder {
         for att in images {
             guard let r = ref(att.id), r.kind == .image else { throw TimerThoughtHandoffError.notStaged(kind: .image) }
             out.append(StagedAttachment(id: att.id, data: att.data, kind: .image))
+            sourceIDs.append(att.id)
+        }
+        // A sketch travels as the PDF that carries its drawing, so the
+        // editor can reopen it as ink. Its name goes by the staged display
+        // names the editors already read for a PDF.
+        for att in sketches {
+            guard let r = ref(att.id), r.kind == .sketch else { throw TimerThoughtHandoffError.notStaged(kind: .pdf) }
+            out.append(StagedAttachment(id: att.id, data: att.data, kind: .pdf))
             sourceIDs.append(att.id)
         }
         for att in audio {

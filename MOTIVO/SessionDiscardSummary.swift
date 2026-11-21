@@ -17,6 +17,7 @@ struct SessionDiscardSummary: Equatable {
     var recordings: Int = 0
     var videos: Int = 0
     var photos: Int = 0
+    var sketches: Int = 0
     var hasTasks: Bool = false
 
     static let title = "Reset the timer?"
@@ -25,11 +26,11 @@ struct SessionDiscardSummary: Equatable {
     /// Time and draft; permanent, so destructive.
     static let confirmTitle = "Reset and discard draft"
 
-    var needsConfirmation: Bool { recordings + videos + photos > 0 || hasTasks }
+    var needsConfirmation: Bool { recordings + videos + photos + sketches > 0 || hasTasks }
 
     /// Reset opens its card only when attachments are staged (Samuel,
     /// 2026-10-11). Task content alone does not ask: reset keeps it anyway.
-    var hasAttachments: Bool { recordings + videos + photos > 0 }
+    var hasAttachments: Bool { recordings + videos + photos + sketches > 0 }
 
     var message: String? {
         guard needsConfirmation else { return nil }
@@ -40,11 +41,12 @@ struct SessionDiscardSummary: Equatable {
         add(recordings, "recording", "recordings")
         add(videos, "video", "videos")
         add(photos, "photo", "photos")
+        add(sketches, "sketch", "sketches")
         if hasTasks { parts.append("your tasks") }
         let list = parts.count == 1
             ? parts[0]
             : parts.dropLast().joined(separator: ", ") + " and " + parts[parts.count - 1]
-        let pronoun = (recordings + videos + photos > 1 || hasTasks || parts.count > 1) ? "them" : "it"
+        let pronoun = (recordings + videos + photos + sketches > 1 || hasTasks || parts.count > 1) ? "them" : "it"
         return "Keep \(list) for your next attempt, or discard \(pronoun) with the timer. Discarding permanently deletes \(pronoun) and can’t be undone."
     }
 

@@ -20,6 +20,7 @@ struct MediaRecorderRowCard: View {
     @AppStorage("ptv_hasUsedAudioCapture_v1") private var hasUsedAudioCapture = false
     @AppStorage("ptv_hasUsedPhotoCapture_v1") private var hasUsedPhotoCapture = false
     @AppStorage("ptv_hasUsedVideoCapture_v1") private var hasUsedVideoCapture = false
+    @AppStorage("ptv_hasUsedSketchCapture_v1") private var hasUsedSketchCapture = false
     @State private var showCameraDeniedAlert = false
     @State private var showMicrophoneDeniedAlert = false
 
@@ -28,6 +29,8 @@ struct MediaRecorderRowCard: View {
     let stopAttachmentPlayback: () -> Void
     let ensureCameraAuthorized: (@escaping () -> Void) -> Void
     var isTunerOpen: Bool = false
+    /// Opens the manuscript pad. It starts nothing: not the timer, not audio.
+    var onSketch: (() -> Void)? = nil
 
     private let tasksAccent = Color(red: 0.66, green: 0.58, blue: 0.46)
     private let tasksAccentIcon = Color(red: 0.44, green: 0.37, blue: 0.29)
@@ -218,6 +221,26 @@ struct MediaRecorderRowCard: View {
                 .accessibilityLabel("Record video")
                 .accessibilityHint("Opens the video recorder for this session.")
                 if !hasUsedVideoCapture { captureCaption("Video") }
+                }
+
+                if let onSketch {
+                    VStack(spacing: 4) {
+                    Button {
+                        hasUsedSketchCapture = true
+                        onSketch()
+                    } label: {
+                        Image(systemName: "pencil.and.scribble")
+                            .symbolRenderingMode(.monochrome)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(recorderIcon)
+                            .frame(width: 48, height: 48)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Sketch")
+                    .accessibilityHint("Opens manuscript paper to draw on for this session.")
+                    if !hasUsedSketchCapture { captureCaption("Sketch") }
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)

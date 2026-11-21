@@ -6,6 +6,7 @@
 // All state/behaviour stays in PracticeTimerView and is passed via bindings/closures.
 
 import SwiftUI
+import PDFKit
 import AVFoundation
 import AVKit
 
@@ -19,6 +20,8 @@ struct AttachmentsCard: View {
     @Binding var stagedImages: [StagedAttachment]
     @Binding var stagedAudio: [StagedAttachment]
     @Binding var stagedVideos: [TimerStagedVideo]
+    /// Manuscript sketches, each the PDF that carries its drawing.
+    var stagedSketches: [StagedAttachment] = []
     
     @Binding var selectedThumbnailID: UUID?
     @Binding var trimItem: StagedAttachment?
@@ -48,12 +51,15 @@ struct AttachmentsCard: View {
     let onPersistCommittedAudioTitle: (UUID) -> Void
     let onPlayVideo: (UUID) -> Void
     let onViewImage: (UUID) -> Void
+    /// Tapping a sketch reopens it on the pad; its bin removes it.
+    var onOpenSketch: (UUID) -> Void = { _ in }
+    var onDeleteSketch: (UUID) -> Void = { _ in }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !stagedImages.isEmpty || !stagedVideos.isEmpty {
+            if !stagedImages.isEmpty || !stagedVideos.isEmpty || !stagedSketches.isEmpty {
                 // C-84 — videos are file-backed, so tiles are merged by id.
-                let visualIDs: [UUID] = stagedImages.map(\.id) + stagedVideos.map(\.id)
+                let visualIDs: [UUID] = stagedImages.map(\.id) + stagedVideos.map(\.id) + stagedSketches.map(\.id)
                 let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(visualIDs, id: \.self) { attID in
@@ -193,6 +199,27 @@ struct AttachmentsCard: View {
                                     }
                                     .buttonStyle(.plain)
                                 }
+                                .padding(6)
+                            }
+                        } else if let att = stagedSketches.first(where: { $0.id == attID }) {
+                            // Sketch tile: the page itself; a tap goes back to the pad.
+                            ZStack(alignment: .topTrailing) {
+                                StagedSketchTile(data: att.data)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { onOpenSketch(att.id) }
+                                    .accessibilityLabel("Sketch")
+                                    .accessibilityHint("Opens the sketch to carry on drawing.")
+                                    .accessibilityAddTraits(.isButton)
+                                Button {
+                                    onDeleteSketch(att.id)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .padding(8)
+                                        .background(.ultraThinMaterial, in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Delete sketch")
                                 .padding(6)
                             }
                         }
@@ -343,3 +370,45 @@ struct AttachmentsCard: View {
     }
 }
 
+
+
+/// A staged sketch's tile: its page, drawn small. Rendered off the main
+/// thread and again whenever the sketch's bytes change (an edit on the pad).
+private struct StagedSketchTile: View {
+    let data: Data
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white)
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(6)
+            } else {
+                Image(systemName: "pencil.and.scribble")
+                    .imageScale(.large)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 128, height: 128)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+        )
+        .task(id: data) {
+            let bytes = data
+            image = await Task.detached(priority: .userInitiated) {
+                StagedSketchTile.render(bytes)
+            }.value
+        }
+    }
+
+    nonisolated static func render(_ data: Data) -> UIImage? {
+        guard let page = PDFDocument(data: data)?.page(at: 0) else { return nil }
+        return page.thumbnail(of: CGSize(width: 384, height: 384), for: .mediaBox)
+    }
+}

@@ -478,6 +478,12 @@ struct PracticeTimerView: View {
 
     // Image capture state (mirrors AddEdit/PostRecord behavior)
     @State var stagedImages: [StagedAttachment] = []
+    /// Manuscript sketches drawn on this page: the fourth staged kind. Each
+    /// is the PDF that carries its drawing. See `PracticeTimerView+Sketch.swift`.
+    @State var stagedSketches: [StagedAttachment] = []
+    @State var sketchTitles: [UUID: String] = [:]
+    @State var showTimerSketchPad = false
+    @State var timerSketchEdit: TimerSketchEditRequest? = nil
     @State var selectedThumbnailID: UUID? = nil
     @State private var showCamera: Bool = false
     @State private var showCameraDeniedAlert: Bool = false
@@ -1701,6 +1707,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 audioAutoTitles.removeAll()
                 audioDurations.removeAll()
                 stagedImages.removeAll()
+                clearStagedSketches()
                 stagedVideos.removeAll()
                 videoThumbnails.removeAll()
                 videoTitles.removeAll()
@@ -1781,7 +1788,7 @@ private func loadPracticeDefaultsIfNeeded() {
             do { try StagingStore.bootstrap() } catch { /* ignore */ }
             let storeRefs = StagingStore.list()
             let storeHas = !storeRefs.isEmpty
-            let localEmpty = (stagedAudio.isEmpty && stagedImages.isEmpty && stagedVideos.isEmpty)
+            let localEmpty = (stagedAudio.isEmpty && stagedImages.isEmpty && stagedVideos.isEmpty && stagedSketches.isEmpty)
             // Build ID sets per kind for comparison
             let localAudioIDs = Set(stagedAudio.map { $0.id })
             let localVideoIDs = Set(stagedVideos.map { $0.id })
@@ -1790,6 +1797,7 @@ private func loadPracticeDefaultsIfNeeded() {
             let storeVideoIDs = Set(storeRefs.filter { $0.kind == .video }.map { $0.id })
             let storeImageIDs = Set(storeRefs.filter { $0.kind == .image }.map { $0.id })
             let idsDiffer = (localAudioIDs != storeAudioIDs) || (localVideoIDs != storeVideoIDs) || (localImageIDs != storeImageIDs)
+                || (Set(stagedSketches.map { $0.id }) != Set(storeRefs.filter { $0.kind == .sketch }.map { $0.id }))
             if (localEmpty && storeHas) || idsDiffer {
                 mirrorFromStagingStore()
             }
@@ -1809,7 +1817,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 do { try StagingStore.bootstrap() } catch { /* ignore */ }
                 let storeRefs = StagingStore.list()
                 let storeHas = !storeRefs.isEmpty
-                let localEmpty = (stagedAudio.isEmpty && stagedImages.isEmpty && stagedVideos.isEmpty)
+                let localEmpty = (stagedAudio.isEmpty && stagedImages.isEmpty && stagedVideos.isEmpty && stagedSketches.isEmpty)
                 let localAudioIDs = Set(stagedAudio.map { $0.id })
                 let localVideoIDs = Set(stagedVideos.map { $0.id })
                 let localImageIDs = Set(stagedImages.map { $0.id })
@@ -1817,6 +1825,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 let storeVideoIDs = Set(storeRefs.filter { $0.kind == .video }.map { $0.id })
                 let storeImageIDs = Set(storeRefs.filter { $0.kind == .image }.map { $0.id })
                 let idsDiffer = (localAudioIDs != storeAudioIDs) || (localVideoIDs != storeVideoIDs) || (localImageIDs != storeImageIDs)
+                || (Set(stagedSketches.map { $0.id }) != Set(storeRefs.filter { $0.kind == .sketch }.map { $0.id }))
                 if (localEmpty && storeHas) || idsDiffer {
                     mirrorFromStagingStore()
                 }
@@ -1907,7 +1916,7 @@ private func loadPracticeDefaultsIfNeeded() {
                        metronomeIsOn = false
 
                     // Intentional discard: purge staged items associated with this live session
-                    let __discardIDs: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
+                    let __discardIDs: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id } + stagedSketches.map { $0.id }
                     if !__discardIDs.isEmpty {
                         StagingStore.removeMany(ids: __discardIDs)
                         // Delete underlying files for these refs now
@@ -1937,6 +1946,7 @@ private func loadPracticeDefaultsIfNeeded() {
                     audioAutoTitles.removeAll()
                     audioDurations.removeAll()
                     stagedImages.removeAll()
+                    clearStagedSketches()
                     stagedVideos.removeAll()
                     videoThumbnails.removeAll()
                     selectedThumbnailID = nil
@@ -2125,6 +2135,11 @@ private func loadPracticeDefaultsIfNeeded() {
                                                   savedNotice: $savedThoughtNotice,
                                                   viewingSaved: $viewingSavedThought,
                                                   editor: { payload in thoughtHandoffEditor(for: payload) }))
+        .modifier(TimerSketchPresentation(showNew: $showTimerSketchPad,
+                                          edit: $timerSketchEdit,
+                                          onNew: { stageNewSketch($0) },
+                                          onEdited: { result, id in applyEditedStagedSketch(result, id: id) },
+                                          onRename: { id, title in renameStagedSketch(id, to: title) }))
         .onChange(of: showReviewSheet) { oldValue, newValue in
             // C-84 — DISMISSAL WITHOUT EXPLICIT DESTRUCTIVE CONFIRMATION PRESERVES
             // THE SESSION. A swipe-down, "Back to Timer" and a failed Save all come
@@ -2845,7 +2860,11 @@ private func loadPracticeDefaultsIfNeeded() {
             droneEngine: audioServices.droneEngine,
             stopAttachmentPlayback: stopAttachmentPlayback,
             ensureCameraAuthorized: ensureCameraAuthorized,
-            isTunerOpen: isTunerOpen
+            isTunerOpen: isTunerOpen,
+            onSketch: {
+                stopAttachmentPlayback()
+                showTimerSketchPad = true
+            }
         )
     }
 
@@ -2868,7 +2887,7 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     var hasAttachments: Bool {
-        !stagedImages.isEmpty || !stagedAudio.isEmpty || !stagedVideos.isEmpty
+        !stagedImages.isEmpty || !stagedAudio.isEmpty || !stagedVideos.isEmpty || !stagedSketches.isEmpty
     }
 
     /// THE ONE SHARED "STARTED SINCE RESET" CHECK. Used by the idle add-actions
@@ -3276,6 +3295,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 stagedImages: $stagedImages,
                 stagedAudio: $stagedAudio,
                 stagedVideos: $stagedVideos,
+                stagedSketches: stagedSketches,
                 selectedThumbnailID: $selectedThumbnailID,
                 trimItem: $trimItem,
                 audioTitleEditingBuffer: $audioTitleEditingBuffer,
@@ -3304,7 +3324,9 @@ private func loadPracticeDefaultsIfNeeded() {
                     persistCommittedAudioTitle(for: id)
                 },
                 onPlayVideo: { playVideo($0) },
-                onViewImage: { openImageViewer($0) }
+                onViewImage: { openImageViewer($0) },
+                onOpenSketch: { openStagedSketch($0) },
+                onDeleteSketch: { deleteStagedSketch($0) }
             )
             .padding(.top, 4)
             .cardSurface()
@@ -4041,6 +4063,7 @@ private func loadPracticeDefaultsIfNeeded() {
             recordings: stagedAudio.count,
             videos: stagedVideos.count,
             photos: stagedImages.count,
+            sketches: stagedSketches.count,
             hasTasks: SessionDiscardSummary.memberTaskContent(taskLines, autoTexts: autoTaskTexts)
         )
     }
@@ -4053,7 +4076,7 @@ private func loadPracticeDefaultsIfNeeded() {
     /// (a stale id list) go too.
     func discardSessionCompletely() {
         stopAttachmentPlayback()
-        let ids: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
+        let ids: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id } + stagedSketches.map { $0.id }
         StagingStore.removeMany(ids: ids)
         clearAllStagingStoreRefs()
         purgeStagedTempFiles()
@@ -4064,6 +4087,7 @@ private func loadPracticeDefaultsIfNeeded() {
         audioAutoTitles.removeAll()
         audioDurations.removeAll()
         stagedImages.removeAll()
+        clearStagedSketches()
         stagedVideos.removeAll()
         videoThumbnails.removeAll()
         videoTitles.removeAll()
@@ -4227,6 +4251,8 @@ private func loadPracticeDefaultsIfNeeded() {
         case stagedAudioIDs = "PracticeTimer.stagedAudioIDs"
         case stagedVideoIDs = "PracticeTimer.stagedVideoIDs"
         case stagedImageIDs = "PracticeTimer.stagedImageIDs"
+        case stagedSketchIDs = "PracticeTimer.stagedSketchIDs"
+        case sketchTitles = "PracticeTimer.sketchTitles"
         case videoTitles = "PracticeTimer.videoTitles"
         // Commented out to move audio metadata persistence to StagingStore
         // case audioTitles = "PracticeTimer.audioTitles"
@@ -4297,6 +4323,15 @@ private func loadPracticeDefaultsIfNeeded() {
         self.stagedAudio = rebuiltAudio
         self.stagedVideos = rebuiltVideo
         self.stagedImages = rebuiltImages
+        let sketchIDs = (d.array(forKey: TimerDefaultsKey.stagedSketchIDs.rawValue) as? [String] ?? []).compactMap(UUID.init)
+        var rebuiltSketches: [StagedAttachment] = []
+        for id in sketchIDs {
+            if let (data, kind) = loadData(for: id), kind == .sketch {
+                rebuiltSketches.append(StagedAttachment(id: id, data: data, kind: .pdf))
+            }
+        }
+        self.stagedSketches = rebuiltSketches
+        self.sketchTitles = Self.persistedSketchTitles(d)
         self.videoThumbnails = rebuiltThumbs
         PracticeTimerDiagnostics.notice("Practice Timer restore • videos=\(rebuiltVideo.count) • audio=\(rebuiltAudio.count) • images=\(rebuiltImages.count) • ms=\(Int(Date().timeIntervalSince(restoreStarted) * 1000)) • headroomMB=\(PracticeTimerDiagnostics.headroomMB())")
         if rebuiltAudio.isEmpty && rebuiltVideo.isEmpty && rebuiltImages.isEmpty {
@@ -4589,6 +4624,11 @@ private func loadPracticeDefaultsIfNeeded() {
         d.set(audioIDs, forKey: TimerDefaultsKey.stagedAudioIDs.rawValue)
         d.set(videoIDs, forKey: TimerDefaultsKey.stagedVideoIDs.rawValue)
         d.set(imageIDs, forKey: TimerDefaultsKey.stagedImageIDs.rawValue)
+        let validSketchIDs = Set(stagedSketches.map { $0.id })
+        sketchTitles = sketchTitles.filter { validSketchIDs.contains($0.key) }
+        d.set(stagedSketches.map { $0.id.uuidString }, forKey: TimerDefaultsKey.stagedSketchIDs.rawValue)
+        d.set(Dictionary(uniqueKeysWithValues: sketchTitles.map { ($0.key.uuidString, $0.value) }),
+              forKey: TimerDefaultsKey.sketchTitles.rawValue)
         // Persist audio metadata to StagingStore, not UserDefaults
         // Edited per instructions below:
         for id in validAudioIDs {
@@ -4630,6 +4670,7 @@ private func loadPracticeDefaultsIfNeeded() {
         var images: [StagedAttachment] = []
         var audios: [StagedAttachment] = []
         var videos: [TimerStagedVideo] = []
+        var sketches: [StagedAttachment] = []
         var thumbs: [UUID: UIImage] = [:]
 
         for ref in refs {
@@ -4651,6 +4692,8 @@ private func loadPracticeDefaultsIfNeeded() {
                     images.append(StagedAttachment(id: ref.id, data: data, kind: .image))
                 case .audio:
                     audios.append(StagedAttachment(id: ref.id, data: data, kind: .audio))
+                case .sketch:
+                    sketches.append(StagedAttachment(id: ref.id, data: data, kind: .pdf))
                 case .video:
                     break
                 }
@@ -4702,6 +4745,8 @@ private func loadPracticeDefaultsIfNeeded() {
         self.stagedImages = images
         self.stagedAudio = audios
         self.stagedVideos = videos
+        self.stagedSketches = sketches
+        self.sketchTitles = Self.persistedSketchTitles(UserDefaults.standard)
         self.videoThumbnails = thumbs
         // Preserve existing selectedThumbnailID if still present; otherwise clear.
 // NOTE: No auto-favourite. Thumbnail is only set via explicit user intent (⭐).
@@ -4736,6 +4781,8 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
         d.removeObject(forKey: TimerDefaultsKey.stagedAudioIDs.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.stagedVideoIDs.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.stagedImageIDs.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.stagedSketchIDs.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.sketchTitles.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.videoTitles.rawValue)
         // Commented out removing audio metadata from UserDefaults since persistence moved to StagingStore
         /*
@@ -4912,6 +4959,7 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
         if stagedVideos.contains(where: { $0.id == id }) { return .video }
         if stagedAudio.contains(where: { $0.id == id }) { return .audio }
         if stagedImages.contains(where: { $0.id == id }) { return .image }
+        if stagedSketches.contains(where: { $0.id == id }) { return .pdf }
         return nil
     }
 
@@ -4929,7 +4977,17 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
             return StagedAttachment(id: video.id, data: data, kind: .video,
                                     sourceFormat: TimerStagedVideo.format(forFile: url))
         }
-        return stagedImages + stagedAudio + videos
+        // A sketch goes as the PDF that carries its drawing; its name by the
+        // staged display names the review page reads for a PDF.
+        seedSketchDisplayNames()
+        return stagedImages + stagedAudio + videos + stagedSketches
+    }
+
+    private static func persistedSketchTitles(_ d: UserDefaults) -> [UUID: String] {
+        let raw = (d.dictionary(forKey: TimerDefaultsKey.sketchTitles.rawValue) as? [String: String]) ?? [:]
+        var out: [UUID: String] = [:]
+        for (key, value) in raw { if let id = UUID(uuidString: key) { out[id] = value } }
+        return out
     }
 
     

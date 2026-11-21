@@ -47,6 +47,12 @@ final class C84SessionPreservationTests: XCTestCase {
         XCTAssertFalse(SessionDiscardSummary().needsConfirmation, "the timer value alone never asks")
         XCTAssertNil(SessionDiscardSummary().message)
         XCTAssertTrue(SessionDiscardSummary(photos: 1).needsConfirmation, "any staged media asks")
+        // A sketch drawn on the timer is staged media like the rest: a draft
+        // holding only a sketch is never discarded without asking.
+        XCTAssertTrue(SessionDiscardSummary(sketches: 1).needsConfirmation)
+        XCTAssertTrue(SessionDiscardSummary(sketches: 1).hasAttachments)
+        XCTAssertEqual(SessionDiscardSummary(sketches: 1).message, "Keep 1 sketch" + tail("it"))
+        XCTAssertEqual(SessionDiscardSummary(recordings: 1, sketches: 2).message, "Keep 1 recording and 2 sketches" + tail("them"))
     }
 
     func testTaskContentIsMemberCreatedOnlyWhenTypedEditedOrTicked() {

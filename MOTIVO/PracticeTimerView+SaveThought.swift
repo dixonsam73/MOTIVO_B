@@ -35,8 +35,8 @@ extension PracticeTimerView {
     }
 
     var saveThoughtCountLabel: String {
-        let n = stagedAudio.count + stagedVideos.count + stagedImages.count
-        if stagedImages.isEmpty {
+        let n = stagedAudio.count + stagedVideos.count + stagedImages.count + stagedSketches.count
+        if stagedImages.isEmpty && stagedSketches.isEmpty {
             return n == 1 ? "1 recording" : "\(n) recordings"
         }
         return n == 1 ? "1 attachment" : "\(n) attachments"
@@ -114,10 +114,12 @@ extension PracticeTimerView {
         for video in stagedVideos where mergedVideoTitles[video.id] == nil {
             if let t = viewerTitles[video.id.uuidString] { mergedVideoTitles[video.id] = t }
         }
+        seedSketchDisplayNames()
         return try TimerThoughtHandoffBuilder.make(
             audio: stagedAudio,
             videos: stagedVideos,
             images: stagedImages,
+            sketches: stagedSketches,
             audioTitles: audioTitles,
             videoTitles: mergedVideoTitles,
             thumbnailID: selectedThumbnailID,
@@ -156,7 +158,7 @@ extension PracticeTimerView {
     /// activity, instrument. Never a reset, never a discard; safe to repeat;
     /// never a permanent file.
     func consumeStagedAttachmentsSavedAsThought(_ committed: [UUID], sourceIDs: [UUID]) {
-        let stillStaged = Set(stagedAudio.map(\.id) + stagedVideos.map(\.id) + stagedImages.map(\.id))
+        let stillStaged = Set(stagedAudio.map(\.id) + stagedVideos.map(\.id) + stagedImages.map(\.id) + stagedSketches.map(\.id))
         let ids = TimerThoughtHandoffBuilder.idsToConsume(committed: committed, sourceIDs: sourceIDs, stillStaged: stillStaged)
         guard !ids.isEmpty else { return }
         let doomed = Set(ids)
@@ -187,6 +189,10 @@ extension PracticeTimerView {
         UserDefaults.standard.set(viewerTitles, forKey: PracticeTimerView.ptvVideoTitlesDefaultsKey)
 
         stagedImages.removeAll { doomed.contains($0.id) }
+        // A sketch saved in the thought is the thought's now; the editor's
+        // own save settled its recovery copy.
+        stagedSketches.removeAll { doomed.contains($0.id) }
+        sketchTitles = sketchTitles.filter { !doomed.contains($0.key) }
         if let t = selectedThumbnailID, doomed.contains(t) { selectedThumbnailID = nil }
 
         // The ONE staging removal on this path: these ids and no others. The

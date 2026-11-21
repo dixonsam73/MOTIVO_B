@@ -12,7 +12,9 @@ import UniformTypeIdentifiers
 /// Lightweight reference to a staged media file stored under Application Support/MOTIVO/Staging.
 /// Only small metadata is stored in a JSON file under Application Support; raw media bytes are kept on disk.
 struct StagedAttachmentRef: Codable, Hashable, Identifiable {
-    enum Kind: String, Codable { case audio, video, image }
+    /// `sketch`: a manuscript sketch drawn on the timer page, staged as the
+    /// PDF that carries its own drawing (`ManuscriptSketchFile`).
+    enum Kind: String, Codable { case audio, video, image, sketch }
     let id: UUID
     let kind: Kind
     let relativePath: String   // path under Staging (e.g., "2025-11-02/abc123.mp4")
@@ -425,6 +427,7 @@ enum StagingStore {
         case .audio: return "m4a"
         case .video: return "mp4"
         case .image: return "jpg"
+        case .sketch: return "pdf"
         }
     }
 

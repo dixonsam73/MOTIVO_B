@@ -75,6 +75,65 @@ final class SaveThoughtHandoffTests: XCTestCase {
                                             pendingStagingCount: pending, readVideo: readVideo)
     }
 
+    // MARK: - A sketch drawn on the timer (the fourth staged kind)
+
+    /// A sketch is staged as the PDF that carries its drawing, and travels
+    /// to the editor as a PDF under its own id, so the editor can reopen it
+    /// as ink and consumption can match it.
+    func testASketchAloneMakesAPayloadAndTravelsAsItsPDFUnderItsOwnID() async throws {
+        let ref = try await stage("%PDF-SKETCH", ext: "pdf", kind: .sketch)
+        XCTAssertEqual(ref.kind, .sketch)
+        XCTAssertEqual(StagingStore.absoluteURL(for: ref).pathExtension, "pdf")
+
+        let sketch = StagedAttachment(id: ref.id, data: Data("%PDF-SKETCH".utf8), kind: .pdf)
+        let payload = try TimerThoughtHandoffBuilder.make(
+            audio: [], videos: [], images: [], sketches: [sketch],
+            audioTitles: [:], videoTitles: [:], thumbnailID: nil, threadLabel: nil, pendingStagingCount: 0)
+
+        XCTAssertEqual(payload.sourceIDs, [ref.id])
+        XCTAssertEqual(payload.attachments.count, 1)
+        XCTAssertEqual(payload.attachments[0].id, ref.id)
+        XCTAssertEqual(payload.attachments[0].kind, .pdf)
+        XCTAssertEqual(payload.attachments[0].data, sketch.data, "the bytes are the staged PDF's, drawing and all")
+    }
+
+    /// A sketch whose staged file has not landed fails the whole hand-off
+    /// visibly, like any other clip: a thought must never silently lack it.
+    func testASketchNotYetStagedFailsTheHandOff() {
+        let sketch = StagedAttachment(id: UUID(), data: Data("%PDF".utf8), kind: .pdf)
+        XCTAssertThrowsError(try TimerThoughtHandoffBuilder.make(
+            audio: [], videos: [], images: [], sketches: [sketch],
+            audioTitles: [:], videoTitles: [:], thumbnailID: nil, threadLabel: nil, pendingStagingCount: 0)) { error in
+            XCTAssertEqual(error as? TimerThoughtHandoffError, .notStaged(kind: .pdf))
+        }
+    }
+
+    /// A thought saved from the timer consumed its sketch's staged id, so a
+    /// later Start has nothing of it left to absorb into a session.
+    func testASketchSavedInAThoughtIsConsumedAndCannotBeAbsorbedByALaterStart() {
+        let sketch = UUID(), clip = UUID()
+        let consumed = TimerThoughtHandoffBuilder.idsToConsume(committed: [sketch], sourceIDs: [sketch, clip],
+                                                               stillStaged: [sketch, clip])
+        XCTAssertEqual(consumed, [sketch], "only what the thought committed")
+        // After consumption it is no longer staged, so nothing takes it again.
+        XCTAssertEqual(TimerThoughtHandoffBuilder.idsToConsume(committed: [sketch], sourceIDs: [sketch, clip],
+                                                               stillStaged: [clip]), [])
+    }
+
+    func testTheTimerPassesItsSketchesIntoBothHandOffs() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let saveThought = try String(contentsOf: root.appendingPathComponent("MOTIVO/PracticeTimerView+SaveThought.swift"), encoding: .utf8)
+        XCTAssertTrue(saveThought.contains("sketches: stagedSketches,"))
+        XCTAssertTrue(saveThought.contains("stagedSketches.removeAll { doomed.contains($0.id) }"))
+        let timer = try String(contentsOf: root.appendingPathComponent("MOTIVO/PracticeTimerView.swift"), encoding: .utf8)
+        XCTAssertTrue(timer.contains("return stagedImages + stagedAudio + videos + stagedSketches"), "Finish carries them to the review page")
+        // Every place the draft's staged photos are dropped drops the sketches too.
+        let drops = timer.components(separatedBy: "stagedImages.removeAll()\n").count - 1
+        let withSketches = timer.components(separatedBy: "clearStagedSketches()\n").count - 1
+        XCTAssertEqual(drops, withSketches)
+        XCTAssertGreaterThanOrEqual(drops, 3)
+    }
+
     // MARK: - The hand-off builder (real staging store)
 
     func testOneAudioOneVideoSeveralClipsAndPhotosMakeOnePayloadWithPlayableMedia() async throws {
