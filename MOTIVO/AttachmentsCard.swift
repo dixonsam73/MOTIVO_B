@@ -388,8 +388,7 @@ private struct StagedSketchTile: View {
                     .scaledToFit()
                     .padding(6)
             } else {
-                Image(systemName: "pencil.and.scribble")
-                    .imageScale(.large)
+                ManuscriptIcon(pointSize: 22)
                     .foregroundStyle(.secondary)
             }
         }

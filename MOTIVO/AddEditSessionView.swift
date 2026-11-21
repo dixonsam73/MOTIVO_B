@@ -1857,8 +1857,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
 
                         Button(action: { showSketchPad = true }) {
                             ZStack {
-                                Image(systemName: "pencil.and.scribble")
-                                    .font(.system(size: 24, weight: .semibold))
+                                // The same icon as the timer's manuscript
+                                // button, at this row's symbol size.
+                                ManuscriptIcon(pointSize: 24)
                                     .foregroundColor(Color(red: 0.38, green: 0.48, blue: 0.62))
                                     .frame(width: 56, height: 56)
                                     .background(

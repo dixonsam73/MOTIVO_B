@@ -229,17 +229,17 @@ struct MediaRecorderRowCard: View {
                         hasUsedSketchCapture = true
                         onSketch()
                     } label: {
-                        Image(systemName: "pencil.and.scribble")
-                            .symbolRenderingMode(.monochrome)
-                            .font(.system(size: 22, weight: .semibold))
+                        // Drawn to sit beside the SF Symbols on this row:
+                        // their size (22 pt), their colour, their weight.
+                        ManuscriptIcon(pointSize: 22)
                             .foregroundStyle(recorderIcon)
                             .frame(width: 48, height: 48)
                             .contentShape(Circle())
                     }
                     .buttonStyle(.bordered)
-                    .accessibilityLabel("Sketch")
+                    .accessibilityLabel("Manuscript")
                     .accessibilityHint("Opens manuscript paper to draw on for this session.")
-                    if !hasUsedSketchCapture { captureCaption("Sketch") }
+                    if !hasUsedSketchCapture { captureCaption("Manuscript") }
                     }
                 }
             }
