@@ -546,9 +546,11 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        Samuel, 2026-11-21, on the iPad: landscape works very well. Fixed
        from his session: the recorder's card stretched to fill the spare
        height in portrait; and the arrangement was held whenever the
-       recorder was open, not only during a take. **Open:** whether the
-       buttons should also sit lower in portrait, nearer the middle of
-       the page.
+       recorder was open, not only during a take; in portrait the whole
+       group of buttons sat near the top of the page and now sits in the
+       middle, as it does in landscape; and "+ Add line" with the
+       keyboard up in landscape drew a broken, flashing menu. Landscape
+       "feels great already" (Samuel). **Awaiting his look at portrait.**
      - Correction to the survey: the Duration wheels were not cut off at
        the top; nothing sits above the first value. The half-height panel
        crowded the wheel and cut its lower rows.
