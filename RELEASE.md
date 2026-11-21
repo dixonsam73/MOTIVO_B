@@ -489,14 +489,11 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      that text symbol, not a pencil. Open: the three pen widths (Samuel
      uses the finest most, the broad for filling note heads, and is not
      sure the three differ enough; they were chosen by eye, not against a
-     standard). The pad's top bar also carries the star (the entry's
-     picture, as in the viewer), added at Samuel's request. Still not
-     built: editing a sketch from the entry page without opening the
-     editor. **Unconfirmed:** Samuel saw a clear bubble at the top right
-     that stayed after the pad's Save, over the editor's Save Thought. It
-     does not appear on an iPadOS 27 simulator; taken to be a Pencil hover
-     highlight left behind, and the pad's top bar no longer shows hover
-     highlights. To be confirmed on the iPad.
+     standard). The star (the entry's picture) is on a sketch's thumbnail
+     in the editor, as for a photo, and in the pad's top bar; both added
+     at Samuel's request. Still not built: editing a sketch from the entry
+     page without opening the editor. The clear bubble Samuel saw at the
+     top right was the Pencil's own hover highlight, not a fault.
      Études Dev on the iPad updated with this (2026-11-21); the other two
      installs untouched.
      *Next:* Samuel's check of the correction on the iPad; then the
