@@ -1490,16 +1490,17 @@ private func loadPracticeDefaultsIfNeeded() {
     /// opened section sits, change.
     ///
     /// - A phone-sized space: exactly the single scrolling column.
-    /// - A roomy window (iPad): the same column, held to a comfortable width.
-    /// - A roomy window in landscape: the same, until a section is opened.
-    ///   Then the column of buttons keeps to the left and stays put, and the
+    /// - A roomy window (iPad), portrait or landscape: the same column, held
+    ///   to a comfortable width and centred, until a section is opened. Then
+    ///   the column of buttons keeps to the left and stays put, and the
     ///   opened sections stack on the right and scroll by themselves.
+    /// - A roomy window too narrow for two parts: the single column.
     ///
     /// The audio recorder holds the take in its own view, and moving it
     /// between the column and the panel would end the take. So from the
     /// moment a take begins until it is kept or deleted, the page keeps the
-    /// arrangement it was in, even if the iPad is turned. A recorder that is
-    /// open with no take is simply rebuilt in its new place.
+    /// arrangement it was in, even if the window changes shape. A recorder
+    /// that is open with no take is simply rebuilt in its new place.
     @ViewBuilder
     private var mainScrollView: some View {
         GeometryReader { proxy in
@@ -1557,7 +1558,11 @@ private func loadPracticeDefaultsIfNeeded() {
                         ScrollView {
                             openSectionsPanel(topInset: TimerPageArrangement.panelTopInset(
                                 pageHeight: proxy.size.height,
-                                windowHeight: proxy.size.height + proxy.safeAreaInsets.bottom
+                                windowHeight: proxy.size.height + proxy.safeAreaInsets.bottom,
+                                landscape: TimerPageArrangement.isLandscape(
+                                    width: proxy.size.width,
+                                    windowHeight: proxy.size.height + proxy.safeAreaInsets.bottom
+                                )
                             ))
                         }
                         .frame(maxWidth: .infinity)

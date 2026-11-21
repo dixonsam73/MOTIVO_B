@@ -39,14 +39,15 @@ final class WideWindowLayoutTests: XCTestCase {
 
     // MARK: The Timer page
 
-    func testTheTimerIsSideBySideOnlyInARoomyLandscapeWindow() {
-        // 11-inch and 13-inch iPad in landscape.
-        XCTAssertTrue(TimerPageArrangement.isSideBySide(CGSize(width: 1210, height: 790), roomy: true))
-        XCTAssertTrue(TimerPageArrangement.isSideBySide(CGSize(width: 1376, height: 990), roomy: true))
-        // Portrait: one column.
-        XCTAssertFalse(TimerPageArrangement.isSideBySide(CGSize(width: 834, height: 1150), roomy: true))
-        // A landscape window too narrow for two parts.
-        XCTAssertFalse(TimerPageArrangement.isSideBySide(CGSize(width: 900, height: 700), roomy: true))
+    func testTheTimerIsSideBySideInARoomyWindowEitherWayUp() {
+        // 11-inch and 13-inch iPad, landscape and portrait: the same
+        // arrangement, so turning the iPad moves nothing.
+        for (w, h) in [(1210.0, 790.0), (834.0, 1166.0), (1376.0, 990.0), (1032.0, 1332.0), (820.0, 1136.0)] {
+            XCTAssertTrue(TimerPageArrangement.isSideBySide(CGSize(width: w, height: h), roomy: true), "\(w)x\(h)")
+        }
+        // An iPad mini in portrait, or a window made narrow: one column.
+        XCTAssertFalse(TimerPageArrangement.isSideBySide(CGSize(width: 744, height: 1089), roomy: true))
+        XCTAssertFalse(TimerPageArrangement.isSideBySide(CGSize(width: 600, height: 700), roomy: true))
         // An iPhone on its side is wide, but it is never roomy.
         XCTAssertFalse(TimerPageArrangement.isSideBySide(CGSize(width: 956, height: 440), roomy: false))
         XCTAssertFalse(TimerPageArrangement.isSideBySide(CGSize(width: 1210, height: 790), roomy: false))
@@ -71,10 +72,16 @@ final class WideWindowLayoutTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(column, 440)
             XCTAssertGreaterThanOrEqual(window - column, 600, "an opened section keeps a comfortable width at \(window)")
         }
-        // A held arrangement in a window since turned or narrowed.
-        for window in [834.0, 400.0] {
-            XCTAssertLessThanOrEqual(TimerPageArrangement.columnRegionWidth(window: window), window / 2)
+        // Portrait, down to the narrowest window that is side by side: each
+        // half holds the row of three timer buttons (about 360 pt, inside
+        // 16 pt margins) and a card about as wide as a phone's.
+        for window in [834.0, 820.0, TimerPageArrangement.sideBySideMinimumWidth] {
+            let column = TimerPageArrangement.columnRegionWidth(window: window)
+            XCTAssertGreaterThanOrEqual(column - 32, 360, "the timer's buttons fit at \(window)")
+            XCTAssertGreaterThanOrEqual(window - column - 16, 380, "a card fits at \(window)")
         }
+        // A held arrangement in a window since made narrow.
+        XCTAssertLessThanOrEqual(TimerPageArrangement.columnRegionWidth(window: 400), 200)
     }
 
     func testTheButtonsSitInTheMiddleOfATallPageAndStayPutOnAShortOne() {
@@ -85,9 +92,23 @@ final class WideWindowLayoutTests: XCTestCase {
         XCTAssertEqual(TimerPageArrangement.centringInset(windowHeight: 1186), 173)
         XCTAssertGreaterThan(TimerPageArrangement.centringInset(windowHeight: 1352),
                              TimerPageArrangement.centringInset(windowHeight: 1186))
-        // The side panel's first card moves down with the buttons.
-        XCTAssertEqual(TimerPageArrangement.panelTopInset(pageHeight: 1166, windowHeight: 1186)
-                        - TimerPageArrangement.panelTopInset(pageHeight: 1166, windowHeight: 810), 173, accuracy: 0.001)
+    }
+
+    func testTheCardsStartLevelWithTheButtonsInLandscapeAndHigherInPortrait() {
+        // Landscape, 11-inch: nothing is added, the cards are level with
+        // the first button, as Samuel signed off.
+        let landscape11 = TimerPageArrangement.panelTopInset(pageHeight: 790, windowHeight: 810, landscape: true)
+        XCTAssertEqual(landscape11, 790 * 0.024 + 95, accuracy: 0.001)
+        // Landscape, 13-inch: the buttons sit lower, and the cards with them.
+        XCTAssertEqual(TimerPageArrangement.panelTopInset(pageHeight: 988, windowHeight: 1008, landscape: true),
+                       988 * 0.024 + 95 + TimerPageArrangement.centringInset(windowHeight: 1008), accuracy: 0.001)
+        // Portrait: the buttons are in the middle of the page, the cards
+        // are not held down with them.
+        XCTAssertEqual(TimerPageArrangement.panelTopInset(pageHeight: 1166, windowHeight: 1186, landscape: false),
+                       1166 * 0.024 + 95, accuracy: 0.001)
+        // The keyboard coming up in portrait is not a turn to landscape.
+        XCTAssertFalse(TimerPageArrangement.isLandscape(width: 834, windowHeight: 1186))
+        XCTAssertTrue(TimerPageArrangement.isLandscape(width: 1210, windowHeight: 810))
     }
 
     /// The keyboard must not move the buttons: the centring is worked out

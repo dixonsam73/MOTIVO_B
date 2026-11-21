@@ -38,10 +38,11 @@ enum WideWindow {
     static var isRoomy: Bool { isRoomy(WindowMetrics.windowBounds.size) }
 }
 
-/// The Timer page in a roomy window. In landscape, an opened section (the
-/// metronome or drone controls, the tuner, the list, the attachments) used
-/// to push the clock and the buttons down the page; there it now sits
-/// beside the column of buttons instead.
+/// The Timer page in a roomy window (an iPad's, either way up). An opened
+/// section (the metronome or drone controls, the tuner, the audio recorder,
+/// the list, the attachments) used to push the clock and the buttons down
+/// the page; there it now sits beside the column of buttons instead, so the
+/// buttons stay where they are.
 enum TimerPageArrangement {
 
     /// The widest the Timer's column of buttons and cards grows in a roomy
@@ -51,18 +52,25 @@ enum TimerPageArrangement {
     /// The widest an opened section grows in the side panel.
     static let panelWidth: CGFloat = 600
 
-    /// Narrower than this there is no room for two parts side by side.
-    static let sideBySideMinimumWidth: CGFloat = 1000
+    /// Narrower than this there is no room for two parts side by side:
+    /// each half must hold the row of three timer buttons, or a card about
+    /// as wide as a phone's. An 11-inch iPad in portrait (834) has room; an
+    /// iPad mini in portrait (744) does not, and keeps the single column.
+    static let sideBySideMinimumWidth: CGFloat = 800
 
-    /// PURE. Two parts side by side: a roomy window that is wider than it
-    /// is tall. Never a phone-sized space, never portrait.
+    /// PURE. Two parts side by side: a roomy window wide enough for both,
+    /// portrait or landscape (Samuel, 2026-11-21: the same arrangement
+    /// whichever way up, so turning the iPad moves nothing). Never a
+    /// phone-sized space.
     static func isSideBySide(_ size: CGSize, roomy: Bool) -> Bool {
-        roomy && size.width > size.height && size.width >= sideBySideMinimumWidth
+        roomy && size.width >= sideBySideMinimumWidth
     }
 
     /// PURE. The arrangement to show. While the audio recorder holds a take
     /// the page keeps the arrangement the take began in (`heldByRecorder`),
     /// whatever the window now fits: moving the recorder would end the take.
+    /// Turning an 11-inch or larger iPad no longer changes what fits; this
+    /// still matters when a window is made narrow, and on a smaller iPad.
     static func sideBySide(fits: Bool, heldByRecorder: Bool?) -> Bool {
         heldByRecorder ?? fits
     }
@@ -90,12 +98,27 @@ enum TimerPageArrangement {
         max(0, ((windowHeight - restingPageHeight) / 2).rounded())
     }
 
-    /// PURE. Where the first opened section starts: level with the top of
-    /// the column's first button. `pageHeight` is the height the page is
-    /// laid out in (it shrinks above the keyboard, as the column's own top
-    /// space does); `windowHeight` is as for `centringInset`.
-    static func panelTopInset(pageHeight: CGFloat, windowHeight: CGFloat) -> CGFloat {
-        max(6, pageHeight * 0.024) + 95 + centringInset(windowHeight: windowHeight)
+    /// PURE. Where the first opened section starts.
+    ///
+    /// In landscape: level with the top of the column's first button
+    /// (Samuel, 2026-11-21: "works well", leave it). In portrait the
+    /// buttons sit in the middle of a tall page, and starting the cards
+    /// level with them left a tall empty band above the cards while they
+    /// ran to the bottom; there the cards start where they would on a page
+    /// with no height to spare, the same distance under the top bar as in
+    /// landscape on an 11-inch iPad.
+    ///
+    /// `pageHeight` is the height the page is laid out in (it shrinks above
+    /// the keyboard, as the column's own top space does); `windowHeight` is
+    /// as for `centringInset`.
+    static func panelTopInset(pageHeight: CGFloat, windowHeight: CGFloat, landscape: Bool) -> CGFloat {
+        max(6, pageHeight * 0.024) + 95 + (landscape ? centringInset(windowHeight: windowHeight) : 0)
+    }
+
+    /// PURE. Landscape, judged from the window (`windowHeight` as above),
+    /// so the keyboard coming up in portrait is not mistaken for a turn.
+    static func isLandscape(width: CGFloat, windowHeight: CGFloat) -> Bool {
+        width > windowHeight
     }
 }
 
