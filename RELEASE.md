@@ -472,8 +472,23 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      instruments, no entries; its store copied to the shared notes first).
      TestFlight 1949 and Sync Test 1948 untouched. The iPad was locked, so
      the first launch was not seen.
-     *Next:* that session's findings; then the Journal and editor iPad
-     adaptations.
+     *Device session, 2026-11-21* (Samuel, iPad with Pencil, Études Dev
+     1972). Right as built: staff spacing at the size the page opens, the
+     three clefs, palm rejection (no marks), erase, undo and redo, zoom
+     and pan, a finger drawing as well as the Pencil, saving, recovery
+     after closing the app mid-drawing, rotation, and landscape filling
+     the width. **Failed: finding how to edit a saved sketch.** In the
+     editor, tapping the thumbnail opens the viewer, as for every other
+     attachment, and its pencil was Rename; the small "Edit sketch" under
+     the tile was missed. Corrected: on a sketch the viewer's pencil opens
+     the pad and Rename is the text symbol beside it; the tile's "Edit
+     sketch" is larger, with a pencil. Open: the three pen widths (Samuel
+     uses the finest most, the broad for filling note heads, and is not
+     sure the three differ enough; they were chosen by eye, not against a
+     standard). Still not built: editing a sketch from the entry page
+     without opening the editor.
+     *Next:* Samuel's check of the correction on the iPad; then the
+     Journal and editor iPad adaptations.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode
