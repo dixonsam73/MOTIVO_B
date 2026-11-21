@@ -187,19 +187,32 @@ struct ManuscriptCanvas: UIViewRepresentable {
 
 // MARK: - The pad
 
+/// What the pad hands over at Save.
+struct ManuscriptPadResult {
+    /// The sketch as PDF data, carrying its drawing.
+    let data: Data
+    /// The recovery copy that goes on protecting it until the entry is saved.
+    let recoveryKey: String
+    let title: String
+    let starred: Bool
+}
+
 struct ManuscriptPadView: View {
     /// A sketch being reopened; nil for a new one, which starts by choosing its paper.
     let existing: ManuscriptSketch?
     /// Called at once when an already attached sketch is given a title; nil
     /// for a new sketch, whose title goes with it at Save.
     let onRename: ((String) -> Void)?
-    /// Receives the finished sketch as PDF data, the key of the recovery copy
-    /// that goes on protecting it until the entry is saved, and its title.
-    /// Throwing keeps the pad open.
-    let onSave: (Data, String, String) throws -> Void
+    /// Called at once when an already attached sketch is starred or
+    /// unstarred; nil for a new sketch, whose star goes with it at Save.
+    let onStar: ((Bool) -> Void)?
+    /// Receives the finished sketch. Throwing keeps the pad open.
+    let onSave: (ManuscriptPadResult) throws -> Void
 
     static let defaultTitle = "Sketch"
     @State private var title: String
+    /// Starred: the entry's picture, as for any other attachment.
+    @State private var starred: Bool
     @State private var titleDraft = ""
     @State private var isNaming = false
 
@@ -224,13 +237,17 @@ struct ManuscriptPadView: View {
 
     init(existing: ManuscriptSketch? = nil,
          title: String = ManuscriptPadView.defaultTitle,
+         starred: Bool = false,
          recovery: ManuscriptSketchRecovery.Opening = .new(),
          onRename: ((String) -> Void)? = nil,
-         onSave: @escaping (Data, String, String) throws -> Void) {
+         onStar: ((Bool) -> Void)? = nil,
+         onSave: @escaping (ManuscriptPadResult) throws -> Void) {
         self.existing = existing
         self.onRename = onRename
+        self.onStar = onStar
         self.onSave = onSave
         _title = State(initialValue: title)
+        _starred = State(initialValue: starred)
         _paper = State(initialValue: existing?.paper)
         _drawing = State(initialValue: existing?.drawing ?? PKDrawing())
         _opening = State(initialValue: recovery)
@@ -356,6 +373,22 @@ struct ManuscriptPadView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Title: \(title). Change title")
+
+                // The star, as in the viewer: this sketch is the entry's picture.
+                Button {
+                    starred.toggle()
+                    onStar?(starred)
+                } label: {
+                    Image(systemName: starred ? "star.fill" : "star")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Self.controlColor)
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(Color.secondary.opacity(0.14)))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(starred ? "Starred" : "Star")
+                .accessibilityAddTraits(starred ? .isSelected : [])
             }
             Spacer()
             Button("Save") { save() }
@@ -366,6 +399,10 @@ struct ManuscriptPadView: View {
         .font(Theme.Text.body)
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.vertical, Theme.Spacing.m)
+        // No hover highlight on these: with a Pencil, the highlight under Save
+        // was left on screen when the pad closed, over the editor's own Save
+        // (seen on a device, 2026-11-21; a simulator has no Pencil to hover).
+        .hoverEffectDisabled()
     }
 
     private static let controlColor = Color(red: 0.38, green: 0.48, blue: 0.62)
@@ -445,7 +482,7 @@ struct ManuscriptPadView: View {
             // The copy comes first: if it cannot be written the editor is
             // not given the sketch and the pad stays open.
             try ManuscriptSketchRecovery.handOver(sketch, data: data, opening: opening) { data, key in
-                try onSave(data, key, title)
+                try onSave(ManuscriptPadResult(data: data, recoveryKey: key, title: title, starred: starred))
             }
             dismiss()
         } catch {

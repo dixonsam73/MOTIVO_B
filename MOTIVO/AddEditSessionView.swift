@@ -825,17 +825,21 @@ struct AddEditSessionView: View {
             // A finished sketch is staged like an imported PDF; it carries its own drawing.
             // Until this entry is saved the sketch exists only here in memory,
             // so its recovery copy is kept and noted against the staged item.
-            ManuscriptPadView(recovery: .new(excluding: sketchRecovery_AESV.held)) { data, recoveryKey, title in
-                let stagedID = stageData(data, kind: .pdf, displayName: title)
-                sketchRecovery_AESV.handedOver(key: recoveryKey, for: stagedID)
+            ManuscriptPadView(recovery: .new(excluding: sketchRecovery_AESV.held)) { result in
+                let stagedID = stageData(result.data, kind: .pdf, displayName: result.title)
+                sketchRecovery_AESV.handedOver(key: result.recoveryKey, for: stagedID)
+                if result.starred { setSketchStar_AESV(stagedID, true) }
             }
         }
         .fullScreenCover(item: $sketchEdit_AESV) { request in
-            // An attached sketch's title is its own: it changes when it is typed, as in the viewer.
-            ManuscriptPadView(existing: request.sketch, title: request.title, recovery: request.recovery,
-                              onRename: { renameSketch_AESV(request.id, to: $0) }) { data, recoveryKey, _ in
-                try applyEditedSketch_AESV(data, id: request.id)
-                sketchRecovery_AESV.handedOver(key: recoveryKey, for: request.id)
+            // An attached sketch's title and star are its own: they change
+            // when they are set, as they do in the viewer.
+            ManuscriptPadView(existing: request.sketch, title: request.title, starred: request.starred,
+                              recovery: request.recovery,
+                              onRename: { renameSketch_AESV(request.id, to: $0) },
+                              onStar: { setSketchStar_AESV(request.id, $0) }) { result in
+                try applyEditedSketch_AESV(result.data, id: request.id)
+                sketchRecovery_AESV.handedOver(key: result.recoveryKey, for: request.id)
             }
         }
         .sheet(isPresented: $showScoreAttachLibrary) {

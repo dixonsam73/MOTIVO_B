@@ -54,6 +54,7 @@ struct AESVSketchEditRequest: Identifiable {
     let id: UUID
     let sketch: ManuscriptSketch
     let title: String
+    let starred: Bool
     let recovery: ManuscriptSketchRecovery.Opening
 }
 
@@ -415,7 +416,8 @@ extension AddEditSessionView {
             } else {
                 sketch = try ManuscriptSketchFile.read(data: att.data)
             }
-            sketchEdit_AESV = AESVSketchEditRequest(id: att.id, sketch: sketch, title: sketchTitle_AESV(att.id), recovery: recovery)
+            sketchEdit_AESV = AESVSketchEditRequest(id: att.id, sketch: sketch, title: sketchTitle_AESV(att.id),
+                                                    starred: selectedThumbnailID == att.id, recovery: recovery)
         } catch {
             consentState.present(notice: "This sketch can't be opened for editing.")
         }
@@ -456,6 +458,19 @@ extension AddEditSessionView {
             UserDefaults.standard.set(dict, forKey: "stagedAttachmentDisplayNames_temp")
         }
         attachmentTitlesRefreshTick &+= 1
+    }
+
+    /// Stars or unstars a sketch, by the viewer's rule here: the starred
+    /// attachment is the entry's picture, and starring one makes it shown.
+    func setSketchStar_AESV(_ id: UUID, _ on: Bool) {
+        guard let att = stagedAttachments.first(where: { $0.id == id }) else { return }
+        if on {
+            let fileURL = surrogateURL(for: att)
+            if isPrivate(id: att.id, url: fileURL) { setPrivate(id: att.id, url: fileURL, false) }
+            selectedThumbnailID = att.id
+        } else if selectedThumbnailID == att.id {
+            selectedThumbnailID = nil
+        }
     }
 
     /// Takes the pad's finished PDF for a sketch already attached here. One
