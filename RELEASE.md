@@ -487,6 +487,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      sure the three differ enough; they were chosen by eye, not against a
      standard). Still not built: editing a sketch from the entry page
      without opening the editor.
+     Études Dev on the iPad updated to build 1975 with the correction
+     (2026-11-21); the other two installs untouched.
      *Next:* Samuel's check of the correction on the iPad; then the
      Journal and editor iPad adaptations.
   5. Once the native shell and the sketch's save and re-edit path work:
