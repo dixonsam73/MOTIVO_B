@@ -190,10 +190,18 @@ struct ManuscriptCanvas: UIViewRepresentable {
 struct ManuscriptPadView: View {
     /// A sketch being reopened; nil for a new one, which starts by choosing its paper.
     let existing: ManuscriptSketch?
-    /// Receives the finished sketch as PDF data, with the key of the recovery
-    /// copy that goes on protecting it until the entry is saved. Throwing
-    /// keeps the pad open.
-    let onSave: (Data, String) throws -> Void
+    /// Called at once when an already attached sketch is given a title; nil
+    /// for a new sketch, whose title goes with it at Save.
+    let onRename: ((String) -> Void)?
+    /// Receives the finished sketch as PDF data, the key of the recovery copy
+    /// that goes on protecting it until the entry is saved, and its title.
+    /// Throwing keeps the pad open.
+    let onSave: (Data, String, String) throws -> Void
+
+    static let defaultTitle = "Sketch"
+    @State private var title: String
+    @State private var titleDraft = ""
+    @State private var isNaming = false
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -215,10 +223,14 @@ struct ManuscriptPadView: View {
     @State private var keepTask: Task<Void, Never>?
 
     init(existing: ManuscriptSketch? = nil,
+         title: String = ManuscriptPadView.defaultTitle,
          recovery: ManuscriptSketchRecovery.Opening = .new(),
-         onSave: @escaping (Data, String) throws -> Void) {
+         onRename: ((String) -> Void)? = nil,
+         onSave: @escaping (Data, String, String) throws -> Void) {
         self.existing = existing
+        self.onRename = onRename
         self.onSave = onSave
+        _title = State(initialValue: title)
         _paper = State(initialValue: existing?.paper)
         _drawing = State(initialValue: existing?.drawing ?? PKDrawing())
         _opening = State(initialValue: recovery)
@@ -269,6 +281,15 @@ struct ManuscriptPadView: View {
             Button(existing == nil ? "Discard Sketch" : "Discard Changes", role: .destructive) { leaveWithoutSaving() }
             Button("Keep Drawing", role: .cancel) { }
         }
+        .alert("Title", isPresented: $isNaming) {
+            TextField(Self.defaultTitle, text: $titleDraft)
+            Button("Done") {
+                let typed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                title = typed.isEmpty ? Self.defaultTitle : typed
+                onRename?(title)
+            }
+            Button("Cancel", role: .cancel) { }
+        }
         .alert("The sketch couldn't be saved.", isPresented: $saveFailed) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -310,9 +331,32 @@ struct ManuscriptPadView: View {
             }
             .foregroundStyle(.primary)
             Spacer()
-            Text(paper == nil ? "Paper" : "Sketch")
-                .font(Theme.Text.sectionHeader)
-                .foregroundStyle(Theme.Colors.secondaryText)
+            if paper == nil {
+                Text("Paper")
+                    .font(Theme.Text.sectionHeader)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            } else {
+                // The sketch's title, and the text button that sets it.
+                Button {
+                    titleDraft = title == Self.defaultTitle ? "" : title
+                    isNaming = true
+                } label: {
+                    HStack(spacing: Theme.Spacing.s) {
+                        Text(title)
+                            .font(Theme.Text.sectionHeader)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .lineLimit(1)
+                        Image(systemName: "character.cursor.ibeam")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(Self.controlColor)
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(Color.secondary.opacity(0.14)))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Title: \(title). Change title")
+            }
             Spacer()
             Button("Save") { save() }
                 .fontWeight(.semibold)
@@ -400,7 +444,9 @@ struct ManuscriptPadView: View {
             // that save is durable (or the person discards the work).
             // The copy comes first: if it cannot be written the editor is
             // not given the sketch and the pad stays open.
-            try ManuscriptSketchRecovery.handOver(sketch, data: data, opening: opening, to: onSave)
+            try ManuscriptSketchRecovery.handOver(sketch, data: data, opening: opening) { data, key in
+                try onSave(data, key, title)
+            }
             dismiss()
         } catch {
             // The pad stays open with the drawing in it; nothing is lost.

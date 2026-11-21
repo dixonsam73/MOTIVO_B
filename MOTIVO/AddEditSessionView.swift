@@ -306,8 +306,6 @@ struct AddEditSessionView: View {
     /// Which of this entry's PDF attachments are manuscript sketches (they carry a drawing).
     @State var sketchAttachmentIDs_AESV: Set<UUID> = []
     @State var sketchEdit_AESV: AESVSketchEditRequest? = nil
-    /// A sketch whose pencil was tapped in the viewer; opened in the pad when the viewer closes.
-    @State var sketchToEditAfterViewer_AESV: UUID? = nil
     /// Saved sketches edited in this editor and not yet saved with the entry.
     @State var sketchEdits_AESV = ManuscriptSketchEdits()
     /// Recovery copies of sketches the pad has handed to this editor and the entry has not saved yet.
@@ -827,13 +825,15 @@ struct AddEditSessionView: View {
             // A finished sketch is staged like an imported PDF; it carries its own drawing.
             // Until this entry is saved the sketch exists only here in memory,
             // so its recovery copy is kept and noted against the staged item.
-            ManuscriptPadView(recovery: .new(excluding: sketchRecovery_AESV.held)) { data, recoveryKey in
-                let stagedID = stageData(data, kind: .pdf, displayName: "Sketch")
+            ManuscriptPadView(recovery: .new(excluding: sketchRecovery_AESV.held)) { data, recoveryKey, title in
+                let stagedID = stageData(data, kind: .pdf, displayName: title)
                 sketchRecovery_AESV.handedOver(key: recoveryKey, for: stagedID)
             }
         }
         .fullScreenCover(item: $sketchEdit_AESV) { request in
-            ManuscriptPadView(existing: request.sketch, recovery: request.recovery) { data, recoveryKey in
+            // An attached sketch's title is its own: it changes when it is typed, as in the viewer.
+            ManuscriptPadView(existing: request.sketch, title: request.title, recovery: request.recovery,
+                              onRename: { renameSketch_AESV(request.id, to: $0) }) { data, recoveryKey, _ in
                 try applyEditedSketch_AESV(data, id: request.id)
                 sketchRecovery_AESV.handedOver(key: recoveryKey, for: request.id)
             }
@@ -887,13 +887,7 @@ struct AddEditSessionView: View {
                    }
                },
                message: { Text(consentState.message) })
-        .fullScreenCover(item: $viewerRequest, onDismiss: {
-            // The viewer's pencil on a sketch: the pad opens once the viewer has gone.
-            if let id = sketchToEditAfterViewer_AESV, let att = stagedAttachments.first(where: { $0.id == id }) {
-                openSketchForEditing_AESV(att)
-            }
-            sketchToEditAfterViewer_AESV = nil
-        }) { req in
+        .fullScreenCover(item: $viewerRequest) { req in
             let imageURLs: [URL] = (req.mode == .visual) ? req.imageURLs : []
             let videoURLs: [URL] = (req.mode == .visual) ? req.videoURLs : []
             let audioURLs: [URL] = (req.mode == .audio) ? req.audioURLs : []
@@ -918,12 +912,6 @@ struct AddEditSessionView: View {
             }
 
 attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: videoURLs, audioURLs: audioURLs, pdfURLs: pdfURLs, audioTitles: audioTitles, req: req)
-                .environment(\.editSketchFromViewer, { url in
-                    // The viewer lists its items in this order, alongside their attachment ids.
-                    guard let index = combined.firstIndex(of: url), index < viewerAttachmentIDs.count else { return }
-                    sketchToEditAfterViewer_AESV = viewerAttachmentIDs[index]
-                    viewerRequest = nil
-                })
         }
         .task { hydrate() } // unified first-appearance init
         .onAppear {
@@ -1530,6 +1518,12 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                     }
                                                                     .contentShape(Rectangle())
                                                                     .onTapGesture {
+                                                                        // A manuscript sketch is edited by drawing: here, where
+                                                                        // everything is being edited, its thumbnail opens the pad.
+                                                                        if sketchAttachmentIDs_AESV.contains(att.id) {
+                                                                            openSketchForEditing_AESV(att)
+                                                                            return
+                                                                        }
                                                                         // Visual gallery: images + videos + PDFs (audio/generic files excluded)
                                                                         ensureSurrogateFilesExistForViewer_edit()
     
@@ -1623,17 +1617,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                             .truncationMode(.tail)
                                                                             .frame(width: 128, alignment: .leading)
 
-                                                                        if sketchAttachmentIDs_AESV.contains(att.id) {
-                                                                            // One page, and it can be drawn on again.
-                                                                            Button { openSketchForEditing_AESV(att) } label: {
-                                                                                Label("Edit sketch", systemImage: "pencil")
-                                                                                    .font(.caption.weight(.semibold))
-                                                                                    .padding(.vertical, 6)
-                                                                                    .frame(width: 128, alignment: .leading)
-                                                                                    .contentShape(Rectangle())
-                                                                            }
-                                                                            .buttonStyle(.plain)
-                                                                        } else {
+                                                                        // A sketch is one page: no page controls, just its name.
+                                                                        if !sketchAttachmentIDs_AESV.contains(att.id) {
                                                                         Text(PDFSelectedPagesFormatter.summary(for: selectedPages(forPDFID: att.id)))
                                                                             .font(.caption2)
                                                                             .foregroundStyle(Theme.Colors.secondaryText)

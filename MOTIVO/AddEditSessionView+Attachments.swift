@@ -53,6 +53,7 @@ struct AESVSketchEditRequest: Identifiable {
     /// The attachment's id.
     let id: UUID
     let sketch: ManuscriptSketch
+    let title: String
     let recovery: ManuscriptSketchRecovery.Opening
 }
 
@@ -414,10 +415,47 @@ extension AddEditSessionView {
             } else {
                 sketch = try ManuscriptSketchFile.read(data: att.data)
             }
-            sketchEdit_AESV = AESVSketchEditRequest(id: att.id, sketch: sketch, recovery: recovery)
+            sketchEdit_AESV = AESVSketchEditRequest(id: att.id, sketch: sketch, title: sketchTitle_AESV(att.id), recovery: recovery)
         } catch {
             consentState.present(notice: "This sketch can't be opened for editing.")
         }
+    }
+
+    /// A sketch's name, from where the editor keeps a PDF attachment's name:
+    /// the saved record, or the staged names for one not saved yet.
+    func sketchTitle_AESV(_ id: UUID) -> String {
+        var name: String?
+        if existingAttachmentIDs.contains(id) {
+            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+            req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            req.fetchLimit = 1
+            name = (try? viewContext.fetch(req).first)?.value(forKey: "displayName") as? String
+        } else {
+            name = (UserDefaults.standard.dictionary(forKey: "stagedAttachmentDisplayNames_temp") as? [String: String])?[id.uuidString]
+        }
+        let trimmed = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? ManuscriptPadView.defaultTitle : trimmed
+    }
+
+    /// Names a sketch, exactly as the viewer's Rename names a PDF attachment
+    /// here: a saved one on its record at once, a staged one in the staged names.
+    func renameSketch_AESV(_ id: UUID, to newTitle: String) {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if existingAttachmentIDs.contains(id) {
+            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+            req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            req.fetchLimit = 1
+            if let hit = try? viewContext.fetch(req).first {
+                hit.setValue(trimmed.isEmpty ? nil : trimmed, forKey: "displayName")
+                viewContext.processPendingChanges()
+                do { try viewContext.save() } catch { print("Sketch title save error: \(error)") }
+            }
+        } else {
+            var dict = (UserDefaults.standard.dictionary(forKey: "stagedAttachmentDisplayNames_temp") as? [String: String]) ?? [:]
+            if trimmed.isEmpty { dict.removeValue(forKey: id.uuidString) } else { dict[id.uuidString] = trimmed }
+            UserDefaults.standard.set(dict, forKey: "stagedAttachmentDisplayNames_temp")
+        }
+        attachmentTitlesRefreshTick &+= 1
     }
 
     /// Takes the pad's finished PDF for a sketch already attached here. One

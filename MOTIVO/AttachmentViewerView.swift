@@ -382,15 +382,10 @@ private func currentURL() -> URL? {
         guard !isReadOnly else { return false }
         return (isFavourite != nil) && (onFavourite != nil)
     }
-    /// Set by the entry editor: opens a manuscript sketch in the pad. Nil
-    /// everywhere else, where a sketch is shown like any other PDF.
-    @Environment(\.editSketchFromViewer) private var editSketchFromViewer
-
-    /// Whether this PDF is a sketch that can be drawn on again from here.
-    /// A file's answer never changes (an edited sketch is a new file), so it
-    /// is worked out once per path.
-    private func canEditSketch(_ url: URL) -> Bool {
-        guard editSketchFromViewer != nil, !isReadOnly, url.isFileURL else { return false }
+    /// Whether this PDF is a manuscript sketch. A file's answer never changes
+    /// (an edited sketch is a new file), so it is worked out once per path.
+    private func isSketch(_ url: URL) -> Bool {
+        guard url.isFileURL else { return false }
         if let known = Self.sketchByPath[url.path] { return known }
         let answer = ManuscriptSketchFile.carriesSketch(url)
         Self.sketchByPath[url.path] = answer
@@ -1088,38 +1083,11 @@ private func currentURL() -> URL? {
                         let currentURL = media[currentIndex].url
                         let currentAttachmentKind = media[currentIndex].kind
 
-                        // A manuscript sketch: the pencil opens it to draw on, which
-                        // is what a pencil on a sketch is taken to mean (2026-11-21:
-                        // on a device it was Rename, and editing could not be found).
-                        // Rename moves to a text symbol beside it.
-                        let editableSketch = currentAttachmentKind == .pdf && canEditSketch(currentURL)
-                        // Side by side: this sits in the layered stack that centres
-                        // the middle control, where two buttons would cover each other.
-                        HStack(spacing: headerSpacing) {
-                        if editableSketch {
-                            Button {
-                                editSketchFromViewer?(currentURL)
-                            } label: {
-                                ZStack {
-                                    Circle()
-                                        .fill(.thinMaterial)
-                                        .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                        .shadow(
-                                            color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
-                                            radius: 2,
-                                            y: 1
-                                        )
-                                    Image(systemName: "pencil")
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundStyle(Theme.Colors.secondaryText)
-                                }
-                                .frame(width: topButtonSize, height: topButtonSize)
-                                .contentShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Edit sketch")
-                        }
-
+                        // On a manuscript sketch a pencil reads as "draw", and it was
+                        // taken that way on a device (2026-11-21). Naming a sketch is
+                        // the text symbol; drawing is done in the pad, which the entry
+                        // editor opens from the thumbnail.
+                        let nameWithTextSymbol = currentAttachmentKind == .pdf && isSketch(currentURL)
                         if currentAttachmentKind == .pdf, canRename(for: currentAttachmentKind, url: currentURL) {
                             Button {
                                 beginRename(url: currentURL, kind: currentAttachmentKind)
@@ -1133,7 +1101,7 @@ private func currentURL() -> URL? {
                                             radius: 2,
                                             y: 1
                                         )
-                                    Image(systemName: editableSketch ? "character.cursor.ibeam" : "pencil")
+                                    Image(systemName: nameWithTextSymbol ? "character.cursor.ibeam" : "pencil")
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundStyle(Theme.Colors.secondaryText)
                                 }
@@ -1141,8 +1109,7 @@ private func currentURL() -> URL? {
                                 .contentShape(Circle())
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel(editableSketch ? "Rename sketch" : "Rename score")
-                        }
+                            .accessibilityLabel(nameWithTextSymbol ? "Rename sketch" : "Rename score")
                         }
                     }
                 }
@@ -3198,17 +3165,3 @@ private extension Comparable {
     }
 }
 
-
-// MARK: - Editing a manuscript sketch from the viewer
-
-private struct EditSketchFromViewerKey: EnvironmentKey {
-    static let defaultValue: ((URL) -> Void)? = nil
-}
-
-extension EnvironmentValues {
-    /// Supplied by the entry editor so its viewer can open a sketch in the pad.
-    var editSketchFromViewer: ((URL) -> Void)? {
-        get { self[EditSketchFromViewerKey.self] }
-        set { self[EditSketchFromViewerKey.self] = newValue }
-    }
-}
