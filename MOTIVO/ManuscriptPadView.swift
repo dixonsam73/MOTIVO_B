@@ -522,63 +522,151 @@ struct ManuscriptBarsIcon: View {
 
 // MARK: - Choosing the paper
 
+/// Choosing the paper for a new sketch: six sheets that fill the screen.
+///
+/// The order and names are Samuel's (2026-11-21): staves with no clef
+/// first, then treble, bass, piano and alto, and last a page with nothing
+/// printed on it. Two across in a narrow space (a phone), three across in a
+/// wide one, so the six always make complete rows.
 struct ManuscriptPaperChooser: View {
     let onChoose: (ManuscriptPaper) -> Void
 
-    private struct Choice: Identifiable {
+    struct Choice: Identifiable, Equatable {
         let id: String
         let paper: ManuscriptPaper
     }
 
-    private let choices: [Choice] = [
-        Choice(id: "Treble clef", paper: ManuscriptPaper(kind: .singleStaff, clef: .treble)),
-        Choice(id: "Bass clef", paper: ManuscriptPaper(kind: .singleStaff, clef: .bass)),
-        Choice(id: "Alto clef", paper: ManuscriptPaper(kind: .singleStaff, clef: .alto)),
+    static let choices: [Choice] = [
         Choice(id: "No clef", paper: ManuscriptPaper(kind: .singleStaff, clef: .none)),
+        Choice(id: "Treble", paper: ManuscriptPaper(kind: .singleStaff, clef: .treble)),
+        Choice(id: "Bass", paper: ManuscriptPaper(kind: .singleStaff, clef: .bass)),
         Choice(id: "Piano", paper: ManuscriptPaper(kind: .piano, clef: .none)),
-        Choice(id: "Plain", paper: ManuscriptPaper(kind: .plain, clef: .none)),
+        Choice(id: "Alto", paper: ManuscriptPaper(kind: .singleStaff, clef: .alto)),
+        Choice(id: "Blank page", paper: ManuscriptPaper(kind: .plain, clef: .none)),
     ]
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: Theme.Spacing.l)], spacing: Theme.Spacing.l) {
-                ForEach(choices) { choice in
-                    Button {
-                        onChoose(choice.paper)
-                    } label: {
-                        VStack(spacing: Theme.Spacing.s) {
-                            Image(uiImage: Self.preview(of: choice.paper))
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.primary.opacity(0.12), lineWidth: 1))
-                            Text(choice.id)
-                                .font(Theme.Text.body)
-                                .foregroundStyle(.primary)
+        GeometryReader { proxy in
+            let layout = ManuscriptPaperChooserLayout(space: proxy.size, count: Self.choices.count)
+            ScrollView {
+                VStack(spacing: ManuscriptPaperChooserLayout.spacing) {
+                    ForEach(0..<layout.rows, id: \.self) { row in
+                        HStack(alignment: .top, spacing: ManuscriptPaperChooserLayout.spacing) {
+                            ForEach(layout.indices(inRow: row), id: \.self) { index in
+                                tile(Self.choices[index], sheet: layout.sheet)
+                            }
                         }
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(ManuscriptPaperChooserLayout.margin)
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
             }
-            .padding(Theme.Spacing.l)
-            .frame(maxWidth: 760)
-            .frame(maxWidth: .infinity)
         }
     }
 
-    /// Complete staves only: two single staves, or one piano system, with
-    /// nothing of the next one showing and the lines ending inside the frame.
-    static func preview(of paper: ManuscriptPaper) -> UIImage {
-        let crop = CGRect(x: 30, y: 46, width: 240, height: 142)
-        let format = UIGraphicsImageRendererFormat()
-        format.opaque = true
-        return UIGraphicsImageRenderer(size: crop.size, format: format).image { renderer in
-            let context = renderer.cgContext
-            context.translateBy(x: -crop.minX, y: -crop.minY)
-            ManuscriptPaperRenderer.draw(paper, in: context)
-            // The page's lines run on to the right; the preview's stop short.
-            context.setFillColor(CGColor(gray: 1, alpha: 1))
-            context.fill(CGRect(x: crop.maxX - 18, y: crop.minY, width: 18, height: crop.height))
+    private func tile(_ choice: Choice, sheet: CGSize) -> some View {
+        Button {
+            onChoose(choice.paper)
+        } label: {
+            VStack(spacing: Theme.Spacing.s) {
+                ManuscriptPaperSheetPreview(paper: choice.paper)
+                    .frame(width: sheet.width, height: sheet.height)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.primary.opacity(0.12), lineWidth: 1))
+                Text(choice.id)
+                    .font(Theme.Text.body)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .frame(height: ManuscriptPaperChooserLayout.labelHeight - Theme.Spacing.s)
+            }
         }
+        .buttonStyle(.plain)
+    }
+}
+
+/// How the six sheets share the space under the pad's top bar. PURE.
+struct ManuscriptPaperChooserLayout: Equatable {
+    static let margin: CGFloat = Theme.Spacing.l
+    static let spacing: CGFloat = Theme.Spacing.l
+    /// The name under a sheet, with the gap above it.
+    static let labelHeight: CGFloat = 30
+    /// A space at least this wide takes three across.
+    static let threeAcrossWidth: CGFloat = 600
+    /// A sheet is never wider than this share of its height, nor so narrow
+    /// that it stops looking like a sheet of paper.
+    static let widestAspect: CGFloat = 0.85
+    /// Below this the sheets stop shrinking and the page scrolls instead.
+    static let smallestSheetHeight: CGFloat = 120
+
+    let columns: Int
+    let rows: Int
+    let sheet: CGSize
+    private let count: Int
+
+    init(space: CGSize, count: Int) {
+        self.count = count
+        columns = space.width >= Self.threeAcrossWidth ? 3 : 2
+        rows = Int((Double(count) / Double(columns)).rounded(.up))
+        let widthEach = (space.width - 2 * Self.margin - CGFloat(columns - 1) * Self.spacing) / CGFloat(columns)
+        let heightEach = (space.height - 2 * Self.margin - CGFloat(rows - 1) * Self.spacing) / CGFloat(rows) - Self.labelHeight
+        let height = max(Self.smallestSheetHeight, heightEach)
+        let width = max(0, min(widthEach, height * Self.widestAspect))
+        sheet = CGSize(width: width.rounded(.down), height: height.rounded(.down))
+    }
+
+    func indices(inRow row: Int) -> [Int] {
+        Array((row * columns)..<min(count, (row + 1) * columns))
+    }
+}
+
+/// The top of the real page, drawn to fill a sheet-shaped tile at a size
+/// where the clef is easy to read. Only complete staves are shown: a staff
+/// the tile would cut through is left off, and the lines stop short of the
+/// right-hand edge, so the tile reads as a small sheet, not a torn corner.
+struct ManuscriptPaperSheetPreview: View {
+    let paper: ManuscriptPaper
+
+    /// The part of the page shown across the tile's width, in page points.
+    static let pageOrigin = CGPoint(x: 30, y: 46)
+    static let pageWidthShown: CGFloat = 240
+    static let rightMargin: CGFloat = 18
+    static let clefTail: CGFloat = 12
+
+    /// PURE. Where the drawing must be blanked from, in page points, so no
+    /// part-staff shows: just below the last row that fits whole. Nil when
+    /// nothing needs blanking.
+    static func blankFromY(paper: ManuscriptPaper, visiblePageHeight: CGFloat) -> CGFloat? {
+        let bottom = pageOrigin.y + visiblePageHeight
+        let rows = ManuscriptPaperRenderer.rows(for: paper)
+        guard !rows.isEmpty else { return nil }
+        // A treble clef's tail hangs about a line and a half below its staff.
+        let whole = rows.filter { $0.bottom + clefTail <= bottom }
+        guard whole.count < rows.count else { return nil }
+        return (whole.last?.bottom ?? pageOrigin.y) + clefTail
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let scale = size.width / Self.pageWidthShown
+            let blankFrom = Self.blankFromY(paper: paper, visiblePageHeight: size.height / scale)
+            context.withCGContext { cg in
+                cg.setFillColor(CGColor(gray: 1, alpha: 1))
+                cg.fill(CGRect(origin: .zero, size: size))
+                cg.saveGState()
+                cg.scaleBy(x: scale, y: scale)
+                cg.translateBy(x: -Self.pageOrigin.x, y: -Self.pageOrigin.y)
+                ManuscriptPaperRenderer.draw(paper, in: cg)
+                cg.setFillColor(CGColor(gray: 1, alpha: 1))
+                // The page's lines run on to the right; the sheet's stop short.
+                let right = Self.pageOrigin.x + Self.pageWidthShown - Self.rightMargin
+                cg.fill(CGRect(x: right, y: 0, width: ManuscriptPaper.pageSize.width, height: ManuscriptPaper.pageSize.height))
+                if let blankFrom {
+                    cg.fill(CGRect(x: 0, y: blankFrom, width: ManuscriptPaper.pageSize.width, height: ManuscriptPaper.pageSize.height))
+                }
+                cg.restoreGState()
+            }
+        }
+        .background(Color.white)
+        .accessibilityHidden(true)
     }
 }
