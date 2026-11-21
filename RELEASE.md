@@ -519,13 +519,24 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        Save Session is at the top right, where Save Thought already was,
        in the entry editor and on the review page after a timed session.
        The button at the foot of those pages is gone. Always reachable,
-       and with the keyboard up. **Awaiting his look on the iPad.**
+       and with the keyboard up. **Signed off 2026-11-21.**
+     - *The same two rules applied to six more pages* (2026-11-21): the
+       review page after a timed session (page-tall, column-wide sheet;
+       wheel pickers sized), the Scores library (the same sheet), and the
+       entry page, Profile, set-up and Explore Connected (the column).
+       About already kept to a column, and Insights already arranges
+       itself. **Awaiting Samuel's sign-off on the iPad.** Seen on the
+       iPad simulator in portrait, except set-up, which needs a fresh
+       install to appear.
      - Correction to the survey: the Duration wheels were not cut off at
        the top; nothing sits above the first value. The half-height panel
        crowded the wheel and cut its lower rows.
-     - Still to do on these pages: the system's window controls over the
+     - Still to do: the Timer (its landscape arrangement, and the
+       sketch's place on it); the system's window controls over the
        top-left button in a resized window; the Thread picker and the
-       other sheets the editor opens.
+       other small sheets; the attachment and score viewers; Connected
+       after sign-in. The review page after a timed session has no
+       sketch button yet (only the entry editor has).
      *Next:* the remaining pages, with the Timer's landscape arrangement
      to discuss first.
   5. Once the native shell and the sketch's save and re-edit path work:
