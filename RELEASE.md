@@ -532,25 +532,22 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        in a wide, tall window they are held to about a phone's width.
        **Signed off 2026-11-21.**
      - *Timer, on trial* (Samuel, 2026-11-21: "be prepared to revert";
-       it is one commit, `772dd84`). In landscape with a section open,
-       the column of buttons keeps to the left and stays put, and the
-       metronome and drone controls, the tuner, the audio recorder, the
-       list and the attachments stack on the right and scroll by
-       themselves. With nothing open the column is centred as before. In
-       portrait it is one column, held to 560 pt. From the moment an
-       audio take begins until it is kept or deleted, the page keeps the
-       arrangement it was in, even if the iPad is turned, because moving
-       the recorder would end the take; a recorder open with no take
-       follows the turn like everything else. Seen on the iPad simulator,
-       including a recording through a turn; the iPhone is unchanged.
-       Samuel, 2026-11-21, on the iPad: landscape works very well. Fixed
-       from his session: the recorder's card stretched to fill the spare
-       height in portrait; and the arrangement was held whenever the
-       recorder was open, not only during a take; in portrait the whole
-       group of buttons sat near the top of the page and now sits in the
-       middle, as it does in landscape; and "+ Add line" with the
-       keyboard up in landscape drew a broken, flashing menu. Landscape
-       "feels great already" (Samuel). **Awaiting his look at portrait.**
+       begun in `772dd84`, shaped over his session on the iPad that day).
+       At rest the whole group of buttons is centred on the page, both
+       ways, in portrait and landscape. When a section is opened (the
+       metronome or drone controls, the tuner, the audio recorder, the
+       list, the attachments) the group keeps to the left and stays put,
+       and the opened sections stack on the right and scroll by
+       themselves: in landscape level with the first button, in portrait
+       higher, the same distance under the top bar. This holds whichever
+       way up, in any roomy window at least 800 pt wide; narrower keeps
+       the single column. From the moment an audio take begins until it
+       is kept or deleted, the page keeps its arrangement if the window
+       changes shape, because moving the recorder would end the take.
+       Also fixed from his session: the recorder's card stretching in a
+       single column, and "+ Add line" with the keyboard up drawing a
+       broken, flashing menu. The iPhone is unchanged. Landscape "feels
+       great already" (Samuel). **Awaiting his look at portrait.**
      - Correction to the survey: the Duration wheels were not cut off at
        the top; nothing sits above the first value. The half-height panel
        crowded the wheel and cut its lower rows.
