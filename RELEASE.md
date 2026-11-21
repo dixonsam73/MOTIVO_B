@@ -542,7 +542,9 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        any roomy window at least 800 pt wide; narrower keeps the single
        column. The list is treated as the session's page, not a tool: in
        landscape it is beside the buttons with the tools; in portrait it
-       has its own area beneath both columns, centred, and scrolls there. From the moment an audio take begins until it
+       has its own area beneath both columns, centred, and scrolls there.
+       On an iPad the list is a card like the tools; on a phone it stays
+       flat. Attachments stay at the side, whichever way up. From the moment an audio take begins until it
        is kept or deleted, the page keeps its arrangement if the window
        changes shape, because moving the recorder would end the take.
        Also fixed from his session: the recorder's card stretching in a
