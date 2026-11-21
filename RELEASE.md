@@ -561,6 +561,13 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        Thought before Start, the review page after Finish. Its tile
        reopens the pad. Checked on both simulators. **Awaiting Samuel on
        the device, with the Pencil.**
+     - *The manuscript button's icon and the buttons' names* (2026-11-21):
+       a stave and pencil drawn as a vector from Samuel's design
+       (`ManuscriptIcon.swift`), on the timer and in the entry editor;
+       and every icon button on the Timer named until first used
+       (Session, Drone, Metronome, Tuner, Audio, Photo, Video, Manuscript,
+       Attachments, List, Scores; none on the plus). iPhone as well as
+       iPad. **Awaiting Samuel on the device.**
      - Still to do: the system's window controls over the
        top-left button in a resized window; the Thread picker and the
        other small sheets; the attachment and score viewers; Connected
