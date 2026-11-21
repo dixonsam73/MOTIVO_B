@@ -37,6 +37,14 @@ struct ManuscriptPaper: Codable, Equatable {
 
     var kind: Kind
     var clef: Clef
+    /// Printed bar lines: 2 or 4 bars to a row; nil for none. Part of the
+    /// paper, not the ink, so it can be switched while drawing without
+    /// touching what has been drawn. Absent in sketches saved before it
+    /// existed, which read as none.
+    var barsPerRow: Int? = nil
+
+    /// The choices offered, in the order the pad's switch steps through them.
+    static let barChoices: [Int?] = [nil, 2, 4]
 
     /// Fixed for every sketch: the screen changes the view, never the page.
     static let pageSize = CGSize(width: 595, height: 842)
@@ -412,6 +420,16 @@ enum ManuscriptPaperRenderer {
                 context.addPath(bracePath(top: top, bottom: bottom))
             }
         }
+        // Printed bar lines, through each row: a staff, or both staves of a piano system.
+        let bars = barLineXs(for: paper)
+        if !bars.isEmpty {
+            for row in rows(for: paper) {
+                for x in bars {
+                    context.move(to: CGPoint(x: x, y: row.top))
+                    context.addLine(to: CGPoint(x: x, y: row.bottom))
+                }
+            }
+        }
         context.strokePath()
         context.setFillColor(CGColor(gray: 0.2, alpha: 1))
         for staff in all {
@@ -421,6 +439,33 @@ enum ManuscriptPaperRenderer {
             }
         }
         context.restoreGState()
+    }
+
+    /// Room kept at the start of a row for its clef before the first bar begins.
+    static let clefAllowance: CGFloat = 34
+
+    /// The rows bar lines run through: each staff, or each piano system top to bottom.
+    static func rows(for paper: ManuscriptPaper) -> [(top: CGFloat, bottom: CGFloat)] {
+        let all = staves(for: paper)
+        switch paper.kind {
+        case .plain:
+            return []
+        case .singleStaff:
+            return all.map { ($0.top, $0.top + staffHeight) }
+        case .piano:
+            return stride(from: 0, to: all.count - 1, by: 2).map { (all[$0].top, all[$0 + 1].top + staffHeight) }
+        }
+    }
+
+    /// Where the printed bar lines fall across the page: the space after the
+    /// clef divided evenly, the last line closing the row at its right end.
+    /// Empty when the paper has no bars, or no staves to bar.
+    static func barLineXs(for paper: ManuscriptPaper) -> [CGFloat] {
+        guard paper.kind != .plain, let count = paper.barsPerRow, count == 2 || count == 4 else { return [] }
+        let hasClef = paper.kind == .piano || paper.clef != .none
+        let start = inset + (hasClef ? clefAllowance : 0)
+        let end = ManuscriptPaper.pageSize.width - inset
+        return (1...count).map { start + (end - start) * CGFloat($0) / CGFloat(count) }
     }
 
     private static func bracePath(top: CGFloat, bottom: CGFloat) -> CGPath {

@@ -194,7 +194,6 @@ struct ManuscriptPadResult {
     /// The recovery copy that goes on protecting it until the entry is saved.
     let recoveryKey: String
     let title: String
-    let starred: Bool
 }
 
 struct ManuscriptPadView: View {
@@ -203,16 +202,11 @@ struct ManuscriptPadView: View {
     /// Called at once when an already attached sketch is given a title; nil
     /// for a new sketch, whose title goes with it at Save.
     let onRename: ((String) -> Void)?
-    /// Called at once when an already attached sketch is starred or
-    /// unstarred; nil for a new sketch, whose star goes with it at Save.
-    let onStar: ((Bool) -> Void)?
     /// Receives the finished sketch. Throwing keeps the pad open.
     let onSave: (ManuscriptPadResult) throws -> Void
 
     static let defaultTitle = "Sketch"
     @State private var title: String
-    /// Starred: the entry's picture, as for any other attachment.
-    @State private var starred: Bool
     @State private var titleDraft = ""
     @State private var isNaming = false
 
@@ -237,17 +231,13 @@ struct ManuscriptPadView: View {
 
     init(existing: ManuscriptSketch? = nil,
          title: String = ManuscriptPadView.defaultTitle,
-         starred: Bool = false,
          recovery: ManuscriptSketchRecovery.Opening = .new(),
          onRename: ((String) -> Void)? = nil,
-         onStar: ((Bool) -> Void)? = nil,
          onSave: @escaping (ManuscriptPadResult) throws -> Void) {
         self.existing = existing
         self.onRename = onRename
-        self.onStar = onStar
         self.onSave = onSave
         _title = State(initialValue: title)
-        _starred = State(initialValue: starred)
         _paper = State(initialValue: existing?.paper)
         _drawing = State(initialValue: existing?.drawing ?? PKDrawing())
         _opening = State(initialValue: recovery)
@@ -363,6 +353,7 @@ struct ManuscriptPadView: View {
                             .font(Theme.Text.sectionHeader)
                             .foregroundStyle(Theme.Colors.secondaryText)
                             .lineLimit(1)
+                            .truncationMode(.tail)
                         Image(systemName: "character.cursor.ibeam")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(Self.controlColor)
@@ -374,21 +365,20 @@ struct ManuscriptPadView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Title: \(title). Change title")
 
-                // The star, as in the viewer: this sketch is the entry's picture.
-                Button {
-                    starred.toggle()
-                    onStar?(starred)
-                } label: {
-                    Image(systemName: starred ? "star.fill" : "star")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(Self.controlColor)
-                        .frame(width: 32, height: 32)
-                        .background(Circle().fill(Color.secondary.opacity(0.14)))
-                        .contentShape(Circle())
+                // Printed bar lines: none, two or four to a row. Paper, not ink,
+                // so it can be switched at any time. Plain paper has no rows to bar.
+                if let current = paper, current.kind != .plain {
+                    Button {
+                        stepBars()
+                    } label: {
+                        ManuscriptBarsIcon(bars: current.barsPerRow)
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(current.barsPerRow == nil ? Color.secondary.opacity(0.14) : Self.controlColor.opacity(0.16)))
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(barsLabel(current.barsPerRow))
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(starred ? "Starred" : "Star")
-                .accessibilityAddTraits(starred ? .isSelected : [])
             }
             Spacer()
             Button("Save") { save() }
@@ -401,7 +391,26 @@ struct ManuscriptPadView: View {
         .padding(.vertical, Theme.Spacing.m)
     }
 
-    private static let controlColor = Color(red: 0.38, green: 0.48, blue: 0.62)
+    fileprivate static let controlColor = Color(red: 0.38, green: 0.48, blue: 0.62)
+
+    /// None, then two, then four bars to a row, then none again. Counts as a
+    /// change to the sketch, so it is saved and kept for recovery like ink.
+    private func stepBars() {
+        guard var current = paper else { return }
+        let choices = ManuscriptPaper.barChoices
+        let index = choices.firstIndex(of: current.barsPerRow) ?? 0
+        current.barsPerRow = choices[(index + 1) % choices.count]
+        paper = current
+        revision += 1
+    }
+
+    private func barsLabel(_ bars: Int?) -> String {
+        switch bars {
+        case 2: return "Bar lines: two bars to a row. Change"
+        case 4: return "Bar lines: four bars to a row. Change"
+        default: return "Bar lines: none. Change"
+        }
+    }
 
     private var toolBar: some View {
         // Six controls must fit an iPhone's width: close spacing, with the
@@ -478,12 +487,35 @@ struct ManuscriptPadView: View {
             // The copy comes first: if it cannot be written the editor is
             // not given the sketch and the pad stays open.
             try ManuscriptSketchRecovery.handOver(sketch, data: data, opening: opening) { data, key in
-                try onSave(ManuscriptPadResult(data: data, recoveryKey: key, title: title, starred: starred))
+                try onSave(ManuscriptPadResult(data: data, recoveryKey: key, title: title))
             }
             dismiss()
         } catch {
             // The pad stays open with the drawing in it; nothing is lost.
             saveFailed = true
+        }
+    }
+}
+
+/// A row of staff with its bars: what the bar-lines switch is showing now.
+struct ManuscriptBarsIcon: View {
+    let bars: Int?
+
+    var body: some View {
+        Canvas { context, size in
+            let box = CGRect(x: size.width * 0.22, y: size.height * 0.34, width: size.width * 0.56, height: size.height * 0.32)
+            var path = Path()
+            // The row: top and bottom lines.
+            path.move(to: CGPoint(x: box.minX, y: box.minY)); path.addLine(to: CGPoint(x: box.maxX, y: box.minY))
+            path.move(to: CGPoint(x: box.minX, y: box.maxY)); path.addLine(to: CGPoint(x: box.maxX, y: box.maxY))
+            // Its bar lines, closing line included.
+            if let bars {
+                for step in 0...bars {
+                    let x = box.minX + box.width * CGFloat(step) / CGFloat(bars)
+                    path.move(to: CGPoint(x: x, y: box.minY)); path.addLine(to: CGPoint(x: x, y: box.maxY))
+                }
+            }
+            context.stroke(path, with: .color(ManuscriptPadView.controlColor), lineWidth: 1.4)
         }
     }
 }

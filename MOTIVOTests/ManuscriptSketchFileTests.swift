@@ -239,6 +239,56 @@ final class ManuscriptSketchFileTests: XCTestCase {
         XCTAssertNil(ManuscriptPaperRenderer.clefPath(.none, staffTop: 200))
     }
 
+    func testPrintedBarLinesAreTwoOrFourToARowAndCloseIt() {
+        let width = ManuscriptPaper.pageSize.width
+        let inset = ManuscriptPaperRenderer.inset
+        func xs(_ kind: ManuscriptPaper.Kind, _ clef: ManuscriptPaper.Clef, _ bars: Int?) -> [CGFloat] {
+            ManuscriptPaperRenderer.barLineXs(for: ManuscriptPaper(kind: kind, clef: clef, barsPerRow: bars))
+        }
+        XCTAssertTrue(xs(.singleStaff, .treble, nil).isEmpty)
+        XCTAssertTrue(xs(.plain, .none, 4).isEmpty, "plain paper has no rows to bar")
+        XCTAssertTrue(xs(.singleStaff, .treble, 3).isEmpty, "only two or four")
+        for bars in [2, 4] {
+            for (kind, clef) in [(ManuscriptPaper.Kind.singleStaff, ManuscriptPaper.Clef.treble), (.singleStaff, .none), (.piano, .none)] {
+                let lines = xs(kind, clef, bars)
+                XCTAssertEqual(lines.count, bars)
+                XCTAssertEqual(lines.last ?? 0, width - inset, accuracy: 0.01, "the last line closes the row")
+                // Even bars, starting after the clef where there is one.
+                let start = inset + ((kind == .piano || clef != .none) ? ManuscriptPaperRenderer.clefAllowance : 0)
+                let step = (width - inset - start) / CGFloat(bars)
+                for (index, x) in lines.enumerated() { XCTAssertEqual(x, start + step * CGFloat(index + 1), accuracy: 0.01) }
+            }
+        }
+        // A piano system's bar lines run from the top staff to the bottom one.
+        let rows = ManuscriptPaperRenderer.rows(for: ManuscriptPaper(kind: .piano, clef: .none))
+        XCTAssertEqual(rows.count, 5)
+        XCTAssertTrue(rows.allSatisfy { $0.bottom - $0.top > 80 })
+        XCTAssertEqual(ManuscriptPaperRenderer.rows(for: ManuscriptPaper(kind: .singleStaff, clef: .bass)).count, 10)
+    }
+
+    func testBarLinesAreSavedWithTheSketchAndOlderSketchesHaveNone() throws {
+        // Saved, reopened, and drawn in the PDF.
+        let drawn = drawing(strokes: 4)
+        let without = file(), with = file()
+        try ManuscriptSketchFile.write(ManuscriptSketch(paper: ManuscriptPaper(kind: .singleStaff, clef: .treble), drawing: drawn), to: without)
+        try ManuscriptSketchFile.write(ManuscriptSketch(paper: ManuscriptPaper(kind: .singleStaff, clef: .treble, barsPerRow: 4), drawing: drawn), to: with)
+        XCTAssertEqual(try ManuscriptSketchFile.read(with).paper.barsPerRow, 4)
+        XCTAssertNil(try ManuscriptSketchFile.read(without).paper.barsPerRow)
+        XCTAssertNotEqual(try hash(with), try hash(without), "the page itself differs")
+        // The ink is the same either way: bars are paper.
+        assertSame(ManuscriptSketch(paper: ManuscriptPaper(kind: .singleStaff, clef: .treble), drawing: try ManuscriptSketchFile.read(with).drawing),
+                   ManuscriptSketch(paper: ManuscriptPaper(kind: .singleStaff, clef: .treble), drawing: drawn))
+        // A sketch saved before bar lines existed has no such setting, and reads as none.
+        let older = try JSONDecoder().decode(ManuscriptPaper.self, from: Data(#"{"kind":"piano","clef":"none"}"#.utf8))
+        XCTAssertEqual(older, ManuscriptPaper(kind: .piano, clef: .none))
+        XCTAssertNil(older.barsPerRow)
+        // And the recovery copy keeps the setting with the drawing.
+        let key = ManuscriptSketchRecovery.newKey()
+        addTeardownBlock { ManuscriptSketchRecovery.clear(key: key) }
+        ManuscriptSketchRecovery.keep(ManuscriptSketch(paper: ManuscriptPaper(kind: .piano, clef: .none, barsPerRow: 2), drawing: drawn), key: key)
+        XCTAssertEqual(ManuscriptSketchRecovery.copy(key: key)?.sketch.paper.barsPerRow, 2)
+    }
+
     // MARK: 2. A failed or interrupted save keeps the previous sketch
     //
     // `ManuscriptSketchEdits` is what the entry editor runs when a saved
