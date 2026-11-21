@@ -655,9 +655,20 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   check at the next Profile or set-up checkpoint, not at final QA. iPad
   work does not make sync public: it stays off by default and Internal
   Only, and public availability is a separate decision (section A).
-  **Estimates** from 2026-10-16 (9.5–13.5 agent-weeks for iPad with markup
-  and manuscript and no sync; manuscript about 3–4 of them) are
-  provisional. Reassess after steps 1 and 3.
+  **Estimate, reassessed 2026-11-21.** The 2026-10-16 figures (9.5–13.5
+  agent-weeks for iPad with markup and manuscript; about 7–10 without
+  markup) were far too high for the building. Steps 1, 3 and most of 4,
+  eight page adaptations and the Timer arrangement took two working
+  days. Those figures assumed a larger scope (sidebar, sketchbook,
+  history) and a scope document and several review rounds per step. What
+  is left to build (the sketch on the Timer and the review page, the
+  remaining pages, native iPad in Sync Test and Release) is days of the
+  same kind. What does not shrink is everything that is not building:
+  Samuel's sign-off of each page on the device, the two-device sketch
+  checks in step 5, the SDK baseline and iPhone Duo check, and the final
+  TestFlight QA. Not yet seen at all, so still unknown: Connected after
+  sign-in on an iPad, the 13-inch and mini sizes, a sketch arriving on a
+  second device.
 - [x] **A + S — iOS 27 compatibility check** (iOS 27 public 2026-09-26).
   S: update one test device to iOS 27 and run the practice tools, a
   recording, playback, and a Connected purchase and sign-in on the current
