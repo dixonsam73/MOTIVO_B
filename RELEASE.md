@@ -529,20 +529,26 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        iPad simulator in portrait, except set-up, which needs a fresh
        install to appear.
      - *Explore Connected's example screens* are pictures of a phone, so
-       in a wide, tall window they are held to about a phone's width
-       (Samuel, 2026-11-21). **Awaiting sign-off.**
+       in a wide, tall window they are held to about a phone's width.
+       **Signed off 2026-11-21.**
      - *Timer, on trial* (Samuel, 2026-11-21: "be prepared to revert";
        it is one commit, `772dd84`). In landscape with a section open,
        the column of buttons keeps to the left and stays put, and the
        metronome and drone controls, the tuner, the audio recorder, the
        list and the attachments stack on the right and scroll by
        themselves. With nothing open the column is centred as before. In
-       portrait it is one column, held to 560 pt. While the audio
-       recorder is open the page keeps the arrangement it opened in, even
-       if the iPad is turned, because moving the recorder would end the
-       take. Seen on the iPad simulator, including a recording through a
-       turn; the iPhone is unchanged. **Awaiting Samuel's verdict on the
-       iPad.**
+       portrait it is one column, held to 560 pt. From the moment an
+       audio take begins until it is kept or deleted, the page keeps the
+       arrangement it was in, even if the iPad is turned, because moving
+       the recorder would end the take; a recorder open with no take
+       follows the turn like everything else. Seen on the iPad simulator,
+       including a recording through a turn; the iPhone is unchanged.
+       Samuel, 2026-11-21, on the iPad: landscape works very well. Fixed
+       from his session: the recorder's card stretched to fill the spare
+       height in portrait; and the arrangement was held whenever the
+       recorder was open, not only during a take. **Open:** whether the
+       buttons should also sit lower in portrait, nearer the middle of
+       the page.
      - Correction to the survey: the Duration wheels were not cut off at
        the top; nothing sits above the first value. The half-height panel
        crowded the wheel and cut its lower rows.
