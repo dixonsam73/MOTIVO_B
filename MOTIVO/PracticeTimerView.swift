@@ -184,6 +184,30 @@ private enum PracticeTimerCompositionUI {
 }
 
 
+/// The list's card. One view either way (no `if`), so the list is not
+/// rebuilt, and keeps its typing focus, if the window stops being roomy.
+/// Not clipped: the list's menus and its drag preview reach outside it.
+private struct TimerListCardSurface: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    let inCard: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, inCard ? Theme.Spacing.m : 0)
+            // The list brings 2 pt above and 12 pt below of its own.
+            .padding(.top, inCard ? Theme.Spacing.m - 2 : 0)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .fill(Theme.Colors.surface(scheme))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                            .stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1)
+                    )
+                    .opacity(inCard ? 1 : 0)
+            )
+    }
+}
+
 private struct AmbientThreadChipFramePreferenceKey: PreferenceKey {
     static var defaultValue: [String: CGRect] = [:]
 
@@ -3205,6 +3229,11 @@ private func loadPracticeDefaultsIfNeeded() {
         }
     }
 
+    /// The list. In a roomy window (an iPad) it sits among the tools'
+    /// cards, or in its own area beneath the columns, and flat text there
+    /// read as belonging to nothing; it is a card like the others (Samuel,
+    /// 2026-11-21). In a phone-sized space it is flat on the page, as it
+    /// always was.
     private var tasksPadCard: some View {
         TasksPadCard(
             showTasksPad: $showTasksPad,
@@ -3237,6 +3266,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 showTaskImportPasteSheet = true
             }
         )
+        .modifier(TimerListCardSurface(inCard: isRoomyWindow))
     }
 
     @ViewBuilder
