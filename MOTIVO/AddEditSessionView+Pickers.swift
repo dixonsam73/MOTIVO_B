@@ -133,7 +133,7 @@ var instrumentPicker: some View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .pickerSheetHeight(wheel: true)
     }
 
     var durationPicker: some View {
@@ -153,7 +153,7 @@ var instrumentPicker: some View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .pickerSheetHeight(wheel: true)
     }
 
     func activityDisplayName(for choice: String) -> String {

@@ -739,6 +739,9 @@ struct AddEditSessionView: View {
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
             .padding(.bottom, Theme.Spacing.xl)
+            // A centred column where the editor fills a wide, tall window;
+            // the whole width still scrolls.
+            .wideWindowColumn()
         }
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom) {
@@ -763,6 +766,10 @@ struct AddEditSessionView: View {
             }
         )
         .navigationTitle("")
+        // Where the editor opens as a sheet in a roomy window (a new entry on
+        // iPad), a page-sized sheet, not the small panel that needed scrolling
+        // to reach Save. No effect on iPhone, where a sheet fills the width.
+        .presentationSizing(ColumnPageSizing())
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") {
@@ -790,11 +797,11 @@ struct AddEditSessionView: View {
         }
         .sheet(isPresented: $showInstrumentPicker) {
             instrumentPicker
-                .presentationDetents([.medium])
+                .pickerSheetHeight()
         }
         .sheet(isPresented: $showActivityPicker) {
             activityPickerPinned
-                .presentationDetents([.medium])
+                .pickerSheetHeight()
         }
         .sheet(isPresented: $showThreadPicker) { ThreadPickerView(selectedThread: $threadLabel, recentThreads: existingThreadOptions) }
         .sheet(isPresented: $showStartPicker) { startPicker }

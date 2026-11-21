@@ -1616,6 +1616,9 @@ fileprivate struct SessionsRootView: View {
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
             .padding(.bottom, Theme.Spacing.xl)
+            // In a wide, tall window the page is a centred column; the top
+            // buttons below keep to the same column.
+            .wideWindowColumn()
             // No big nav title
             
             .safeAreaInset(edge: .top) {
@@ -1692,6 +1695,7 @@ fileprivate struct SessionsRootView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
+                .wideWindowColumn()
             }
             #if canImport(UIKit)
             .task(id: toolbarAvatarKeyNormalized) {
