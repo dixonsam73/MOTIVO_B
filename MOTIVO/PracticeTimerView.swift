@@ -1526,7 +1526,7 @@ private func loadPracticeDefaultsIfNeeded() {
                                         height: max(
                                             PracticeTimerCompositionUI.minimumViewportTopInset,
                                             proxy.size.height * PracticeTimerCompositionUI.viewportTopInsetRatio
-                                        )
+                                        ) + (roomy ? TimerPageArrangement.centringInset(windowHeight: proxy.size.height + proxy.safeAreaInsets.bottom) : 0)
                                     )
 
                                 mainContent(sideBySide: sideBySide)
@@ -1555,7 +1555,10 @@ private func loadPracticeDefaultsIfNeeded() {
 
                     if panelOpen {
                         ScrollView {
-                            openSectionsPanel(topInset: TimerPageArrangement.panelTopInset(windowHeight: proxy.size.height))
+                            openSectionsPanel(topInset: TimerPageArrangement.panelTopInset(
+                                pageHeight: proxy.size.height,
+                                windowHeight: proxy.size.height + proxy.safeAreaInsets.bottom
+                            ))
                         }
                         .frame(maxWidth: .infinity)
                         .transition(.opacity)

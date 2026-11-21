@@ -77,6 +77,36 @@ final class WideWindowLayoutTests: XCTestCase {
         }
     }
 
+    func testTheButtonsSitInTheMiddleOfATallPageAndStayPutOnAShortOne() {
+        // 11-inch iPad in landscape (834 less the status bar): already
+        // centred, nothing added.
+        XCTAssertEqual(TimerPageArrangement.centringInset(windowHeight: 810), 0)
+        // 11-inch and 13-inch in portrait: half the spare height goes above.
+        XCTAssertEqual(TimerPageArrangement.centringInset(windowHeight: 1186), 173)
+        XCTAssertGreaterThan(TimerPageArrangement.centringInset(windowHeight: 1352),
+                             TimerPageArrangement.centringInset(windowHeight: 1186))
+        // The side panel's first card moves down with the buttons.
+        XCTAssertEqual(TimerPageArrangement.panelTopInset(pageHeight: 1166, windowHeight: 1186)
+                        - TimerPageArrangement.panelTopInset(pageHeight: 1166, windowHeight: 810), 173, accuracy: 0.001)
+    }
+
+    /// The keyboard must not move the buttons: the centring is worked out
+    /// from the height down to the window's bottom edge, which the page
+    /// passes as its own height plus the bottom inset (the keyboard, when up).
+    func testTheCentringIsWorkedOutFromTheWindowNotTheSpaceAboveTheKeyboard() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("MOTIVO/PracticeTimerView.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains("TimerPageArrangement.centringInset(windowHeight: proxy.size.height + proxy.safeAreaInsets.bottom)"))
+        XCTAssertFalse(source.contains("centringInset(windowHeight: proxy.size.height)"))
+    }
+
+    func testAListMenuIgnoresTheKeyboardOnlyInARoomyWindow() {
+        XCTAssertEqual(TaskLineMenuKeyboard.regions(horizontal: .regular, vertical: .regular), .keyboard)
+        XCTAssertEqual(TaskLineMenuKeyboard.regions(horizontal: .compact, vertical: .regular), [])
+        XCTAssertEqual(TaskLineMenuKeyboard.regions(horizontal: .regular, vertical: .compact), [])
+        XCTAssertEqual(TaskLineMenuKeyboard.regions(horizontal: nil, vertical: nil), [])
+    }
+
     /// Pins the one thing the arrangement must never do: build the recorder
     /// in a place that depends only on the window's shape.
     func testTheTimerPageHoldsItsArrangementWhileTheRecorderHoldsATake() throws {

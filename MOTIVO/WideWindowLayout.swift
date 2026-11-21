@@ -74,10 +74,28 @@ enum TimerPageArrangement {
         min(max(440, (window * 0.42).rounded()), (window / 2).rounded())
     }
 
+    /// The height the resting page needs: the buttons and the space above
+    /// them. An 11-inch iPad in landscape is about this tall, and there the
+    /// buttons already sit in the middle of the page.
+    static let restingPageHeight: CGFloat = 840
+
+    /// PURE. Extra space above the buttons in a roomy window taller than
+    /// the resting page (an iPad in portrait): half the spare height, so
+    /// the buttons sit in the middle of the page, not near its top.
+    ///
+    /// `windowHeight` is the height down to the window's bottom edge, NOT
+    /// the height left above the keyboard: the buttons must not jump when
+    /// the keyboard comes up, nor when a section is opened.
+    static func centringInset(windowHeight: CGFloat) -> CGFloat {
+        max(0, ((windowHeight - restingPageHeight) / 2).rounded())
+    }
+
     /// PURE. Where the first opened section starts: level with the top of
-    /// the column's first button.
-    static func panelTopInset(windowHeight: CGFloat) -> CGFloat {
-        max(6, windowHeight * 0.024) + 95
+    /// the column's first button. `pageHeight` is the height the page is
+    /// laid out in (it shrinks above the keyboard, as the column's own top
+    /// space does); `windowHeight` is as for `centringInset`.
+    static func panelTopInset(pageHeight: CGFloat, windowHeight: CGFloat) -> CGFloat {
+        max(6, pageHeight * 0.024) + 95 + centringInset(windowHeight: windowHeight)
     }
 }
 

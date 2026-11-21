@@ -7,6 +7,8 @@ struct TaskLineAddButton: View {
     let onAddContext: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var isPresented = false
     @State private var pendingContext: Bool?
 
@@ -41,6 +43,7 @@ struct TaskLineAddButton: View {
             .fixedSize(horizontal: false, vertical: true)
             .presentationBackground(Theme.Colors.surface(colorScheme))
             .presentationCompactAdaptation(.popover)
+            .ignoresSafeArea(TaskLineMenuKeyboard.regions(horizontal: horizontalSizeClass, vertical: verticalSizeClass), edges: .bottom)
             .onDisappear {
                 // Insert/focus after dismissal so the popover does not take keyboard focus back.
                 guard let context = pendingContext else { return }
@@ -60,6 +63,8 @@ struct TaskLineActionsButton: View {
     let onDelete: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var pendingDeletion: Bool?
 
     private var conversionTitle: String {
@@ -98,12 +103,25 @@ struct TaskLineActionsButton: View {
             .fixedSize(horizontal: false, vertical: true)
             .presentationBackground(Theme.Colors.surface(colorScheme))
             .presentationCompactAdaptation(.popover)
+            .ignoresSafeArea(TaskLineMenuKeyboard.regions(horizontal: horizontalSizeClass, vertical: verticalSizeClass), edges: .bottom)
             .onDisappear {
                 guard let deletion = pendingDeletion else { return }
                 pendingDeletion = nil
                 if deletion { onDelete() } else { onConvert() }
             }
         }
+    }
+}
+
+/// A menu opened while the keyboard is up (a line is being typed). In a
+/// roomy window (an iPad) the menu is a real popover squeezed between the
+/// top of the window and the keyboard, and it then also moved its own rows
+/// up out of the keyboard's way: a row was cut off and the popover's size
+/// fought the keyboard. There the menu's content ignores the keyboard. In a
+/// phone-sized space nothing changes.
+enum TaskLineMenuKeyboard {
+    static func regions(horizontal: UserInterfaceSizeClass?, vertical: UserInterfaceSizeClass?) -> SafeAreaRegions {
+        horizontal == .regular && vertical == .regular ? .keyboard : []
     }
 }
 
