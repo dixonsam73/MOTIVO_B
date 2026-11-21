@@ -486,13 +486,15 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      attachment; there is no separate edit button, under the tile or in
      the viewer. The sketch's title is set from a text button in the
      pad's top bar. Where a sketch is shown in the viewer, its Rename is
-     that text symbol, not a pencil. Open: the three pen widths (Samuel
-     uses the finest most, the broad for filling note heads, and is not
-     sure the three differ enough; they were chosen by eye, not against a
-     standard). The star (the entry's picture) is on a sketch's thumbnail
+     that text symbol, not a pencil. The three pen widths stay as they
+     are for now (Samuel, 2026-11-21: live with them for a while; he uses
+     the finest most and the broad for filling note heads; they were
+     chosen by eye, not against a standard). The star (the entry's picture) is on a sketch's thumbnail
      in the editor, as for a photo, and in the pad's top bar; both added
-     at Samuel's request. Still not built: editing a sketch from the entry
-     page without opening the editor. The clear bubble Samuel saw at the
+     at Samuel's request. A sketch is edited only after Edit has been
+     tapped for the whole entry; opening it from the entry page shows it,
+     and that is settled (Samuel, 2026-11-21), not something to build.
+     The clear bubble Samuel saw at the
      top right was the Pencil's own hover highlight, not a fault.
      Études Dev on the iPad updated with this (2026-11-21); the other two
      installs untouched.
