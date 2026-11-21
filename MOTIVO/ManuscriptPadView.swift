@@ -399,10 +399,6 @@ struct ManuscriptPadView: View {
         .font(Theme.Text.body)
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.vertical, Theme.Spacing.m)
-        // No hover highlight on these: with a Pencil, the highlight under Save
-        // was left on screen when the pad closed, over the editor's own Save
-        // (seen on a device, 2026-11-21; a simulator has no Pencil to hover).
-        .hoverEffectDisabled()
     }
 
     private static let controlColor = Color(red: 0.38, green: 0.48, blue: 0.62)

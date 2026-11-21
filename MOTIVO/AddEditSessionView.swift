@@ -1412,7 +1412,10 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
     
                                                                         // Right-side vertical controls: Star, Privacy, Delete
                                                                         VStack(spacing: 6) {
-                                                                            if att.kind == .image || att.kind == .audio || att.kind == .video {
+                                                                            // A manuscript sketch is starred here like a photo; other
+                                                                            // PDFs keep their star in the viewer, as before.
+                                                                            if att.kind == .image || att.kind == .audio || att.kind == .video
+                                                                                || sketchAttachmentIDs_AESV.contains(att.id) {
                                                                                 Text(selectedThumbnailID == att.id ? "★" : "☆")
                                                                                     .font(.system(size: 16))
                                                                                     .padding(8)
