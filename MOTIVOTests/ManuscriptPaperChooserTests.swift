@@ -1,4 +1,5 @@
 import XCTest
+import PencilKit
 @testable import Etudes
 
 /// The Paper page: six sheets, in Samuel's order, sharing out the screen.
@@ -109,5 +110,30 @@ final class ManuscriptPaperChooserTests: XCTestCase {
 
         // A blank page has nothing to blank.
         XCTAssertNil(ManuscriptPaperSheetPreview.blankFromY(paper: ManuscriptPaper(kind: .plain, clef: .none), visiblePageHeight: 300))
+    }
+
+    // MARK: - The pens
+
+    /// PencilKit has a narrowest width for its pen and quietly uses that if
+    /// asked for less. The fine pen must be a width it really draws.
+    func testPencilKitDrawsEachPenAtTheWidthAskedFor() {
+        let range = PKInkingTool.InkType.pen.validWidthRange
+        for width in ManuscriptPadTool.penWidths {
+            XCTAssertTrue(range.contains(width), "\(width) is outside PencilKit's pen range \(range)")
+            XCTAssertEqual(PKInkingTool(.pen, color: .black, width: width).width, width, accuracy: 0.001)
+        }
+    }
+
+    /// Fine enough for notation on a 7-point stave space, and three widths
+    /// that are plainly different from one another.
+    func testThePensAreFineEnoughForTheStaveAndDistinct() {
+        let widths = ManuscriptPadTool.penWidths
+        let space = ManuscriptPaperRenderer.lineGap
+        XCTAssertEqual(widths.count, 3)
+        XCTAssertEqual(widths, widths.sorted())
+        XCTAssertLessThanOrEqual(widths[0], space / 6, "the fine pen is no more than a sixth of a stave space")
+        XCTAssertLessThanOrEqual(widths[2], space / 2, "the broad pen is no thicker than a printed beam")
+        XCTAssertGreaterThanOrEqual(widths[1] / widths[0], 1.5)
+        XCTAssertGreaterThanOrEqual(widths[2] / widths[1], 1.5)
     }
 }

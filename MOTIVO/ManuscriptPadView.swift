@@ -72,7 +72,16 @@ enum ManuscriptPadTool: Equatable {
     case pen(width: CGFloat)
     case eraser
 
-    static let penWidths: [CGFloat] = [1.6, 3, 5.5]
+    /// Fine, medium and broad, in page points (the page is 595 wide and a
+    /// stave space is 7). Made finer on 2026-11-21 (Samuel; they were 1.6,
+    /// 3 and 5.5): the fine pen was nearly a quarter of a stave space, a
+    /// heavy line for notation, and a finger draws every stroke at the full
+    /// width where the Pencil thins with a light touch. Now about a seventh
+    /// of a space for stems and accidentals, under a third for general
+    /// writing, and half a space, a printed beam's thickness, for beams and
+    /// filled noteheads. A stroke keeps the width it was drawn with, so
+    /// existing sketches are unchanged.
+    static let penWidths: [CGFloat] = [1.0, 2.0, 3.5]
 
     var pencilKitTool: PKTool {
         switch self {
@@ -428,7 +437,7 @@ struct ManuscriptPadView: View {
                 } label: {
                     Circle()
                         .fill(Color.primary.opacity(0.75))
-                        .frame(width: 4 + width * 2.4, height: 4 + width * 2.4)
+                        .frame(width: 4 + width * 3.2, height: 4 + width * 3.2)
                         .frame(width: 44, height: 44)
                         .background(toolBackground(selected: selected))
                 }
