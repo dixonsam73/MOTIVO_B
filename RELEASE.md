@@ -528,17 +528,32 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        itself. **Awaiting Samuel's sign-off on the iPad.** Seen on the
        iPad simulator in portrait, except set-up, which needs a fresh
        install to appear.
+     - *Explore Connected's example screens* are pictures of a phone, so
+       in a wide, tall window they are held to about a phone's width
+       (Samuel, 2026-11-21). **Awaiting sign-off.**
+     - *Timer, on trial* (Samuel, 2026-11-21: "be prepared to revert";
+       it is one commit, `772dd84`). In landscape with a section open,
+       the column of buttons keeps to the left and stays put, and the
+       metronome and drone controls, the tuner, the audio recorder, the
+       list and the attachments stack on the right and scroll by
+       themselves. With nothing open the column is centred as before. In
+       portrait it is one column, held to 560 pt. While the audio
+       recorder is open the page keeps the arrangement it opened in, even
+       if the iPad is turned, because moving the recorder would end the
+       take. Seen on the iPad simulator, including a recording through a
+       turn; the iPhone is unchanged. **Awaiting Samuel's verdict on the
+       iPad.**
      - Correction to the survey: the Duration wheels were not cut off at
        the top; nothing sits above the first value. The half-height panel
        crowded the wheel and cut its lower rows.
-     - Still to do: the Timer (its landscape arrangement, and the
-       sketch's place on it); the system's window controls over the
+     - Still to do: the sketch's place on the Timer (a fourth button
+       beside audio, photo and video); the system's window controls over the
        top-left button in a resized window; the Thread picker and the
        other small sheets; the attachment and score viewers; Connected
        after sign-in. The review page after a timed session has no
        sketch button yet (only the entry editor has).
-     *Next:* the remaining pages, with the Timer's landscape arrangement
-     to discuss first.
+     *Next:* Samuel's verdict on the Timer arrangement; then the sketch
+     button on the Timer, and the remaining pages.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode
