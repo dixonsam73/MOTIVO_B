@@ -503,8 +503,25 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      hover highlight, not a fault.
      Études Dev on the iPad updated with this (2026-11-21); the other two
      installs untouched.
-     *Next:* Samuel's check of the correction on the iPad; then the
-     Journal and editor iPad adaptations.
+     *iPad pages, begun 2026-11-21* (`WideWindowLayout.swift`; decided by
+     the space a window has, never the device: a phone-sized space,
+     portrait or landscape, is untouched).
+     - *Journal:* in a wide, tall window the page is a centred column,
+       720 pt at most, with the top buttons on the same column. **Awaiting
+       Samuel's sign-off on the iPad.**
+     - *Entry editor:* opened as a sheet (a new entry), it is page-tall
+       and column-wide, not the small panel that needed scrolling to
+       reach Save; opened full screen (editing an entry), its content
+       keeps to the column. Its wheel pickers (Start Time, Duration) get a
+       panel that shows the whole wheel; its lists of choices (instrument,
+       activity) get the whole panel. **Awaiting sign-off.**
+     - Correction to the survey: the Duration wheels were not cut off at
+       the top; nothing sits above the first value. The half-height panel
+       crowded the wheel and cut its lower rows.
+     - Still to do on these pages: the system's window controls over the
+       top-left button in a resized window; the Thread picker and the
+       other sheets the editor opens.
+     *Next:* sign-off of those two; then the remaining pages.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode
