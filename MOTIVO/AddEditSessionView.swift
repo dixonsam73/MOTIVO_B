@@ -778,21 +778,24 @@ struct AddEditSessionView: View {
                 .font(.body.weight(.medium))
                 .foregroundStyle(Theme.Colors.secondaryText)
             }
-            if isThoughtMode {
-                // The one save action for a thought: always reachable, however
-                // many attachments sit above the notes.
-                ToolbarItem(placement: .confirmationAction) {
-                    // Disabled reads as quiet as the dimmed plain-style "Save
-                    // Session": secondary colour, lower opacity, same place.
-                    let saveEnabled = canSaveThought && !sharingSaveGate.isAwaitingDecision && !didCommitLocally
-                    Button("Save Thought") { attemptSaveWithConnectedPreflight() }
-                        .font(.body.weight(saveEnabled ? .semibold : .regular))
-                        .foregroundStyle(saveEnabled ? Theme.Colors.primaryAction : Theme.Colors.secondaryText)
-                        .opacity(saveEnabled ? 1.0 : 0.6)
-                        .disabled(!saveEnabled)
-                        .accessibilityLabel("Save Thought")
-                        .accessibilityIdentifier("button.saveThought")
+            // The one save action, in the same place for a session and a
+            // thought (2026-11-21): always reachable, however much sits above
+            // the notes, and with the keyboard up. A session's used to be a
+            // button at the foot of the page.
+            ToolbarItem(placement: .confirmationAction) {
+                // Disabled reads quiet: secondary colour, lower opacity, same place.
+                let saveEnabled = canSaveEntry && !sharingSaveGate.isAwaitingDecision && !didCommitLocally
+                // The action is the Connected preflight and nothing else
+                // (pinned by ConsentAtBothPublishSitesTests).
+                Button(action: { attemptSaveWithConnectedPreflight() }) {
+                    Text(isThoughtMode ? "Save Thought" : "Save Session")
                 }
+                    .font(.body.weight(saveEnabled ? .semibold : .regular))
+                    .foregroundStyle(saveEnabled ? Theme.Colors.primaryAction : Theme.Colors.secondaryText)
+                    .opacity(saveEnabled ? 1.0 : 0.6)
+                    .disabled(!saveEnabled)
+                    .accessibilityLabel(isThoughtMode ? "Save Thought" : "Save Session")
+                    .accessibilityIdentifier(isThoughtMode ? "button.saveThought" : "button.saveSession")
             }
         }
         .sheet(isPresented: $showInstrumentPicker) {
@@ -1165,7 +1168,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                     stateAndScoreSections
                     attachmentsGridSection
                     addAttachmentControls
-                    bottomSaveButton
                 }
             }
     }
@@ -1880,31 +1882,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 .padding(.bottom, Theme.Spacing.s)
     }
 
-    private var bottomSaveButton: some View {
-        HStack {
-            Spacer(minLength: 0)
-
-            Button(action: { attemptSaveWithConnectedPreflight() }) {
-                Text(isThoughtMode ? "Save Thought" : "Save Session")
-                    .font(Theme.Text.body)
-                    .foregroundColor(.primary)
-                    .opacity(1.0)
-            }
-            .frame(maxWidth: 260, minHeight: 44)
-            .background(Theme.Colors.primaryAction.opacity(0.17))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .buttonStyle(.plain)
-            .disabled((isThoughtMode ? !canSaveThought : (durationSeconds == 0 || instrument == nil))
-                      || sharingSaveGate.isAwaitingDecision   // P6-I-02 2d-1: no second save behind the alert
-                      || didCommitLocally)
-            .accessibilityLabel(isThoughtMode ? "Save thought" : "Save session")
-            .accessibilityIdentifier("button.saveSession")
-
-            Spacer(minLength: 0)
-        }
-        .padding(.top, Theme.Spacing.xs)
-        .padding(.bottom, Theme.Spacing.m)
-    }
 
     // MARK: - Focus / State
 
@@ -2170,6 +2147,12 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
     }
 
 // MARK: - Actions
+
+    /// Whether the entry can be saved: a thought by its own rule, a session
+    /// with a duration and an instrument.
+    private var canSaveEntry: Bool {
+        isThoughtMode ? canSaveThought : (durationSeconds != 0 && instrument != nil)
+    }
 
     private var canSaveThought: Bool {
         !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !stagedAttachments.isEmpty || !scoreAttachmentItems_AESV.isEmpty

@@ -1275,10 +1275,6 @@ var body: some View {
                         .cardSurface(padding: Theme.Spacing.m)
 
                     addAttachmentsControlsSection
-
-                    Group {
-                        bottomSaveButton
-                    }
                 }
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
@@ -1323,6 +1319,24 @@ var body: some View {
                     .accessibilityLabel("Back to Timer")
                 }
 
+                // Save is at the top right, as in the entry editor (2026-11-21):
+                // always reachable, where it used to be a button at the foot
+                // of the page. Disabled reads quiet, in the same place.
+                ToolbarItem(placement: .confirmationAction) {
+                    let saveEnabled = durationSeconds != 0 && instrument != nil
+                        && !sharingSaveGate.isAwaitingDecision   // P6-I-02 2d-1: no second save behind the alert
+                    // The action is the Connected preflight and nothing else
+                    // (pinned by ConsentAtBothPublishSitesTests).
+                    Button(action: { attemptSaveWithConnectedPreflight() }) {
+                        Text("Save Session")
+                    }
+                        .font(.body.weight(saveEnabled ? .semibold : .regular))
+                        .foregroundStyle(saveEnabled ? Theme.Colors.primaryAction : Theme.Colors.secondaryText)
+                        .opacity(saveEnabled ? 1.0 : 0.6)
+                        .disabled(!saveEnabled)
+                        .accessibilityLabel("Save Session")
+                        .accessibilityIdentifier("button.saveSession")
+                }
             }
             .onAppear {
                 loadDraftIsPublicIfNeeded()
@@ -1544,28 +1558,6 @@ var body: some View {
     }
 
     // MARK: - Subviews
-
-    private var bottomSaveButton: some View {
-        HStack {
-            Spacer(minLength: 0)
-
-            Button(action: { attemptSaveWithConnectedPreflight() }) {
-                Text("Save Session")
-                    .font(Theme.Text.body)
-            }
-            .frame(maxWidth: 260, minHeight: 44)
-            .background(Theme.Colors.primaryAction.opacity(0.17))
-            .foregroundStyle(.primary)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .buttonStyle(.plain)
-            .disabled(durationSeconds == 0 || instrument == nil
-                      || sharingSaveGate.isAwaitingDecision)   // P6-I-02 2d-1: no second save behind the alert
-
-            Spacer(minLength: 0)
-        }
-        .padding(.top, Theme.Spacing.xs)
-        .padding(.bottom, Theme.Spacing.m)
-    }
 
     private var addAttachmentsControlsSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {

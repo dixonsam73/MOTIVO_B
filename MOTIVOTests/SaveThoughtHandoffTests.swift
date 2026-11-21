@@ -283,7 +283,8 @@ final class SaveThoughtHandoffTests: XCTestCase {
         XCTAssertTrue(finalise.contains("onLocalCommit(attempt.committedStagedIDs.filter { prefilledStagedIDs.contains($0) })"),
                       "exactly the committed staged ids that came from the timer")
         XCTAssertTrue(block(after: "func save(", in: aesv)?.contains("if didCommitLocally { return }") ?? false)
-        XCTAssertTrue(aesv.contains("|| didCommitLocally)"), "the Save button follows")
+        XCTAssertTrue(aesv.contains("let saveEnabled = canSaveEntry && !sharingSaveGate.isAwaitingDecision && !didCommitLocally"),
+                      "the Save button follows: one button now, at the top, for a session and a thought")
         XCTAssertTrue(block(after: "private func seedPrefilledAttachmentsIfNeeded(", in: aesv)?.contains("guard !didSeedPrefill") ?? false,
                       "seeded once per presentation")
         XCTAssertTrue(aesv.contains("func removalMenuTitle(for att: StagedAttachment) -> String"), "Remove from thought")
@@ -359,9 +360,9 @@ final class SaveThoughtHandoffTests: XCTestCase {
             cursor = r.upperBound
         }
         XCTAssertTrue(aesv.contains("private var arrivedWithAttachments: Bool { !prefillAttachments.isEmpty }"), "fixed for the presentation; removing all media does not reflow")
-        XCTAssertTrue(block(after: "ToolbarItem(placement: .confirmationAction) {", in: aesv)?.contains("Button(\"Save Thought\")") ?? false, "one save action, in the toolbar")
+        XCTAssertTrue(block(after: "ToolbarItem(placement: .confirmationAction) {", in: aesv)?.contains("Text(isThoughtMode ? \"Save Thought\" : \"Save Session\")") ?? false, "one save action, in the toolbar, for a thought and a session alike")
         XCTAssertTrue(block(after: "ToolbarItem(placement: .confirmationAction) {", in: aesv)?.contains(".opacity(saveEnabled ? 1.0 : 0.6)") ?? false, "disabled is visibly quieter")
-        XCTAssertEqual(stack.components(separatedBy: "bottomSaveButton").count - 1, 1, "the bottom save button is sessions only")
+        XCTAssertFalse(aesv.contains("bottomSaveButton"), "no second save at the foot of the page (2026-11-21)")
     }
 
     // MARK: - Audio-only thoughts are named by their recording
