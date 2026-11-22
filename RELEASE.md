@@ -629,8 +629,7 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        other three. Sketches already on the Timer stay and open in the
        pad, and the entry editor and review page keep their manuscript
        button. Seen on the iPhone and iPad simulators.
-     *Paused here by Samuel, 2026-11-22,* after the review and its
-     correction pass. Step 5 is next, when he says.
+     Codex closed the correction review at `dcb16ae`.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode
@@ -639,6 +638,48 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      after an edit arrives once with no duplicate, and when both devices
      edit it offline the later edit stands and the other is kept under
      Displaced by sync and restores as ink.
+     **Run 2026-11-22 and passed** (`593b8eb`, Sync Test 2024; evidence,
+     the two builds and the read-only reader scripts in the shared notes,
+     `local_0dcc80dc…/step5-2026-11-22/`). Sync Test is native on iPad with
+     one window, the same switch as Debug; Release is untouched. Devices:
+     the iPad and Device A, both "Études Sync Test" on the trial container,
+     zone `JournalC197`, sync on, as recorded on 2026-11-13; the builds were
+     made with that zone on the command line. A baseline copy of each
+     container was taken first. One disposable thought with one sketch.
+     - *Upgrade in place.* On both devices the state file was byte for
+       byte unchanged by the install; the iPad's first native launch built
+       its engine from the saved state on the same zone, and both stores
+       kept their 7 entries and 4 attachments. *Sync off stays off* was
+       checked on the iPad simulator, not a device (both trial installs
+       have sync on and were not to be changed): a compatibility-mode
+       install with one sketch entry and sync off, upgraded in place, kept
+       the entry and its ink, runs natively and still has no state file.
+     - *Editable transfer.* Drawn on the iPad with the Pencil (treble,
+       four bars to a row): 3 records and one 61,561-byte file sent; on
+       Device A 7 seconds later, the same file by hash, the same four
+       strokes, the same paper; it opened in the pad.
+     - *Replacement.* Edited and renamed on Device A: the title as its own
+       record with no file, then one 67,441-byte upload; the iPad replaced
+       its file (8 strokes on both, same hash). One PDF attachment row and
+       one sketch file on each device; the iPad uploaded nothing.
+     - *Offline conflict.* iPad edit 10:44:49, Device A edit 10:46:18,
+       both in Airplane Mode; Device A reconnected first. Both devices
+       ended with Device A's later version (10 strokes, same hash). The
+       iPad kept its own version as a file (14 strokes, paper intact) and
+       listed one entry under Displaced by sync; it uploaded nothing.
+     - *Restore* on the iPad put that file back (the same hash as the kept
+       copy, 14 strokes), resolved the entry, sent it with one upload, and
+       Device A took it. Restoring is a new edit: the version it replaced
+       (Device A's) is then on neither device, as designed.
+     - *Found:* after the conflict the iPad's Journal row and entry page
+       showed an older thumbnail of the sketch (C-202). Fixed in `7e2f109`;
+       Sync Test 2025 is on both devices. **Its re-check on the iPad is
+       awaited.**
+     - *Not exercised:* a sketch sync-off upgrade on a physical device; a
+       second iPad size; a conflict in which the iPad's edit is the later
+       one; more than one sketch or page.
+     *Paused here.* Native iPad in Release, the Connected pages on iPad
+     and any wider distribution are separate steps.
   6. Timer: consider the landscape arrangement early; build the sketch's
      place in it once persistence works, reusing the existing
      Thought/session hand-off (`TimerThoughtHandoff.swift`).
