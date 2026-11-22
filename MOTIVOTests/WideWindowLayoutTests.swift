@@ -232,4 +232,36 @@ final class WideWindowLayoutTests: XCTestCase {
         XCTAssertGreaterThan(dialog.lowerBound, label.upperBound)
         XCTAssertFalse(library[label.upperBound..<dialog.lowerBound].contains("}"), "nothing closes between the button and its dialog")
     }
+
+    // MARK: - The sign-in sheet on iPad (2026-11-22)
+
+    /// A small panel, not the system's large one with a single button in
+    /// it: narrower and shorter, never less than its base height, taller
+    /// with larger text, and never larger than the system's own sheet.
+    func testTheSignInPanelIsSmallButLeavesRoom() {
+        typealias Panel = CompactPanelSizing
+        let usual = Panel.size(formWidth: 580, formHeight: 650, height: Panel.baseHeight)
+        XCTAssertEqual(usual, CGSize(width: 440, height: 340))
+        XCTAssertGreaterThanOrEqual(usual.height, 52 * 4, "room above and below a 52 pt button for a line of text")
+        // Larger text: taller.
+        XCTAssertEqual(Panel.size(formWidth: 580, formHeight: 650, height: 510).height, 510)
+        // Never shorter than the base, never beyond the system's sheet.
+        XCTAssertEqual(Panel.size(formWidth: 580, formHeight: 650, height: 100).height, Panel.baseHeight)
+        XCTAssertEqual(Panel.size(formWidth: 400, formHeight: 300, height: 900), CGSize(width: 400, height: 300))
+        // No size from the system: its own.
+        XCTAssertEqual(Panel.size(formWidth: nil, formHeight: nil, height: 340), CGSize(width: 440, height: 340))
+    }
+
+    /// Only the presentation changed: the sheet's content, and so the
+    /// sign-in itself, is the same view as before.
+    func testTheSignInSheetKeepsItsContentAndGainsOnlyItsSize() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let profile = try String(contentsOf: root.appendingPathComponent("MOTIVO/ProfileView.swift"), encoding: .utf8)
+        XCTAssertTrue(profile.contains("signedOutGateView\n                        // A small panel on an iPad; unchanged on a phone.\n                        .presentationSizing(CompactPanelSizing(height: signInPanelHeight, roomy: WideWindow.isRoomy))"))
+        // In a phone-sized space the system's own sizing is handed back.
+        let layout = try String(contentsOf: root.appendingPathComponent("MOTIVO/WideWindowLayout.swift"), encoding: .utf8)
+        XCTAssertTrue(layout.contains("guard roomy else {\n            let unchanged: AutomaticPresentationSizing = .automatic\n            return unchanged.proposedSize(for: root, context: context)"))
+        XCTAssertEqual(profile.components(separatedBy: "SignInWithAppleButton(.signIn)").count - 1, 1)
+        XCTAssertTrue(profile.contains("Spacer().frame(height: geo.size.height * 0.30)"), "the button is where it was within the sheet")
+    }
 }

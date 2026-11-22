@@ -591,6 +591,8 @@ struct ProfileNameDraftState: Equatable {
      @State private var showConnectedIntroduction: Bool = false
      @State private var showMembershipSelection: Bool = false
      @State private var showConnectedSignInSheet: Bool = false
+     /// The sign-in sheet's height on an iPad, growing with the text size.
+     @ScaledMetric(relativeTo: .body) private var signInPanelHeight: CGFloat = CompactPanelSizing.baseHeight
 
      /// U5f — WHY THE SIGN-IN SHEET NOW NEEDS AN INTENT.
      ///
@@ -746,6 +748,8 @@ struct ProfileNameDraftState: Equatable {
                     }
                 }) {
                     signedOutGateView
+                        // A small panel on an iPad; unchanged on a phone.
+                        .presentationSizing(CompactPanelSizing(height: signInPanelHeight, roomy: WideWindow.isRoomy))
                 }
                 .appBackground()
             }

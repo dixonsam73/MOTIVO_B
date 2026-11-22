@@ -196,6 +196,41 @@ struct ColumnPageSizing: PresentationSizing {
     }
 }
 
+/// A small panel, for a sheet that holds one action (the sign-in sheet).
+/// In a roomy window the system's sheet is a panel about 580 by 650 pt, and
+/// one button sat a third of the way down a large blank. This asks for a
+/// narrower, shorter panel that still leaves room around the button for a
+/// line of explanation and for larger text: its height is given by the
+/// caller, scaled with the text size, and is never less than `baseHeight`.
+/// Only where `roomy`: in a phone-sized space it hands back the system's
+/// own sizing untouched, so the sheet there is exactly as it always was.
+struct CompactPanelSizing: PresentationSizing {
+    static let width: CGFloat = 440
+    /// The height at the default text size.
+    static let baseHeight: CGFloat = 340
+    var height: CGFloat = baseHeight
+    /// `WideWindow.isRoomy`, read by the view that presents the sheet.
+    var roomy: Bool
+
+    /// PURE. Never wider or taller than the system's own form sheet.
+    static func size(formWidth: CGFloat?, formHeight: CGFloat?, height: CGFloat) -> CGSize {
+        let wanted = max(height, baseHeight)
+        return CGSize(width: min(formWidth ?? width, width),
+                      height: min(wanted, formHeight ?? wanted))
+    }
+
+    func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
+        guard roomy else {
+            let unchanged: AutomaticPresentationSizing = .automatic
+            return unchanged.proposedSize(for: root, context: context)
+        }
+        let system: FormPresentationSizing = .form
+        let form = system.proposedSize(for: root, context: context)
+        let size = Self.size(formWidth: form.width, formHeight: form.height, height: height)
+        return ProposedViewSize(width: size.width, height: size.height)
+    }
+}
+
 extension View {
 
     /// For a top bar the app draws itself, with a button at its leading
