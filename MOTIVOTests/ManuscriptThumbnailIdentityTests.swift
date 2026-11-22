@@ -96,6 +96,11 @@ final class ManuscriptThumbnailIdentityTests: XCTestCase {
             let source = try String(contentsOf: root.appendingPathComponent("MOTIVO/\(file)"), encoding: .utf8)
             XCTAssertTrue(source.contains("-\\(AttachmentStore.editStamp(of: attachment))\""), file)
         }
+        // The Journal row has to be told the attachment changed: on the
+        // device it redrew only once the list was rebuilt.
+        let row = try String(contentsOf: root.appendingPathComponent("MOTIVO/ContentViewRowSupport.swift"), encoding: .utf8)
+        XCTAssertTrue(row.contains("struct SingleAttachmentPreview: View {\n    /// Observed"))
+        XCTAssertTrue(row.contains("    @ObservedObject var attachment: Attachment\n    @State private var poster: UIImage? = nil"))
     }
 
     func testEqualBytesHaveEqualFingerprintsAndDifferentBytesOfOneLengthDoNot() {

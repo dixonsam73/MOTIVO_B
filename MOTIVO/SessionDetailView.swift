@@ -1911,7 +1911,9 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
 // SCOPE: PDF Scores Phase 2B — use first selected PDF page for SessionDetailView PDF thumbnails; preserve entire-document thumbnail behaviour.
 // SEARCH-TOKEN: 20260610_1718-PDF-THUMBNAIL-SELECTION
 fileprivate struct AttachmentRow: View {
-    let attachment: Attachment
+    /// Observed, so a file sync replaces while this page is open is drawn
+    /// again (C-202).
+    @ObservedObject var attachment: Attachment
     let showAttachmentPrivacy: Bool
     let onTap: () -> Void
 

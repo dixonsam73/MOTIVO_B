@@ -81,7 +81,10 @@ enum LocalAttachmentVideoPosterCache {
 // SCOPE: PDF Scores Phase 2C — render selected-page PDF thumbnails in local ContentView rows using existing page-aware thumbnail infrastructure; preserve photo/video/audio behaviour.
 // SEARCH-TOKEN: 20260610_190300-PDF-CONTENTVIEW-THUMB-PARITY
 struct SingleAttachmentPreview: View {
-    let attachment: Attachment
+    /// Observed, as the image thumbnail below observes it: when sync
+    /// replaces this attachment's file while the Journal is on screen, the
+    /// row is drawn again without the list having to be rebuilt (C-202).
+    @ObservedObject var attachment: Attachment
     @State private var poster: UIImage? = nil
     @State private var pdfThumbnail: UIImage? = nil
 
