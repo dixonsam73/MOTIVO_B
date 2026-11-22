@@ -598,14 +598,11 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        Lists manager the instrument and activity pickers opened as a half
        sheet inside the panel; they now take the whole panel, as in the
        entry editor.
-     - Still to do: **Connected after sign-in, the feed included.** It
-       cannot be seen natively on an iPad yet: Debug and Sync Test
-       cannot be Connected, the simulator has no age assurance, and
-       Release is still iPhone-only. It is looked at when native iPad is
-       turned on in Release. Prepared without being seen: the feed is in
-       the Journal's column already, and the Connected entry page now
-       keeps the same column as the local one. Also unseen: the score
-       viewer and the Scores scanner in a resized window.
+     - Still to do: **Connected after sign-in, the feed included** (see
+       step 7 for why it has not been seen and the routes). Prepared
+       without being seen: the feed is in the Journal's column already,
+       and the Connected entry page keeps the same column as the local
+       one.
      - *The sketch on the review page* (2026-11-22,
        `PostRecordDetailsView+Sketch.swift`): a fourth button beside
        photo, file and score, on iPhone and iPad; a sketch's tile opens
@@ -693,6 +690,53 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
   7. The remaining pages; native iPad in Release when ready; then the
      release decisions (section A) and the final Internal Only TestFlight
      QA (section D).
+     **Native iPad in Release: turned on 2026-11-22** (`af9e0ed`), the
+     same one-window switch as Debug and Sync Test. Release's built
+     Info.plist differs from before only in the device family, the one
+     window and the icon name Xcode adds for iPad; its signed
+     entitlements are identical. `SchemeConfigurationGuardTests` pins all
+     three configurations. **No native Release build has been installed
+     or distributed.** Supporting iPad cannot be withdrawn once a version
+     is released with it.
+     *The score viewer, 2026-11-22* (`2de9a6a`; iPad simulator). Opened
+     from the Scores library it came up as a small centred panel: it was
+     opened a fixed 0.15 s after the library sheet was told to close,
+     while the sheet was still leaving. It opens when the sheet has gone
+     and fills the window. Its top-left button clears the window
+     controls. The Add Score choices open from the + button, not the top
+     middle of the sheet. *The scanner* is the system's document camera
+     and does not run on a simulator: **to be seen on a device.**
+     *Seen and left as they are:* the erase sheet (a centred panel). In a
+     window made full screen with the green window button, the system
+     keeps the corner reserved and indents its own toolbar buttons; the
+     app's bars match.
+     *Connected, as far as it can be seen without an account* (iPad
+     simulator, Debug's "Force Études Connected" switch, 2026-11-22): the
+     Journal and Feed switch and an empty Feed, in the page's column; the
+     People sheet, a centred panel; the entry page's like, comment and
+     share row. **Not reachable without a signed-in member:** feed rows
+     with content, another person's entry page, comments, the profile
+     peek, sharing to a follower, and the membership screens after
+     sign-in. A trial Release archive of `2de9a6a` exported for App Store
+     Connect with the same signed entitlements as build 1949 (production
+     push, Production CloudKit, same container and profile); it was not
+     uploaded and was deleted.
+     *Awaiting Samuel:* (a) the sign-in sheet on iPad is a large blank
+     panel with the one button a third of the way down, the phone's
+     design in a bigger frame; (b) **how Connected after sign-in is to
+     be seen natively on an iPad.** The Release installs on the iPad and
+     Device A (TestFlight 1949) both have sync on in Production with the
+     fixture journal and are not signed in to Connected. A
+     development-signed Release build uses CloudKit's Development
+     environment, so it must not be installed over them. Sign in with
+     Apple on either device is Samuel's own account, and a Connected
+     device with sync on publishes the synced profile (one shared
+     profile, C-192).
+     *SDK baseline still outstanding* (the item above): everything in
+     this step was built and judged with Xcode 26.6 and the iOS 26.5 SDK.
+     It limits three things: the iPad layouts have not been seen on the
+     SDK that will ship; the iPhone Duo check has not been run; and a
+     build made this way cannot be uploaded from April 2027.
   **Survey, 2026-11-20** (Debug, iPad Pro 11-inch simulator, iOS 26.5:
   full window in portrait, 834 pt wide, and landscape, 1210 pt; a narrow
   window, about 375 pt). Nothing crashes or is unreachable. **The narrow
