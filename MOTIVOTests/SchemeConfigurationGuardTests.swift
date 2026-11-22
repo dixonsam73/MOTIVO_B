@@ -41,12 +41,12 @@ final class SchemeConfigurationGuardTests: XCTestCase {
                        "a pinned StoreKit configuration silences real StoreKit in every configuration (C-52)")
     }
 
-    // Native iPad is turned on one configuration at a time (RELEASE.md,
-    // section B): Debug first (2026-11-20), then Sync Test (2026-11-22),
-    // Release last, when its step is reached. Until then an iPad runs
-    // Release in compatibility mode, exactly as before. Change the
-    // expectation here in the same commit that turns Release on.
-    func testNativeIPadIsOnInDebugAndSyncTestButNotRelease() throws {
+    // Native iPad was turned on one configuration at a time (RELEASE.md,
+    // section B): Debug (2026-11-20), Sync Test and then Release
+    // (2026-11-22). Every configuration now runs natively on iPad with one
+    // app window. Supporting iPad cannot be withdrawn from a released app,
+    // so none of these may go back to iPhone-only.
+    func testEveryConfigurationRunsNativelyOnIPadWithOneWindow() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let project = try String(contentsOf: root.appendingPathComponent("MOTIVO.xcodeproj/project.pbxproj"), encoding: .utf8)
         func deviceFamily(bundleID: String) -> String? {
@@ -58,7 +58,7 @@ final class SchemeConfigurationGuardTests: XCTestCase {
         }
         XCTAssertEqual(deviceFamily(bundleID: "com.samueldixon.motivo.dev"), "1,2", "Debug runs natively on iPad")
         XCTAssertEqual(deviceFamily(bundleID: "com.samueldixon.motivo.synctest"), "1,2", "Sync Test runs natively on iPad")
-        XCTAssertEqual(deviceFamily(bundleID: "com.sdsongs.etudes"), "1", "Release stays iPhone-only until the last page is signed off")
+        XCTAssertEqual(deviceFamily(bundleID: "com.sdsongs.etudes"), "1,2", "Release runs natively on iPad")
 
         // One app window on iPad. Xcode's generated scene manifest allows
         // several and wins over the file, so a configuration that runs
@@ -80,7 +80,21 @@ final class SchemeConfigurationGuardTests: XCTestCase {
         let trialManifest = try XCTUnwrap(trialPlist["UIApplicationSceneManifest"] as? [String: Any])
         XCTAssertEqual(trialManifest["UIApplicationSupportsMultipleScenes"] as? Bool, false, "one app window at launch")
 
-        // Release still generates its own manifest and is not native yet.
-        XCTAssertTrue(generatesManifest(bundleID: "com.sdsongs.etudes"), "Release is unchanged until its step")
+        // Release shares Debug's Info.plist file, checked above.
+        XCTAssertFalse(generatesManifest(bundleID: "com.sdsongs.etudes"), "Release takes the one-window manifest from Info.plist")
+
+        // An iPad app that can be resized must allow every orientation.
+        func iPadOrientations(bundleID: String) -> String {
+            guard let idRange = project.range(of: "PRODUCT_BUNDLE_IDENTIFIER = \(bundleID);"),
+                  let start = project.range(of: "buildSettings = {", options: .backwards, range: project.startIndex..<idRange.lowerBound),
+                  let key = project.range(of: "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = ", range: start.lowerBound..<idRange.lowerBound) else { return "" }
+            return String(project[key.upperBound...].prefix { $0 != ";" })
+        }
+        for bundleID in ["com.samueldixon.motivo.dev", "com.samueldixon.motivo.synctest", "com.sdsongs.etudes"] {
+            let orientations = iPadOrientations(bundleID: bundleID)
+            for needed in ["UIInterfaceOrientationPortrait ", "UIInterfaceOrientationPortraitUpsideDown", "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"] {
+                XCTAssertTrue(orientations.contains(needed), "\(bundleID) lacks \(needed)")
+            }
+        }
     }
 }

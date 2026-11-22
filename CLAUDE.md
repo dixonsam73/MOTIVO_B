@@ -153,12 +153,11 @@ xcodebuild -project MOTIVO.xcodeproj -scheme MOTIVO -configuration {Debug|Releas
 xcodebuild test -project MOTIVO.xcodeproj -scheme MOTIVO -only-testing:MOTIVOTests -destination '<simulator>'
 ```
 
-- Deployment target **iOS 26.4**, for the whole app. Native iPad is turned
-  on one configuration at a time (`RELEASE.md` section B): **Debug**
-  (2026-11-20) and **Sync Test** (2026-11-22) run natively on iPad, with
-  one app window. **Release is still iPhone-only**
-  (`TARGETED_DEVICE_FAMILY = 1`), so an iPad runs it in compatibility
-  mode; it is turned on last. `SchemeConfigurationGuardTests` pins this.
+- Deployment target **iOS 26.4**, for the whole app. Every configuration
+  runs natively on iPad with one app window (`RELEASE.md` section B):
+  Debug since 2026-11-20, Sync Test and Release since 2026-11-22.
+  `SchemeConfigurationGuardTests` pins this. No native iPad Release build
+  has been distributed yet; TestFlight build 1949 is still iPhone-only.
 - **Only Release can make purchases.** Debug's bundle id
   (`com.samueldixon.motivo.dev`) is unknown to App Store Connect, so products
   come back empty. The shared scheme's Run action **must stay Release with no
