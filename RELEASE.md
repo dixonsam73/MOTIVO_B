@@ -721,17 +721,41 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      Connect with the same signed entitlements as build 1949 (production
      push, Production CloudKit, same container and profile); it was not
      uploaded and was deleted.
-     *Awaiting Samuel:* (a) the sign-in sheet on iPad is a large blank
-     panel with the one button a third of the way down, the phone's
-     design in a bigger frame; (b) **how Connected after sign-in is to
-     be seen natively on an iPad.** The Release installs on the iPad and
-     Device A (TestFlight 1949) both have sync on in Production with the
-     fixture journal and are not signed in to Connected. A
-     development-signed Release build uses CloudKit's Development
-     environment, so it must not be installed over them. Sign in with
-     Apple on either device is Samuel's own account, and a Connected
-     device with sync on publishes the synced profile (one shared
-     profile, C-192).
+     *The sign-in sheet* (Samuel, 2026-11-22): on an iPad it is a small
+     panel, 440 by 340 pt at the default text size and taller with larger
+     text, with room around the button; the sheet's content and the
+     sign-in are unchanged, and a phone-sized space gets the system's own
+     sheet as before.
+     *The signed-in Connected pages: arrangement agreed 2026-11-22, not
+     yet run.* The iPad stays on Samuel's main Apple Account and joins as
+     his own Connected account; Device A, on his other Apple ID, is a
+     separate account that he follows from the iPad. No sample screen is
+     built. Read from the devices and the code first:
+     - *The iPad's local profile is published on entering Connected,
+       whether or not sync is on* (`publishLocalProfileSnapshotToDirectoryIfPossible`).
+       It holds "Samuel Dixon", "London", and eight instruments all
+       marked visible (Bass Guitar, Double Bass, Guitar, Horses, Mandolin,
+       Op-1, Piano, Tuba). The preparation is to make the visible
+       instruments match his real profile before joining.
+     - *Its journal is the 18 October copy:* 118 entries, 86 marked
+       shared. Nothing is published at sign-in (posts are queued only when
+       an editor saves), so they are not re-sent; an entry saved on the
+       iPad while signed in would publish its old content.
+     - *Device A.* Études there holds the same copy and belongs to his
+       main identity, and a sign-in by another identity is refused while
+       that journal is on the device (C-114). So Études on Device A must
+       be deleted and installed fresh; that removes its local copy and
+       sync state and nothing else. Études Sync Test there is bound to the
+       main account: on another account it refuses to sync and keeps its
+       journal and state.
+     - *Age.* On 16 October, with Device A on its own Apple Account, the
+       sandbox age fixtures were ignored and Apple returned a cached
+       answer (C-113). On 11 and 13 November, with Device A on the main
+       account, a development-signed build and a fresh Sandbox Apple
+       Account, the fixture was honoured after Revoke App Consent. The
+       proposed set-up (the other Apple ID again) has not been tried
+       since October, so the answer there is not known until it is tried.
+       The iPad's install already holds Apple's confirmed answer.
      *SDK baseline still outstanding* (the item above): everything in
      this step was built and judged with Xcode 26.6 and the iOS 26.5 SDK.
      It limits three things: the iPad layouts have not been seen on the
