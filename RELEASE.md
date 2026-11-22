@@ -726,8 +726,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      text, with room around the button; the sheet's content and the
      sign-in are unchanged, and a phone-sized space gets the system's own
      sheet as before.
-     *The signed-in Connected pages: arrangement agreed 2026-11-22, not
-     yet run.* The iPad stays on Samuel's main Apple Account and joins as
+     *The signed-in Connected pages: arrangement agreed 2026-11-22 and
+     run that evening (below).* The iPad stays on Samuel's main Apple Account and joins as
      his own Connected account; Device A, on his other Apple ID, is a
      separate account that he follows from the iPad. No sample screen is
      built. Read from the devices and the code first:
@@ -767,7 +767,9 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      A is used, its signed-in identity is verified in the running app
      after the reinstall, not from its files alone; and if the adult
      check refuses it, that route stops there.
-     *Internal Only candidate prepared 2026-11-22, not uploaded:* archive
+     *Internal Only build 2034, 2026-11-22* (uploaded by Samuel, Internal
+     Only, and installed on the iPad from TestFlight over 1949 with its
+     journal and sync state intact): archive
      `Etudes 2034 (7b7f2eb)` in `~/Library/Developer/Xcode/Archives/2026-11-22/`,
      from a clean tree. Bundle `com.sdsongs.etudes`, version 1.0, build
      2034, iPhone and iPad, one window, no StoreKit file. Its App Store
@@ -776,7 +778,35 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      Production CloudKit, the same container. Built with Xcode 26.6 and
      the iOS 26.5 SDK, so the SDK baseline is still outstanding. Unit
      tests at `7b7f2eb`: 1355 on MOTIVO and 1591 on MOTIVO SyncTest, the
-     seven known order-dependent failures and no others. Samuel uploads.
+     seven known order-dependent failures and no others.
+     *The signed-in Connected pages, run 2026-11-22.* The iPad on
+     TestFlight 2034 joined as Samuel's own account (a Sandbox purchase).
+     Device A, on his other Apple ID, had Études deleted and a
+     development-signed Release (2035) installed fresh, and joined as a
+     new disposable account, "Device A Test"; the adult check passed
+     there through the Sandbox account's age setting. Each follows the
+     other. **Seen on the iPad, portrait and landscape, and right as they
+     are:** the feed with both accounts' posts, another person's entry
+     page, comments (with the keyboard up, and with comments in the
+     list), People, the share destination sheet, Profile's Connected and
+     Account sections, the scanner (the system's camera) and the scanned
+     score opened across the window. **Fixed:** the membership choices
+     ran edge to edge and now sit in the column (not yet seen: the page
+     needs a sign-in, so it waits for the next device build); and C-203,
+     found here and not an iPad matter: a saved PDF shared from the
+     entry's editor was refused. Neither fix is in build 2034. **For Samuel to decide:** the profile peek is a tall
+     panel with a small card low in it; Comments in landscape puts the
+     input straight under a short list where portrait puts it at the
+     foot. **Seen and Apple's:** the membership cards showed dollar
+     prices while Apple's purchase sheet showed pounds; the cards print
+     StoreKit's own price text unchanged. To look at again in the final
+     TestFlight QA. **Not layout, still open:** Samuel's directory row
+     holds no picture, so his avatar does not show to followers; the
+     server holds two posts for his account (the iPad's 86 shared marks
+     are the October copy's, not posts). **Left as it is until Samuel
+     chooses:** the disposable account exists on production; Device A is
+     on the other Apple ID with only the development-signed Release
+     (Études Sync Test is no longer on it).
      *SDK baseline still outstanding* (the item above): everything in
      this step was built and judged with Xcode 26.6 and the iOS 26.5 SDK.
      It limits three things: the iPad layouts have not been seen on the

@@ -233,6 +233,16 @@ final class WideWindowLayoutTests: XCTestCase {
         XCTAssertFalse(library[label.upperBound..<dialog.lowerBound].contains("}"), "nothing closes between the button and its dialog")
     }
 
+    // MARK: - The membership choices on iPad (2026-11-22)
+
+    /// Seen on the iPad: the two membership cards ran from edge to edge,
+    /// after an introduction page that sits in the column. Same column.
+    func testTheMembershipChoicesSitInTheColumn() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let page = try String(contentsOf: root.appendingPathComponent("MOTIVO/MembershipSelectionView.swift"), encoding: .utf8)
+        XCTAssertTrue(page.contains("            .frame(maxWidth: .infinity, alignment: .leading)\n            // The same column as the page before it, where the window is wide.\n            .wideWindowColumn()\n        }\n        .appBackground()"))
+    }
+
     // MARK: - The sign-in sheet on iPad (2026-11-22)
 
     /// A small panel, not the system's large one with a single button in

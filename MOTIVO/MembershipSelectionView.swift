@@ -36,6 +36,8 @@ struct MembershipSelectionView: View {
             .padding(.top, Theme.Spacing.xxl)
             .padding(.bottom, Theme.Spacing.xxl)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // The same column as the page before it, where the window is wide.
+            .wideWindowColumn()
         }
         .appBackground()
         .navigationTitle("")
