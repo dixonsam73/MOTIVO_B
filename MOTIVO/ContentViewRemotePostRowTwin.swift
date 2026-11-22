@@ -522,6 +522,7 @@ struct RemotePostRowTwin: View {
             )
                 .environment(\.managedObjectContext, ctx)
                 .environmentObject(auth)
+                .profilePeekPanel()
         }
         .sheet(isPresented: $isRemoteCommentsPresented) {
             let owner = (post.ownerUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")

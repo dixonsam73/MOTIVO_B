@@ -13,6 +13,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 enum WideWindow {
 
@@ -231,7 +232,187 @@ struct CompactPanelSizing: PresentationSizing {
     }
 }
 
+/// A small panel as tall as what it holds: the profile peek, a card of a
+/// few lines. In a roomy window the system's sheet is about 580 by 650 pt
+/// and the card sat low in a mostly empty panel. This asks for the small
+/// panel's width and the content's own height at that width, so the panel
+/// grows with larger text and with a longer list of instruments, and is
+/// never larger than the system's own sheet. Only where `roomy`: in a
+/// phone-sized space the system's sizing is handed back untouched.
+struct FittedPanelSizing: PresentationSizing {
+    /// `WideWindow.isRoomy`, read by the view that presents the sheet.
+    var roomy: Bool
+
+    /// PURE. `contentHeight` is the content's height at the panel's width,
+    /// its own margins included.
+    static func size(formWidth: CGFloat?, formHeight: CGFloat?, contentHeight: CGFloat) -> CGSize {
+        let width = min(formWidth ?? CompactPanelSizing.width, CompactPanelSizing.width)
+        let wanted = max(contentHeight.rounded(.up), 1)
+        return CGSize(width: width, height: min(wanted, formHeight ?? wanted))
+    }
+
+    func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
+        guard roomy else {
+            let unchanged: AutomaticPresentationSizing = .automatic
+            return unchanged.proposedSize(for: root, context: context)
+        }
+        let system: FormPresentationSizing = .form
+        let form = system.proposedSize(for: root, context: context)
+        let width = min(form.width ?? CompactPanelSizing.width, CompactPanelSizing.width)
+        let content = root.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        let size = Self.size(formWidth: form.width, formHeight: form.height, contentHeight: content.height)
+        return ProposedViewSize(width: size.width, height: size.height)
+    }
+}
+
+/// The on-screen keyboard as it sits across the foot of the screen, from
+/// the keyboard's own reports. For a panel that keeps its content clear of
+/// the keyboard itself (`clearOfKeyboardInPanel`).
+enum DockedKeyboard {
+
+    /// PURE. The keyboard's top edge, in screen coordinates, when it is
+    /// docked across the foot of the screen. Nil for a keyboard that is
+    /// away, floating, split, or has no height: nothing is covered then.
+    static func top(endFrame: CGRect, screen: CGRect) -> CGFloat? {
+        guard endFrame.height > 0,
+              endFrame.minY < screen.maxY,
+              endFrame.maxY >= screen.maxY - 1,
+              endFrame.width >= screen.width - 1 else { return nil }
+        return endFrame.minY
+    }
+
+    /// PURE. How much of a view whose bottom edge is at `viewBottom` (screen
+    /// coordinates) lies under a keyboard whose top edge is at
+    /// `keyboardTop`. Never negative, and never more than the view.
+    static func overlap(viewBottom: CGFloat, viewHeight: CGFloat, keyboardTop: CGFloat?) -> CGFloat {
+        guard let keyboardTop else { return 0 }
+        return min(max(0, viewBottom - keyboardTop), max(0, viewHeight))
+    }
+}
+
+/// Measures, in UIKit, how much of the view it sits behind is under the
+/// keyboard, and says so whenever that changes.
+private struct KeyboardOverlapProbe: UIViewRepresentable {
+    var active: Bool
+    var onChange: (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        return view
+    }
+
+    func updateUIView(_ view: ProbeView, context: Context) {
+        view.onChange = onChange
+        view.active = active
+    }
+
+    final class ProbeView: UIView {
+        var onChange: ((CGFloat) -> Void)?
+        var active = false {
+            didSet {
+                guard active != oldValue else { return }
+                if active { measure() } else { report(0) }
+            }
+        }
+        /// The keyboard's last reported frame, in screen coordinates.
+        private var keyboardFrame: CGRect?
+        private var reported: CGFloat = 0
+        private var observers: [NSObjectProtocol] = []
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers = []
+            guard window != nil else { return }
+            let centre = NotificationCenter.default
+            // The frame it is going to, and again once it is there: the
+            // system moves a sheet up when the keyboard comes, so the
+            // panel's own place is only final afterwards.
+            for name in [UIResponder.keyboardWillShowNotification, UIResponder.keyboardWillChangeFrameNotification,
+                         UIResponder.keyboardDidShowNotification, UIResponder.keyboardDidChangeFrameNotification] {
+                observers.append(centre.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                    let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                    MainActor.assumeIsolated {
+                        self?.keyboardFrame = frame
+                        self?.measure()
+                        DispatchQueue.main.async { self?.measure() }
+                    }
+                })
+            }
+            // Going away is final at once, whatever was reserved before.
+            for name in [UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification] {
+                observers.append(centre.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.keyboardFrame = nil
+                        self?.report(0)
+                    }
+                })
+            }
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            measure()
+        }
+
+        private func measure() {
+            guard active, let window, let keyboardFrame else { return report(0) }
+            let screen = window.screen
+            let top = DockedKeyboard.top(endFrame: keyboardFrame, screen: screen.bounds)
+            let mine = convert(bounds, to: screen.coordinateSpace)
+            report(DockedKeyboard.overlap(viewBottom: mine.maxY, viewHeight: mine.height, keyboardTop: top))
+        }
+
+        private func report(_ overlap: CGFloat) {
+            guard abs(overlap - reported) > 0.5 else { return }
+            reported = overlap
+            onChange?(overlap)
+        }
+    }
+}
+
+/// See `clearOfKeyboardInPanel`.
+private struct PanelKeyboardClearance: ViewModifier {
+    @State private var overlap: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        // By the WINDOW: inside an iPad's panel the width class is compact,
+        // as on a phone, so the size classes cannot tell the two apart.
+        let roomy = WideWindow.isRoomy
+        content
+            .padding(.bottom, roomy ? overlap : 0)
+            .background {
+                KeyboardOverlapProbe(active: roomy) { new in
+                    withAnimation(.easeOut(duration: 0.25)) { overlap = new }
+                }
+            }
+            .ignoresSafeArea(roomy ? .keyboard : [], edges: .bottom)
+    }
+}
+
 extension View {
+
+    /// For a sheet with a field at its foot (Comments), shown as a panel in
+    /// a roomy window. There the content is kept clear of the keyboard by
+    /// the keyboard's own reports and not by the system's reckoning: on an
+    /// iPad, after a comment was sent in landscape and the keyboard went
+    /// away, the space it had taken stayed reserved, and the field sat in
+    /// the middle of the panel until the iPad was turned (seen 2026-11-22).
+    /// The moment the keyboard starts to leave, nothing is reserved.
+    /// In a phone-sized space this does nothing and the system's own
+    /// handling is unchanged.
+    func clearOfKeyboardInPanel() -> some View {
+        modifier(PanelKeyboardClearance())
+    }
+
+    /// For the sheet that shows a profile peek: in a roomy window a small
+    /// panel as tall as the card (`FittedPanelSizing`). Unchanged on a phone.
+    @MainActor
+    func profilePeekPanel() -> some View {
+        presentationSizing(FittedPanelSizing(roomy: WideWindow.isRoomy))
+    }
 
     /// For a top bar the app draws itself, with a button at its leading
     /// end. In an iPad window that is not full screen the system puts its

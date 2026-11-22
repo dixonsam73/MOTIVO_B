@@ -794,16 +794,30 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      ran edge to edge and now sit in the column (not yet seen: the page
      needs a sign-in, so it waits for the next device build); and C-203,
      found here and not an iPad matter: a saved PDF shared from the
-     entry's editor was refused. Neither fix is in build 2034. **For Samuel to decide:** the profile peek is a tall
-     panel with a small card low in it; Comments in landscape puts the
-     input straight under a short list where portrait puts it at the
-     foot. **Seen and Apple's:** the membership cards showed dollar
+     entry's editor was refused. Neither fix is in build 2034.
+     **Decided by Samuel and built the same evening** (iPad simulator,
+     both ways up; not yet on a device): *the profile peek* was a small
+     card low in a tall, mostly empty panel; its sheet is now a small
+     panel fitted to the card, 440 pt wide with the same margin all
+     round, growing with larger text and a longer list of instruments.
+     *Comments in landscape:* after a comment was sent, the field stayed
+     in the middle of the panel with a blank below it until the iPad was
+     turned. The keyboard had gone but the space it took was still
+     reserved (seen only on the device; the simulator does not do it).
+     In an iPad's panel Comments now keeps clear of the keyboard by the
+     keyboard's own reports, and reserves nothing from the moment it
+     starts to leave: the field is at the foot of the panel, above the
+     keyboard while it is up, with the comments scrolling above it. The
+     panel itself is unchanged, and so is everything on a phone. Unit
+     tests after both: 1363 on MOTIVO, the seven known failures and no
+     others. **Seen and Apple's:** the membership cards showed dollar
      prices while Apple's purchase sheet showed pounds; the cards print
      StoreKit's own price text unchanged. To look at again in the final
-     TestFlight QA. **Not layout, still open:** Samuel's directory row
-     holds no picture, so his avatar does not show to followers; the
-     server holds two posts for his account (the iPad's 86 shared marks
-     are the October copy's, not posts). **Left as it is until Samuel
+     TestFlight QA. **Not layout:** Samuel's directory row held no
+     picture, so his avatar did not show to followers; he saved it again
+     on the iPad and it now shows on Device A. The server holds two
+     posts for his account (the iPad's 86 shared marks are the October
+     copy's, not posts). **Left as it is until Samuel
      chooses:** the disposable account exists on production; Device A is
      on the other Apple ID with only the development-signed Release
      (Études Sync Test is no longer on it).

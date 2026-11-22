@@ -243,6 +243,74 @@ final class WideWindowLayoutTests: XCTestCase {
         XCTAssertTrue(page.contains("            .frame(maxWidth: .infinity, alignment: .leading)\n            // The same column as the page before it, where the window is wide.\n            .wideWindowColumn()\n        }\n        .appBackground()"))
     }
 
+    // MARK: - The profile peek on iPad (Samuel, 2026-11-22)
+
+    /// A panel as tall as the card it holds: the small panel's width, the
+    /// card's own height (so it grows with larger text and a longer list
+    /// of instruments), and never larger than the system's sheet.
+    func testTheProfilePeekPanelIsAsTallAsItsCard() {
+        typealias Panel = FittedPanelSizing
+        XCTAssertEqual(Panel.size(formWidth: 580, formHeight: 650, contentHeight: 176), CGSize(width: 440, height: 176))
+        XCTAssertEqual(Panel.size(formWidth: 580, formHeight: 650, contentHeight: 311.2).height, 312, "larger text: a taller panel")
+        XCTAssertEqual(Panel.size(formWidth: 400, formHeight: 650, contentHeight: 900), CGSize(width: 400, height: 650))
+        XCTAssertEqual(Panel.size(formWidth: nil, formHeight: nil, contentHeight: 200), CGSize(width: 440, height: 200))
+    }
+
+    /// Every sheet that shows the peek asks for the fitted panel, and the
+    /// peek and the panel both judge "an iPad" by the window: inside a
+    /// panel the width class is compact, as on a phone.
+    func testEveryProfilePeekSheetIsTheFittedPanel() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        func source(_ name: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent("MOTIVO/\(name)"), encoding: .utf8)
+        }
+        for file in ["ContentViewSessionRow.swift", "ContentViewRemotePostRowTwin.swift", "BackendSessionDetailView.swift"] {
+            let text = try source(file)
+            let sheet = try XCTUnwrap(text.range(of: "ProfilePeekView("), file)
+            XCTAssertTrue(text[sheet.upperBound...].prefix(700).contains(".profilePeekPanel()"), file)
+        }
+        let layout = try source("WideWindowLayout.swift")
+        XCTAssertTrue(layout.contains("presentationSizing(FittedPanelSizing(roomy: WideWindow.isRoomy))"))
+        let peek = try source("ProfilePeekView.swift")
+        XCTAssertTrue(peek.contains("private var roomy: Bool { WideWindow.isRoomy }"))
+        XCTAssertTrue(peek.contains(".padding(.bottom, roomy ? Theme.Spacing.l : 0)"), "the same margin below the card as beside it")
+    }
+
+    // MARK: - Comments in an iPad's panel (2026-11-22)
+
+    /// Only a keyboard docked across the foot of the screen covers
+    /// anything: not one that is away, floating or split.
+    func testOnlyADockedKeyboardCountsAsCovering() {
+        let screen = CGRect(x: 0, y: 0, width: 1210, height: 834)
+        XCTAssertEqual(DockedKeyboard.top(endFrame: CGRect(x: 0, y: 405, width: 1210, height: 429), screen: screen), 405)
+        XCTAssertNil(DockedKeyboard.top(endFrame: CGRect(x: 0, y: 834, width: 1210, height: 429), screen: screen), "away, below the screen")
+        XCTAssertNil(DockedKeyboard.top(endFrame: CGRect(x: 400, y: 300, width: 320, height: 260), screen: screen), "floating")
+        XCTAssertNil(DockedKeyboard.top(endFrame: CGRect(x: 0, y: 500, width: 1210, height: 250), screen: screen), "not at the foot")
+        XCTAssertNil(DockedKeyboard.top(endFrame: .zero, screen: screen))
+    }
+
+    /// The panel reserves exactly what the keyboard covers of it, and
+    /// nothing once the keyboard has gone: the field is back at the foot.
+    func testThePanelReservesOnlyWhatTheKeyboardCovers() {
+        XCTAssertEqual(DockedKeyboard.overlap(viewBottom: 735, viewHeight: 650, keyboardTop: 405), 330)
+        XCTAssertEqual(DockedKeyboard.overlap(viewBottom: 400, viewHeight: 650, keyboardTop: 405), 0, "the panel is clear of it")
+        XCTAssertEqual(DockedKeyboard.overlap(viewBottom: 735, viewHeight: 650, keyboardTop: nil), 0, "no keyboard")
+        XCTAssertEqual(DockedKeyboard.overlap(viewBottom: 2000, viewHeight: 650, keyboardTop: 405), 650, "never more than the panel")
+    }
+
+    /// Comments takes the keyboard handling on its whole sheet, the
+    /// handling is by the window, and going away clears it at once.
+    func testCommentsKeepsItsFieldClearOfTheKeyboardInAPanel() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let comments = try String(contentsOf: root.appendingPathComponent("MOTIVO/CommentsView.swift"), encoding: .utf8)
+        XCTAssertTrue(comments.contains("        .clearOfKeyboardInPanel()\n        .appBackground()\n        .moderationAlerts(moderation)"))
+        XCTAssertEqual(comments.components(separatedBy: ".clearOfKeyboardInPanel()").count - 1, 1)
+        let layout = try String(contentsOf: root.appendingPathComponent("MOTIVO/WideWindowLayout.swift"), encoding: .utf8)
+        XCTAssertTrue(layout.contains("let roomy = WideWindow.isRoomy\n        content\n            .padding(.bottom, roomy ? overlap : 0)"))
+        XCTAssertTrue(layout.contains(".ignoresSafeArea(roomy ? .keyboard : [], edges: .bottom)"), "nothing changes in a phone-sized space")
+        XCTAssertTrue(layout.contains("for name in [UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification]"))
+    }
+
     // MARK: - The sign-in sheet on iPad (2026-11-22)
 
     /// A small panel, not the system's large one with a single button in

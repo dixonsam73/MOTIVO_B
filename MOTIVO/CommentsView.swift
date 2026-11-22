@@ -498,6 +498,9 @@ public struct CommentsView: View {
                 }
                 .scrollContentBackground(.hidden)
         }
+        // In an iPad's panel the field stays at the foot, above the
+        // keyboard while it is up and back at the foot when it has gone.
+        .clearOfKeyboardInPanel()
         .appBackground()
         .moderationAlerts(moderation)
     }

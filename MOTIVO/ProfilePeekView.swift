@@ -52,6 +52,10 @@ struct ProfilePeekView: View {
     @State private var showUnfollowConfirm = false
     @State private var showAvatarViewer = false
     @Environment(\.colorScheme) private var colorScheme
+    /// An iPad's window, where the peek's sheet is a panel fitted to the
+    /// card (`profilePeekPanel`). By the window: inside that panel the
+    /// width class is compact, as on a phone.
+    private var roomy: Bool { WideWindow.isRoomy }
 
     let ownerID: String
     let directoryDisplayName: String?
@@ -301,6 +305,10 @@ struct ProfilePeekView: View {
             .cardSurface()
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
+            // Where the sheet is a panel fitted to this card (an iPad), the
+            // card has the same margin above and below as at its sides.
+            .padding(.top, roomy ? Theme.Spacing.l - Theme.Spacing.m : 0)
+            .padding(.bottom, roomy ? Theme.Spacing.l : 0)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
         

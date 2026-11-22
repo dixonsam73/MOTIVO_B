@@ -892,6 +892,7 @@ struct SessionRow: View {
             )
                 .environment(\.managedObjectContext, ctx)
                 .environmentObject(auth)
+                .profilePeekPanel()
         }
     }
 

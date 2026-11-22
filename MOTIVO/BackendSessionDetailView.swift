@@ -279,6 +279,7 @@ struct BackendSessionDetailView: View {
         directoryAvatarKey: directoryAccount?.avatarKey,
         directoryInstruments: directoryAccount?.instruments
     )
+    .profilePeekPanel()
 }
         .fullScreenCover(item: $viewerRequest) { req in
             let p = req.payload
