@@ -433,6 +433,8 @@ struct PracticeTimerView: View {
     @State private var showThoughtEditorSheet: Bool = false
     @State private var showScoresLibrary: Bool = false
     @State private var scoreViewerRequest: TimerScoreViewerRequest? = nil
+    /// The score chosen in the library, opened when the library sheet has gone.
+    @State private var scoreToOpenAfterLibrary: ScoreLibraryItem? = nil
     @State private var connectedScoreShareRequest: ConnectedScoreShareRequest? = nil
     @State private var pendingNativeScoreShareURL: URL? = nil
     @State private var nativeScoreShareURL: URL? = nil
@@ -1480,6 +1482,9 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.top, Theme.Spacing.m)
+        // The score viewer's own top row: its first button keeps clear of
+        // the window controls in a window that is not full screen.
+        .clearOfWindowControls()
         .allowsHitTesting(true)
     }
 
@@ -2080,14 +2085,19 @@ private func loadPracticeDefaultsIfNeeded() {
                     if hasShownFirstUseGuidance { hasOpenedThoughtEditor = true }
                 }
         }
-        .sheet(isPresented: $showScoresLibrary) {
+        // The score opens once the library sheet has GONE, not a fixed
+        // moment after it was told to go. On an iPad the sheet takes longer
+        // to leave than the old 0.15 s, and a full-screen cover presented
+        // while it was still leaving came up the size of the sheet.
+        .sheet(isPresented: $showScoresLibrary, onDismiss: {
+            guard let item = scoreToOpenAfterLibrary else { return }
+            scoreToOpenAfterLibrary = nil
+            openScoreFromTimer(item)
+        }) {
             ScoresLibraryView(
                 onOpenActiveScore: { item in
+                    scoreToOpenAfterLibrary = item
                     showScoresLibrary = false
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        openScoreFromTimer(item)
-                    }
                 }
             )
         }

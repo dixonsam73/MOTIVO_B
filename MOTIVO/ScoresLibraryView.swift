@@ -97,18 +97,21 @@ struct ScoresLibraryView: View {
                         Image(systemName: "plus")
                     }
                     .accessibilityLabel("Add score")
-                }
-            }
-            .confirmationDialog("Add Score", isPresented: $showAddOptions, titleVisibility: .visible) {
-                Button("Import PDF") {
-                    showFileImporter = true
-                }
+                    // On the button, so that on an iPad the choices open
+                    // from it and not from the middle of the sheet. On an
+                    // iPhone they are the same sheet from the bottom.
+                    .confirmationDialog("Add Score", isPresented: $showAddOptions, titleVisibility: .visible) {
+                        Button("Import PDF") {
+                            showFileImporter = true
+                        }
 
-                Button("Scan Music") {
-                    showScanner = true
-                }
+                        Button("Scan Music") {
+                            showScanner = true
+                        }
 
-                Button("Cancel", role: .cancel) { }
+                        Button("Cancel", role: .cancel) { }
+                    }
+                }
             }
             .fileImporter(
                 isPresented: $showFileImporter,

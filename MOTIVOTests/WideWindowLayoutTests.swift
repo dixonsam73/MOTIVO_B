@@ -188,6 +188,10 @@ final class WideWindowLayoutTests: XCTestCase {
         for file in ["ContentView.swift", "AttachmentViewerView.swift", "ManuscriptPadView.swift", "VideoRecorderView.swift"] {
             XCTAssertTrue(try source(file).contains(".clearOfWindowControls()"), file)
         }
+        // The score viewer's own top row, which is in the Timer's file.
+        let overlay = try XCTUnwrap(timer.range(of: "private func scoreViewerDestinationOverlay"))
+        let nextMember = try XCTUnwrap(timer.range(of: "private func scoreViewerDestinationControl", range: overlay.upperBound..<timer.endIndex))
+        XCTAssertTrue(timer[overlay.lowerBound..<nextMember.lowerBound].contains(".clearOfWindowControls()"))
         XCTAssertTrue(try source("WideWindowLayout.swift").contains("containerCornerOffset(.leading, sizeToFit: true)"))
     }
 
@@ -198,5 +202,34 @@ final class WideWindowLayoutTests: XCTestCase {
         let manager = try String(contentsOf: root.appendingPathComponent("MOTIVO/TasksManagerView.swift"), encoding: .utf8)
         XCTAssertEqual(manager.components(separatedBy: ".pickerSheetHeight()").count - 1, 2)
         XCTAssertFalse(manager.contains(".presentationDetents([.medium])"))
+    }
+
+    // MARK: - The score viewer and the Scores library on iPad (2026-11-22)
+
+    /// On an iPad the library sheet takes longer to leave than the fixed
+    /// 0.15 s the Timer used to wait, and the score viewer, a full-screen
+    /// cover, came up the size of the sheet. The score is opened when the
+    /// sheet HAS gone.
+    func testAScoreChosenInTheLibraryOpensOnceTheLibrarySheetHasGone() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let timer = try String(contentsOf: root.appendingPathComponent("MOTIVO/PracticeTimerView.swift"), encoding: .utf8)
+        XCTAssertTrue(timer.contains(".sheet(isPresented: $showScoresLibrary, onDismiss: {"))
+        XCTAssertTrue(timer.contains("guard let item = scoreToOpenAfterLibrary else { return }"))
+        XCTAssertTrue(timer.contains("scoreToOpenAfterLibrary = item\n                    showScoresLibrary = false"))
+        // Not on a timer any more.
+        let sheet = try XCTUnwrap(timer.range(of: ".sheet(isPresented: $showScoresLibrary, onDismiss: {"))
+        let next = try XCTUnwrap(timer.range(of: ".sheet(item: $connectedScoreShareRequest", range: sheet.upperBound..<timer.endIndex))
+        XCTAssertFalse(timer[sheet.lowerBound..<next.lowerBound].contains("asyncAfter"))
+    }
+
+    /// The Add Score choices hang on the + button, so on an iPad they open
+    /// from it and not from the middle of the sheet.
+    func testTheAddScoreChoicesOpenFromTheirButton() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let library = try String(contentsOf: root.appendingPathComponent("MOTIVO/ScoresLibraryView.swift"), encoding: .utf8)
+        let label = try XCTUnwrap(library.range(of: ".accessibilityLabel(\"Add score\")"))
+        let dialog = try XCTUnwrap(library.range(of: ".confirmationDialog(\"Add Score\""))
+        XCTAssertGreaterThan(dialog.lowerBound, label.upperBound)
+        XCTAssertFalse(library[label.upperBound..<dialog.lowerBound].contains("}"), "nothing closes between the button and its dialog")
     }
 }
