@@ -103,6 +103,39 @@ final class PreparabilityPreflightTests: XCTestCase {
     }
 
     /// The dialog now covers more than size, so its title names no cause.
+    // MARK: - A saved PDF shared from the entry's editor (C-203)
+
+    /// Found on a device, 2026-11-22: an entry was saved, then edited to
+    /// share its manuscript sketch, and Save said the sketch couldn't be
+    /// shared. The editor's row for a SAVED attachment holds no bytes, and
+    /// the check was judging the PDF by that row: no page, so never
+    /// preparable. A saved attachment is judged from its file.
+    func testASavedPDFIsJudgedFromItsFileNotFromTheEditorsEmptyRow() throws {
+        // What the editor holds for a saved PDF, and what judging it gave.
+        let row = ConnectedSharePreflight.candidate(forStaged: UUID(), data: Data(), kind: .pdf, sourceFormat: nil)
+        XCTAssertEqual(ConnectedSharePreflight.verdict(for: row, limitBytes: limit), .needsConsent,
+                       "the empty row has no page: it must not be what decides")
+
+        // The same attachment, from its file.
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("C203-\(UUID().uuidString).pdf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try onePagePDF().write(to: url, options: .atomic)
+        let saved = ConnectedSharePreflight.candidate(forPersisted: UUID(), url: url)
+        XCTAssertEqual(ConnectedSharePreflight.verdict(for: saved, limitBytes: limit), .canShare)
+
+        // The editor judges by bytes only what is not saved yet, and leaves
+        // out a saved attachment removed in this edit.
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let editor = try String(contentsOf: root.appendingPathComponent("MOTIVO/AddEditSessionView+Attachments.swift"), encoding: .utf8)
+        let start = try XCTUnwrap(editor.range(of: "func connectedShareCandidates() -> [ConnectedSharePreflight.Candidate] {"))
+        let end = try XCTUnwrap(editor.range(of: "func attemptSaveWithConnectedPreflight()"))
+        let body = String(editor[start.upperBound..<end.lowerBound])
+        XCTAssertTrue(body.contains("for att in stagedAttachments where existingAttachmentIDs.contains(att.id) == false {"))
+        XCTAssertFalse(body.contains("for att in stagedAttachments {"))
+        XCTAssertTrue(body.contains("guard !deletedExistingAttachmentIDs.contains(id) else { continue }"))
+        XCTAssertTrue(body.contains("ConnectedSharePreflight.candidate(forPersisted: id, url: url)"))
+    }
+
     func testConsentTitleNamesNoCause() {
         for n in [1, 2] {
             XCTAssertFalse(ConnectedSharePreflight.consentTitle(count: n).lowercased().contains("large"),

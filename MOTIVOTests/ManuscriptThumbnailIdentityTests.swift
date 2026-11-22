@@ -103,6 +103,36 @@ final class ManuscriptThumbnailIdentityTests: XCTestCase {
         XCTAssertTrue(row.contains("    @ObservedObject var attachment: Attachment\n    @State private var poster: UIImage? = nil"))
     }
 
+    // MARK: - Sharing a sketch (the Connected pre-share check)
+
+    /// A sketch must pass the check that decides whether an attachment can
+    /// go into a Connected post: staged (new in an editor) and saved alike,
+    /// alone in the post or not, the first time it is asked and again.
+    func testASketchCanBeSharedStagedAndSaved() throws {
+        let data = try sketchPDF(lineAtY: 200)
+        let limit = AddEditSessionView.publishUploadLimitBytesInt
+
+        for _ in 0..<2 {
+            let staged = ConnectedSharePreflight.candidate(forStaged: UUID(), data: data, kind: .pdf, sourceFormat: nil)
+            XCTAssertTrue(staged.preparable, "a staged sketch has a page to draw")
+            XCTAssertEqual(ConnectedSharePreflight.verdict(for: staged, limitBytes: limit), .canShare)
+        }
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try data.write(to: url, options: .atomic)
+        let saved = ConnectedSharePreflight.candidate(forPersisted: UUID(), url: url)
+        XCTAssertTrue(saved.preparable, "a saved sketch has a page to draw")
+        XCTAssertEqual(ConnectedSharePreflight.verdict(for: saved, limitBytes: limit), .canShare)
+
+        // An empty page is still a sketch and still has a page.
+        let empty = ManuscriptSketch(paper: ManuscriptPaper(kind: .singleStaff, clef: .treble), drawing: PKDrawing())
+        let file = try ManuscriptSketchFile.writeVerified(empty)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let blank = ConnectedSharePreflight.candidate(forStaged: UUID(), data: try Data(contentsOf: file), kind: .pdf, sourceFormat: nil)
+        XCTAssertEqual(ConnectedSharePreflight.verdict(for: blank, limitBytes: limit), .canShare)
+    }
+
     func testEqualBytesHaveEqualFingerprintsAndDifferentBytesOfOneLengthDoNot() {
         let one = Data("manuscript-one".utf8), two = Data("manuscript-two".utf8)
         XCTAssertEqual(one.count, two.count)

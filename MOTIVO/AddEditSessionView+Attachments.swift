@@ -1659,7 +1659,12 @@ extension AddEditSessionView {
     func connectedShareCandidates() -> [ConnectedSharePreflight.Candidate] {
         var out: [ConnectedSharePreflight.Candidate] = []
 
-        for att in stagedAttachments {
+        // Only the attachments NOT SAVED YET are judged by the bytes held
+        // here. The row this editor keeps for a saved attachment is a
+        // placeholder with no bytes (only a picture's are loaded): judged by
+        // it, a saved PDF had no page to draw and was left out of the post
+        // (C-203). A saved attachment is judged from its file, below.
+        for att in stagedAttachments where existingAttachmentIDs.contains(att.id) == false {
             let url = surrogateURL(for: att)
             guard !isPrivate(id: att.id, url: url) else { continue }
             out.append(ConnectedSharePreflight.candidate(forStaged: att.id,
@@ -1673,6 +1678,8 @@ extension AddEditSessionView {
                 guard let id = a.value(forKey: "id") as? UUID,
                       let path = a.value(forKey: "fileURL") as? String,
                       let url = resolveStoredFileURL(at: path) else { continue }
+                // One removed in this edit is not going into the post.
+                guard !deletedExistingAttachmentIDs.contains(id) else { continue }
                 guard !isPrivate(id: id, url: url) else { continue }
                 // C-73 — the same rules as a staged attachment, from one place.
                 // This was built inline here: a second copy of the rules.
