@@ -756,6 +756,17 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        proposed set-up (the other Apple ID again) has not been tried
        since October, so the answer there is not known until it is tried.
        The iPad's install already holds Apple's confirmed answer.
+     *Sequence approved by Samuel, 2026-11-22, with these rules:* the
+     existing beta tester's account is the second member if it can be,
+     and then Device A is left alone (Samuel asks them; nobody is
+     contacted on his behalf). On the iPad he hides, not removes, the
+     instruments that are not on his profile, and because sync is on
+     those are changes to his shared profile, not temporary settings.
+     Editing and sharing checks on the iPad use newly made disposable
+     entries; the historical shared entries are left untouched. If Device
+     A is used, its signed-in identity is verified in the running app
+     after the reinstall, not from its files alone; and if the adult
+     check refuses it, that route stops there.
      *SDK baseline still outstanding* (the item above): everything in
      this step was built and judged with Xcode 26.6 and the iOS 26.5 SDK.
      It limits three things: the iPad layouts have not been seen on the
