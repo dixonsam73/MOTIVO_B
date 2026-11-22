@@ -484,6 +484,7 @@ struct ProfileNameDraftState: Equatable {
      @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
      @AppStorage("appSettings_showTasksPad") private var showTasksPad: Bool = true
     @AppStorage("appSettings_showScores") private var showScores: Bool = true
+    @AppStorage("appSettings_showManuscript") private var showManuscript: Bool = true
     @AppStorage("appSettings_showThreadSuggestions") private var showThreadSuggestions: Bool = true
     @AppStorage("appSettings_showTuner") private var showTuner: Bool = true
     @AppStorage("appSettings_tintMode") private var tintModeRaw: String = Theme.TintMode.auto.rawValue
@@ -1072,6 +1073,17 @@ private var sessionSetupSection: some View {
 
                  Toggle(isOn: $showTasksPad) {
                      Text("Show Lists Pad")
+                 }
+                 .tint(Theme.Colors.accent)
+                 .padding(.vertical, Theme.Spacing.s)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     quietDivider()
+                 }
+
+                 Toggle(isOn: $showManuscript) {
+                     Text("Show Manuscript")
                  }
                  .tint(Theme.Colors.accent)
                  .padding(.vertical, Theme.Spacing.s)

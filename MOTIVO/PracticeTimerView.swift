@@ -325,6 +325,10 @@ struct PracticeTimerView: View {
     @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
     @AppStorage("appSettings_showTasksPad") private var showTasksButton: Bool = true
     @AppStorage("appSettings_showScores") private var showScoresButton: Bool = true
+    /// Profile → Settings → Show Manuscript. Off hides only the button
+    /// that starts a NEW sketch here; staged sketches stay on the page and
+    /// open in the pad, and the editors keep their own manuscript button.
+    @AppStorage("appSettings_showManuscript") private var showManuscriptButton: Bool = true
     @AppStorage("appSettings_showThreadSuggestions") private var showThreadSuggestions: Bool = true
     @AppStorage("appSettings_showTuner") private var showTuner: Bool = true
     @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
@@ -2907,10 +2911,11 @@ private func loadPracticeDefaultsIfNeeded() {
             stopAttachmentPlayback: stopAttachmentPlayback,
             ensureCameraAuthorized: ensureCameraAuthorized,
             isTunerOpen: isTunerOpen,
-            onSketch: {
+            // No action, no button: the row closes up around the other three.
+            onSketch: showManuscriptButton ? {
                 stopAttachmentPlayback()
                 showTimerSketchPad = true
-            }
+            } : nil
         )
     }
 

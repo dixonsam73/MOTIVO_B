@@ -98,4 +98,50 @@ final class ManuscriptIconTests: XCTestCase {
             XCTAssertTrue(row.contains("captureCaption(\"\(title)\")"), title)
         }
     }
+
+    // MARK: - Show Manuscript (Profile → Settings)
+
+    /// Samuel, 2026-11-22: a setting like the Timer's other tool settings.
+    /// On by default; off hides only the button that starts a NEW sketch on
+    /// the Timer, and its first-use name.
+    func testShowManuscriptIsATimerToolSettingAndIsOnByDefault() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let profile = try String(contentsOf: root.appendingPathComponent("MOTIVO/ProfileView.swift"), encoding: .utf8)
+        XCTAssertTrue(profile.contains("@AppStorage(\"appSettings_showManuscript\") private var showManuscript: Bool = true"))
+        XCTAssertTrue(profile.contains("Toggle(isOn: $showManuscript) {\n                     Text(\"Show Manuscript\")"))
+
+        let timer = try String(contentsOf: root.appendingPathComponent("MOTIVO/PracticeTimerView.swift"), encoding: .utf8)
+        XCTAssertTrue(timer.contains("@AppStorage(\"appSettings_showManuscript\") private var showManuscriptButton: Bool = true"))
+        // Hidden means no action is given to the row, and the row draws no
+        // button and no name for an action it has not got.
+        XCTAssertTrue(timer.contains("onSketch: showManuscriptButton ? {"))
+        let row = try String(contentsOf: root.appendingPathComponent("MOTIVO/MediaRecorderRowCard.swift"), encoding: .utf8)
+        XCTAssertTrue(row.contains("if let onSketch {"))
+    }
+
+    /// Off touches nothing else: staged sketches stay on the Timer and open
+    /// in the pad, the entry editor and the review page keep their own
+    /// manuscript button, and the first-use name is neither set nor reset.
+    func testHidingTheButtonHidesNothingElse() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let folder = root.appendingPathComponent("MOTIVO")
+        let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        var readers: [String] = []
+        for file in files {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            if source.contains("appSettings_showManuscript") { readers.append(file.lastPathComponent) }
+        }
+        XCTAssertEqual(readers.sorted(), ["PracticeTimerView.swift", "ProfileView.swift"])
+
+        let timer = try String(contentsOf: folder.appendingPathComponent("PracticeTimerView.swift"), encoding: .utf8)
+        XCTAssertEqual(timer.components(separatedBy: "showManuscriptButton").count - 1, 2,
+                       "declared once and read once, for the button alone")
+        // The first-use flag belongs to the row and changes only when the
+        // button is used.
+        let row = try String(contentsOf: folder.appendingPathComponent("MediaRecorderRowCard.swift"), encoding: .utf8)
+        XCTAssertEqual(row.components(separatedBy: "hasUsedSketchCapture = true").count - 1, 1)
+        XCTAssertEqual(row.components(separatedBy: "hasUsedSketchCapture = false").count - 1, 1, "only where it is declared")
+        XCTAssertFalse(timer.contains("hasUsedSketchCapture"))
+    }
 }
