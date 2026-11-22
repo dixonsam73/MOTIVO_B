@@ -72,20 +72,39 @@ enum ManuscriptPadTool: Equatable {
     case pen(width: CGFloat)
     case eraser
 
-    /// Fine, medium and broad, in page points (the page is 595 wide and a
-    /// stave space is 7). Made finer on 2026-11-21 (Samuel; they were 1.6,
-    /// 3 and 5.5): the fine pen was nearly a quarter of a stave space, a
-    /// heavy line for notation, and a finger draws every stroke at the full
-    /// width where the Pencil thins with a light touch. Now about a seventh
-    /// of a space for stems and accidentals, under a third for general
-    /// writing, and half a space, a printed beam's thickness, for beams and
-    /// filled noteheads. A stroke keeps the width it was drawn with, so
-    /// existing sketches are unchanged.
-    static let penWidths: [CGFloat] = [1.0, 2.0, 3.5]
+    /// Fine, medium and broad: PencilKit width settings for `monoline`,
+    /// chosen for the LINE they draw: about 1.3, 2 and 3 page points, on a
+    /// page where a stave space is 7. That is under a fifth of a space for
+    /// stems and accidentals, under a third for general writing, and under
+    /// half, a printed beam's thickness, for beams and noteheads.
+    ///
+    /// `monoline` draws an even line, the same with a finger as with the
+    /// Pencil, and a little over twice its setting. Measured on two saved
+    /// sketches, with the same ruler as the figures below: settings of
+    /// 0.65, 1, 1.3, 1.5, 2 and 3 drew 1.05, 1.75, 2.46, 2.63, 3.86 and
+    /// 5.79 points (`lineThickness(forWidth:)` is the straight line through
+    /// those).
+    ///
+    /// It replaced `pen` on 2026-11-22, after Samuel drew the same word six
+    /// ways and the strokes were read back from the saved sketch: with
+    /// `pen` the three buttons drew almost the same line (about 1.3, 1.5
+    /// and 1.85 pt with the Pencil for settings of 1, 2 and 3.5), a
+    /// finger's line was heavier than the Pencil's at every setting (2.1 to
+    /// 2.4 pt), and no stroke varied along its length. `pen` starts from a
+    /// fixed thickness and adds only a little for the width set, so in the
+    /// range notation needs the setting hardly mattered.
+    ///
+    /// The fine line is the one the Pencil's fine pen drew before, which he
+    /// was happy with. A stroke keeps the ink and width it was drawn with,
+    /// so existing sketches are unchanged.
+    static let penWidths: [CGFloat] = [0.8, 1.15, 1.6]
+    static let inkType: PKInkingTool.InkType = .monoline
+    /// The line `monoline` draws for a width setting, as measured.
+    static func lineThickness(forWidth width: CGFloat) -> CGFloat { 2.11 * width - 0.36 }
 
     var pencilKitTool: PKTool {
         switch self {
-        case .pen(let width): return PKInkingTool(.pen, color: .black, width: width)
+        case .pen(let width): return PKInkingTool(Self.inkType, color: .black, width: width)
         case .eraser: return PKEraserTool(.vector)
         }
     }
@@ -437,7 +456,8 @@ struct ManuscriptPadView: View {
                 } label: {
                     Circle()
                         .fill(Color.primary.opacity(0.75))
-                        .frame(width: 4 + width * 3.2, height: 4 + width * 3.2)
+                        .frame(width: 4 + ManuscriptPadTool.lineThickness(forWidth: width) * 3.2,
+                               height: 4 + ManuscriptPadTool.lineThickness(forWidth: width) * 3.2)
                         .frame(width: 44, height: 44)
                         .background(toolBackground(selected: selected))
                 }

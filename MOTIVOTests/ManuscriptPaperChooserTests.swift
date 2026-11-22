@@ -114,26 +114,50 @@ final class ManuscriptPaperChooserTests: XCTestCase {
 
     // MARK: - The pens
 
-    /// PencilKit has a narrowest width for its pen and quietly uses that if
-    /// asked for less. The fine pen must be a width it really draws.
+    /// PencilKit has a narrowest and a widest width for each ink and quietly
+    /// uses the nearest if asked for more or less. Each pen must be a width
+    /// its ink really draws.
     func testPencilKitDrawsEachPenAtTheWidthAskedFor() {
-        let range = PKInkingTool.InkType.pen.validWidthRange
+        let ink = ManuscriptPadTool.inkType
+        let range = ink.validWidthRange
         for width in ManuscriptPadTool.penWidths {
-            XCTAssertTrue(range.contains(width), "\(width) is outside PencilKit's pen range \(range)")
-            XCTAssertEqual(PKInkingTool(.pen, color: .black, width: width).width, width, accuracy: 0.001)
+            XCTAssertTrue(range.contains(width), "\(width) is outside PencilKit's range \(range)")
+            XCTAssertEqual(PKInkingTool(ink, color: .black, width: width).width, width, accuracy: 0.001)
+            guard case .pen(let chosen) = ManuscriptPadTool.pen(width: width),
+                  let tool = ManuscriptPadTool.pen(width: width).pencilKitTool as? PKInkingTool else { return XCTFail() }
+            XCTAssertEqual(tool.width, chosen, accuracy: 0.001)
+            XCTAssertEqual(tool.inkType, ink)
         }
     }
 
-    /// Fine enough for notation on a 7-point stave space, and three widths
-    /// that are plainly different from one another.
-    func testThePensAreFineEnoughForTheStaveAndDistinct() {
-        let widths = ManuscriptPadTool.penWidths
+    /// The ink that draws the width it is asked for. With `pen` the three
+    /// buttons drew almost the same line, and a finger's was heavier than
+    /// the Pencil's (measured from Samuel's test sketch, 2026-11-22).
+    func testThePadDrawsWithTheConstantWidthInk() {
+        XCTAssertEqual(ManuscriptPadTool.inkType, .monoline)
+    }
+
+    /// Fine enough for notation on a 7-point stave space, and three lines
+    /// that are plainly different from one another. The LINE is what
+    /// matters, not the setting: `monoline` draws a little over twice its
+    /// setting.
+    func testThePensDrawLinesOfAboutOnePointThreeTwoAndThree() {
+        let lines = ManuscriptPadTool.penWidths.map(ManuscriptPadTool.lineThickness(forWidth:))
         let space = ManuscriptPaperRenderer.lineGap
-        XCTAssertEqual(widths.count, 3)
-        XCTAssertEqual(widths, widths.sorted())
-        XCTAssertLessThanOrEqual(widths[0], space / 6, "the fine pen is no more than a sixth of a stave space")
-        XCTAssertLessThanOrEqual(widths[2], space / 2, "the broad pen is no thicker than a printed beam")
-        XCTAssertGreaterThanOrEqual(widths[1] / widths[0], 1.5)
-        XCTAssertGreaterThanOrEqual(widths[2] / widths[1], 1.5)
+        XCTAssertEqual(lines.count, 3)
+        XCTAssertEqual(lines[0], 1.3, accuracy: 0.1, "the fine line is the one the Pencil's fine pen drew before")
+        XCTAssertEqual(lines[1], 2.0, accuracy: 0.15)
+        XCTAssertEqual(lines[2], 3.0, accuracy: 0.15)
+        XCTAssertLessThanOrEqual(lines[0], space / 5)
+        XCTAssertLessThanOrEqual(lines[2], space / 2, "the broad line is no thicker than a printed beam")
+    }
+
+    /// The measurements the settings were chosen from (two saved sketches,
+    /// 2026-11-22): the fitted line stays within a fifth of a point of each.
+    func testTheLineForAWidthMatchesWhatWasMeasured() {
+        let measured: [(setting: CGFloat, line: CGFloat)] = [(0.65, 1.05), (1.0, 1.75), (1.3, 2.46), (1.5, 2.63), (2.0, 3.86), (3.0, 5.79)]
+        for sample in measured {
+            XCTAssertEqual(ManuscriptPadTool.lineThickness(forWidth: sample.setting), sample.line, accuracy: 0.2, "\(sample.setting)")
+        }
     }
 }
