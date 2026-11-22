@@ -767,6 +767,16 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      A is used, its signed-in identity is verified in the running app
      after the reinstall, not from its files alone; and if the adult
      check refuses it, that route stops there.
+     *Internal Only candidate prepared 2026-11-22, not uploaded:* archive
+     `Etudes 2034 (7b7f2eb)` in `~/Library/Developer/Xcode/Archives/2026-11-22/`,
+     from a clean tree. Bundle `com.sdsongs.etudes`, version 1.0, build
+     2034, iPhone and iPad, one window, no StoreKit file. Its App Store
+     export (a check only, not uploaded) is signed Apple Distribution
+     with entitlements identical to build 1949's: production push,
+     Production CloudKit, the same container. Built with Xcode 26.6 and
+     the iOS 26.5 SDK, so the SDK baseline is still outstanding. Unit
+     tests at `7b7f2eb`: 1355 on MOTIVO and 1591 on MOTIVO SyncTest, the
+     seven known order-dependent failures and no others. Samuel uploads.
      *SDK baseline still outstanding* (the item above): everything in
      this step was built and judged with Xcode 26.6 and the iOS 26.5 SDK.
      It limits three things: the iPad layouts have not been seen on the
