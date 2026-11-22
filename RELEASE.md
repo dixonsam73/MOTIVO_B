@@ -671,10 +671,17 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        copy, 14 strokes), resolved the entry, sent it with one upload, and
        Device A took it. Restoring is a new edit: the version it replaced
        (Device A's) is then on neither device, as designed.
-     - *Found:* after the conflict the iPad's Journal row and entry page
-       showed an older thumbnail of the sketch (C-202). Fixed in `7e2f109`;
-       Sync Test 2025 is on both devices. **Its re-check on the iPad is
-       awaited.**
+     - *Found and fixed:* after the conflict the iPad's Journal row and
+       entry page showed an older thumbnail of the sketch (C-202). Two
+       causes, `7e2f109` (the thumbnail cache went by path) and `8c63421`
+       (the Journal row was not told its attachment had changed).
+       **Confirmed by Samuel on the iPad, Sync Test 2027:** with the
+       Journal on screen, and then the entry page, each of two further
+       edits from Device A changed the thumbnail by itself.
+     - *Left on the devices:* both run Sync Test 2027 on the same zone,
+       holding the one test thought (one sketch, 20 strokes, the same
+       file by hash on both). Études 1949 on both and Études Dev 2023 on
+       the iPad were not touched.
      - *Not exercised:* a sketch sync-off upgrade on a physical device; a
        second iPad size; a conflict in which the iPad's edit is the later
        one; more than one sketch or page.
