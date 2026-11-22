@@ -1695,6 +1695,7 @@ fileprivate struct SessionsRootView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
+                .clearOfWindowControls()
                 .wideWindowColumn()
             }
             #if canImport(UIKit)

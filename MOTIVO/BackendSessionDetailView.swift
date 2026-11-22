@@ -254,6 +254,8 @@ struct BackendSessionDetailView: View {
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
                 .padding(.bottom, Theme.Spacing.xl)
+                // The same column as the entry page for one's own entries.
+                .wideWindowColumn()
         }
         .onAppear {
             isLikedLocal = FeedInteractionStore.isSaved(model.id, viewerUserID: effectiveViewerUserID ?? "unknown")

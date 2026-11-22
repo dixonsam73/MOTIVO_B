@@ -127,6 +127,7 @@ public struct VideoRecorderView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.top }.first ?? 0 + 8)
+                .clearOfWindowControls()
                 Spacer()
             }
             .ignoresSafeArea(edges: .top)

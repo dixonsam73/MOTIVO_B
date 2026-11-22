@@ -578,10 +578,32 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        iPad (Études Dev 2014): the Pencil and a finger now draw the same
        lines, about 1.45, 2.25 and 3 pt. Existing sketches keep the ink
        they were drawn with. **Kept as they are (Samuel, 2026-11-22).**
-     - Still to do: the system's window controls over the
-       top-left button in a resized window; the Thread picker and the
-       other small sheets; the attachment and score viewers; Connected
-       after sign-in.
+     - *Window controls* (2026-11-22): in a window that is not full
+       screen the system's close and resize controls no longer cover the
+       first button of a bar the app draws: the Timer and Journal (the
+       profile picture), the attachment viewer (back), the manuscript pad
+       (Cancel) and the video recorder (close). It is the system's own
+       measure (`containerCornerInsets`, `containerCornerOffset`), zero in
+       a full-screen window and on an iPhone. Seen on the iPad simulator
+       in a resized window for the Timer, Journal, viewer and pad; the
+       iPhone's Timer bar is pixel-identical. Pages with a system
+       toolbar (entry page, Profile, editors) were already clear.
+     - *Small sheets and viewers, surveyed 2026-11-22.* Nothing to
+       change in the Thread picker, the Instruments and Activities
+       managers, the Timer's instrument and activity pickers (a centred
+       panel sized to its list), or the attachment viewer (a page fits
+       and is centred, portrait and landscape). One fault fixed: in the
+       Lists manager the instrument and activity pickers opened as a half
+       sheet inside the panel; they now take the whole panel, as in the
+       entry editor.
+     - Still to do: **Connected after sign-in, the feed included.** It
+       cannot be seen natively on an iPad yet: Debug and Sync Test
+       cannot be Connected, the simulator has no age assurance, and
+       Release is still iPhone-only. It is looked at when native iPad is
+       turned on in Release. Prepared without being seen: the feed is in
+       the Journal's column already, and the Connected entry page now
+       keeps the same column as the local one. Also unseen: the score
+       viewer and the Scores scanner in a resized window.
      - *The sketch on the review page* (2026-11-22,
        `PostRecordDetailsView+Sketch.swift`): a fourth button beside
        photo, file and score, on iPhone and iPad; a sketch's tile opens
@@ -593,7 +615,7 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        (it is in the Timer's attachments with the edit), Finish, Save
        Session (three sketch files saved, nothing left staged, no
        recovery copy left). **Awaiting Samuel on the device.**
-     *Next:* the remaining pages, with the Connected feed among them.
+     *Next:* Samuel's look at these on the iPad; then step 5.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode

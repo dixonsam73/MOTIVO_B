@@ -150,6 +150,22 @@ enum TimerPageArrangement {
     }
 }
 
+/// The system's window controls: the close, minimise and resize buttons at
+/// the top leading corner of an iPad window that is not full screen. Their
+/// size is `GeometryProxy.containerCornerInsets.topLeading`, read at a
+/// page's root; it is zero in a full-screen window and on an iPhone.
+enum WindowControls {
+    /// Clear space between the controls and the first button of a bar.
+    static let gap: CGFloat = 8
+
+    /// The leading padding to ADD to a bar that starts at the window's
+    /// leading edge and already has `existing` padding there.
+    static func extraLeading(controls: CGFloat, existing: CGFloat) -> CGFloat {
+        guard controls > 0 else { return 0 }
+        return max(0, controls + gap - existing)
+    }
+}
+
 private struct WideWindowColumn: ViewModifier {
     @Environment(\.horizontalSizeClass) private var horizontal
     @Environment(\.verticalSizeClass) private var vertical
@@ -181,6 +197,18 @@ struct ColumnPageSizing: PresentationSizing {
 }
 
 extension View {
+
+    /// For a top bar the app draws itself, with a button at its leading
+    /// end. In an iPad window that is not full screen the system puts its
+    /// window controls in the top leading corner, on top of that button.
+    /// This moves the bar's leading end clear of them. Where there are no
+    /// window controls (a full-screen window, an iPhone) it does nothing.
+    /// It is the system's own measure and has no effect inside a scroll
+    /// view; a bar that scrolls takes `WindowControls.extraLeading` from
+    /// its page's root instead.
+    func clearOfWindowControls() -> some View {
+        containerCornerOffset(.leading, sizeToFit: true)
+    }
 
     /// Keeps a page's content in a centred column where the window is wide
     /// and tall. Anywhere else the view is returned untouched.

@@ -1253,8 +1253,10 @@ private func loadPracticeDefaultsIfNeeded() {
         recomputeSessionMetaTint()
     }
 
+    /// `windowControls`: the width the system's window controls take at the
+    /// top leading corner (zero in a full-screen window and on an iPhone).
     @ViewBuilder
-    private var homeTopBar: some View {
+    private func homeTopBar(windowControls: CGFloat) -> some View {
         if isHomePresentation {
             HStack(alignment: .center, spacing: Theme.Spacing.m) {
                 Button {
@@ -1381,6 +1383,7 @@ private func loadPracticeDefaultsIfNeeded() {
             }
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, 0)
+            .padding(.leading, WindowControls.extraLeading(controls: windowControls, existing: Theme.Spacing.l))
         }
     }
 
@@ -1563,17 +1566,19 @@ private func loadPracticeDefaultsIfNeeded() {
             let panelOpen = sideBySide && hasOpenPanelSection(listInPanel: listPlace == .panel)
             let listBeneath = listPlace == .beneath && isTasksPadShowing
             let pageHeight = max(proxy.size.height - (isHomePresentation ? PracticeTimerCompositionUI.homeTopBarAllowance : 0), 0)
+            // The system's window controls, in a window that is not full screen.
+            let windowControls = proxy.containerCornerInsets.topLeading.width
 
             VStack(spacing: 0) {
                 if isHomePresentation && sideBySide {
-                    homeTopBar
+                    homeTopBar(windowControls: windowControls)
                 }
 
                 HStack(alignment: .top, spacing: 0) {
                     ScrollView {
                         VStack(spacing: 0) {
                             if isHomePresentation && !sideBySide {
-                                homeTopBar
+                                homeTopBar(windowControls: windowControls)
                             }
 
                             VStack(spacing: 0) {

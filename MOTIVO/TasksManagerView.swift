@@ -793,11 +793,11 @@ struct TasksManagerView: View {
             }
             .sheet(isPresented: $showManagerInstrumentPickerSheet) {
                 managerInstrumentPickerSheet
-                    .presentationDetents([.medium])
+                    .pickerSheetHeight()
             }
             .sheet(isPresented: $showManagerActivityPickerSheet) {
                 managerActivityPickerSheet
-                    .presentationDetents([.medium])
+                    .pickerSheetHeight()
             }
             .onAppear {
                 selectedActivityRef = normalizedActivityRef(activityRef)

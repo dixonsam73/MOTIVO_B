@@ -38,7 +38,7 @@ final class AppSetUpGateBodyFetchTests: XCTestCase {
         "private var appSetUpBootstrapStateKey: String {",
         "private var shouldRenderAppSetUpRoot: Bool {",
         "private var launchGateEvaluationKey: String {",
-        "private var homeTopBar: some View {",
+        "private func homeTopBar(windowControls: CGFloat) -> some View {",
     ]
 
     private func timerViewCode() -> String {

@@ -281,6 +281,7 @@ struct ManuscriptPadView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
+                .clearOfWindowControls()
             if offered != nil {
                 Color.clear
             } else if let paper {

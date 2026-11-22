@@ -156,4 +156,47 @@ final class WideWindowLayoutTests: XCTestCase {
         XCTAssertEqual(source.components(separatedBy: "TimerPageArrangement.isSideBySide(").count - 1, 1,
                        "the window's shape is read in one place, and only through the held arrangement")
     }
+
+    // MARK: - The system's window controls
+
+    /// In an iPad window that is not full screen the system's window
+    /// controls sit on the top leading corner. A bar the app draws moves
+    /// its first button clear of them, and does nothing where there are
+    /// none (a full-screen window, an iPhone).
+    func testABarMovesClearOfTheWindowControlsOnlyWhereThereAreSome() {
+        XCTAssertEqual(WindowControls.extraLeading(controls: 0, existing: 16), 0)
+        // 66 pt of controls (measured on the 11-inch iPad simulator), a gap,
+        // less the padding the bar already has.
+        XCTAssertEqual(WindowControls.extraLeading(controls: 66, existing: 16), 66 + WindowControls.gap - 16)
+        // Padding already wider than the controls: nothing to add.
+        XCTAssertEqual(WindowControls.extraLeading(controls: 20, existing: 40), 0)
+    }
+
+    /// The Timer's bar scrolls with the page in a narrow window, where the
+    /// system's own modifier has no effect, so it takes the measurement
+    /// from the page's root. The bars that do not scroll use the system's.
+    func testEveryBarTheAppDrawsWithALeadingButtonKeepsClearOfTheWindowControls() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        func source(_ name: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent("MOTIVO/\(name)"), encoding: .utf8)
+        }
+        let timer = try source("PracticeTimerView.swift")
+        XCTAssertTrue(timer.contains("let windowControls = proxy.containerCornerInsets.topLeading.width"))
+        XCTAssertTrue(timer.contains(".padding(.leading, WindowControls.extraLeading(controls: windowControls, existing: Theme.Spacing.l))"))
+        XCTAssertEqual(timer.components(separatedBy: "homeTopBar(windowControls: windowControls)").count - 1, 2,
+                       "the bar in the scrolling column and the bar above both columns")
+        for file in ["ContentView.swift", "AttachmentViewerView.swift", "ManuscriptPadView.swift", "VideoRecorderView.swift"] {
+            XCTAssertTrue(try source(file).contains(".clearOfWindowControls()"), file)
+        }
+        XCTAssertTrue(try source("WideWindowLayout.swift").contains("containerCornerOffset(.leading, sizeToFit: true)"))
+    }
+
+    /// A list of choices opened from inside a sheet gets the whole panel in
+    /// a roomy window, in the Lists manager as in the entry editor.
+    func testTheListsManagersPickersUseTheSharedPickerHeight() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let manager = try String(contentsOf: root.appendingPathComponent("MOTIVO/TasksManagerView.swift"), encoding: .utf8)
+        XCTAssertEqual(manager.components(separatedBy: ".pickerSheetHeight()").count - 1, 2)
+        XCTAssertFalse(manager.contains(".presentationDetents([.medium])"))
+    }
 }

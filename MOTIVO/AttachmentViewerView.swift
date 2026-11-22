@@ -1115,6 +1115,7 @@ private func currentURL() -> URL? {
                 }
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
+                .clearOfWindowControls()
 
                 // Video title (presentation-only)
                 if media.indices.contains(currentIndex) {
