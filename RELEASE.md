@@ -486,10 +486,9 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      attachment; there is no separate edit button, under the tile or in
      the viewer. The sketch's title is set from a text button in the
      pad's top bar. Where a sketch is shown in the viewer, its Rename is
-     that text symbol, not a pencil. The three pen widths stay as they
-     are for now (Samuel, 2026-11-21: live with them for a while; he uses
-     the finest most and the broad for filling note heads; they were
-     chosen by eye, not against a standard). The star (the entry's
+     that text symbol, not a pencil. He uses the finest pen most and the
+     broad for filling note heads (the pens themselves were changed on
+     2026-11-22; see "The Paper page and the pens", below). The star (the entry's
      picture) is on a sketch's thumbnail in the editor, as for a photo,
      and in the viewer where a sketch is only looked at; it is not in the
      pad (Samuel, 2026-11-21). **Printed bar lines** (same day): none, two
@@ -568,6 +567,18 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        (Session, Drone, Metronome, Tuner, Audio, Photo, Video, Manuscript,
        Attachments, List, Scores; none on the plus). iPhone as well as
        iPad. **Awaiting Samuel on the device.**
+     - *The Paper page and the pens* (2026-11-21 and 22). Paper: six
+       sheets in Samuel's order (No clef, Treble, Bass, Piano, Alto, Blank
+       page), two across on a phone and three on an iPad; landscape fills
+       the page, portrait has sheets of about the same size, spaced out.
+       **Landscape "perfect" (Samuel); portrait built to his note.** Pens:
+       the pad draws with PencilKit's even ink (`monoline`), not `pen`,
+       whose three widths drew almost the same line and drew heavier with
+       a finger than with the Pencil. Read back from his test page on the
+       iPad (Études Dev 2014): the Pencil and a finger now draw the same
+       lines, about 1.45, 2.25 and 3 pt. Existing sketches keep the ink
+       they were drawn with. **Awaiting his view of the three lines in
+       use.**
      - Still to do: the system's window controls over the
        top-left button in a resized window; the Thread picker and the
        other small sheets; the attachment and score viewers; Connected

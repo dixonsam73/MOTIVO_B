@@ -160,4 +160,15 @@ final class ManuscriptPaperChooserTests: XCTestCase {
             XCTAssertEqual(ManuscriptPadTool.lineThickness(forWidth: sample.setting), sample.line, accuracy: 0.2, "\(sample.setting)")
         }
     }
+
+    /// What the three pens drew on the iPad, with the Pencil and with a
+    /// finger alike (Samuel's test page, Études Dev 2014, 2026-11-22). If a
+    /// pen's setting changes, it needs measuring on a device again.
+    func testTheThreePensDrawWhatTheyDrewOnTheIPad() {
+        XCTAssertEqual(ManuscriptPadTool.penWidths, [0.8, 1.15, 1.6])
+        let onTheIPad: [CGFloat] = [1.45, 2.25, 3.0]
+        for (width, line) in zip(ManuscriptPadTool.penWidths, onTheIPad) {
+            XCTAssertEqual(ManuscriptPadTool.lineThickness(forWidth: width), line, accuracy: 0.2, "\(width)")
+        }
+    }
 }

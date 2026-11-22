@@ -94,9 +94,13 @@ enum ManuscriptPadTool: Equatable {
     /// fixed thickness and adds only a little for the width set, so in the
     /// range notation needs the setting hardly mattered.
     ///
-    /// The fine line is the one the Pencil's fine pen drew before, which he
-    /// was happy with. A stroke keeps the ink and width it was drawn with,
-    /// so existing sketches are unchanged.
+    /// Confirmed on the iPad the same day (Études Dev 2014, the same six
+    /// rows read back from the saved sketch): the Pencil and a finger store
+    /// the same stroke and draw the same line, about 1.45, 2.25 and 3 pt.
+    ///
+    /// The fine line is close to the one the Pencil's fine pen drew before,
+    /// which he was happy with. A stroke keeps the ink and width it was
+    /// drawn with, so existing sketches are unchanged.
     static let penWidths: [CGFloat] = [0.8, 1.15, 1.6]
     static let inkType: PKInkingTool.InkType = .monoline
     /// The line `monoline` draws for a width setting, as measured.
