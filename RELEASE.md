@@ -577,8 +577,7 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        a finger than with the Pencil. Read back from his test page on the
        iPad (Études Dev 2014): the Pencil and a finger now draw the same
        lines, about 1.45, 2.25 and 3 pt. Existing sketches keep the ink
-       they were drawn with. **Awaiting his view of the three lines in
-       use.**
+       they were drawn with. **Kept as they are (Samuel, 2026-11-22).**
      - Still to do: the system's window controls over the
        top-left button in a resized window; the Thread picker and the
        other small sheets; the attachment and score viewers; Connected
