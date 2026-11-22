@@ -588,6 +588,8 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        in a resized window for the Timer, Journal, viewer and pad; the
        iPhone's Timer bar is pixel-identical. Pages with a system
        toolbar (entry page, Profile, editors) were already clear.
+       **Confirmed by Samuel on the iPad, 2026-11-22** (Timer and
+       Journal).
      - *Small sheets and viewers, surveyed 2026-11-22.* Nothing to
        change in the Thread picker, the Instruments and Activities
        managers, the Timer's instrument and activity pickers (a centred
@@ -614,8 +616,10 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        the iPad simulator: new sketch, reopen and edit, Back to Timer
        (it is in the Timer's attachments with the edit), Finish, Save
        Session (three sketch files saved, nothing left staged, no
-       recovery copy left). **Awaiting Samuel on the device.**
-     *Next:* Samuel's look at these on the iPad; then step 5.
+       recovery copy left). **Confirmed by Samuel on the iPad, 2026-11-22
+       (Études Dev 2018).**
+     *Paused here by Samuel, 2026-11-22,* for a Codex review of the
+     week's work. Step 5 is next after it.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode
