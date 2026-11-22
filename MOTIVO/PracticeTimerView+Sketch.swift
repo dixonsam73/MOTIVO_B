@@ -38,7 +38,9 @@ struct TimerSketchEditRequest: Identifiable {
 
     /// The recovery copy for an edit of this staged sketch: one per sketch,
     /// so an edit lost when the app stopped is found when it is reopened.
-    var recoveryKey: String { "timer-" + id.uuidString }
+    var recoveryKey: String { Self.recoveryKey(for: id) }
+
+    static func recoveryKey(for id: UUID) -> String { "timer-" + id.uuidString }
 }
 
 extension PracticeTimerView {
@@ -75,8 +77,9 @@ extension PracticeTimerView {
 
     // MARK: - From the pad
 
-    /// The pad's Save for a new sketch.
-    func stageNewSketch(_ result: ManuscriptPadResult) {
+    /// The pad's Save for a new sketch. Returns the id it is staged under.
+    @discardableResult
+    func stageNewSketch(_ result: ManuscriptPadResult) -> UUID {
         let id = UUID()
         let revealAttachments = !hasAttachments
         stagedSketches.append(StagedAttachment(id: id, data: result.data, kind: .pdf))
@@ -84,6 +87,7 @@ extension PracticeTimerView {
         if revealAttachments { isAttachmentsVisible = true }
         persistStagedAttachments()
         landSketchInStagingStore(id: id, data: result.data, recoveryKey: result.recoveryKey)
+        return id
     }
 
     /// The pad's Save for a staged sketch that was reopened.
@@ -158,6 +162,21 @@ extension PracticeTimerView {
         }
         stagedSketches.removeAll()
         sketchTitles.removeAll()
+    }
+
+    // MARK: - From the review page
+
+    /// The review page draws on the same staged sketches: one drawn or
+    /// changed there is staged HERE, at the pad's Save, exactly as if it had
+    /// been drawn on this page. So Back to Timer loses nothing, and there is
+    /// one durable copy and one owner of it whichever page the pad was
+    /// opened from.
+    var reviewSketchStaging: ReviewSketchStaging {
+        ReviewSketchStaging(
+            stageNew: { stageNewSketch($0) },
+            applyEdit: { applyEditedStagedSketch($0, id: $1) },
+            rename: { renameStagedSketch($0, to: $1) },
+            remove: { deleteStagedSketch($0) })
     }
 }
 

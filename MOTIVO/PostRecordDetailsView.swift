@@ -283,6 +283,13 @@ struct PostRecordDetailsView: View {
     @State private var showCamera = false
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCameraDeniedAlert = false
+    // Manuscript sketches (PostRecordDetailsView+Sketch.swift).
+    @State var showSketchPad_PRDV = false
+    @State var sketchEdit_PRDV: PRDVSketchEditRequest? = nil
+    /// Which staged PDFs here are manuscript sketches the Timer holds.
+    @State var sketchAttachmentIDs_PRDV: Set<UUID> = []
+    /// Sketches first drawn on this page, in this visit.
+    @State var sketchesDrawnHere_PRDV: Set<UUID> = []
 
     /// P6-I-01 — a save that could not complete must say so. Non-nil presents
     /// the alert; the session stays in review and nothing staged is removed.
@@ -505,6 +512,9 @@ struct PostRecordDetailsView: View {
     private let lastMeaningfulScorePagePrefill: [UUID: Int]
     private let prefillAttachments: [StagedAttachment]?
     private let prefillAttachmentNames: [UUID: String]?
+    /// How a sketch drawn or changed here is staged (the Timer does it);
+    /// nil where there is no Timer behind this page, and then no pad.
+    let sketchStaging: ReviewSketchStaging?
 
     init(
         isPresented: Binding<Bool>,
@@ -520,6 +530,7 @@ struct PostRecordDetailsView: View {
         lastMeaningfulScorePagePrefill: [UUID: Int] = [:],
         prefillAttachments: [StagedAttachment]? = nil,
         prefillAttachmentNames: [UUID: String]? = nil,
+        sketchStaging: ReviewSketchStaging? = nil,
         onSaved: (() -> Void)? = nil,
         onCancel: @escaping () -> Void = {}
     ) {
@@ -561,6 +572,7 @@ struct PostRecordDetailsView: View {
         self.lastMeaningfulScorePagePrefill = lastMeaningfulScorePagePrefill
         self.prefillAttachments = prefillAttachments
         self.prefillAttachmentNames = prefillAttachmentNames
+        self.sketchStaging = sketchStaging
         self.onSaved = onSaved
         self.onCancel = onCancel
     }
@@ -1357,6 +1369,10 @@ var body: some View {
             .fullScreenCover(item: $viewerRequest) { request in
                 attachmentViewerCover(request: request)
             }
+            .modifier(PRDVSketchPresentation(showNew: $showSketchPad_PRDV, edit: $sketchEdit_PRDV,
+                                             onNew: { stageNewSketch_PRDV($0) },
+                                             onEdited: { applyEditedSketch_PRDV($0, id: $1) },
+                                             onRename: { renameSketch_PRDV($0, to: $1) }))
             // Sheets
             .sheet(isPresented: $showInstrumentPicker) { instrumentPicker }
             .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
@@ -1431,6 +1447,7 @@ var body: some View {
             .task {
                 if let pre = prefillAttachments, !pre.isEmpty, stagedAttachments.isEmpty {
                     stagedAttachments.append(contentsOf: pre)
+                    noteTimerSketches_PRDV(in: pre)
                     if let nameMap = prefillAttachmentNames {
                         // Store in a temporary map via UserDefaults for the lifetime of this view, keyed by staged id
                         let key = "stagedAudioNames_temp"
@@ -1618,6 +1635,26 @@ var body: some View {
                 .contentShape(Circle())
                 .buttonStyle(.plain)
                 .tint(.accentColor)
+
+                // A new manuscript sketch, as in the entry editor.
+                if sketchStaging != nil {
+                    Button(action: { showSketchPad_PRDV = true }) {
+                        ZStack {
+                            ManuscriptIcon(pointSize: 24)
+                                .foregroundColor(Color(red: 0.38, green: 0.48, blue: 0.62)) // slate blue-grey
+                                .frame(width: 56, height: 56)
+                                .background(
+                                    Circle()
+                                        .fill(Color.secondary.opacity(0.18))
+                                        .frame(width: 64, height: 64)
+                                )
+                        }
+                    }
+                    .accessibilityLabel("Add manuscript sketch")
+                    .contentShape(Circle())
+                    .buttonStyle(.plain)
+                    .tint(.accentColor)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, Theme.Spacing.l)

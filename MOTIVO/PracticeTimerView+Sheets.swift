@@ -180,6 +180,7 @@ extension PracticeTimerView {
                 lastMeaningfulScorePagePrefill: lastMeaningfulScorePageThisSession,
                 prefillAttachments: reviewPrefill,
                 prefillAttachmentNames: audioTitles,
+                sketchStaging: reviewSketchStaging,
                 onSaved: {
                     didSaveFromReview = true
                     clearPersistedTimer()

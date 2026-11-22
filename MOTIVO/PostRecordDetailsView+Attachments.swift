@@ -213,6 +213,7 @@ isPrivate: { url in
                                 ZStack(alignment: .topTrailing) {
                                     AttachmentThumbCell(
                                         att: att,
+                                        isSketch: sketchAttachmentIDs_PRDV.contains(att.id),
                                         isThumbnail: selectedThumbnailID == att.id,
                                         onMakeThumbnail: { toggleThumbnail(att) },
                                         onRemove: { removeStagedAttachment(att) },
@@ -226,6 +227,12 @@ isPrivate: { url in
                                     )
                                     .contentShape(Rectangle())
                                     .onTapGesture {
+                                    // A manuscript sketch is edited by drawing: its tile
+                                    // opens the pad, as in the entry editor.
+                                    if sketchAttachmentIDs_PRDV.contains(att.id) {
+                                        openSketch_PRDV(att)
+                                        return
+                                    }
                                     // Step 3: Visual taps (images + videos + PDFs) present via viewerRequest only.
                                     // Ordering matches the PRDV visual grid (non-audio, non-generic-file attachments in stagedAttachments order).
                                     ensureSurrogateFilesExistForViewer()
@@ -291,6 +298,7 @@ isPrivate: { url in
                                     }
                                 }
 
+                                let _ = attachmentTitlesRefreshTick
                                 if let caption = stagedAttachmentDisplayName(for: att) {
                                     Text(caption)
                                         .font(.caption2)
@@ -300,7 +308,8 @@ isPrivate: { url in
                                         .frame(width: 128, alignment: .leading)
                                 }
 
-                                if att.kind == .pdf {
+                                // A sketch is one page: no page controls, just its name.
+                                if att.kind == .pdf, !sketchAttachmentIDs_PRDV.contains(att.id) {
                                     Text(PDFSelectedPagesFormatter.summary(for: selectedPages(forPDFID: att.id)))
                                         .font(.caption2)
                                         .foregroundStyle(Theme.Colors.secondaryText)
@@ -666,6 +675,7 @@ isPrivate: { url in
 
 
     func removeStagedAttachment(_ a: StagedAttachment) {
+        sketchRemoved_PRDV(a.id)
         PDFSelectedPagesStore.setPages(nil, for: a.id)
         stagedAttachments.removeAll { $0.id == a.id }
         if selectedThumbnailID == a.id {
@@ -1046,6 +1056,8 @@ fileprivate func formatClipDuration(_ seconds: Double) -> String {
 // SEARCH-TOKEN: 20260610_1718-PDF-THUMBNAIL-SELECTION
 fileprivate struct AttachmentThumbCell: View {
     let att: StagedAttachment
+    /// A manuscript sketch is starred like a photo, as in the entry editor.
+    var isSketch: Bool = false
     let isThumbnail: Bool
     let onMakeThumbnail: () -> Void
     let onRemove: () -> Void
@@ -1075,8 +1087,8 @@ fileprivate struct AttachmentThumbCell: View {
 
             // Right-side vertical control column: Star, Privacy, Delete
             VStack(spacing: 6) {
-                // Star (thumbnail selection for images, audio, and video)
-                if att.kind == .image || att.kind == .audio || att.kind == .video {
+                // Star (thumbnail selection for images, audio, video and sketches)
+                if att.kind == .image || att.kind == .audio || att.kind == .video || isSketch {
                     Text(isThumbnail ? "★" : "☆")
                         .font(.system(size: 16))
                         .padding(8)
@@ -1117,7 +1129,7 @@ fileprivate struct AttachmentThumbCell: View {
             .padding(6)
         }
         .contextMenu {
-            if att.kind == .image || att.kind == .audio || att.kind == .video {
+            if att.kind == .image || att.kind == .audio || att.kind == .video || isSketch {
                 Button("Set as Thumbnail") { onMakeThumbnail() }
             }
             Button(role: .destructive) { onRemove() } label: { Text("Remove") }
@@ -1242,7 +1254,9 @@ fileprivate struct AttachmentThumbCell: View {
     }
 
     private var pdfThumbnailTaskID: String {
-        "\(att.id.uuidString)-page-\(selectedPDFThumbnailPage ?? 1)"
+        // The bytes are part of the identity: a manuscript sketch drawn on
+        // again keeps its id and page but is a different picture.
+        "\(att.id.uuidString)-page-\(selectedPDFThumbnailPage ?? 1)-\(att.data.count)"
     }
 
     private func placeholder(system: String) -> some View {

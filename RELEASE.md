@@ -581,10 +581,19 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
      - Still to do: the system's window controls over the
        top-left button in a resized window; the Thread picker and the
        other small sheets; the attachment and score viewers; Connected
-       after sign-in. The review page after a timed session has no
-       sketch button yet (only the entry editor has).
-     *Next:* Samuel's look at the sketch on the Timer; then the
-     remaining pages, with the Connected feed among them.
+       after sign-in.
+     - *The sketch on the review page* (2026-11-22,
+       `PostRecordDetailsView+Sketch.swift`): a fourth button beside
+       photo, file and score, on iPhone and iPad; a sketch's tile opens
+       the pad, has the star and no page controls, as in the entry
+       editor. The Timer holds every sketch, so one drawn or changed on
+       the review page is staged on the Timer at the pad's Save: Back to
+       Timer loses nothing, and it returns at the next Finish. Checked on
+       the iPad simulator: new sketch, reopen and edit, Back to Timer
+       (it is in the Timer's attachments with the edit), Finish, Save
+       Session (three sketch files saved, nothing left staged, no
+       recovery copy left). **Awaiting Samuel on the device.**
+     *Next:* the remaining pages, with the Connected feed among them.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode
