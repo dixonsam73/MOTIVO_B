@@ -97,12 +97,24 @@ struct AttachmentStore {
         return image
     }
 
+    /// The part of a staged PDF's thumbnail identity that stands for its
+    /// content, for the view task that draws the thumbnail. A manuscript
+    /// sketch is redrawn under the same id and page, and two drawings can be
+    /// the same length, so a sketch is identified by its bytes. Any other
+    /// staged PDF never changes under its id; its length is enough, and a
+    /// large score is not hashed every time its tile is laid out.
+    static func stagedPDFContentIdentity(_ data: Data, isSketch: Bool) -> String {
+        isSketch ? ContentFingerprint.of(data) : String(data.count)
+    }
+
     /// Generates (and caches) a thumbnail for staged PDF data.
     /// - Parameter page: Human-visible PDF page number. `nil` preserves existing page-1 behaviour.
     /// - Note: Synchronous renderer is intended to be called off-main by callers.
     static func generatePDFThumbnail(data: Data, cacheKey: String, size: CGSize = CGSize(width: 256, height: 256), page: Int? = nil) -> UIImage? {
         let pageNumber = normalizedPDFThumbnailPage(page)
-        let key = "pdf-data:\(cacheKey):\(data.count):page:\(pageNumber):\(Int(size.width))x\(Int(size.height))" as NSString
+        // Keyed by what the bytes ARE, not how many there are: a manuscript
+        // sketch drawn on again keeps its id and can keep its length.
+        let key = "pdf-data:\(cacheKey):\(ContentFingerprint.of(data)):page:\(pageNumber):\(Int(size.width))x\(Int(size.height))" as NSString
         if let cached = _PDFThumbnailCache.shared.cache.object(forKey: key) { return cached }
         guard let document = PDFDocument(data: data), let pdfPage = document.page(at: pageNumber - 1) else { return nil }
         let image = renderPDFPage(pdfPage, size: size)

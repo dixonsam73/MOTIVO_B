@@ -796,9 +796,16 @@ extension AddEditSessionView {
             // SEARCH-TOKEN: 20260610_1718-PDF-THUMBNAIL-SELECTION
             // CHANGE-ID: 20260609_211900_AESVPersistedPDFThumbnailMap
             // SCOPE: Prefer the persisted attachment URL map for existing PDFs in AESV edit mode; keep temp-surrogate fallback for staged PDFs.
+            // A sketch not saved yet is drawn from the bytes the editor
+            // holds: its temporary file keeps one path however often the
+            // sketch is redrawn, and a thumbnail cached by path would be the
+            // old picture. A saved sketch gets a new file with every edit.
+            let isSketch = sketchAttachmentIDs_AESV.contains(att.id)
             PDFStagedThumbnailView(
                 att: att,
-                sourceURL: existingAttachmentURLMap[att.id] ?? existingSurrogateURL_edit(id: att.id, kind: att.kind)
+                sourceURL: existingAttachmentURLMap[att.id]
+                    ?? (isSketch ? nil : existingSurrogateURL_edit(id: att.id, kind: att.kind)),
+                isSketch: isSketch
             )
         }
     }
@@ -1570,6 +1577,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
 fileprivate struct PDFStagedThumbnailView: View {
     let att: StagedAttachment
     let sourceURL: URL?
+    var isSketch: Bool = false
 
     @State private var thumbnail: UIImage? = nil
 
@@ -1596,9 +1604,10 @@ fileprivate struct PDFStagedThumbnailView: View {
     }
 
     private var thumbnailTaskID: String {
-        // The file and the bytes are part of the identity: a manuscript sketch
-        // drawn on again keeps its id and page but is a different picture.
-        "\(att.id.uuidString)-page-\(selectedThumbnailPage ?? 1)-\(sourceURL?.lastPathComponent ?? "")-\(att.data.count)"
+        // The file and the content are part of the identity: a manuscript
+        // sketch drawn on again keeps its id and page, and can keep its
+        // length, but is a different picture.
+        "\(att.id.uuidString)-page-\(selectedThumbnailPage ?? 1)-\(sourceURL?.lastPathComponent ?? "")-\(AttachmentStore.stagedPDFContentIdentity(att.data, isSketch: isSketch))"
     }
 
     private func generateThumbnailIfNeeded() async {

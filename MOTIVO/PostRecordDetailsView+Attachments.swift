@@ -1254,9 +1254,10 @@ fileprivate struct AttachmentThumbCell: View {
     }
 
     private var pdfThumbnailTaskID: String {
-        // The bytes are part of the identity: a manuscript sketch drawn on
-        // again keeps its id and page but is a different picture.
-        "\(att.id.uuidString)-page-\(selectedPDFThumbnailPage ?? 1)-\(att.data.count)"
+        // The content is part of the identity: a manuscript sketch drawn on
+        // again keeps its id and page, and can keep its length, but is a
+        // different picture.
+        "\(att.id.uuidString)-page-\(selectedPDFThumbnailPage ?? 1)-\(AttachmentStore.stagedPDFContentIdentity(att.data, isSketch: isSketch))"
     }
 
     private func placeholder(system: String) -> some View {
