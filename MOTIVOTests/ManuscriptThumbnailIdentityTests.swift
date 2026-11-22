@@ -64,6 +64,40 @@ final class ManuscriptThumbnailIdentityTests: XCTestCase {
         XCTAssertTrue(again === firstImage, "an unchanged sketch is still served from the cache")
     }
 
+    // MARK: - A saved sketch replaced under the same path (C-202)
+
+    /// Found on the two-device check, 2026-11-22: sync replaced a sketch
+    /// under a path it had used before, and the Journal row and the entry
+    /// page showed the picture cached for that path until the app restarted.
+    func testAFileReplacedUnderTheSamePathGetsItsNewPicture() throws {
+        let (first, second) = try twoDrawingsOfEqualLength()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try first.write(to: url, options: .atomic)
+        let firstImage = try XCTUnwrap(AttachmentStore.generatePDFThumbnail(url: url))
+        XCTAssertTrue(try XCTUnwrap(AttachmentStore.generatePDFThumbnail(url: url)) === firstImage,
+                      "an untouched file is still served from the cache")
+
+        // The same path, the same length, another drawing: what sync's
+        // replacement of a file in place looks like to the cache.
+        try second.write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(2)], ofItemAtPath: url.path)
+        let secondImage = try XCTUnwrap(AttachmentStore.generatePDFThumbnail(url: url))
+        XCTAssertFalse(secondImage === firstImage, "the path alone used to return the old picture")
+        XCTAssertNotEqual(secondImage.pngData(), firstImage.pngData(), "and it is a picture of the new drawing")
+    }
+
+    /// The Journal row and the entry page draw a saved PDF's thumbnail
+    /// again when the attachment's edit time changes, whatever its path.
+    func testTheJournalRowAndTheEntryPageRedrawWhenTheAttachmentIsEdited() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        for file in ["ContentViewRowSupport.swift", "SessionDetailView.swift"] {
+            let source = try String(contentsOf: root.appendingPathComponent("MOTIVO/\(file)"), encoding: .utf8)
+            XCTAssertTrue(source.contains("-\\(AttachmentStore.editStamp(of: attachment))\""), file)
+        }
+    }
+
     func testEqualBytesHaveEqualFingerprintsAndDifferentBytesOfOneLengthDoNot() {
         let one = Data("manuscript-one".utf8), two = Data("manuscript-two".utf8)
         XCTAssertEqual(one.count, two.count)

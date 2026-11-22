@@ -1990,7 +1990,8 @@ fileprivate struct AttachmentRow: View {
     }
 
     private var pdfThumbnailTaskID: String {
-        "\(attachment.fileURL ?? "")-page-\(selectedPDFThumbnailPage ?? 1)"
+        // The edit time too: a sketch replaced by sync can keep its path.
+        "\(attachment.fileURL ?? "")-page-\(selectedPDFThumbnailPage ?? 1)-\(AttachmentStore.editStamp(of: attachment))"
     }
 
     private func generatePDFThumbnailIfNeeded() async {

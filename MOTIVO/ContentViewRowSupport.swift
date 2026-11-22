@@ -175,7 +175,8 @@ struct SingleAttachmentPreview: View {
 
     private var pdfThumbnailTaskID: String {
         let urlKey = attachment.fileURL ?? attachmentFileURL(attachment)?.absoluteString ?? "missing-url"
-        return "\(urlKey)-page-\(selectedPDFThumbnailPage ?? 1)"
+        // The edit time too: a sketch replaced by sync can keep its path.
+        return "\(urlKey)-page-\(selectedPDFThumbnailPage ?? 1)-\(AttachmentStore.editStamp(of: attachment))"
     }
 
     private func generatePDFThumbnailIfNeeded(size: CGSize) async {

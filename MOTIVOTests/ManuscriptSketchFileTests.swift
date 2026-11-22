@@ -119,6 +119,43 @@ final class ManuscriptSketchFileTests: XCTestCase {
         }
     }
 
+    /// The pad draws with the even ink at one of three widths. PencilKit
+    /// hands a saved stroke of that ink back labelled `pen` (seen
+    /// 2026-11-22, on iOS and macOS); what must hold is that it is DRAWN
+    /// the same, or a reopened sketch would change under the person's hand.
+    func testAReopenedSketchIsDrawnExactlyAsItWasSaved() throws {
+        let strokes = ManuscriptPadTool.penWidths.enumerated().map { index, width -> PKStroke in
+            guard let tool = ManuscriptPadTool.pen(width: width).pencilKitTool as? PKInkingTool else { fatalError("the pen is an inking tool") }
+            let y = CGFloat(100 + index * 60)
+            let points = [CGPoint(x: 60, y: y), CGPoint(x: 400, y: y)].map {
+                PKStrokePoint(location: $0, timeOffset: 0, size: CGSize(width: width + 2, height: width + 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+            }
+            return PKStroke(ink: tool.ink, path: PKStrokePath(controlPoints: points, creationDate: Date(timeIntervalSince1970: 0)))
+        }
+        let drawn = ManuscriptSketch(paper: ManuscriptPaper(kind: .singleStaff, clef: .treble), drawing: PKDrawing(strokes: strokes))
+        let url = file()
+        try ManuscriptSketchFile.write(drawn, to: url)
+        let reopened = try ManuscriptSketchFile.read(url)
+
+        XCTAssertEqual(reopened.drawing.strokes.count, 3)
+        for (before, after) in zip(drawn.drawing.strokes, reopened.drawing.strokes) {
+            XCTAssertEqual(after.path.first?.size.width ?? 0, before.path.first?.size.width ?? -1, accuracy: 0.01, "the width it was drawn at")
+            XCTAssertEqual(after.renderBounds.width, before.renderBounds.width, accuracy: 0.01)
+            XCTAssertEqual(after.renderBounds.height, before.renderBounds.height, accuracy: 0.01, "the same thickness on the page")
+        }
+        let area = CGRect(x: 0, y: 0, width: 460, height: 300)
+        let traits = UITraitCollection(userInterfaceStyle: .light)
+        var before: Data?, after: Data?, blank: Data?
+        traits.performAsCurrent {
+            before = drawn.drawing.image(from: area, scale: 2).pngData()
+            after = reopened.drawing.image(from: area, scale: 2).pngData()
+            blank = PKDrawing().image(from: area, scale: 2).pngData()
+        }
+        XCTAssertNotNil(before)
+        XCTAssertNotEqual(before, blank, "a picture of something")
+        XCTAssertEqual(before, after, "the reopened drawing is the same picture, pixel for pixel")
+    }
+
     func testAnEmptyPageIsStillASketch() throws {
         let original = ManuscriptSketch(paper: ManuscriptPaper(kind: .piano, clef: .none), drawing: PKDrawing())
         let url = file()

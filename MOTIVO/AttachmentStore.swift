@@ -89,12 +89,35 @@ struct AttachmentStore {
     #if canImport(UIKit) && canImport(PDFKit)
     static func generatePDFThumbnail(url: URL, size: CGSize = CGSize(width: 256, height: 256), page: Int? = nil) -> UIImage? {
         let pageNumber = normalizedPDFThumbnailPage(page)
-        let key = "pdf-url:\(url.path):page:\(pageNumber):\(Int(size.width))x\(Int(size.height))" as NSString
+        // Keyed by the file AS IT IS NOW, not by its path alone: sync
+        // replaces a manuscript sketch under a path used before, and by
+        // path the old picture came back until the app restarted (C-202).
+        let key = "pdf-url:\(url.path):\(pdfFileStamp(url)):page:\(pageNumber):\(Int(size.width))x\(Int(size.height))" as NSString
         if let cached = _PDFThumbnailCache.shared.cache.object(forKey: key) { return cached }
         guard let document = PDFDocument(url: url), let pdfPage = document.page(at: pageNumber - 1) else { return nil }
         let image = renderPDFPage(pdfPage, size: size)
         _PDFThumbnailCache.shared.cache.setObject(image, forKey: key)
         return image
+    }
+
+    /// What tells one version of a file at a path from another, cheaply: its
+    /// size and when it was last written. A file replaced in place has a
+    /// new stamp; an untouched one keeps its stamp and its cached picture.
+    static func pdfFileStamp(_ url: URL) -> String {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return "missing" }
+        let size = (attributes[.size] as? NSNumber)?.int64Value ?? -1
+        let written = (attributes[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate ?? -1
+        return "\(size)-\(written)"
+    }
+
+    /// The edit time of a saved attachment, as part of the identity of the
+    /// view task that draws its thumbnail. Sync and the pad both set it when
+    /// the file changes, so a thumbnail on screen is drawn again even when
+    /// the file keeps its path.
+    static func editStamp(of attachment: NSManagedObject) -> String {
+        guard attachment.entity.attributesByName["userModifiedAt"] != nil,
+              let edited = attachment.value(forKey: "userModifiedAt") as? Date else { return "0" }
+        return String(edited.timeIntervalSinceReferenceDate)
     }
 
     /// The part of a staged PDF's thumbnail identity that stands for its
