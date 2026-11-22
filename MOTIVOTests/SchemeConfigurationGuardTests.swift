@@ -42,11 +42,11 @@ final class SchemeConfigurationGuardTests: XCTestCase {
     }
 
     // Native iPad is turned on one configuration at a time (RELEASE.md,
-    // section B): Debug first, then Sync Test, Release last, each when its
-    // step is reached. Until then an iPad runs Release and Sync Test in
-    // compatibility mode, exactly as before. Change the expectation here in
-    // the same commit that turns the next configuration on.
-    func testNativeIPadIsOnInDebugOnly() throws {
+    // section B): Debug first (2026-11-20), then Sync Test (2026-11-22),
+    // Release last, when its step is reached. Until then an iPad runs
+    // Release in compatibility mode, exactly as before. Change the
+    // expectation here in the same commit that turns Release on.
+    func testNativeIPadIsOnInDebugAndSyncTestButNotRelease() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let project = try String(contentsOf: root.appendingPathComponent("MOTIVO.xcodeproj/project.pbxproj"), encoding: .utf8)
         func deviceFamily(bundleID: String) -> String? {
@@ -57,13 +57,13 @@ final class SchemeConfigurationGuardTests: XCTestCase {
             return String(project[key.upperBound...].prefix { $0 != ";" }).trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
         }
         XCTAssertEqual(deviceFamily(bundleID: "com.samueldixon.motivo.dev"), "1,2", "Debug runs natively on iPad")
-        XCTAssertEqual(deviceFamily(bundleID: "com.samueldixon.motivo.synctest"), "1", "Sync Test stays iPhone-only until its step")
+        XCTAssertEqual(deviceFamily(bundleID: "com.samueldixon.motivo.synctest"), "1,2", "Sync Test runs natively on iPad")
         XCTAssertEqual(deviceFamily(bundleID: "com.sdsongs.etudes"), "1", "Release stays iPhone-only until the last page is signed off")
 
         // One app window on iPad. Xcode's generated scene manifest allows
         // several and wins over the file, so a configuration that runs
         // natively on iPad turns generation off and takes the manifest in
-        // MOTIVO/Info.plist, which allows one.
+        // its Info.plist file, which allows one.
         func generatesManifest(bundleID: String) -> Bool {
             guard let idRange = project.range(of: "PRODUCT_BUNDLE_IDENTIFIER = \(bundleID);"),
                   let start = project.range(of: "buildSettings = {", options: .backwards, range: project.startIndex..<idRange.lowerBound) else { return true }
@@ -73,5 +73,14 @@ final class SchemeConfigurationGuardTests: XCTestCase {
         let plist = try XCTUnwrap(NSDictionary(contentsOf: root.appendingPathComponent("MOTIVO/Info.plist")))
         let manifest = try XCTUnwrap(plist["UIApplicationSceneManifest"] as? [String: Any])
         XCTAssertEqual(manifest["UIApplicationSupportsMultipleScenes"] as? Bool, false, "one app window at launch")
+
+        // Sync Test has its own Info.plist file, and the same switch.
+        XCTAssertFalse(generatesManifest(bundleID: "com.samueldixon.motivo.synctest"), "Sync Test takes the one-window manifest from Info-SyncTest.plist")
+        let trialPlist = try XCTUnwrap(NSDictionary(contentsOf: root.appendingPathComponent("MOTIVO/Info-SyncTest.plist")))
+        let trialManifest = try XCTUnwrap(trialPlist["UIApplicationSceneManifest"] as? [String: Any])
+        XCTAssertEqual(trialManifest["UIApplicationSupportsMultipleScenes"] as? Bool, false, "one app window at launch")
+
+        // Release still generates its own manifest and is not native yet.
+        XCTAssertTrue(generatesManifest(bundleID: "com.sdsongs.etudes"), "Release is unchanged until its step")
     }
 }
