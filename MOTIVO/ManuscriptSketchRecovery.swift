@@ -98,6 +98,15 @@ enum ManuscriptSketchRecovery {
 
     static func copy(key: String) -> Copy? { copy(at: url(for: key)) }
 
+    /// What identifies the copy under `key` exactly as it is now: it changes
+    /// whenever the copy is written again, with the same drawing or another.
+    /// Nil if there is no copy. For releasing a copy only if nothing has
+    /// written to it since (`ManuscriptSketchStaging`).
+    static func stamp(key: String) -> String? {
+        guard let data = try? Data(contentsOf: url(for: key)) else { return nil }
+        return ContentFingerprint.of(data)
+    }
+
     private static func copy(at url: URL) -> Copy? {
         guard url.pathExtension == "draft",
               let data = try? Data(contentsOf: url),

@@ -23,9 +23,11 @@
 //  WHAT PROTECTS THE DRAWING. While the pad is open, and from the pad's Save
 //  until the staged file has landed, it is the pad's recovery copy
 //  (`ManuscriptSketchRecovery`). Once the file is in the staging store that
-//  file is the durable copy, and the recovery copy is released. If staging
-//  fails the recovery copy is kept, so the drawing is offered back the next
-//  time a sketch is started.
+//  file is the durable copy, and the recovery copy is released, unless the
+//  sketch has been drawn on again since: then the copy holds newer work
+//  and stays. If staging fails the recovery copy is kept, so the drawing is
+//  offered back the next time a sketch is started. The order and the
+//  release are `ManuscriptSketchStaging`'s.
 //
 
 import SwiftUI
@@ -98,35 +100,13 @@ extension PracticeTimerView {
         landSketchInStagingStore(id: id, data: result.data, recoveryKey: result.recoveryKey)
     }
 
-    /// Writes the sketch's PDF into the staging store under ITS id (as C-89
-    /// does for a photo), replacing the staged file if there is one. Only
-    /// when that has succeeded is the pad's recovery copy released.
+    /// Queues the sketch's PDF for the staging store under ITS id. The
+    /// queue keeps a sketch's writes in order, and releases the pad's
+    /// recovery copy only when the staged file holds this save and nothing
+    /// has been drawn since (`ManuscriptSketchStaging`).
     private func landSketchInStagingStore(id: UUID, data: Data, recoveryKey: String) {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sketch-" + UUID().uuidString)
-            .appendingPathExtension("pdf")
-        do {
-            try data.write(to: tmp, options: .atomic)
-        } catch {
-            // Nothing staged on disk: the recovery copy goes on protecting it.
-            return
-        }
-        pendingStagingOps.insert(id)
-        Task {
-            defer { pendingStagingOps.remove(id) }
-            do {
-                if let existing = StagingStore.ref(withId: id), existing.kind == .sketch {
-                    _ = try await StagingStore.replace(original: existing, with: tmp)
-                } else {
-                    _ = try await StagingStore.saveNew(from: tmp, kind: .sketch, suggestedName: id.uuidString,
-                                                       duration: nil, poster: nil, id: id)
-                }
-                ManuscriptSketchRecovery.clear(key: recoveryKey)
-            } catch {
-                // Not staged: the recovery copy is kept and the drawing is
-                // offered back the next time a sketch is started.
-            }
-            try? FileManager.default.removeItem(at: tmp)
+        ManuscriptSketchStaging.shared.land(id: id, data: data, recoveryKey: recoveryKey) { busy in
+            if busy { pendingStagingOps.insert(id) } else { pendingStagingOps.remove(id) }
         }
     }
 
@@ -144,6 +124,8 @@ extension PracticeTimerView {
     func deleteStagedSketch(_ id: UUID) {
         stagedSketches.removeAll { $0.id == id }
         sketchTitles.removeValue(forKey: id)
+        // A write still outstanding must not bring it back.
+        ManuscriptSketchStaging.shared.discard(id)
         ManuscriptSketchRecovery.clear(key: "timer-" + id.uuidString)
         persistStagedAttachments()
         if let ref = StagingStore.ref(withId: id) { StagingStore.remove(ref) }
@@ -158,6 +140,7 @@ extension PracticeTimerView {
     /// The staged files are removed by those paths' own store clearing.
     func clearStagedSketches() {
         for sketch in stagedSketches {
+            ManuscriptSketchStaging.shared.discard(sketch.id)
             ManuscriptSketchRecovery.clear(key: "timer-" + sketch.id.uuidString)
         }
         stagedSketches.removeAll()
