@@ -618,8 +618,19 @@ Owner is **S** (Samuel), **A** (agent) or both. Started 2026-09-22.
        Session (three sketch files saved, nothing left staged, no
        recovery copy left). **Confirmed by Samuel on the iPad, 2026-11-22
        (Études Dev 2018).**
-     *Paused here by Samuel, 2026-11-22,* for a Codex review of the
-     week's work. Step 5 is next after it.
+     - *Correction pass after the Codex review* (2026-11-22). Two
+       findings fixed: an earlier staging write can no longer clear a
+       sketch's newer recovery copy or replace a later saved version
+       (C-200, Timer and review page), and a redrawn sketch of the same
+       file length gets its new thumbnail (C-201). Added: **Show
+       Manuscript** in Profile → Settings, with the Timer's other tool
+       settings. On by default. Off hides only the manuscript button on
+       the Timer and its first-use name; the row closes up around the
+       other three. Sketches already on the Timer stay and open in the
+       pad, and the entry editor and review page keep their manuscript
+       button. Seen on the iPhone and iPad simulators.
+     *Paused here by Samuel, 2026-11-22,* after the review and its
+     correction pass. Step 5 is next, when he says.
   5. Once the native shell and the sketch's save and re-edit path work:
      native iPad in Sync Test, with two device checks that are not left
      until every page is done. The install over a compatibility-mode
